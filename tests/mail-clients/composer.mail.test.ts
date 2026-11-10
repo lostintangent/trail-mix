@@ -73,12 +73,15 @@ describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix
   // A test that fails leaves a screenshot of each page and what it showed, for CI to keep.
   const { test } = app;
 
-  beforeAll(async () => {
-    webmail = await roundcube(ports.webmail);
-    const page = await trailMix();
-    await addAlice(page);
-    await page.close();
-  }, 120_000);
+  beforeAll(
+    app.witnessed('Alice’s account, added', async () => {
+      webmail = await roundcube(ports.webmail);
+      const page = await trailMix();
+      await addAlice(page);
+      await page.close();
+    }),
+    120_000,
+  );
 
   afterAll(async () => {
     await webmail?.stop();
