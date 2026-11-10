@@ -18,8 +18,20 @@ export async function startPreview(vars: Record<string, string> = {}): Promise<P
   const restoreVars = writeVars({ ...exampleVars(), ...vars });
   const server = Bun.spawn(
     ['node', 'node_modules/vite/bin/vite.js', 'preview', '--port', '0', '--strictPort'],
-    // Vite colors its output whenever `CI` is set, which would break the address up with escapes.
-    { cwd: ROOT, stdout: 'pipe', stderr: 'inherit', env: { ...process.env, NO_COLOR: '1' } },
+    {
+      cwd: ROOT,
+      stdout: 'pipe',
+      stderr: 'inherit',
+      env: {
+        ...process.env,
+        // Vite colors its output whenever `CI` is set, which would break the address up with escapes.
+        NO_COLOR: '1',
+        // Wrangler's local trace collector records every statement and socket read in the Worker's
+        // own thread. A deployed Worker has none of it, so it stays out of what the bench measures.
+        X_LOCAL_EXPLORER: 'false',
+        X_LOCAL_OBSERVABILITY: 'false',
+      },
+    },
   );
   const url = await listeningUrl(server.stdout);
   return {
