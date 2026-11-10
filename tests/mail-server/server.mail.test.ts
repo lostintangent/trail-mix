@@ -66,8 +66,11 @@ function submit(
   return transport.sendMail({ ...message, subject: 'server test', text: 'server test' });
 }
 
-/** A token from the stand-in for Microsoft's sign-in, as a person signing in would get one. */
-async function tokenFor(user: string) {
+/**
+ * A token from the stand-in for Microsoft's sign-in, as a person signing in would get one, lasting
+ * `seconds` if given.
+ */
+async function tokenFor(user: string, seconds?: number) {
   const post = (path: string, form: Record<string, string>) =>
     fetch(`${identity.authority}${path}`, { method: 'POST', body: new URLSearchParams(form) });
   const started = await post('/oauth2/v2.0/devicecode', {
@@ -77,7 +80,11 @@ async function tokenFor(user: string) {
   const code = await started.json<Record<string, string>>();
   await fetch(`http://127.0.0.1:${ports.identity}/devicelogin`, {
     method: 'POST',
-    body: new URLSearchParams({ user_code: code.user_code ?? '', login_hint: user }),
+    body: new URLSearchParams({
+      user_code: code.user_code ?? '',
+      login_hint: user,
+      ...(seconds ? { expires_in: String(seconds) } : {}),
+    }),
   });
   const grant = {
     grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
@@ -207,6 +214,19 @@ describe('OAuth', () => {
         ),
       ).rejects.toThrow(/535/);
     }
+  });
+
+  // Dovecot keeps no cache of what a token was, so a lapsed sign-in shows at the next login.
+  test('IMAP and submission refuse a token once it has expired', async () => {
+    await start('outlook');
+    const accessToken = await tokenFor(alice.email, 1);
+    const auth = { user: alice.email, accessToken };
+    await session(async () => {}, auth);
+    await Bun.sleep(1100);
+    await expect(session(async () => {}, auth)).rejects.toThrow();
+    await expect(
+      submit(ports.submission, { from: alice.email, to: alice.email }, { type: 'OAuth2', ...auth }),
+    ).rejects.toThrow(/535/);
   });
 });
 

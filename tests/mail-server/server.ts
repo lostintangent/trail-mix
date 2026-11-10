@@ -15,6 +15,9 @@ import { connect } from 'node:net';
 import { tmpdir, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { SMTPServerAuthentication } from 'smtp-server';
+import { signInStandIn as standIn } from './sign-in.ts';
+
+export type { Requested } from './sign-in.ts';
 
 export const domain = 'trailmix.test';
 
@@ -40,8 +43,14 @@ export const ports = {
   webmail: base + 880, // Roundcube, for tests that read mail as another client shows it
 };
 
-/** The stand-in for login.microsoftonline.com, for the device-code flow and XOAUTH2. */
-export const identity = { authority: `http://127.0.0.1:${ports.identity}/consumers` } as const;
+/**
+ * The stand-in for login.microsoftonline.com, for the device-code flow and XOAUTH2. `sign-in.ts`
+ * says what it answers, and how a test plays the person and steers the sign-in.
+ */
+export const identity = {
+  origin: `http://127.0.0.1:${ports.identity}`,
+  authority: `http://127.0.0.1:${ports.identity}/consumers`,
+} as const;
 
 /**
  * Capabilities each profile withholds, so code cannot lean on what Zoho and Outlook lack. Zoho also
@@ -696,90 +705,9 @@ async function serve() {
   });
 }
 
-/**
- * The endpoints of Microsoft's device-code sign-in, as login.microsoftonline.com answers them, plus
- * `POST /devicelogin`, where a test plays the person who signs in, and the token introspection
- * Dovecot asks. Every code and token lives in this process's memory.
- */
+/** The stand-in for Microsoft's sign-in, at the address the test mail server serves it on. */
 export function signInStandIn() {
-  type Grant = {
-    clientId: string;
-    scope: string;
-    userCode: string;
-    expiresAt: number;
-    user?: string;
-    declined?: boolean;
-  };
-  const grants = new Map<string, Grant>();
-  const tokens = new Map<string, string>();
-  const random = () => crypto.randomUUID().replaceAll('-', '');
-  const error = (code: string, status = 400) =>
-    Response.json({ error: code, error_description: code }, { status });
-
-  async function fetch(request: Request): Promise<Response> {
-    const url = new URL(request.url);
-    const form =
-      request.method === 'POST' ? new URLSearchParams(await request.text()) : url.searchParams;
-
-    if (request.method === 'POST' && /^\/[^/]+\/oauth2\/v2\.0\/devicecode$/.test(url.pathname)) {
-      const clientId = form.get('client_id');
-      if (!clientId) return error('invalid_request');
-      const userCode = random().slice(0, 8).toUpperCase();
-      const deviceCode = random();
-      grants.set(deviceCode, {
-        clientId,
-        scope: form.get('scope') ?? '',
-        userCode,
-        expiresAt: Date.now() + 900_000,
-      });
-      const verificationUri = `http://127.0.0.1:${ports.identity}/devicelogin`;
-      return Response.json({
-        device_code: deviceCode,
-        user_code: userCode,
-        verification_uri: verificationUri,
-        expires_in: 900,
-        interval: 1,
-        message: `To sign in, use a web browser to open the page ${verificationUri} and enter the code ${userCode} to authenticate.`,
-      });
-    }
-
-    if (request.method === 'POST' && /^\/[^/]+\/oauth2\/v2\.0\/token$/.test(url.pathname)) {
-      if (form.get('grant_type') !== 'urn:ietf:params:oauth:grant-type:device_code')
-        return error('unsupported_grant_type');
-      const grant = grants.get(form.get('device_code') ?? '');
-      if (!grant || grant.clientId !== form.get('client_id')) return error('bad_verification_code');
-      if (Date.now() > grant.expiresAt) return error('expired_token');
-      if (grant.declined) return error('authorization_declined');
-      if (!grant.user) return error('authorization_pending');
-      grants.delete(form.get('device_code') ?? '');
-      const accessToken = random();
-      tokens.set(accessToken, grant.user);
-      return Response.json({
-        token_type: 'Bearer',
-        scope: grant.scope,
-        expires_in: 3600,
-        access_token: accessToken,
-        refresh_token: random(),
-      });
-    }
-
-    if (request.method === 'POST' && url.pathname === '/devicelogin') {
-      const grant = [...grants.values()].find((g) => g.userCode === form.get('user_code'));
-      if (!grant) return error('invalid_user_code', 404);
-      if (form.get('decline')) grant.declined = true;
-      else grant.user = form.get('login_hint') ?? '';
-      return new Response(null, { status: 204 });
-    }
-
-    if (url.pathname === '/introspect') {
-      const user = tokens.get(form.get('access_token') ?? '');
-      return Response.json(user ? { active: 'true', email: user } : { active: 'false' });
-    }
-
-    return new Response(null, { status: 404 });
-  }
-
-  return { fetch, userOf: (token: string) => tokens.get(token) };
+  return standIn(`http://127.0.0.1:${ports.identity}`);
 }
 
 // The command line
