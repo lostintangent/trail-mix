@@ -221,16 +221,16 @@ Tests concentrate where a defect spreads.
 
 `bun run bench` measures each budget on the built app, fails when one is exceeded, and runs locally and in CI, which attaches the numbers. It and `bun run e2e` need a build, so they stay out of `bun test`. Budgets are measured against a demo mailbox that scales deterministically to 50,000 messages, and the browser ones use a phone profile of four times CPU slowdown.
 
-| What                                                      | Budget                                        |
-| --------------------------------------------------------- | --------------------------------------------- |
-| Cold load to the first Inbox rows                         | 1 second, with at most 250 KB of JS, gzip     |
-| Scrolling a 50,000-message folder                         | 60 frames a second                            |
-| Moving through the list by key, or archiving              | 50 milliseconds                               |
-| A page of the unified Inbox, or a 50-message conversation | 10 milliseconds in the Mailroom               |
-| Search as you type                                        | 100 milliseconds                              |
-| First sync of a 50,000-message folder                     | 2 minutes, with no batch over 1 second of CPU |
-| A cached conversation with 300 KB of HTML                 | 200 milliseconds to render                    |
-| Worker startup                                            | Checked by `wrangler check startup` in CI     |
+| What                                                      | Budget                                                          |
+| --------------------------------------------------------- | --------------------------------------------------------------- |
+| Cold load to the first Inbox rows                         | 1 second, with at most 250 KB of JS, gzip                       |
+| Scrolling a 50,000-message folder                         | 60 frames a second                                              |
+| Moving through the list by key, or archiving              | 50 milliseconds                                                 |
+| A page of the unified Inbox, or a 50-message conversation | 10 milliseconds in the Mailroom                                 |
+| Search as you type                                        | 100 milliseconds                                                |
+| First sync of a 50,000-message folder                     | 2 minutes, with no batch over 1 second of CPU                   |
+| Moving to a conversation with 300 KB of HTML              | 200 milliseconds to render, its body sanitized ahead while idle |
+| Worker startup                                            | Checked by `wrangler check startup` in CI                       |
 
 ### Mail safety
 
