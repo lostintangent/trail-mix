@@ -25,6 +25,7 @@ import {
   PRESETS,
   type DemoKind,
   type MailProvider,
+  type Moved,
   type SyncWindow,
 } from '../../providers/index.ts';
 import type { AccountSetup, DraftInput, Mailroom as Contract, Page } from '../client/index.ts';
@@ -264,20 +265,22 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     }
   }
 
-  async move(refs: MessageRef[], to: FolderRef | FolderRole): Promise<void> {
+  async move(refs: MessageRef[], to: FolderRef | FolderRole): Promise<Moved[]> {
     const destination = input.destinationOf(to);
+    const moved: Moved[] = [];
     for (const [account, held] of this.byAccount(refs)) {
       const path =
         typeof destination === 'string'
           ? this.pathWithRole(account, destination)
           : destination.path;
-      await (await this.provider(account)).move(held, path);
+      moved.push(...(await (await this.provider(account)).move(held, path)));
       await this.owe(() => {
         for (const from of new Set([...held.map((ref) => ref.path), path])) {
           this.queue.folder({ account, path: from });
         }
       });
     }
+    return moved;
   }
 
   saveDraft(_draft: DraftInput, _replaces?: MessageRef): Promise<MessageRef> {

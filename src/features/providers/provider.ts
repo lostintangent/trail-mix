@@ -26,8 +26,12 @@ export interface MailProvider {
   /** Sets or clears the named flags. Refs that are already gone are skipped. */
   setFlags(refs: MessageRef[], change: Partial<Flags>): Promise<void>;
 
-  /** Moves messages to another folder. Refs that are already gone, moved or not, are skipped. */
-  move(refs: MessageRef[], to: string): Promise<void>;
+  /**
+   * Moves messages to another folder, and resolves with where each one landed, so a move can be
+   * undone by moving each `to` back to its `from` folder. Refs that are already gone, moved or not,
+   * are skipped, and so is a message whose new place cannot be known.
+   */
+  move(refs: MessageRef[], to: string): Promise<Moved[]>;
 
   /**
    * Files a draft in the account's Drafts and returns its ref. With `replaces`, the older draft is
@@ -65,6 +69,9 @@ export interface MailProvider {
 export type { SyncEvent };
 
 /** Where a folder's sync stopped. It belongs to the provider and is opaque to the Mailroom. */
+/** Where a moved message was, and where it is now. */
+export type Moved = { from: MessageRef; to: MessageRef };
+
 export type Cursor = string;
 
 /** Only messages newer than `since`, an ISO 8601 date, are reported. */

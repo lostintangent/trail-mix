@@ -200,11 +200,44 @@ export function describeContract(
       const { events, cursor } = await syncAll('INBOX');
       const ref = refOf(arrived(events)[0]!);
       const archive = await role('archive');
-      await provider.move([ref], archive);
+      const [moved] = await provider.move([ref], archive);
       expect((await syncAll('INBOX', cursor)).events).toEqual([{ type: 'gone', ref }]);
-      expect((await only(archive, 'Move me')).messageId).toBe('<move-me@example.com>');
-      await provider.move([ref], archive);
+      const landed = await only(archive, 'Move me');
+      expect(moved).toEqual({ from: ref, to: refOf(landed) });
+      expect(await provider.move([ref], archive)).toEqual([]);
       expect(await count(archive, '<move-me@example.com>')).toBe(1);
+    });
+
+    it('says where each message moved, so moving each back restores both lists', async () => {
+      await world().deliver(message({ id: 'keep', subject: 'Keep', minutesAgo: 2 }));
+      await world().deliver(message({ id: 'one', subject: 'One', minutesAgo: 1 }));
+      await world().deliver(message({ id: 'two', subject: 'Two' }));
+      const archive = await role('archive');
+      const listed = async () => ({
+        inbox: arrived((await syncAll('INBOX')).events)
+          .map((e) => e.messageId)
+          .sort(),
+        archive: arrived((await syncAll(archive)).events)
+          .map((e) => e.messageId)
+          .sort(),
+      });
+      const before = await listed();
+      const chosen = arrived((await syncAll('INBOX')).events)
+        .filter((e) => e.subject !== 'Keep')
+        .map(refOf);
+
+      const moved = await provider.move(chosen, archive);
+      expect(keys(moved.map(({ from }) => from))).toEqual(keys(chosen));
+      const inArchive = arrived((await syncAll(archive)).events).map(refOf);
+      expect(keys(moved.map(({ to }) => to))).toEqual(keys(inArchive));
+
+      // Undo, as the browser does it: each message back to the folder it came from.
+      const back = await provider.move(
+        moved.map(({ to }) => to),
+        'INBOX',
+      );
+      expect(keys(back.map(({ from }) => from))).toEqual(keys(moved.map(({ to }) => to)));
+      expect(await listed()).toEqual(before);
     });
 
     it('saves a draft, and a new version replaces the old one', async () => {
@@ -329,6 +362,10 @@ export function describeContract(
     });
   });
 }
+
+/** Refs as comparable keys, in one order. */
+const keys = (refs: MessageRef[]) =>
+  refs.map(({ path, uidValidity, uid }) => `${path} ${uidValidity} ${uid}`).sort();
 
 const refOf = ({ account, path, uidValidity, uid }: MessageRef): MessageRef => ({
   account,

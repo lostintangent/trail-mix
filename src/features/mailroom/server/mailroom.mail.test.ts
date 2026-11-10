@@ -11,6 +11,7 @@ import type {
   Folder,
   Hint,
   Message,
+  MessageRef,
   View,
 } from '../../mail/core/index.ts';
 import type { AccountSetup, Page } from '../client/index.ts';
@@ -124,6 +125,27 @@ describe('The Mailroom', () => {
     expect(Date.now() - sent).toBeLessThan(5000);
     expect(elsewhere.hints).toEqual([]);
     for (const device of [...devices, elsewhere]) device.close();
+  }, 30_000);
+
+  test('moves to a role, and its undo by the pairs it returned restores the lists', async () => {
+    const before = await ada.page({ in: 'inbox' });
+    const garden = before.find((row) => row.subject === 'Garden')!;
+    const [message] = await ada.call<Message[]>('conversation', garden.id);
+    const moved = await ada.call<{ from: MessageRef; to: MessageRef }[]>(
+      'move',
+      [message],
+      'archive',
+    );
+    expect(moved.map(({ from }) => from)).toEqual([refOf(message!)]);
+    expect(moved[0]!.to.path).toBe('Archive');
+    await ada.until(
+      async () => !(await ada.page({ in: 'inbox' })).some((row) => row.id === garden.id),
+    );
+
+    for (const { from, to } of moved) {
+      await ada.call('move', [to], { account: from.account, path: from.path });
+    }
+    await ada.until(async () => Bun.deepEquals(await ada.page({ in: 'inbox' }), before));
   }, 30_000);
 
   test('another member reaches none of it', async () => {
@@ -372,3 +394,10 @@ function raw(fields: {
     '',
   ].join('\r\n');
 }
+
+const refOf = ({ account, path, uidValidity, uid }: Message) => ({
+  account,
+  path,
+  uidValidity,
+  uid,
+});

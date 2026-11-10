@@ -118,6 +118,15 @@ describe('profiles', () => {
     for (const cap of ['IDLE', 'UIDPLUS', 'MOVE', 'SPECIAL-USE']) expect(caps).toContain(cap);
     for (const cap of ['CONDSTORE', 'QRESYNC']) expect(caps).not.toContain(cap);
   });
+
+  test('plain withholds every extension but IDLE, and marks no folder roles', async () => {
+    await start('plain');
+    const caps = await capabilities();
+    expect(caps).toContain('IDLE');
+    for (const cap of ['UIDPLUS', 'MOVE', 'CONDSTORE', 'QRESYNC', 'SPECIAL-USE'])
+      expect(caps).not.toContain(cap);
+    expect(await foldersWithRoles()).toEqual([]);
+  });
 });
 
 describe('mailboxes', () => {

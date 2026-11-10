@@ -10,7 +10,7 @@ import nodemailer from 'nodemailer';
 import type { SMTPTransportGetSocket } from 'nodemailer/lib/smtp-transport';
 import PostalMime from 'postal-mime';
 import type { AccountId, Flags, Folder, FolderRole, MessageRef } from '../../mail/core/index.ts';
-import type { Cursor, MailProvider, SyncBatch, SyncWindow } from '../provider.ts';
+import type { Cursor, MailProvider, Moved, SyncBatch, SyncWindow } from '../provider.ts';
 import { envelopeOf, previewPartOf, type ImapMessage } from './core/envelope.ts';
 import { flagsOf, planSync, type SyncPlan } from './core/sync.ts';
 
@@ -340,31 +340,67 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
       }
     },
 
+    /**
+     * With UIDPLUS, the server says where each message landed. Without it, their Message-IDs are
+     * read first and found again where they landed.
+     */
     async move(refs: MessageRef[], to: string) {
+      const moved: Moved[] = [];
       for (const [path, group] of byFolder(refs)) {
         if (path === to) continue;
-        await inFolder(path, async (connection, mailbox) => {
+        const done = await inFolder(path, async (connection, mailbox) => {
           const uids = current(group, mailbox);
-          if (uids.length) await connection.messageMove(rangeOf(uids), to, { uid: true });
+          if (!uids.length) return undefined;
+          const uidplus = connection.capabilities.has('UIDPLUS');
+          const ids = uidplus ? new Map<number, string>() : await messageIdsOf(connection, uids);
+          const result = await connection.messageMove(rangeOf(uids), to, { uid: true });
+          if (!result) throw new Error(`The server would not move those messages to ${to}.`);
+          return { uidplus, ids, result };
         });
+        if (!done) continue;
+        const from = (uid: number) => group.find((ref) => ref.uid === uid);
+        const { uidMap, uidValidity } = done.result;
+        if (done.uidplus && uidMap && uidValidity !== undefined) {
+          for (const [was, landed] of uidMap) {
+            const ref = from(was);
+            if (ref) moved.push({ from: ref, to: refIn(to, uidValidity, landed) });
+          }
+          continue;
+        }
+        const found = await inFolder(to, async (connection, mailbox) => {
+          const pairs: Moved[] = [];
+          for (const [was, messageId] of done.ids) {
+            const ref = from(was);
+            const landed = await uidOf(connection, messageId);
+            if (ref && landed !== undefined) {
+              pairs.push({ from: ref, to: refIn(to, mailbox.uidValidity, landed) });
+            }
+          }
+          return pairs;
+        });
+        moved.push(...found);
       }
+      return moved;
     },
 
     async saveDraft(message: Uint8Array, replaces?: MessageRef) {
       const drafts = await folderFor('drafts');
-      const appended = await connected((connection) =>
-        connection.append(drafts, Buffer.from(message), ['\\Draft', '\\Seen']),
-      );
-      if (!appended || appended.uid === undefined || appended.uidValidity === undefined) {
-        throw new Error('The server did not say where it filed the draft');
-      }
+      const { appended, uidplus } = await connected(async (connection) => ({
+        appended: await connection.append(drafts, Buffer.from(message), ['\\Draft', '\\Seen']),
+        uidplus: connection.capabilities.has('UIDPLUS'),
+      }));
+      // Without UIDPLUS the server doesn't say where it filed the draft, so its Message-ID finds it.
+      const filed =
+        uidplus && appended && appended.uid !== undefined && appended.uidValidity !== undefined
+          ? refIn(drafts, appended.uidValidity, appended.uid)
+          : await inFolder(drafts, async (connection, mailbox) => {
+              const messageId = (await PostalMime.parse(message)).messageId;
+              const uid = messageId ? await uidOf(connection, messageId) : undefined;
+              return uid === undefined ? undefined : refIn(drafts, mailbox.uidValidity, uid);
+            });
+      if (!filed) throw new Error('The server did not say where it filed the draft');
       if (replaces) await remove(replaces);
-      return {
-        account: id,
-        path: drafts,
-        uidValidity: Number(appended.uidValidity),
-        uid: appended.uid,
-      };
+      return filed;
     },
 
     async send(draft: MessageRef) {
@@ -498,6 +534,13 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
   };
 
   /** Removes one message for good. Its folder may have no Trash to move it to. */
+  const refIn = (path: string, uidValidity: bigint | number, uid: number): MessageRef => ({
+    account: id,
+    path,
+    uidValidity: Number(uidValidity),
+    uid,
+  });
+
   async function remove(ref: MessageRef) {
     await inFolder(ref.path, async (connection, mailbox) => {
       const uids = current([ref], mailbox);
@@ -519,6 +562,22 @@ const ROLES: Record<string, FolderRole> = {
 const roleOf = (specialUse: string | undefined) => (specialUse ? ROLES[specialUse] : undefined);
 
 /** Ascending UIDs as an IMAP sequence set, with runs collapsed, so a long list stays short. */
+/** The Message-IDs of messages in the selected folder, by UID. */
+async function messageIdsOf(connection: ImapFlow, uids: number[]): Promise<Map<number, string>> {
+  const ids = new Map<number, string>();
+  for await (const message of connection.fetch(rangeOf(uids), { envelope: true }, { uid: true })) {
+    const messageId = message.envelope?.messageId;
+    if (messageId) ids.set(message.uid, messageId);
+  }
+  return ids;
+}
+
+/** The UID of the message with this Message-ID in the selected folder, the newest if several. */
+async function uidOf(connection: ImapFlow, messageId: string): Promise<number | undefined> {
+  const found = await connection.search({ header: { 'message-id': messageId } }, { uid: true });
+  return Array.isArray(found) && found.length ? Math.max(...found) : undefined;
+}
+
 export function rangeOf(uids: number[]): string {
   const sorted = [...new Set(uids)].sort((a, b) => a - b);
   const runs: string[] = [];

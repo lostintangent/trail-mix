@@ -1,4 +1,4 @@
-export type { Cursor, MailProvider, SyncBatch, SyncEvent, SyncWindow } from './provider.ts';
+export type { Cursor, MailProvider, Moved, SyncBatch, SyncEvent, SyncWindow } from './provider.ts';
 export {
   DEMO_ACCOUNTS,
   demoMailbox,

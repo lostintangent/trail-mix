@@ -44,7 +44,8 @@ export const identity = { authority: `http://127.0.0.1:${ports.identity}/consume
 
 /**
  * Capabilities each profile withholds, so code cannot lean on what Zoho and Outlook lack. Zoho also
- * marks no folder with a role, so roles must be found some other way.
+ * marks no folder with a role, so roles must be found some other way. `plain` is any IMAP server,
+ * with IDLE and none of the extensions Trail Mix can do without.
  */
 export const profiles = {
   full: { withhold: [], roleFlags: true },
@@ -61,6 +62,21 @@ export const profiles = {
     roleFlags: false,
   },
   outlook: { withhold: ['CONDSTORE', 'QRESYNC'], roleFlags: true },
+  plain: {
+    withhold: [
+      'UIDPLUS',
+      'MOVE',
+      'CONDSTORE',
+      'QRESYNC',
+      'SPECIAL-USE',
+      'SORT',
+      'SORT=DISPLAY',
+      'THREAD=REFERENCES',
+      'THREAD=REFS',
+      'THREAD=ORDEREDSUBJECT',
+    ],
+    roleFlags: false,
+  },
 } as const;
 export type Profile = keyof typeof profiles;
 
@@ -685,7 +701,7 @@ if (import.meta.main) {
       const flag = args.indexOf('--profile');
       const profile = (flag >= 0 ? args[flag + 1] : 'full') as Profile;
       if (!(profile in profiles))
-        throw new Error(`Unknown profile ${profile}. Choose full, zoho or outlook.`);
+        throw new Error(`Unknown profile ${profile}. Choose full, zoho, outlook or plain.`);
       await start(profile);
       console.log(
         `The test mail server is up with the ${profile} profile. Clients trust ${caFile}.`,

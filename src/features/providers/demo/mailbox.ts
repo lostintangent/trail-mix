@@ -182,18 +182,25 @@ export function setFlags(
   }, mailbox);
 }
 
-/** Moves messages that are still in `path` to `to`, where each gets the next UID. */
+/**
+ * Moves messages that are still in `path` to `to`, where each gets the next UID. Says each moved
+ * message's UID before and after, as UIDPLUS does.
+ */
 export function move(
   mailbox: DemoMailbox,
   path: string,
   uids: readonly number[],
   to: string,
-): DemoMailbox {
-  if (to === path && folderOf(mailbox, to)) return mailbox;
-  return uids.reduce((current, uid) => {
+): [DemoMailbox, [from: number, to: number][]] {
+  if (to === path && folderOf(mailbox, to)) return [mailbox, []];
+  const moved: [number, number][] = [];
+  const next = uids.reduce((current, uid) => {
     const [copied, landed] = copy(current, path, uid, to);
-    return landed === undefined ? current : expunge(copied, path, [uid]);
+    if (landed === undefined) return current;
+    moved.push([uid, landed]);
+    return expunge(copied, path, [uid]);
   }, mailbox);
+  return [next, moved];
 }
 
 /** Files a copy of a message in `to`, with other flags if given, and says the UID it was given. */

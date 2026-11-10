@@ -11,7 +11,7 @@ import {
 } from '../../mail/core/index.ts';
 import { previewOf } from '../imap/core/envelope.ts';
 import { planSync } from '../imap/core/sync.ts';
-import type { MailProvider } from '../provider.ts';
+import type { MailProvider, Moved } from '../provider.ts';
 import * as server from './mailbox.ts';
 import { DEMO_ACCOUNTS, type DemoKind } from './stories.ts';
 
@@ -149,8 +149,21 @@ export function demoServer(
 
     async move(refs, to) {
       let next = mailbox;
-      for (const [path, uids] of live(refs)) next = server.move(next, path, uids, to);
+      const moved: Moved[] = [];
+      for (const [path, uids] of live(refs)) {
+        const from = server.folderOf(next, path)!.uidValidity;
+        const [after, pairs] = server.move(next, path, uids, to);
+        next = after;
+        const landedIn = server.folderOf(next, to)!.uidValidity;
+        for (const [was, uid] of pairs) {
+          moved.push({
+            from: { account, path, uidValidity: from, uid: was },
+            to: { account, path: to, uidValidity: landedIn, uid },
+          });
+        }
+      }
       await commit(next, [...live(refs).keys(), to]);
+      return moved;
     },
 
     async saveDraft(message, replaces) {

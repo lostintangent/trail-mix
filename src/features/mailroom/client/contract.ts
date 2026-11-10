@@ -44,8 +44,11 @@ export interface Commands {
   /** This member's accounts, index, cache and credentials. */
   eraseEverything(): Promise<void>;
   setFlags(refs: MessageRef[], change: Partial<Flags>): Promise<void>;
-  /** Archive and delete are moves to a role. */
-  move(refs: MessageRef[], to: FolderRef | FolderRole): Promise<void>;
+  /** Archive and delete are moves to a role. Undo moves each `to` back to its `from` folder. */
+  move(
+    refs: MessageRef[],
+    to: FolderRef | FolderRole,
+  ): Promise<{ from: MessageRef; to: MessageRef }[]>;
   saveDraft(draft: DraftInput, replaces?: MessageRef): Promise<MessageRef>;
   /** At now plus the undo window, unless given a time. */
   send(draft: MessageRef, at?: string): Promise<Outgoing>;

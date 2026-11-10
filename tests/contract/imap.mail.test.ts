@@ -1,6 +1,6 @@
 // The contract suite against the IMAP provider and the test mail server, once for each profile, so
-// the provider meets the contract without QRESYNC and SPECIAL-USE, as on Zoho, and without
-// CONDSTORE, as on Outlook.
+// the provider meets the contract without QRESYNC and SPECIAL-USE, as on Zoho, without CONDSTORE,
+// as on Outlook, and without UIDPLUS or MOVE, as on a plain IMAP server.
 import { afterAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { ImapFlow } from 'imapflow';
