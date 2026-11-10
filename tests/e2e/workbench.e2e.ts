@@ -210,6 +210,63 @@ test('the reader follows a move made after a rest at once, and waits while a key
   await context.close();
 }, 30_000);
 
+test('quick presses never rest, however long a slow phone takes to draw each move', async () => {
+  const { context, page, problems } = await open(SIZES.desktop);
+  const rows = page.getByRole('option');
+  const heading = page.locator('section[aria-label="Reader"] h1');
+  // Each conversation is opened once first, so one the reader shows later draws at once.
+  for (const row of [1, 2, 3, 4, 0]) {
+    await rows.nth(row).click();
+    await page.waitForFunction((row: number) => {
+      const subject = document.querySelector('section[aria-label="Reader"] h1')?.textContent;
+      const text = document.querySelectorAll('[role="option"]')[row]?.textContent ?? '';
+      return subject ? text.includes(subject) : false;
+    }, row);
+  }
+  expect(await heading.count()).toBe(1);
+  await page.waitForTimeout(1_000);
+
+  const shown = await page.evaluate(async () => {
+    const reader = document.querySelector('section[aria-label="Reader"]')!;
+    const list = document.querySelector('[role="listbox"]')!;
+    const subject = () => reader.querySelector('h1')?.textContent ?? '';
+    const before = subject();
+    const seen: string[] = [];
+    const observer = new MutationObserver(() => {
+      const now = subject();
+      if (now && now !== (seen.at(-1) ?? before)) seen.push(now);
+    });
+    observer.observe(reader, { subtree: true, childList: true, characterData: true });
+
+    // Four presses 30 ms apart, each stamped with when it was pressed...
+    const presses: KeyboardEvent[] = [];
+    for (let press = 0; press < 4; press++) {
+      presses.push(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+    // ...each handled 200 ms after the last move was drawn, as on a slow phone.
+    for (const press of presses) {
+      list.dispatchEvent(press);
+      await new Promise(requestAnimationFrame);
+      const drawnBy = performance.now() + 200;
+      while (performance.now() < drawnBy);
+    }
+    await new Promise(requestAnimationFrame);
+    const last = list.querySelector('[aria-selected="true"]')?.textContent ?? '';
+    while (!subject() || !last.includes(subject())) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    observer.disconnect();
+    return { seen, last };
+  });
+
+  // The first press came after a rest, so it opened its conversation, and then only the last.
+  expect(shown.seen).toHaveLength(2);
+  expect(shown.last).toContain(shown.seen[1] ?? '(none)');
+  expect(problems).toEqual([]);
+  await context.close();
+}, 30_000);
+
 /**
  * Opens a conversation from the unified Inbox and waits for its mail. On a phone it first goes back
  * to the list, from the reader or the folders.

@@ -140,22 +140,44 @@ const REST_MS = 150;
  * The selection the reader shows. One made after a rest shows at once. While the member moves
  * quickly, as when holding a key, the reader waits until the selection rests, so it does no work
  * nobody would see, and the list keeps up.
+ *
+ * A move is timed by the press that made it, not by when it was drawn, so on a slow phone a render
+ * that runs long can't make quick presses look like rests.
  */
 function useRestingSelection(selected: ConversationId | undefined): ConversationId | undefined {
   const [shown, setShown] = useState(selected);
-  const changedAt = useRef(-Infinity);
+  const pressedAt = useLastPress();
+  const movedAt = useRef(-Infinity);
   useLayoutEffect(() => {
     const now = performance.now();
-    const hasRested = now - changedAt.current >= REST_MS;
-    changedAt.current = now;
+    const at = pressedAt.current > movedAt.current ? pressedAt.current : now;
+    const hasRested = at - movedAt.current >= REST_MS;
+    movedAt.current = at;
     if (hasRested) {
       setShown(selected);
       return;
     }
     const timer = setTimeout(() => setShown(selected), REST_MS);
     return () => clearTimeout(timer);
-  }, [selected]);
+  }, [selected, pressedAt]);
   return shown;
+}
+
+/** When the member last pressed a key or a pointer, as the event says, however late it ran. */
+function useLastPress() {
+  const pressedAt = useRef(-Infinity);
+  useEffect(() => {
+    const note = (event: Event) => {
+      pressedAt.current = event.timeStamp;
+    };
+    window.addEventListener('keydown', note, { capture: true });
+    window.addEventListener('pointerdown', note, { capture: true });
+    return () => {
+      window.removeEventListener('keydown', note, { capture: true });
+      window.removeEventListener('pointerdown', note, { capture: true });
+    };
+  }, []);
+  return pressedAt;
 }
 
 /** How long after the list first shows something to open the reader starts loading. */
