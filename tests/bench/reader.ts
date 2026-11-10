@@ -19,7 +19,7 @@ const MESSAGES = '50000';
 /** The newsletter's row in the unified Inbox. */
 const NEWSLETTER = /Kernel Weekly/;
 
-/** How long the browser is left idle after a selection, to prepare the conversations beside it. */
+/** How long the browser is left idle before a move, to prepare the conversations beside it. */
 const IDLE_MS = 3_000;
 
 export const reader: BenchArea = {
@@ -33,8 +33,10 @@ export const reader: BenchArea = {
       await filling.getByText('Up to date').waitFor({ state: 'attached', timeout: 180_000 });
       await filling.close();
 
-      // Cold: the newsletter opened by a click, its body fetched and sanitized only then.
+      // Cold: after the app has idled as long as the prepared case does, the newsletter opened by
+      // a click, its body fetched and sanitized only then.
       const cold = await desktop(preview.url);
+      await cold.waitForTimeout(IDLE_MS);
       const coldOpen = await timed(cold, () =>
         cold.getByRole('option').filter({ hasText: NEWSLETTER }).first().click(),
       );

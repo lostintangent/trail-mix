@@ -11,8 +11,8 @@ import type { Account, ConversationId } from '../../mail/core/index.ts';
 import { conversationQuery } from '../../mailroom/client/index.ts';
 
 /**
- * The reader, with its sanitizer, loads apart from the first rows, which don't need it. Once the
- * list shows a conversation to open, it loads while the browser is idle, ready before the click.
+ * The reader, with its sanitizer, loads apart from the first rows, which don't need it. Soon after
+ * the list shows a conversation to open, it loads while the browser is idle, ready for the click.
  */
 type ReaderModule = typeof import('../../reader/index.ts');
 let loaded: ReaderModule | undefined;
@@ -78,16 +78,18 @@ export function ReaderPane({
   );
 }
 
+/** How long after the list first shows something to open the reader starts loading. */
+const PRELOAD_AFTER_MS = 1_000;
+
 function usePreloadedReader(isWanted: boolean) {
   useEffect(() => {
     if (!isWanted) return;
-    // Safari has no idle callback.
-    if ('requestIdleCallback' in window) {
-      const id = requestIdleCallback(() => void loadReader());
-      return () => cancelIdleCallback(id);
-    }
-    const id = setTimeout(() => void loadReader(), 200);
-    return () => clearTimeout(id);
+    const timer = setTimeout(() => {
+      // Safari has no idle callback.
+      if ('requestIdleCallback' in window) requestIdleCallback(() => void loadReader());
+      else void loadReader();
+    }, PRELOAD_AFTER_MS);
+    return () => clearTimeout(timer);
   }, [isWanted]);
 }
 
