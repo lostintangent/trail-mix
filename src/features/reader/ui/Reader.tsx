@@ -13,7 +13,7 @@ import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { memo, useEffect, useState } from 'react';
 import { stampStyles } from '../../../app/theme/stamps.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
-import type { Account, ConversationId, Message } from '../../mail/core/index.ts';
+import type { Account, ConversationId, Message, MessageRef } from '../../mail/core/index.ts';
 import { accountsQuery, bodyQuery, conversationQuery } from '../../mailroom/client/index.ts';
 import { MessageKeys } from './MessageFrame.tsx';
 import { displayName, MessageSheet, when } from './MessageSheet.tsx';
@@ -30,6 +30,10 @@ export type ReaderProps = {
    * workbench's shortcuts. The same function from one render to the next.
    */
   onMessageKey?: (event: KeyboardEvent) => void;
+  /** Drafts left out, such as the one being written below the conversation. */
+  hidden?: readonly MessageRef[];
+  /** Opens a draft to go on writing it. Without it, a draft reads like any message. */
+  onOpenDraft?: (draft: Message) => void;
 };
 
 /**
@@ -40,17 +44,25 @@ export type ReaderProps = {
  * It renders again only when what it shows or prepares changes, so moving through the list while
  * the reader waits costs it nothing.
  */
-export const Reader = memo(function Reader({ upcoming = [], onMessageKey, ...props }: ReaderProps) {
+export const Reader = memo(function Reader({
+  upcoming = [],
+  onMessageKey,
+  hidden = NONE_HIDDEN,
+  ...props
+}: ReaderProps) {
   usePrepared(upcoming);
   const id = props.conversation[0]?.conversation ?? '';
   return (
     <MessageKeys value={onMessageKey ?? IGNORE_KEY}>
-      <Conversation key={id} {...props} />
+      <Conversation key={id} hidden={hidden} {...props} />
     </MessageKeys>
   );
 }, isSameReading);
 
 const IGNORE_KEY = () => {};
+const NONE_HIDDEN: readonly MessageRef[] = [];
+
+const keys = (refs: readonly MessageRef[] = NONE_HIDDEN) => refs.map(refKey).join('\u0001');
 
 function isSameReading(before: ReaderProps, after: ReaderProps): boolean {
   const ids = (props: ReaderProps) => (props.upcoming ?? []).join('\u0000');
@@ -58,13 +70,28 @@ function isSameReading(before: ReaderProps, after: ReaderProps): boolean {
     before.conversation === after.conversation &&
     before.account === after.account &&
     before.onMessageKey === after.onMessageKey &&
+    before.onOpenDraft === after.onOpenDraft &&
+    keys(before.hidden) === keys(after.hidden) &&
     ids(before) === ids(after)
   );
 }
 
-function Conversation({ conversation, account }: ReaderProps) {
-  const messages = conversation.toSorted((a, b) => a.date.localeCompare(b.date));
-  const newest = messages.at(-1);
+/**
+ * The conversation's messages, oldest first. A draft lies folded, and opening it goes on writing it
+ * when the reader can, so the newest message that lies open is the newest one sent.
+ */
+function Conversation({
+  conversation,
+  account,
+  hidden,
+  onOpenDraft,
+}: Omit<ReaderProps, 'hidden'> & { hidden: readonly MessageRef[] }) {
+  const leftOut = new Set(hidden.map(refKey));
+  const messages = conversation
+    .filter((message) => !leftOut.has(refKey(message)))
+    .toSorted((a, b) => a.date.localeCompare(b.date));
+  const isDraft = (message: Message) => onOpenDraft !== undefined && message.flags.draft;
+  const newest = messages.findLast((message) => !isDraft(message)) ?? messages.at(-1);
   const [opened, setOpened] = useState(() => new Set(newest ? [refKey(newest)] : []));
   if (!newest) return null;
 
@@ -76,7 +103,18 @@ function Conversation({ conversation, account }: ReaderProps) {
         {account.name} · {messages.length === 1 ? '1 message' : `${messages.length} messages`}
       </p>
       {messages.map((message) =>
-        opened.has(refKey(message)) ? (
+        isDraft(message) ? (
+          <button
+            key={refKey(message)}
+            type="button"
+            onClick={() => onOpenDraft?.(message)}
+            {...stylex.props(styles.folded)}
+          >
+            <strong {...stylex.props(styles.foldedFrom, styles.draft)}>Draft</strong>
+            <span {...stylex.props(styles.foldedPreview)}>{message.preview}</span>
+            <span>Go on writing</span>
+          </button>
+        ) : opened.has(refKey(message)) ? (
           <MessageSheet key={refKey(message)} message={message} account={account} />
         ) : (
           <button
@@ -220,6 +258,9 @@ const styles = stylex.create({
   foldedFrom: {
     color: colorVars['--color-text-secondary'],
     fontWeight: fontWeightVars['--font-weight-semibold'],
+  },
+  draft: {
+    color: colorVars['--color-accent'],
   },
   foldedPreview: {
     flexGrow: 1,

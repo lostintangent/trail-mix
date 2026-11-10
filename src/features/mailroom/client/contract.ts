@@ -200,8 +200,10 @@ export function readCall<Name extends string>(names: readonly Name[], input: unk
  */
 export function sendable(call: Call<string>): Call<string> | FormData {
   const files: File[] = [];
+  // JSON has no undefined, and would send an optional argument left out as null.
+  const given = call.args.slice(0, call.args.findLastIndex((arg) => arg !== undefined) + 1);
   const args = JSON.parse(
-    JSON.stringify(call.args, (_key, value: unknown) =>
+    JSON.stringify(given, (_key, value: unknown) =>
       value instanceof File ? { $file: files.push(value) - 1 } : value,
     ),
   ) as unknown[];

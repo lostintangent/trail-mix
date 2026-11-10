@@ -45,6 +45,7 @@ import {
 import { PickedActions, SelectionPane } from './SelectionPane.tsx';
 import { workbenchCommands } from './commands.ts';
 import {
+  CommandButton,
   Commands,
   focusSearch,
   runCommandKey,
@@ -52,6 +53,8 @@ import {
   useCommandKeys,
   type Command,
 } from '../../commands/index.ts';
+import { Composer, composerCommands } from '../../composer/ui/index.ts';
+import { isDocked, useComposing } from './useComposing.ts';
 
 const NO_COMMANDS: readonly Command[] = [];
 import { StatusLine } from './StatusLine.tsx';
@@ -134,6 +137,20 @@ export function Workbench({
   const isOffscreen = (pane: Pane) => isPhone && pane !== phonePane;
 
   const { triage, undoLast, canUndo } = useTriage(view, folders);
+  const composing = useComposing(selected);
+  // A new message is from the account the view holds, or else the first.
+  const writeFrom = scope ?? accounts[0];
+  // On a phone, a new message closed with nothing open goes back to the list it was begun from.
+  const closeComposer = () => {
+    composing.close();
+    if (selected === undefined) setPhonePane('list');
+  };
+  const write =
+    writeFrom &&
+    (() => {
+      composing.write(writeFrom);
+      setPhonePane('reader');
+    });
   const [isSheetOpen, setSheetOpen] = useState(false);
   // A conversation that leaves the list gives way to the one below it, or above it at the end. On a
   // phone, where the reader fills the screen, the list comes back instead. The list shows the
@@ -172,20 +189,31 @@ export function Workbench({
   useLayoutEffect(() => {
     latestTriageShown.current = triageShown;
   });
+  const { replyIn } = composing;
   const readerActions = useCallback(
-    ({ id, conversation, account }: Reading, place: 'bar' | 'island') => (
-      <TriageActions
-        commands={triageCommands({
-          accounts: [account],
-          folders,
-          isFlagged: conversation.some(({ flags }) => flags.flagged),
-          isUnread: conversation.some(({ flags }) => !flags.seen),
-          onTriage: (action) => latestTriageShown.current(action, id),
-        })}
-        isCompact={place === 'island'}
-      />
-    ),
-    [folders],
+    ({ id, conversation, account }: Reading, place: 'bar' | 'island') => {
+      const [, reply, replyAll] = composerCommands({
+        write: undefined,
+        reply: (all) => replyIn(conversation, all),
+      });
+      return (
+        <>
+          {reply && <CommandButton command={reply} />}
+          {replyAll && place === 'bar' && <CommandButton command={replyAll} />}
+          <TriageActions
+            commands={triageCommands({
+              accounts: [account],
+              folders,
+              isFlagged: conversation.some(({ flags }) => flags.flagged),
+              isUnread: conversation.some(({ flags }) => !flags.seen),
+              onTriage: (action) => latestTriageShown.current(action, id),
+            })}
+            isCompact={place === 'island'}
+          />
+        </>
+      );
+    },
+    [folders, replyIn],
   );
 
   // Moving the selection re-renders only what shows it: the list, its two changed rows, and the
@@ -257,16 +285,22 @@ export function Workbench({
     ...workbenchCommands({
       next: stepTo(anchorAt + 1),
       previous: anchorAt > 0 ? stepTo(anchorAt - 1) : undefined,
-      back: isPhone
-        ? phonePane === 'list'
-          ? undefined
-          : () => setPhonePane('list')
-        : isMany
-          ? stopPicking
-          : undefined,
+      back: composing.compose
+        ? closeComposer
+        : isPhone
+          ? phonePane === 'list'
+            ? undefined
+            : () => setPhonePane('list')
+          : isMany
+            ? stopPicking
+            : undefined,
       undo: canUndo ? undoLast : undefined,
       focusSearch,
       showShortcuts: () => setSheetOpen(true),
+    }),
+    ...composerCommands({
+      write,
+      reply: selected !== undefined && !isMany ? (all) => void composing.reply(all) : undefined,
     }),
     ...viewCommands(accounts, folders, openView),
     ...extraCommands,
@@ -282,6 +316,23 @@ export function Workbench({
     ),
     [accounts, isSidebarRail, sidebarFooter],
   );
+
+  const newMessage = commands.find(({ id }) => id === 'message.new');
+  const { compose } = composing;
+  const writing = compose && {
+    composer: (
+      <Suspense>
+        <Composer
+          key={composing.session}
+          compose={compose}
+          accounts={accounts}
+          onDraft={(saved, older) => composing.noteDraft(compose, saved, older)}
+          onClose={closeComposer}
+        />
+      </Suspense>
+    ),
+    isDocked: isDocked(compose),
+  };
 
   return (
     <Commands value={commands}>
@@ -361,6 +412,7 @@ export function Workbench({
                 isCollapsed={!isPhone && list.isCollapsed}
                 onExpand={() => setList({ ...list, isCollapsed: false })}
                 onShowFolders={() => setPhonePane('sidebar')}
+                write={newMessage && <CommandButton command={newMessage} />}
               />
               <PanelEdge
                 spec={PANELS.list}
@@ -384,6 +436,9 @@ export function Workbench({
                   onShown={markRead}
                   actions={readerActions}
                   onMessageKey={runCommandKey}
+                  writing={writing}
+                  hidden={composing.hidden}
+                  onOpenDraft={composing.openDraft}
                   onBack={() => setPhonePane('list')}
                 />
               )}

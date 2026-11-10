@@ -1,0 +1,5 @@
+// The composer as the workbench shows it. The Mailroom reaches only its core, through the
+// feature's own index, so the Worker never takes in the editor.
+export { composerCommands } from './commands.ts';
+export { Composer, preloadComposer } from './lazy.ts';
+export type { Compose, ComposerProps } from './Composer.tsx';

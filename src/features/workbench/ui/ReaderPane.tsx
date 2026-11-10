@@ -6,7 +6,6 @@ import * as stylex from '@stylexjs/stylex';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, MailOpen } from 'lucide-react';
 import {
-  lazy,
   Suspense,
   useEffect,
   useEffectEvent,
@@ -18,9 +17,11 @@ import {
   type ReactNode,
 } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
-import type { Account, ConversationId, Message } from '../../mail/core/index.ts';
+import type { Account, ConversationId, Message, MessageRef } from '../../mail/core/index.ts';
 import { conversationQuery } from '../../mailroom/client/index.ts';
 import { preloadTriageActions } from '../../conversations/index.ts';
+import { preloadComposer } from '../../composer/ui/index.ts';
+import { preloadable } from '../../../shared/preloadable.ts';
 import { PhoneIsland } from './PhoneIsland.tsx';
 
 /** The conversation the reader shows, with its messages and the account they belong to. */
@@ -30,17 +31,9 @@ export type Reading = { id: ConversationId; conversation: Message[]; account: Ac
  * The reader, with its sanitizer, loads apart from the first rows, which don't need it. Soon after
  * the list shows a conversation to open, it loads while the browser is idle, ready for the click.
  */
-type ReaderModule = typeof import('../../reader/index.ts');
-let loaded: ReaderModule | undefined;
-const loadReader = async () => (loaded ??= await import('../../reader/index.ts'));
-const Reader = lazy(() => {
-  const ready = loaded && { default: loaded.Reader };
-  if (!ready) return loadReader().then(({ Reader }) => ({ default: Reader }));
-  // Loaded code comes through a thenable that settles at once, which React renders without
-  // suspending, so the first open doesn't wait out the pause React gives a Suspense reveal.
-  const settled = { then: (resolve: (module: typeof ready) => void) => resolve(ready) };
-  return settled as unknown as Promise<typeof ready>;
-});
+const { Component: Reader, preload: loadReader } = preloadable(
+  async () => (await import('../../reader/index.ts')).Reader,
+);
 
 /**
  * The reader's sheet, where an open conversation lies. On a phone it fills the screen, with a way
@@ -53,6 +46,9 @@ export function ReaderPane({
   onShown,
   actions,
   onMessageKey,
+  writing,
+  hidden,
+  onOpenDraft,
   onBack,
 }: {
   selected: ConversationId | undefined;
@@ -71,6 +67,15 @@ export function ReaderPane({
   actions?: (reading: Reading, place: 'bar' | 'island') => ReactNode;
   /** Keys pressed inside a message, which the window never hears. The same function each render. */
   onMessageKey?: (event: KeyboardEvent) => void;
+  /**
+   * The composer, while the member writes: docked under the conversation it answers, or filling
+   * the sheet for a message of its own.
+   */
+  writing?: { composer: ReactNode; isDocked: boolean };
+  /** Drafts the reader leaves out, such as the one being written. */
+  hidden?: readonly MessageRef[];
+  /** Opens a draft in the conversation to go on writing it. */
+  onOpenDraft?: (draft: Message, conversation: Message[]) => void;
   onBack: () => void;
 }) {
   const shown = useRestingSelection(selected);
@@ -88,11 +93,17 @@ export function ReaderPane({
   const bar = useMemo(() => reading && actions?.(reading, 'bar'), [reading, actions]);
   const island = useMemo(() => reading && actions?.(reading, 'island'), [reading, actions]);
   const isShowing = reading !== undefined;
+  const openDraft = useMemo(
+    () => reading && onOpenDraft && ((draft: Message) => onOpenDraft(draft, reading.conversation)),
+    [reading, onOpenDraft],
+  );
+  const isDocked = writing?.isDocked === true;
   const announce = useEffectEvent((id: ConversationId) => onShown?.(id));
   useEffect(() => {
     if (shown !== undefined && isShowing) announce(shown);
   }, [shown, isShowing]);
   usePreloadedReader(upcoming.length > 0);
+  usePreloadedComposer(isShowing);
   // Preparing what comes next is never urgent, so a change to it, as when the open conversation
   // leaves the list, doesn't make the open conversation render again in the change's own frame.
   const preparing = useDeferredValue(upcoming);
@@ -107,12 +118,17 @@ export function ReaderPane({
           onClick={onBack}
         />
       </header>
-      {bar ? (
+      {writing && !isDocked ? (
+        <div {...stylex.props(styles.scroll, styles.filled)}>
+          <div {...stylex.props(styles.writing, styles.filled)}>{writing.composer}</div>
+        </div>
+      ) : null}
+      {bar && !(writing && !isDocked) ? (
         <div role="toolbar" aria-label="Conversation" {...stylex.props(styles.bar)}>
           <Suspense>{bar}</Suspense>
         </div>
       ) : null}
-      {reading ? (
+      {writing && !isDocked ? null : reading ? (
         <div {...stylex.props(styles.scroll, actions && styles.underBar)}>
           <Suspense>
             <Reader
@@ -120,8 +136,11 @@ export function ReaderPane({
               account={reading.account}
               upcoming={shown === selected ? preparing : []}
               onMessageKey={onMessageKey}
+              hidden={hidden}
+              onOpenDraft={openDraft}
             />
           </Suspense>
+          {isDocked && <div {...stylex.props(styles.writing)}>{writing?.composer}</div>}
         </div>
       ) : (
         <div {...stylex.props(styles.empty)}>
@@ -132,7 +151,7 @@ export function ReaderPane({
           />
         </div>
       )}
-      {island ? (
+      {island && !writing ? (
         <PhoneIsland label="Conversation">
           <Suspense>{island}</Suspense>
         </PhoneIsland>
@@ -190,6 +209,17 @@ function useLastPress() {
 
 /** How long after the list first shows something to open the reader starts loading. */
 const PRELOAD_AFTER_MS = 1_000;
+
+/** While a conversation is open, the composer loads when the browser is idle, ready for a reply. */
+function usePreloadedComposer(isWanted: boolean) {
+  useEffect(() => {
+    if (!isWanted) return;
+    // Safari has no idle callback.
+    if (!('requestIdleCallback' in window)) return void preloadComposer();
+    const id = requestIdleCallback(() => void preloadComposer());
+    return () => cancelIdleCallback(id);
+  }, [isWanted]);
+}
 
 function usePreloadedReader(isWanted: boolean) {
   useEffect(() => {
@@ -255,6 +285,20 @@ const styles = stylex.create({
       default: null,
       [media.phone]: `calc(${tm.target} + ${spacingVars['--spacing-1']} * 2 + ${spacingVars['--spacing-3']} + ${tm.safeBottom})`,
     },
+  },
+  // A new message's sheet fills the reader, however little is written on it.
+  filled: {
+    flexGrow: 1,
+    display: 'flex',
+    flexDirection: 'column',
+  },
+  // The composer lies on the desk's paper like the conversation's messages, in the same margins.
+  writing: {
+    paddingInline: {
+      default: spacingVars['--spacing-6'],
+      [media.phone]: spacingVars['--spacing-3'],
+    },
+    paddingBottom: spacingVars['--spacing-6'],
   },
   empty: {
     flexGrow: 1,

@@ -69,6 +69,17 @@ test('every screen renders cleanly, with readable text, at both sizes in both th
       }
       // The newest conversation, a thread, then the newsletter, which sets its own colors.
       screens.push(['reader', (page) => openConversation(page, 0)]);
+      // A reply to it, docked under the conversation.
+      screens.push([
+        'reply',
+        async (page) => {
+          await page
+            .getByRole('button', { name: 'Reply', exact: true })
+            .locator('visible=true')
+            .click();
+          await page.getByRole('textbox', { name: 'Reply' }).waitFor();
+        },
+      ]);
       screens.push(['newsletter', (page) => openConversation(page, /Kernel Weekly/)]);
       // A search, whose matches the highlighter marks.
       screens.push(['search', (page) => searchFor(page, 'lunch thu')]);

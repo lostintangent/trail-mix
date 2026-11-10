@@ -90,6 +90,15 @@ test('a call carrying files travels as form data and reaches the Mailroom with t
   });
 });
 
+test('an optional argument left out of a call carrying files arrives left out, not as null', async () => {
+  const notes = new File(['Bring a jacket.'], 'notes.txt', { type: 'text/plain' });
+  const sent = sendable({
+    name: 'saveDraft',
+    args: [{ attachments: [{ file: notes }] }, undefined],
+  });
+  expect((await receivedCall(COMMANDS, sent)).args).toHaveLength(1);
+});
+
 test('a call without files travels as it is', async () => {
   const call: Call<CommandName> = { name: 'setFlags', args: [[{ uid: 1 }], { seen: true }] };
   expect(sendable(call)).toBe(call);

@@ -52,6 +52,7 @@ export function ListPane({
   isCollapsed,
   onExpand,
   onShowFolders,
+  write,
 }: {
   id: string;
   title: string;
@@ -80,6 +81,8 @@ export function ListPane({
   isCollapsed: boolean;
   onExpand: () => void;
   onShowFolders: () => void;
+  /** Starts a new message: at the end of the title on a desktop, and in the island on a phone. */
+  write?: ReactNode;
 }) {
   const titleId = useId();
   if (isCollapsed) {
@@ -112,6 +115,7 @@ export function ListPane({
             'All accounts'
           )}
         </span>
+        {write && <span {...stylex.props(styles.write)}>{write}</span>}
       </header>
       {below && <div {...stylex.props(styles.below)}>{below}</div>}
       <div {...stylex.props(styles.sheet, conversations?.length === 0 && styles.empty)}>
@@ -155,6 +159,7 @@ export function ListPane({
             variant="ghost"
             onClick={onShowFolders}
           />
+          {write}
         </PhoneIsland>
       )}
     </section>
@@ -212,6 +217,13 @@ const styles = stylex.create({
       [media.phone]: spacingVars['--spacing-3'],
     },
     paddingInline: spacingVars['--spacing-4'],
+  },
+  // The header's line keeps its height, so the button's extra size reaches into its padding.
+  write: {
+    display: { default: 'flex', [media.phone]: 'none' },
+    alignSelf: 'center',
+    marginInlineStart: 'auto',
+    marginBlock: `calc(-1 * ${spacingVars['--spacing-2']})`,
   },
   below: {
     flexShrink: 0,
