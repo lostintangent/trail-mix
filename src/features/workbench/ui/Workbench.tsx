@@ -1,7 +1,16 @@
-import { colorVars, durationVars } from '@astryxdesign/core/theme/tokens.stylex';
+import { colorVars, durationVars, spacingVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { useCallback, useId, useMemo, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
+import { Toasts } from '../../../shared/toasts.tsx';
 import type {
   Account,
   ConversationId,
@@ -12,7 +21,8 @@ import type {
 import { ListPane } from './ListPane.tsx';
 import { PanelEdge } from './PanelEdge.tsx';
 import { PANELS } from './panels.ts';
-import { ReaderPane } from './ReaderPane.tsx';
+import { ReaderPane, type Reading } from './ReaderPane.tsx';
+import { rowChange, TriageActions, useTriage, type Action } from '../../conversations/index.ts';
 import { StatusLine } from './StatusLine.tsx';
 import { folderName, Sidebar, UNIFIED_VIEWS, type ViewCounts } from '../../folders/index.ts';
 import { useMediaQuery } from './useMediaQuery.ts';
@@ -62,6 +72,46 @@ export function Workbench({
   // Panes off a phone's screen are inert, so focus and assistive tech stay on the one in view.
   const isOffscreen = (pane: Pane) => isPhone && pane !== phonePane;
 
+  const triage = useTriage(view, folders);
+  // A conversation that leaves the list gives way to the one below it, or above it at the end. On a
+  // phone, where the reader fills the screen, the list comes back instead.
+  const triageShown = (action: Action, id: ConversationId) => {
+    if (rowChange(action, view) === 'gone') {
+      const at = conversations?.findIndex((row) => row.id === id) ?? -1;
+      const next = conversations?.[at + 1] ?? conversations?.[at - 1];
+      if (isPhone) {
+        setPhonePane('list');
+        setSelected(undefined);
+      } else {
+        setSelected(at < 0 ? selected : next?.id);
+      }
+    }
+    triage(action, [id]);
+  };
+  const markRead = (id: ConversationId) => {
+    if (conversations?.find((row) => row.id === id)?.unread) {
+      triage({ do: 'read' }, [id], { quietly: true });
+    }
+  };
+  // The reader's actions stay the same while the selection moves, so a held key doesn't redraw them.
+  const latestTriageShown = useRef(triageShown);
+  useLayoutEffect(() => {
+    latestTriageShown.current = triageShown;
+  });
+  const readerActions = useCallback(
+    ({ id, conversation, account }: Reading, place: 'bar' | 'island') => (
+      <TriageActions
+        accounts={[account]}
+        folders={folders}
+        isFlagged={conversation.some(({ flags }) => flags.flagged)}
+        isUnread={conversation.some(({ flags }) => !flags.seen)}
+        isCompact={place === 'island'}
+        onTriage={(action) => latestTriageShown.current(action, id)}
+      />
+    ),
+    [folders],
+  );
+
   // Moving the selection re-renders only what shows it: the list, its two changed rows, and the
   // reader. The sidebar and the panel edges are memoized, and what they're handed stays the same.
   const openView = useCallback(
@@ -88,6 +138,14 @@ export function Workbench({
 
   return (
     <div {...stylex.props(styles.desk)}>
+      {/* On a phone, toasts rise above the island, where the pane's actions float. */}
+      <Toasts
+        layerInset={
+          isPhone
+            ? { blockEnd: `calc(${tm.target} + ${spacingVars['--spacing-1']} * 2)` }
+            : undefined
+        }
+      />
       <div
         {...stylex.props(
           styles.track,
@@ -145,6 +203,8 @@ export function Workbench({
             selected={selected}
             accounts={accounts}
             upcoming={neighbors(conversations, selected)}
+            onShown={markRead}
+            actions={readerActions}
             onBack={() => setPhonePane('list')}
           />
         </div>

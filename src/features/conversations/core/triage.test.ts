@@ -4,6 +4,9 @@ import {
   changeMessages,
   changeRows,
   commandFor,
+  isShown,
+  overlaid,
+  putBack,
   rowChange,
   undoOf,
   type Command,
@@ -201,4 +204,47 @@ test('a row change reaches the triaged conversations and no others', () => {
     { id: 'b', unread: 1, flagged: false },
     { id: 'c', unread: 0, flagged: true },
   ]);
+});
+
+test('putting rows back returns each to its place by date, and restores what changed in place', () => {
+  const row = (id: string, date: string, unread = 0) => ({ id, date, unread });
+  const now = [row('a', '2026-11-09'), row('d', '2026-11-03', 0)];
+  const earlier = [row('b', '2026-11-07'), row('c', '2026-11-05'), row('d', '2026-11-03', 2)];
+
+  expect(putBack(now, earlier)).toEqual([
+    row('a', '2026-11-09'),
+    row('b', '2026-11-07'),
+    row('c', '2026-11-05'),
+    row('d', '2026-11-03', 2),
+  ]);
+});
+
+test('overlays lay over a snapshot in order, so an Undo after an archive shows the row again', () => {
+  const row = (id: string, date: string) => ({ id, date, unread: 1, flagged: false });
+  const rows = [row('a', '2026-11-09'), row('b', '2026-11-08')];
+  const archived = { ids: new Set(['a']), change: 'gone' as const };
+  const read = { ids: new Set(['b']), change: { unread: 0 } };
+
+  expect(overlaid(rows, [archived, read])).toEqual([{ ...row('b', '2026-11-08'), unread: 0 }]);
+  expect(overlaid(rows, [archived, { returning: [row('a', '2026-11-09')] }])).toEqual(rows);
+});
+
+test('a snapshot shows an overlay once its rows are gone, or changed, or back as they were', () => {
+  const row = (id: string, unread = 0, flagged = false) => ({
+    id,
+    date: '2026-11-09',
+    unread,
+    flagged,
+  });
+  const gone = { ids: new Set(['a']), change: 'gone' as const };
+  const flagged = { ids: new Set(['a']), change: { flagged: true } };
+  const back = { returning: [row('a', 2)] };
+
+  expect(isShown([row('a'), row('b')], gone)).toBe(false);
+  expect(isShown([row('b')], gone)).toBe(true);
+  expect(isShown([row('a')], flagged)).toBe(false);
+  expect(isShown([row('a', 0, true)], flagged)).toBe(true);
+  expect(isShown([row('b')], back)).toBe(false);
+  expect(isShown([row('a', 0)], back)).toBe(false);
+  expect(isShown([row('a', 2)], back)).toBe(true);
 });

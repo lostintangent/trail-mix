@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { useTriagedList } from '../features/conversations/index.ts';
 import { viewCounts } from '../features/folders/index.ts';
 import type { View } from '../features/mail/core/index.ts';
 import {
@@ -53,7 +54,8 @@ function Desk({ sidebarFooter }: { sidebarFooter: ReactNode }) {
   const { data, hasNextPage, isFetchingNextPage, fetchNextPage } = useInfiniteQuery(
     conversationsQuery(view),
   );
-  const conversations = useMemo(() => data?.pages.flatMap(({ items }) => items), [data]);
+  const listed = useMemo(() => data?.pages.flatMap(({ items }) => items), [data]);
+  const conversations = useTriagedList(view, listed);
   const onListNearEnd = useCallback(() => {
     if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
   }, [hasNextPage, isFetchingNextPage, fetchNextPage]);

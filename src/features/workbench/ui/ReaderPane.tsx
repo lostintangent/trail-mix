@@ -11,12 +11,19 @@ import {
   useEffect,
   useEffectEvent,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
+  type ReactNode,
 } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
-import type { Account, ConversationId } from '../../mail/core/index.ts';
+import type { Account, ConversationId, Message } from '../../mail/core/index.ts';
 import { conversationQuery } from '../../mailroom/client/index.ts';
+import { preloadTriageActions } from '../../conversations/index.ts';
+import { PhoneIsland } from './PhoneIsland.tsx';
+
+/** The conversation the reader shows, with its messages and the account they belong to. */
+export type Reading = { id: ConversationId; conversation: Message[]; account: Account };
 
 /**
  * The reader, with its sanitizer, loads apart from the first rows, which don't need it. Soon after
@@ -43,6 +50,7 @@ export function ReaderPane({
   accounts,
   upcoming,
   onShown,
+  actions,
   onBack,
 }: {
   selected: ConversationId | undefined;
@@ -54,6 +62,11 @@ export function ReaderPane({
    * conversation the selection passes on its way elsewhere is never shown.
    */
   onShown?: (conversation: ConversationId) => void;
+  /**
+   * What can be done to the conversation shown: in a bar above it on a desktop, and on a phone in
+   * the island at the bottom of the screen, which has room for fewer.
+   */
+  actions?: (reading: Reading, place: 'bar' | 'island') => ReactNode;
   onBack: () => void;
 }) {
   const shown = useRestingSelection(selected);
@@ -62,7 +75,14 @@ export function ReaderPane({
     enabled: shown !== undefined,
   });
   const account = accounts.find(({ id }) => id === conversation?.[0]?.account);
-  const reading = shown && conversation?.length && account ? { conversation, account } : undefined;
+  const reading = useMemo<Reading | undefined>(
+    () =>
+      shown && conversation?.length && account ? { id: shown, conversation, account } : undefined,
+    [shown, conversation, account],
+  );
+  // Made once for each conversation shown, so the moves of a held key pass them by.
+  const bar = useMemo(() => reading && actions?.(reading, 'bar'), [reading, actions]);
+  const island = useMemo(() => reading && actions?.(reading, 'island'), [reading, actions]);
   const isShowing = reading !== undefined;
   const announce = useEffectEvent((id: ConversationId) => onShown?.(id));
   useEffect(() => {
@@ -80,8 +100,13 @@ export function ReaderPane({
           onClick={onBack}
         />
       </header>
+      {bar ? (
+        <div role="toolbar" aria-label="Conversation" {...stylex.props(styles.bar)}>
+          <Suspense>{bar}</Suspense>
+        </div>
+      ) : null}
       {reading ? (
-        <div {...stylex.props(styles.scroll)}>
+        <div {...stylex.props(styles.scroll, actions && styles.underBar)}>
           <Suspense>
             <Reader
               conversation={reading.conversation}
@@ -99,6 +124,11 @@ export function ReaderPane({
           />
         </div>
       )}
+      {island ? (
+        <PhoneIsland label="Conversation">
+          <Suspense>{island}</Suspense>
+        </PhoneIsland>
+      ) : null}
     </section>
   );
 }
@@ -136,8 +166,12 @@ function usePreloadedReader(isWanted: boolean) {
     if (!isWanted) return;
     const timer = setTimeout(() => {
       // Safari has no idle callback.
-      if ('requestIdleCallback' in window) requestIdleCallback(() => void loadReader());
-      else void loadReader();
+      const load = () => {
+        void loadReader();
+        preloadTriageActions();
+      };
+      if ('requestIdleCallback' in window) requestIdleCallback(load);
+      else load();
     }, PRELOAD_AFTER_MS);
     return () => clearTimeout(timer);
   }, [isWanted]);
@@ -167,12 +201,30 @@ const styles = stylex.create({
     paddingTop: tm.safeTop,
     paddingInline: spacingVars['--spacing-2'],
   },
+  // On a desktop the conversation's actions sit in a bar along the top of its sheet.
+  bar: {
+    display: { default: 'flex', [media.phone]: 'none' },
+    flexShrink: 0,
+    alignItems: 'center',
+    gap: spacingVars['--spacing-0-5'],
+    paddingTop: spacingVars['--spacing-2'],
+    paddingInline: spacingVars['--spacing-2'],
+  },
   scroll: {
     flexGrow: 1,
     minHeight: 0,
     overflowY: 'auto',
     overscrollBehavior: 'contain',
     paddingTop: { default: spacingVars['--spacing-6'], [media.phone]: spacingVars['--spacing-1'] },
+  },
+  // Below a desktop's bar the subject needs less room above it, and on a phone the conversation
+  // ends above the island: its height, its padding, and the gap below it.
+  underBar: {
+    paddingTop: { default: spacingVars['--spacing-2'], [media.phone]: spacingVars['--spacing-1'] },
+    paddingBottom: {
+      default: null,
+      [media.phone]: `calc(${tm.target} + ${spacingVars['--spacing-1']} * 2 + ${spacingVars['--spacing-3']} + ${tm.safeBottom})`,
+    },
   },
   empty: {
     flexGrow: 1,

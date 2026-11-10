@@ -119,6 +119,68 @@ export function changeRows<Row extends { id: ConversationId }>(
   return rows.map((row) => (ids.has(row.id) ? { ...row, ...change } : row));
 }
 
+/**
+ * A list's rows with some conversations' earlier rows put back, as an Undo or a refusal shows them:
+ * a row still listed takes its earlier self, and a row that left returns where its date places it,
+ * since a list runs newest first.
+ */
+export function putBack<Row extends { id: ConversationId; date: string }>(
+  rows: readonly Row[],
+  earlier: readonly Row[],
+): Row[] {
+  const byId = new Map(earlier.map((row) => [row.id, row]));
+  const kept = rows.map((row) => byId.get(row.id) ?? row);
+  const listed = new Set(rows.map(({ id }) => id));
+  const returning = earlier.filter(({ id }) => !listed.has(id));
+  return [...kept, ...returning].toSorted((a, b) =>
+    a.date < b.date ? 1 : a.date > b.date ? -1 : 0,
+  );
+}
+
+/**
+ * What a list shows ahead of the Mailroom's own list: some rows changed or gone, or earlier rows put
+ * back by an Undo. A browser lays it over each snapshot until a snapshot already shows it, since a
+ * snapshot fetched before the Mailroom folded the change would otherwise undo it on screen.
+ */
+export type Overlay<Row extends ListRow = ConversationSummary> =
+  { ids: ReadonlySet<ConversationId>; change: RowChange } | { returning: readonly Row[] };
+
+type ListRow = { id: ConversationId; date: string } & Pick<
+  ConversationSummary,
+  'flagged' | 'unread'
+>;
+
+/** A list's rows with overlays laid over them, in the order they were made. */
+export function overlaid<Row extends ListRow>(
+  rows: readonly Row[],
+  overlays: readonly Overlay<Row>[],
+): readonly Row[] {
+  return overlays.reduce<readonly Row[]>(
+    (shown, overlay) =>
+      'returning' in overlay
+        ? putBack(shown, overlay.returning)
+        : changeRows(shown, overlay.ids, overlay.change),
+    rows,
+  );
+}
+
+/** Whether a list's rows already show what an overlay would, so it has nothing left to do. */
+export function isShown<Row extends ListRow>(rows: readonly Row[], overlay: Overlay<Row>): boolean {
+  if ('returning' in overlay) {
+    const listed = new Map(rows.map((row) => [row.id, row]));
+    return overlay.returning.every((earlier) => {
+      const row = listed.get(earlier.id);
+      return row?.unread === earlier.unread && row.flagged === earlier.flagged;
+    });
+  }
+  const { ids, change } = overlay;
+  const triaged = rows.filter(({ id }) => ids.has(id));
+  if (change === 'gone') return triaged.length === 0;
+  return triaged.every((row) =>
+    (Object.keys(change) as (keyof typeof change)[]).every((field) => row[field] === change[field]),
+  );
+}
+
 /** An open conversation's messages once a flag or read change reached them. */
 export function changeMessages(messages: readonly Message[], command: Command): Message[] {
   if (!('setFlags' in command)) return [...messages];
