@@ -155,6 +155,31 @@ async function hold(page: Page, which: (request: Request) => boolean) {
   };
 }
 
+/**
+ * Waits until the reader shows `count` messages open, each with its body: HTML in its frame, or
+ * plain text, and neither still opening nor failed.
+ */
+async function bodiesShown(page: Page, count: number) {
+  await page.waitForFunction(
+    (count) => {
+      const sheets = [...document.querySelectorAll('section[aria-label="Reader"] article')];
+      return (
+        sheets.length === count &&
+        sheets.every(
+          (sheet) =>
+            !sheet.querySelector('[role="alert"]') &&
+            !sheet.textContent?.includes('Opening…') &&
+            [...sheet.querySelectorAll('iframe')].every(
+              (frame) => frame.style.visibility === 'visible',
+            ),
+        )
+      );
+    },
+    count,
+    { timeout: ELSEWHERE_MS },
+  );
+}
+
 /** Waits until the reader shows `count` messages' HTML, each in its frame. */
 async function framesShown(page: Page, count: number) {
   await page.waitForFunction(
@@ -178,6 +203,14 @@ async function shownSubject(page: Page): Promise<string> {
 }
 
 const row = (page: Page, subject: RegExp) => page.getByRole('option').filter({ hasText: subject });
+/** The row at a place in the list, counting from 1. */
+const at = (page: Page, place: number) => page.locator(`[role="option"][aria-posinset="${place}"]`);
+/**
+ * A row's text, less its read mark. The demo repeats stories, even within the rows on screen, but
+ * never two alike in a row, so a row is known by its place and its text.
+ */
+const textAt = async (page: Page, place: number) =>
+  (await at(page, place).textContent())?.replace('Unread', '');
 const bar = (page: Page) => page.getByRole('toolbar', { name: 'Conversation' });
 const reader = (page: Page) => page.locator('section[aria-label="Reader"]');
 /** The toast's Undo. Its name is exact, since a folded message's preview can mention undoing. */
@@ -383,36 +416,42 @@ test('keys run the registry’s commands: from the list, from inside a message, 
 
 test('straight after Z, a conversation opens with its messages, under the refs Undo gave them', async () => {
   const here = await inbox();
-  const subject = /Replayable stream cursors/;
   const sheets = reader(here).locator('article');
+  const folded = reader(here).locator('h1 ~ button').filter({ hasNotText: 'Go on writing' });
   const failed: string[] = [];
   here.on('response', (response) => {
     if (response.url().includes('%22body%22') && !response.ok()) failed.push(response.url());
   });
-  await row(here, subject).click();
-  await framesShown(here, 1);
+  // The first conversation on screen with an earlier message, which lies folded.
+  let place = 1;
+  for (; (await folded.count()) === 0; place += 1) {
+    if (place > 10) throw new Error('No conversation on screen has an earlier message.');
+    await at(here, place).click();
+    await shownSubject(here);
+  }
+  place -= 1;
+  const [conversation, below] = [await textAt(here, place), await textAt(here, place + 1)];
+  await bodiesShown(here, 1);
 
   // The browser hears of the moves only from the Mailroom's answers to its own commands.
   const refetches = await hold(here, (request) => request.url().includes('%22conversation%22'));
   await here.keyboard.press('e');
-  await row(here, subject).waitFor({ state: 'detached', timeout: 1_000 });
+  await until(async () => (await textAt(here, place)) === below, 1_000);
   await undoButton(here).waitFor();
   // Undo is held, so the conversation opens while its messages are still in Archive.
   const commands = await hold(here, (request) => request.method() === 'POST');
   await here.keyboard.press('z');
-  await row(here, subject).click();
-  await framesShown(here, 1);
+  await until(async () => (await textAt(here, place)) === conversation, 1_000);
+  await at(here, place).click();
+  await bodiesShown(here, 1);
   const before = await sheets.elementHandle();
-  await reader(here)
-    .getByRole('button', { name: /review was requested/ })
-    .click();
-  await framesShown(here, 2);
+  await folded.first().click();
+  await bodiesShown(here, 2);
 
   // Back in the Inbox, each message has a new ref, and both stay open under it.
   await commands();
   await before.waitForElementState('hidden', { timeout: ELSEWHERE_MS });
-  await framesShown(here, 2);
-  await expect(reader(here).getByRole('alert').count()).resolves.toBe(0);
+  await bodiesShown(here, 2);
   await refetches();
   expect(failed).toEqual([]);
 }, 30_000);
@@ -442,12 +481,8 @@ test('folders are created, renamed and deleted, and a move to one deleted elsewh
     route.request().url().includes('%22folders%22') ? route.abort() : route.fallback();
   await here.route('**/_serverFn/**', stale);
   await folderRow(here, 'Inbox').click();
-  // A row is known by its place and its text, less its read mark. The demo repeats stories, even
-  // within the rows on screen, but never two alike in a row.
-  const at = (place: number) => here.locator(`[role="option"][aria-posinset="${place}"]`);
-  const textAt = async (place: number) => (await at(place).textContent())?.replace('Unread', '');
-  await at(1).click();
-  const [moving, below] = await Promise.all([textAt(1), textAt(2)]);
+  await at(here, 1).click();
+  const [moving, below] = [await textAt(here, 1), await textAt(here, 2)];
 
   await folderRow(there, 'Journeys').click();
   await there.getByRole('button', { name: 'Folder', exact: true }).click();
@@ -459,10 +494,10 @@ test('folders are created, renamed and deleted, and a move to one deleted elsewh
   // The command is held a moment, so the row is seen gone before the refusal brings it back.
   const release = await slowCommands(here);
   await here.getByRole('menuitem', { name: 'Journeys' }).click();
-  await until(async () => (await textAt(1)) === below, 1_000);
+  await until(async () => (await textAt(here, 1)) === below, 1_000);
   await release();
   // The server refuses, so the conversation comes back and a toast says why.
-  await until(async () => (await textAt(1)) === moving, ELSEWHERE_MS);
+  await until(async () => (await textAt(here, 1)) === moving, ELSEWHERE_MS);
   // The toast and its announcement both say it.
   const refusal = here.getByText(/Couldn't move to Journeys\. .*Journeys/).first();
   await refusal.waitFor({ timeout: ELSEWHERE_MS });

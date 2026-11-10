@@ -121,8 +121,8 @@ export function changeRows<Row extends { id: ConversationId }>(
 
 /**
  * A list's rows with some conversations' earlier rows put back, as an Undo or a refusal shows them:
- * a row still listed takes its earlier self, and a row that left returns where its date places it,
- * since a list runs newest first.
+ * a row still listed takes its earlier self, and a row that left returns where the Mailroom lists
+ * it, newest first, and by id, highest first, among rows of one date.
  */
 export function putBack<Row extends { id: ConversationId; date: string }>(
   rows: readonly Row[],
@@ -133,7 +133,7 @@ export function putBack<Row extends { id: ConversationId; date: string }>(
   const listed = new Set(rows.map(({ id }) => id));
   const returning = earlier.filter(({ id }) => !listed.has(id));
   return [...kept, ...returning].toSorted((a, b) =>
-    a.date < b.date ? 1 : a.date > b.date ? -1 : 0,
+    a.date !== b.date ? (a.date < b.date ? 1 : -1) : a.id < b.id ? 1 : a.id > b.id ? -1 : 0,
   );
 }
 

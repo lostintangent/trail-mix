@@ -237,6 +237,13 @@ test('putting rows back returns each to its place by date, and restores what cha
   ]);
 });
 
+test('a row put back beside one of the same date takes the place the Mailroom gives it, by id', () => {
+  const row = (id: string) => ({ id, date: '2026-11-09T06:04:00Z' });
+
+  expect(putBack([row('c'), row('a')], [row('b')])).toEqual([row('c'), row('b'), row('a')]);
+  expect(putBack([row('b')], [row('c'), row('a')])).toEqual([row('c'), row('b'), row('a')]);
+});
+
 test('overlays lay over a snapshot in order, so an Undo after an archive shows the row again', () => {
   const row = (id: string, date: string) => ({ id, date, unread: 1, flagged: false });
   const rows = [row('a', '2026-11-09'), row('b', '2026-11-08')];
