@@ -43,7 +43,7 @@ import { Marked } from './search.tsx';
 /** A list that shows no search. */
 const NO_MARKS: Marks = [];
 
-/** A row's height before one has been drawn: three lines of text and the row's padding. */
+/** A row's height before the list is first laid out: three lines of text and the row's padding. */
 const FIRST_GUESS = 72;
 
 /** How many rows short of the end the list asks for more, so the next page arrives in time. */
@@ -97,8 +97,9 @@ export function ConversationList({
   onNearEnd: () => void;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
+  const ruler = useRef<HTMLDivElement>(null);
   const listId = useId();
-  const rowHeight = useRowHeight(scroller);
+  const rowHeight = useRowHeight(ruler);
   // The row the keys move from and the list names as active: the last one picked.
   const selectedIndex = conversations.findIndex(({ id }) => id === selection.anchor);
   const selected = useMemo(() => new Set(selection.ids), [selection.ids]);
@@ -174,6 +175,7 @@ export function ConversationList({
       onKeyDown={move}
       {...stylex.props(styles.scroller, stylex.defaultMarker())}
     >
+      <RowRuler ref={ruler} />
       <div {...stylex.props(styles.canvas(virtualizer.getTotalSize()))}>
         {virtualizer.getVirtualItems().map(({ index, start }) => {
           const conversation = conversations[index];
@@ -257,7 +259,7 @@ const Row = memo(function Row({
     >
       <span {...stylex.props(styles.stamp, stampStyles[stamp])} />
       <span {...stylex.props(styles.lines)}>
-        <span {...stylex.props(styles.top)}>
+        <span {...stylex.props(styles.top, styles.line)}>
           {isUnread && <span {...stylex.props(styles.dot)} />}
           <span {...stylex.props(styles.sender, isUnread && styles.senderUnread, styles.clip)}>
             <Marked text={senderNames(senders)} marks={marks} />
@@ -271,10 +273,10 @@ const Row = memo(function Row({
             {formatListDate(date)}
           </time>
         </span>
-        <span {...stylex.props(isUnread && styles.subjectUnread, styles.clip)}>
+        <span {...stylex.props(isUnread && styles.subjectUnread, styles.clip, styles.line)}>
           {subject ? <Marked text={subject} marks={marks} /> : '(no subject)'}
         </span>
-        <span {...stylex.props(styles.preview, styles.clip)}>
+        <span {...stylex.props(styles.preview, styles.clip, styles.line)}>
           <Marked text={preview} marks={marks} />
         </span>
       </span>
@@ -373,40 +375,42 @@ function slideBack(row: HTMLElement) {
 const classesOf = (style: stylex.StyleXStyles) => stylex.props(style).className?.split(' ') ?? [];
 
 /**
- * Every row is the same height, three lines of text and the row's padding, so the list places rows
- * by arithmetic. It watches one drawn row for that height, as when a finger makes the text and
- * padding larger, and moves to another only when that row is no longer drawn. So a render neither
- * measures nor, when the height stays the same, asks for another render. The height is rounded up
- * to a whole pixel, so rows start on whole pixels and a scroll lands exactly where it was asked to.
+ * An empty row, out of sight, that the list measures for every row's height. Each of a row's three
+ * lines is exactly one line of its type tall, whatever it holds or leaves empty, so the height
+ * follows from the row's type and padding alone. No row's content can change it, while a coarse
+ * pointer's padding or a larger text size changes it for every row at once.
  */
-function useRowHeight(scroller: RefObject<HTMLDivElement | null>): number {
+function RowRuler({ ref }: { ref: RefObject<HTMLDivElement | null> }) {
+  return (
+    <div ref={ref} aria-hidden {...stylex.props(styles.row, styles.ruler)}>
+      <span />
+      <span {...stylex.props(styles.lines)}>
+        <span {...stylex.props(styles.top, styles.line)} />
+        <span {...stylex.props(styles.line)} />
+        <span {...stylex.props(styles.preview, styles.line)} />
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Every row's height, as the ruler measures it, so the list places rows by arithmetic. It is read
+ * before the list is first drawn, and again whenever the ruler's size changes. It is rounded up to a
+ * whole pixel, so rows start on whole pixels and a scroll lands exactly where it was asked to.
+ */
+function useRowHeight(ruler: RefObject<HTMLDivElement | null>): number {
   const [height, setHeight] = useState(FIRST_GUESS);
-  const watch = useRef<(row: Element | null) => void>(null);
   useLayoutEffect(() => {
-    let measured = FIRST_GUESS;
-    let watched: Element | null = null;
+    const element = ruler.current;
+    if (!element) return;
+    setHeight(Math.ceil(element.getBoundingClientRect().height));
     const observer = new ResizeObserver(([entry]) => {
       const size = entry?.borderBoxSize[0]?.blockSize;
-      if (size === undefined) return;
-      const next = Math.ceil(size);
-      if (next === measured) return;
-      measured = next;
-      setHeight(next);
+      if (size !== undefined) setHeight(Math.ceil(size));
     });
-    watch.current = (row) => {
-      if (row === watched) return;
-      if (watched) observer.unobserve(watched);
-      if (row) observer.observe(row);
-      watched = row;
-    };
-    return () => {
-      observer.disconnect();
-      watch.current = null;
-    };
-  }, []);
-  useLayoutEffect(() => {
-    watch.current?.(scroller.current?.querySelector('[role="option"]') ?? null);
-  });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [ruler]);
   return height;
 }
 
@@ -456,6 +460,10 @@ const styles = stylex.create({
     },
   },
   placed: (top: number) => ({ transform: `translate(var(${SWIPE}, 0px), ${top}px)` }),
+  ruler: {
+    visibility: 'hidden',
+    pointerEvents: 'none',
+  },
   // Selection lifts instead of tinting: the open conversation rises from the sheet onto paper.
   selected: {
     backgroundColor: {
@@ -497,6 +505,11 @@ const styles = stylex.create({
   },
   subjectUnread: {
     fontWeight: fontWeightVars['--font-weight-medium'],
+  },
+  // Each of a row's lines is one line of its type tall, empty or not, and a taller glyph, such as
+  // an emoji's, can't make it more.
+  line: {
+    height: '1lh',
   },
   clip: {
     minWidth: 0,

@@ -171,6 +171,95 @@ test('a row leads with its sender and subject, and sets unread apart by weight a
   }
 });
 
+test('every row is one height, the first with no preview too, so no two overlap', async () => {
+  for (const [size, options] of Object.entries(SIZES)) {
+    const { context, page, problems } = await open(options);
+    const inbox = await rowsDrawn(page);
+    const subject = await writeNothing(page);
+    const drafts = page.getByRole('button', { name: /^Drafts/ }).first();
+    if (!(await inView(drafts)))
+      await page.getByRole('button', { name: 'Folders', exact: true }).click();
+    await drafts.click();
+    await page.getByRole('option').first().filter({ hasText: subject }).waitFor();
+
+    const rows = await rowsDrawn(page);
+    expect({ size, preview: rows[0]?.preview }).toEqual({ size, preview: '' });
+    const height = inbox[0]?.height ?? 0;
+    expect(height).toBeGreaterThan(0);
+    // Rows lie on whole pixels, each the height of a row of mail rounded up.
+    const pitch = Math.ceil(height);
+    for (const row of [...inbox, ...rows]) {
+      expect({ size, row: row.index, height: row.height }).toEqual({
+        size,
+        row: row.index,
+        height,
+      });
+      expect({ size, row: row.index, top: row.top }).toEqual({
+        size,
+        row: row.index,
+        top: row.index * pitch,
+      });
+    }
+    expect(problems).toEqual([]);
+    await context.close();
+  }
+}, 60_000);
+
+test('scrolling a long folder never changes a row’s height or moves a row already drawn', async () => {
+  for (const [size, options] of Object.entries(SIZES)) {
+    const { context, page } = await open(options);
+    // A search for the demo's member finds most of their mail, led by a draft with no preview.
+    const subject = await writeNothing(page);
+    await searchFor(page, 'sam');
+    await page
+      .locator('[role="listbox"][aria-multiselectable] [role="option"]')
+      .first()
+      .filter({ hasText: subject })
+      .waitFor();
+    const scrolled = await page.evaluate(async () => {
+      const list = document.querySelector<HTMLElement>('[role="listbox"][aria-multiselectable]');
+      if (!list) return { heights: [], misplaced: ['no list'], reached: 0 };
+      const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
+      const heights = new Set<number>();
+      const misplaced: string[] = [];
+      let reached = 0;
+      let still = 0;
+      while (still < 10) {
+        const canvas = list.lastElementChild?.getBoundingClientRect().top ?? 0;
+        const height = list.querySelector('[role="option"]')?.getBoundingClientRect().height ?? 0;
+        // Rows lie on whole pixels, each the height of a row of mail rounded up.
+        const pitch = Math.ceil(height);
+        for (const row of list.querySelectorAll('[role="option"]')) {
+          const box = row.getBoundingClientRect();
+          const index = Number(row.getAttribute('aria-posinset')) - 1;
+          heights.add(box.height);
+          reached = Math.max(reached, index);
+          if (Math.abs(box.top - canvas - index * pitch) > 0.5) {
+            misplaced.push(`row ${index} at ${box.top - canvas}, not ${index * pitch}`);
+          }
+        }
+        const before = list.scrollTop;
+        list.scrollTop += list.clientHeight * 0.8;
+        await frame();
+        await frame();
+        if (list.scrollTop === before) {
+          still++;
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        } else still = 0;
+      }
+      return { heights: [...heights], misplaced: misplaced.slice(0, 5), reached };
+    });
+    expect({ size, heights: scrolled.heights.length, misplaced: scrolled.misplaced }).toEqual({
+      size,
+      heights: 1,
+      misplaced: [],
+    });
+    // Far past the first page, so pages arrived on the way.
+    expect(scrolled.reached).toBeGreaterThan(200);
+    await context.close();
+  }
+}, 120_000);
+
 test('side panels resize by pointer and key, snap to a rail, and come back the same before the app runs', async () => {
   const { context, page } = await open(SIZES.desktop);
   const sidebar = page.getByRole('separator', { name: 'Resize the sidebar' });
@@ -650,6 +739,38 @@ async function searchFor(page: Page, text: string) {
   if (await inView(back)) await back.click();
   await page.getByRole('searchbox', { name: 'Search mail' }).fill(text);
   await page.locator('[role="option"] mark').first().waitFor();
+}
+
+/**
+ * Writes a new message with a subject and nothing else, which leaves the newest draft, one with no
+ * preview. Returns its subject.
+ */
+async function writeNothing(page: Page): Promise<string> {
+  const subject = `Nothing written ${Date.now()}`;
+  await page.keyboard.press('c');
+  await page.keyboard.type('grace@example.com');
+  const composer = page.locator('section[aria-label="New message"]');
+  await composer.getByRole('textbox', { name: 'Subject' }).fill(subject);
+  await page.getByRole('status').filter({ hasText: 'Saved to Drafts' }).waitFor();
+  await page.keyboard.press('Escape');
+  return subject;
+}
+
+/** The list's rows drawn now: where each lies in the list, its height, and its preview's text. */
+function rowsDrawn(page: Page) {
+  return page.evaluate(() => {
+    const list = document.querySelector('[role="listbox"][aria-multiselectable]');
+    const canvas = list?.lastElementChild?.getBoundingClientRect().top ?? 0;
+    return [...(list?.querySelectorAll('[role="option"]') ?? [])].map((row) => {
+      const box = row.getBoundingClientRect();
+      return {
+        index: Number(row.getAttribute('aria-posinset')) - 1,
+        top: box.top - canvas,
+        height: box.height,
+        preview: row.lastElementChild?.lastElementChild?.textContent ?? undefined,
+      };
+    });
+  });
 }
 
 /** Whether a control is in a pane on screen. A pane off a phone's screen is inert. */
