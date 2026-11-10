@@ -1,4 +1,5 @@
 import type { Envelope, Flags, FolderRef, SyncEvent } from '../../../mail/core/index.ts';
+import { FIRST_SYNC_BATCH } from '../../provider.ts';
 
 /**
  * IMAP sync reconciliation: what the server says about a folder now, compared with what the cursor
@@ -44,8 +45,11 @@ export type Fetched = {
   flags?: ReadonlyMap<number, Flags>;
 };
 
-/** At most this many messages arrive or leave in one batch, which keeps a batch's CPU bounded. */
-const BATCH_SIZE = 500;
+/**
+ * At most this many messages arrive or leave in one batch, which keeps a batch's CPU bounded. A
+ * folder starting over begins with a smaller batch, so its newest mail shows sooner.
+ */
+const BATCHES = { first: FIRST_SYNC_BATCH, rest: 500 };
 
 /**
  * Compares the folder with the cursor. With no usable cursor, or when the server has numbered its
@@ -55,7 +59,7 @@ export function planSync(
   folder: FolderRef,
   cursor: string | null,
   state: FolderState,
-  batchSize = BATCH_SIZE,
+  batches: { first: number; rest: number } = BATCHES,
 ): SyncPlan {
   const decoded = cursor === null ? undefined : decode(cursor);
   const known =
@@ -63,13 +67,14 @@ export function planSync(
       ? decoded
       : undefined;
 
+  const size = known ? batches.rest : batches.first;
   const inWindow = new Set(state.inWindow);
   const previously = known?.uids ?? [];
   const reported = new Set(previously.filter((uid) => inWindow.has(uid)));
   const allLeaving = previously.filter((uid) => !inWindow.has(uid));
-  const leaving = allLeaving.slice(0, batchSize);
+  const leaving = allLeaving.slice(0, size);
   const unreported = new Set([...inWindow].filter((uid) => !reported.has(uid)));
-  const arriving = [...unreported].sort((a, b) => b - a).slice(0, batchSize - leaving.length);
+  const arriving = [...unreported].sort((a, b) => b - a).slice(0, size - leaving.length);
   const more = allLeaving.length > leaving.length || unreported.size > arriving.length;
 
   const { account, path } = folder;

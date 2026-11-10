@@ -66,7 +66,14 @@ function sync(mailbox: Mailbox, cursor: string | null, server: Server = ZOHO) {
     highestModSeq: server.condstore ? mailbox.modSeq : undefined,
     inWindow: window.map(([uid]) => uid),
   };
-  const plan = planSync(INBOX, cursor, state, server.batchSize);
+  const plan = planSync(
+    INBOX,
+    cursor,
+    state,
+    server.batchSize === undefined
+      ? undefined
+      : { first: server.batchSize, rest: server.batchSize },
+  );
   const envelopes = plan.envelopes.flatMap((uid) => mailbox.messages.get(uid)?.envelope ?? []);
   const flags = fetchFlags(
     mailbox,
@@ -127,19 +134,32 @@ function mirrors(mailroom: Mailroom, mailbox: Mailbox, since = LAST_YEAR) {
   expect(held.sort(byUid)).toEqual(window.sort(byUid));
 }
 
-test('a first sync reports the folder newest first, in batches that survive a cold start', () => {
+test('a first sync reports the folder newest first, a small batch and then full ones, each surviving a cold start', () => {
   const mailbox = new Mailbox();
   for (let i = 0; i < 1200; i++) mailbox.deliver();
 
   const first = sync(mailbox, null);
   const resumed = sync(mailbox, first.cursor);
-  const last = sync(mailbox, resumed.cursor);
+  const again = sync(mailbox, resumed.cursor);
+  const last = sync(mailbox, again.cursor);
 
   expect(first.events[0]).toEqual({ type: 'reset', folder: INBOX });
-  expect(uidsOf(first.events)).toEqual(range(1200, 701));
-  expect(uidsOf(resumed.events)).toEqual(range(700, 201));
-  expect(uidsOf(last.events)).toEqual(range(200, 1));
-  expect([first.more, resumed.more, last.more]).toEqual([true, true, false]);
+  expect(uidsOf(first.events)).toEqual(range(1200, 1101));
+  expect(uidsOf(resumed.events)).toEqual(range(1100, 601));
+  expect(uidsOf(again.events)).toEqual(range(600, 101));
+  expect(uidsOf(last.events)).toEqual(range(100, 1));
+  expect([first.more, resumed.more, again.more, last.more]).toEqual([true, true, true, false]);
+});
+
+test('a folder numbered again starts over with a small batch too', () => {
+  const mailbox = new Mailbox();
+  for (let i = 0; i < 300; i++) mailbox.deliver();
+  let batch = sync(mailbox, null);
+  while (batch.more) batch = sync(mailbox, batch.cursor);
+  mailbox.renumber();
+  const restarted = sync(mailbox, batch.cursor);
+  expect(restarted.events[0]).toEqual({ type: 'reset', folder: INBOX });
+  expect(uidsOf(restarted.events)).toHaveLength(100);
 });
 
 test('a quiet folder fetches no envelopes, and reports nothing', () => {
@@ -271,7 +291,8 @@ test('a folder of 50,000 messages riddled with gaps keeps a cursor under 64 KB, 
   const state = { uidValidity: 1, uidNext: 80_001, inWindow: envelopes.map(({ uid }) => uid) };
 
   // The whole folder in one batch, so the test measures the cursor rather than a hundred syncs.
-  const { cursor, more } = planSync(INBOX, null, state, envelopes.length).reconcile({ envelopes });
+  const whole = { first: envelopes.length, rest: envelopes.length };
+  const { cursor, more } = planSync(INBOX, null, state, whole).reconcile({ envelopes });
 
   expect(more).toBe(false);
   expect(envelopes.length).toBeGreaterThan(49_000);

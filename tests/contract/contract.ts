@@ -5,6 +5,7 @@ import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { Envelope, MessageRef, SyncEvent } from '../../src/features/mail/core/index.ts';
 import {
+  FIRST_SYNC_BATCH,
   SEARCH_LIMIT,
   type Cursor,
   type MailProvider,
@@ -144,9 +145,16 @@ export function describeContract(
       for (let i = 0; i < 520; i++) {
         await world().deliver(message({ id: `bulk-${i}`, subject: `Bulk ${i}` }));
       }
-      const { events, batches } = await syncAll('INBOX');
-      const ids = arrived(events).map((e) => e.messageId);
-      expect(batches).toBeGreaterThan(1);
+      // A folder starting over shows its newest mail first, in a small batch.
+      const first = await provider.sync('INBOX', null, WINDOW);
+      const newest = arrived(first.events);
+      expect(newest.length).toBeGreaterThan(0);
+      expect(newest.length).toBeLessThanOrEqual(FIRST_SYNC_BATCH);
+      expect(newest[0]!.subject).toBe('Bulk 519');
+      expect(first.more).toBe(true);
+
+      const rest = await syncAll('INBOX', first.cursor);
+      const ids = [...newest, ...arrived(rest.events)].map((e) => e.messageId);
       expect(ids).toHaveLength(520);
       expect(new Set(ids).size).toBe(520);
     });

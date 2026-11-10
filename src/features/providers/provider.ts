@@ -16,7 +16,7 @@ export interface MailProvider {
   /**
    * One bounded batch of what changed in a folder since `cursor`, newest first. Call again from the
    * returned cursor while `more`. A null cursor, or one the provider no longer recognizes, starts
-   * the folder over with a `reset`.
+   * the folder over with a `reset`, in a first batch of at most `FIRST_SYNC_BATCH` messages.
    */
   sync(folder: string, cursor: Cursor | null, window: SyncWindow): Promise<SyncBatch>;
 
@@ -79,6 +79,12 @@ export interface MailProvider {
 }
 
 export type { SyncEvent };
+
+/**
+ * The most messages a folder's first batch holds when it starts over, so its newest mail shows
+ * soon, and the batch that pays for a cold start does the least work.
+ */
+export const FIRST_SYNC_BATCH = 100;
 
 /** How many messages one folder's search reports at most. */
 export const SEARCH_LIMIT = 100;

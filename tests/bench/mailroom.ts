@@ -95,6 +95,7 @@ async function firstSync({ url, group }: LocalWorker) {
   // workerd's CPU when the account's folders were listed, which is when its Inbox starts to sync,
   // and when each Inbox batch landed.
   let listed: number | undefined;
+  let firstRows: number | undefined;
   const inboxBatches: number[] = [];
   const device = new WebSocket(`${url.replace(/^http/, 'ws')}/bench/updates`);
   device.addEventListener('message', (event) => {
@@ -102,6 +103,7 @@ async function firstSync({ url, group }: LocalWorker) {
     if (hint.changed === 'folders') listed ??= cpuOf(workerd);
     if (hint.changed === 'conversations' && hint.folder.path === 'INBOX') {
       inboxBatches.push(cpuOf(workerd));
+      firstRows ??= performance.now();
     }
   });
   await new Promise((opened, failed) => {
@@ -125,6 +127,10 @@ async function firstSync({ url, group }: LocalWorker) {
       await Bun.sleep(200);
     }
     const total = performance.now() - added;
+    console.log(
+      `The first Inbox rows landed ${Math.round(firstRows! - added)} ms after the account was added,` +
+        ` and the whole Inbox in ${(total / 1000).toFixed(1)} s.`,
+    );
     const expected = Math.ceil(BENCH_INBOX / 500);
     if (inboxBatches.length < expected || listed === undefined) {
       throw new Error(`Saw ${inboxBatches.length} Inbox batches, expected ${expected} at least.`);
