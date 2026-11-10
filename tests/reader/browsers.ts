@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type { BrowserType } from 'playwright';
+import { chromium, webkit, type BrowserType } from 'playwright';
 import { Features } from 'lightningcss';
 import { build } from 'vite';
 import { stylexOptions } from '../../src/shared/build/stylexOptions.ts';
@@ -138,6 +138,19 @@ export function serveCanary(): Canary {
     stop: () => void server.stop(true),
   };
 }
+
+/**
+ * The browsers the reader's tests run in: Chromium for desktops and WebKit for iPhones, both unless
+ * `READER_BROWSERS` names some. CI runs each in its own job, because WebKit's system libraries
+ * take minutes to install on Linux.
+ */
+export const BROWSERS: BrowserType[] = (process.env['READER_BROWSERS'] ?? 'chromium,webkit')
+  .split(',')
+  .map((name) => {
+    const type = { chromium, webkit }[name.trim()];
+    if (!type) throw new Error(`READER_BROWSERS names "${name}", which is not chromium or webkit.`);
+    return type;
+  });
 
 /** Launches a browser, or explains how to install it. A missing browser fails, never skips. */
 export async function launch(type: BrowserType) {

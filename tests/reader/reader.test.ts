@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { chromium, webkit, type Browser, type BrowserType, type Page } from 'playwright';
+import type { Browser, Page } from 'playwright';
 import {
+  BROWSERS,
   corpus,
   launch,
   serveCanary,
@@ -34,7 +35,6 @@ afterAll(() => {
 });
 
 const SIZES = { desktop: { width: 900, height: 900 }, phone: { width: 390, height: 844 } };
-const BROWSERS: BrowserType[] = [chromium, webkit];
 
 for (const type of BROWSERS) {
   for (const [size, viewport] of Object.entries(SIZES)) {

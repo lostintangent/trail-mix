@@ -37,8 +37,19 @@ jobs:
       - name: Type-check
         run: bun check
 
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-chromium-${{ hashFiles('bun.lock') }}
+
+      # The reader's tests render hostile mail in Chromium here, and in WebKit in their own job.
+      - name: Install Chromium
+        run: bunx playwright install --with-deps chromium
+
       - name: Test
         run: bun test
+        env:
+          READER_BROWSERS: chromium
 
       - name: Build
         run: bun run build
@@ -78,6 +89,34 @@ jobs:
         with:
           name: results
           path: test-results/
+
+  # The reader's tests again in WebKit, the engine of every iPhone browser. Its system libraries
+  # take minutes to install, so it runs beside the main job instead of inside it.
+  webkit:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: canary
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-webkit-${{ hashFiles('bun.lock') }}
+
+      - name: Install WebKit
+        run: bunx playwright install --with-deps webkit
+
+      - name: Reader tests in WebKit
+        run: bun test tests/reader
+        env:
+          READER_BROWSERS: webkit
 
   # Mail I/O against the native test mail server: the server's own tests, and the mail check
   # running in a Durable Object on workerd.

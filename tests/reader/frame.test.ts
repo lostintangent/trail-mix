@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { chromium, webkit, type Browser, type BrowserType, type Page } from 'playwright';
+import type { Browser, Page } from 'playwright';
 import {
+  BROWSERS,
   corpus,
   launch,
   serveCanary,
@@ -32,8 +33,6 @@ afterAll(() => {
   harness.stop();
   canary.stop();
 });
-
-const BROWSERS: BrowserType[] = [chromium, webkit];
 
 for (const type of BROWSERS) {
   describe(type.name(), () => {

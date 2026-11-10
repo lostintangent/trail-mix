@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { chromium, webkit, type Browser, type BrowserType } from 'playwright';
+import type { Browser } from 'playwright';
 import type { MessageRef } from '../../src/features/mail/core/index.ts';
 import { MAX_IMAGE_BYTES, proxyImage } from '../../src/server/routes/images.ts';
 import { serveMessageBytes, type MessageBytes } from '../../src/server/routes/messages.ts';
-import { launch } from './browsers.ts';
+import { BROWSERS, launch } from './browsers.ts';
 
 /**
  * The routes that serve a message's bytes and remote images share Trail Mix's origin and the
@@ -197,8 +197,6 @@ describe('a part’s headers', () => {
     for (const id of ['html', 'svg']) expect(await disposition(id)).toStartWith('attachment;');
   });
 });
-
-const BROWSERS: BrowserType[] = [chromium, webkit];
 
 for (const type of BROWSERS) {
   describe(`${type.name()}, opening each route directly`, () => {
