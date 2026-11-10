@@ -6,6 +6,7 @@ import * as stylex from '@stylexjs/stylex';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, MailOpen } from 'lucide-react';
 import {
+  memo,
   Suspense,
   useEffect,
   useEffectEvent,
@@ -130,12 +131,7 @@ export function ReaderPane({
   return (
     <section aria-label="Reader" {...stylex.props(styles.sheet)}>
       <header {...stylex.props(styles.phoneHeader)}>
-        <IconButton
-          label="Back"
-          icon={<Icon icon={ChevronLeft} />}
-          variant="ghost"
-          onClick={onBack}
-        />
+        <BackButton onClick={onBack} />
         {top && !writing && !page ? (
           <div role="toolbar" aria-label="Marks" {...stylex.props(styles.top)}>
             <Suspense>{top}</Suspense>
@@ -280,6 +276,14 @@ function usePreloadedReader(isWanted: boolean) {
     return () => clearTimeout(timer);
   }, [isWanted]);
 }
+
+const BACK_ICON = <Icon icon={ChevronLeft} />;
+
+// The header with Back is a phone's, and hidden on wider screens, so it costs nothing as the
+// reader changes.
+const BackButton = memo(function BackButton({ onClick }: { onClick: () => void }) {
+  return <IconButton label="Back" icon={BACK_ICON} variant="ghost" onClick={onClick} />;
+});
 
 const styles = stylex.create({
   sheet: {

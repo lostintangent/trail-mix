@@ -21,6 +21,7 @@ import {
   type Command,
   type Moved,
 } from '../core/triage.ts';
+import { afterPaint } from '../../../shared/afterPaint.ts';
 import { reasonOf } from '../../../shared/reasons.ts';
 import { toast } from '../../../shared/toasts.tsx';
 import { overlaysOf } from './overlays.ts';
@@ -93,6 +94,8 @@ export function useTriage(
 
       void (async () => {
         try {
+          // The rows show the change in this frame. Telling the Mailroom waits until it has painted.
+          await afterPaint();
           const conversations = await Promise.all(
             ids.map((id) => queryClient.ensureQueryData(conversationQuery(id))),
           );

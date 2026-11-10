@@ -72,7 +72,11 @@ export function RegisteredCommandButton({ id }: { id: string }) {
  */
 export function PrimaryCommandButton({ id }: { id: string }) {
   const command = useCommands().find((each) => each.id === id);
-  if (!command) return null;
+  return command ? <PrimaryButton command={command} /> : null;
+}
+
+// Like CommandButton, it renders again only when its command changes how it looks.
+const PrimaryButton = memo(function PrimaryButton({ command }: { command: Command }) {
   return (
     <Button
       label={command.title}
@@ -95,7 +99,7 @@ export function PrimaryCommandButton({ id }: { id: string }) {
       </span>
     </Button>
   );
-}
+});
 
 const styles = stylex.create({
   farEnd: {

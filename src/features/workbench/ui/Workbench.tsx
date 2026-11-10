@@ -204,6 +204,10 @@ export function Workbench({
       composing.write(writeFrom);
     });
   const [isSheetOpen, setSheetOpen] = useState(false);
+  // The conversation leaving the list, and where it was, until the selection has moved on from it.
+  // Meanwhile it stays picked, and the moves either side of it and the reader's place count from
+  // where it was, so the commands and what shows them don't change in the frame that shows it gone.
+  const [vacating, setVacating] = useState<{ row: ConversationSummary; at: number }>();
   // A conversation that leaves the list gives way to the one below it, or above it at the end. On a
   // phone, where the reader fills the screen, the list comes back instead. The list shows the
   // conversation gone at once, and the reader turns to the next one just after, so the frame that
@@ -211,18 +215,34 @@ export function Workbench({
   const triageShown = (action: Action, id: ConversationId) => {
     if (rowChange(action, view) === 'gone') {
       const at = conversations?.findIndex((row) => row.id === id) ?? -1;
+      const leaving = conversations?.[at];
       const next = conversations?.[at + 1] ?? conversations?.[at - 1];
       if (isPhone) {
         setPhonePane('list');
         setSelection(NOTHING_SELECTED);
-      } else if (at >= 0) {
-        startTransition(() =>
-          setSelection(next ? { ids: [next.id], anchor: next.id } : NOTHING_SELECTED),
-        );
+      } else if (leaving) {
+        setVacating({ row: leaving, at });
+        startTransition(() => {
+          setSelection(next ? { ids: [next.id], anchor: next.id } : NOTHING_SELECTED);
+          setVacating(undefined);
+        });
       }
     }
     triage(action, [id]);
   };
+  /**
+   * Where a conversation sits in the list, or, while it leaves, where it was: the row that took its
+   * place is the one after it.
+   */
+  const placeOf = useCallback(
+    (id: ConversationId | undefined) => {
+      const at = id === undefined ? -1 : (conversations?.findIndex((row) => row.id === id) ?? -1);
+      return at < 0 && vacating !== undefined && vacating.row.id === id
+        ? { at: vacating.at, after: vacating.at }
+        : { at, after: at + 1 };
+    },
+    [conversations, vacating],
+  );
   // A selection that leaves the list is done with, and so is picking.
   const triageSelection = (action: Action) => {
     if (rowChange(action, view) === 'gone') {
@@ -278,13 +298,9 @@ export function Workbench({
   // The reader's place renders again only as the list or the conversation shown changes.
   const readerPlace = useCallback(
     (shown: ConversationId) => (
-      <ReaderPlace
-        at={(conversations?.findIndex(({ id }) => id === shown) ?? -1) + 1}
-        of={conversations?.length ?? 0}
-        hasMore={hasMore}
-      />
+      <ReaderPlace at={placeOf(shown).at + 1} of={conversations?.length ?? 0} hasMore={hasMore} />
     ),
-    [conversations, hasMore],
+    [placeOf, conversations, hasMore],
   );
   // A message's source shows over everything, whichever message it is.
   const [source, setSource] = useState<Message>();
@@ -344,6 +360,10 @@ export function Workbench({
     setPage(undefined);
     if (isPhone) setPhonePane('list');
   }, [isPhone]);
+  // The phone's ways between panes, the same functions every render, so the buttons they're on stay
+  // drawn as they are while the list and the reader change.
+  const showFolders = useCallback(() => setPhonePane('sidebar'), []);
+  const backToList = useCallback(() => setPhonePane('list'), []);
   const accountsCommands = useMemo(
     () =>
       accountCommands({
@@ -395,10 +415,12 @@ export function Workbench({
     setPicking(false);
     setSelection(NOTHING_SELECTED);
   };
-  const pickedRows = useMemo(
-    () => conversations?.filter(({ id }) => selection.ids.includes(id)) ?? [],
-    [conversations, selection.ids],
-  );
+  const pickedRows = useMemo(() => {
+    const rows = conversations?.filter(({ id }) => selection.ids.includes(id)) ?? [];
+    return vacating && selection.ids.includes(vacating.row.id) && !rows.includes(vacating.row)
+      ? [...rows, vacating.row]
+      : rows;
+  }, [conversations, selection.ids, vacating]);
   // What's selected, as commands: the selection's own while several are picked, else the open one's.
   const selectedCommands =
     pickedRows.length === 0
@@ -408,10 +430,13 @@ export function Workbench({
           folders,
           isFlagged: pickedRows.every(({ flagged }) => flagged),
           isUnread: pickedRows.some(({ unread }) => unread > 0),
+          // One leaving the list is done with, until the selection has moved on from it.
           onTriage: (action) =>
-            isMany || isPicking || selected === undefined
-              ? triageSelection(action)
-              : triageShown(action, selected),
+            selected !== undefined && selected === vacating?.row.id
+              ? undefined
+              : isMany || isPicking || selected === undefined
+                ? triageSelection(action)
+                : triageShown(action, selected),
         });
   const selectionActions = (place: 'bar' | 'island') => (
     <TriageActions commands={selectedCommands} isCompact={place === 'island'} />
@@ -447,7 +472,7 @@ export function Workbench({
 
   // The registry: every command the workbench can run now, gathered from each feature, which binds
   // their keys and feeds the palette and the shortcut sheet.
-  const anchorAt = conversations?.findIndex(({ id }) => id === selection.anchor) ?? -1;
+  const anchor = placeOf(selection.anchor);
   const stepTo = (at: number) => {
     const row = conversations?.[at];
     return row && (() => pick(row.id, 'only'));
@@ -457,8 +482,8 @@ export function Workbench({
   const commands = useSteadyCommands([
     ...selectedCommands,
     ...workbenchCommands({
-      next: stepTo(anchorAt + 1),
-      previous: anchorAt > 0 ? stepTo(anchorAt - 1) : undefined,
+      next: stepTo(anchor.after),
+      previous: anchor.at > 0 ? stepTo(anchor.at - 1) : undefined,
       back: page
         ? closePage
         : composing.compose
@@ -630,7 +655,7 @@ export function Workbench({
                 onNearEnd={onListNearEnd}
                 isCollapsed={!isPhone && list.isCollapsed}
                 onExpand={() => setList({ ...list, isCollapsed: false })}
-                onShowFolders={() => setPhonePane('sidebar')}
+                onShowFolders={showFolders}
                 island={
                   <>
                     {searchAndCommands && <CommandButton command={searchAndCommands} />}
@@ -686,7 +711,7 @@ export function Workbench({
                       />
                     ) : undefined
                   }
-                  onBack={page ? closePage : () => setPhonePane('list')}
+                  onBack={page ? closePage : backToList}
                 />
               )}
             </div>

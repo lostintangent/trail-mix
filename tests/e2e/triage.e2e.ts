@@ -239,6 +239,74 @@ test('archiving shows at once, reaches another open browser, and Undo brings it 
   await row(there, subject).waitFor({ timeout: ELSEWHERE_MS });
 }, 30_000);
 
+test('the frame that shows a conversation archived from the reader keeps its place, its moves and its actions', async () => {
+  const page = await inbox();
+  await at(page, 3).click();
+  const archived = await shownSubject(page);
+  const third = await textAt(page, 3);
+  await bar(page).getByRole('button', { name: 'Archive' }).waitFor();
+  // Every state of the reader's bar, as each change to it lands, from the click until the reader
+  // shows the next conversation. Until a row is selected again, it is what the click's frame shows.
+  const states = await page.evaluate(
+    (archived) =>
+      new Promise<
+        { title: string; place?: string; previous?: boolean; archive: boolean; moved: boolean }[]
+      >((resolve) => {
+        const reader = document.querySelector('section[aria-label="Reader"]')!;
+        const look = () => {
+          const toolbar = reader.querySelector('[role="toolbar"][aria-label="Conversation"]');
+          const previous = toolbar?.querySelector('button[aria-label="Previous conversation"]');
+          return {
+            title: reader.querySelector('h1')?.textContent ?? '',
+            place: [...(toolbar?.querySelectorAll('span') ?? [])]
+              .map(({ textContent }) => textContent ?? '')
+              .find((text) => /^\d+ of \d+\+?$/.test(text)),
+            previous: previous
+              ? !previous.hasAttribute('disabled') &&
+                previous.getAttribute('aria-disabled') !== 'true'
+              : undefined,
+            archive: Boolean(toolbar?.querySelector('button[aria-label="Archive"]')),
+            moved: Boolean(document.querySelector('[role="option"][aria-selected="true"]')),
+          };
+        };
+        const seen: ReturnType<typeof look>[] = [];
+        const watching = new MutationObserver(() => {
+          seen.push(look());
+          if (seen.at(-1)!.title !== archived) {
+            watching.disconnect();
+            resolve(seen);
+          }
+        });
+        watching.observe(reader, {
+          subtree: true,
+          childList: true,
+          attributes: true,
+          characterData: true,
+        });
+        reader.querySelector<HTMLElement>('[role="toolbar"] button[aria-label="Archive"]')!.click();
+      }),
+    archived,
+  );
+  const shownGone = states.filter(({ moved }) => !moved);
+  expect(shownGone.length).toBeGreaterThan(0);
+  for (const { title, place, previous, archive } of shownGone) {
+    expect(title).toBe(archived);
+    expect(place).toMatch(/^3 of /);
+    expect(previous).toBe(true);
+    expect(archive).toBe(true);
+  }
+
+  // The other tests here share the member's mail.
+  await undoButton(page).click();
+  await page.waitForFunction(
+    (third) =>
+      document
+        .querySelector('[role="option"][aria-posinset="3"]')
+        ?.textContent?.replace('Unread', '') === third,
+    third,
+  );
+}, 30_000);
+
 test('a flag and a read mark show at once and in the other browser, and Undo takes them back', async () => {
   const [here, there] = await Promise.all([inbox(), inbox()]);
   const subject = /Lunch Thursday/;

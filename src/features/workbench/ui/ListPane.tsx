@@ -12,7 +12,7 @@ import {
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { ChevronRight, File, FolderOpen, Inbox, Menu, SearchX, Star } from 'lucide-react';
-import { useId, type ReactNode } from 'react';
+import { memo, useId, type ReactNode } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { PhoneIsland } from './PhoneIsland.tsx';
 import { ConversationList, type SelectBy, type Selection } from '../../conversations/index.ts';
@@ -158,18 +158,20 @@ export function ListPane({
         <PhoneIsland label="Picked conversations">{picked}</PhoneIsland>
       ) : (
         <PhoneIsland label="Mailbox actions" spans={island !== undefined}>
-          <IconButton
-            label="Folders"
-            icon={<Icon icon={Menu} />}
-            variant="ghost"
-            onClick={onShowFolders}
-          />
+          <FoldersButton onClick={onShowFolders} />
           {island}
         </PhoneIsland>
       )}
     </section>
   );
 }
+
+const FOLDERS_ICON = <Icon icon={Menu} />;
+
+// The island is a phone's, and hidden on wider screens, so it costs nothing as the list changes.
+const FoldersButton = memo(function FoldersButton({ onClick }: { onClick: () => void }) {
+  return <IconButton label="Folders" icon={FOLDERS_ICON} variant="ghost" onClick={onClick} />;
+});
 
 /** What an empty list says, for the kind of view it is. */
 const EMPTY = {
