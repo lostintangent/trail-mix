@@ -13,20 +13,27 @@ const BUDGET = { coldLoad: 1000, firstLoadJs: 250, scrollFrame: 1000 / 60, keyMo
 /** The built app's 50,000-message demo mailbox, as `DEMO_MAILBOX` fills it. */
 const MESSAGES = '50000';
 
+/**
+ * A member of the bench's own. `DEMO_MAILBOX` sizes only a new Mailroom, and the preview keeps its
+ * storage between runs, so the smoke suite's member already holds a smaller mailbox.
+ */
+const MEMBER = 'bench@trailmix.test';
+
 /** A frame counts as on time within a millisecond of the 60Hz interval, for timer jitter. */
 const FRAME_SLACK = 1;
 
 export const workbench: BenchArea = {
   name: 'workbench',
   measure: async () => {
-    const preview = await startPreview({ DEMO_MAILBOX: MESSAGES });
+    const preview = await startPreview({ DEMO_MAILBOX: MESSAGES, DEV_MEMBER: MEMBER });
     const browser = await chromium.launch();
     try {
-      // A first visit lets the Mailroom fill its demo account, so the cold load that follows measures
-      // the browser starting cold rather than the first sync.
+      // A first visit stays until the Mailroom has filled its demo accounts, so what follows measures
+      // the browser starting cold on a full index, with no sync under way.
       const warm = await phone(browser);
-      await (await warm.newPage()).goto(preview.url);
-      await firstRows(warm.pages()[0]!);
+      const filling = await warm.newPage();
+      await filling.goto(preview.url);
+      await filling.getByText('Up to date').waitFor({ state: 'attached', timeout: 180_000 });
       await warm.close();
 
       const context = await phone(browser);
