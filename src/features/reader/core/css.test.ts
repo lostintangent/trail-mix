@@ -130,4 +130,15 @@ describe('what comes out', () => {
     const css = '@media (width < 600px){.a>.b{color:light-dark(#000,#fff);margin:0 auto}}';
     expect(rewrite(css).css).toBe(css);
   });
+
+  test('a function’s name comes out as written, so an escaped url( in it stays part of the name', () => {
+    const name = '\\75 rl\\28 https\\3a \\2f \\2f evil\\2e example\\2f t\\29 \\2c linear-gradient';
+    const css = `a{--x:${name}(red,blue);background:var(--x)}`;
+    const { css: out, asked } = rewrite(css);
+    expect(out).toBe(css);
+    expect(asked).toEqual([]);
+    expect(rewrite('a{color:RGB(0,0,0);background:-WebKit-Image-Set("a.png" 1x)}').css).toBe(
+      'a{color:RGB(0,0,0);background:-WebKit-Image-Set("proxy/a.png" 1x)}',
+    );
+  });
 });

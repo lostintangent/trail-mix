@@ -11,7 +11,9 @@
  * Where browsers disagree on which characters an identifier may hold, a name that merely ends in
  * `url` is read as `url`, so a character one browser splits off cannot hide a load.
  *
- * Strings come out with `<` escaped, so none can close the `<style>` element it is written into.
+ * Strings and resources are written anew, with `<` escaped, so none can close the `<style>` element
+ * it is written into. Everything else comes out exactly as written, never decoded, so a browser
+ * reads it as this did.
  */
 
 /** Where a resource named in CSS loads from instead, or null to load nothing. */
@@ -77,7 +79,9 @@ function rewrite(css: string, from: number, to: number, mode: Mode, resolve: Res
       const close = findClose(css, ident.next + 1, to);
       const inner = rewrite(css, ident.next + 1, close, images ? 'images' : 'values', resolve);
       if (inner.unresolved) unresolved = true;
-      text += images && inner.unresolved ? 'none' : `${name}(${inner.text})`;
+      // The name goes out as written: decoded, an escaped `(` in it would start a new function.
+      const written = css.slice(i, ident.next);
+      text += images && inner.unresolved ? 'none' : `${written}(${inner.text})`;
       i = Math.min(close + 1, to);
     } else {
       text += c;

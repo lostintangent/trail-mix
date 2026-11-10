@@ -3,6 +3,7 @@
 <img id="img" src="{{canary}}/img.png" alt="img">
 <img src="//{{canary-host}}/protocol-relative.png" alt="protocol-relative">
 <img srcset="{{canary}}/srcset-1x.png 1x, {{canary}}/srcset-2x.png 2x" alt="srcset">
+<img srcset="cid:logo@hostile.example 1x(( ), {{canary}}/srcset-nested-parens.png 2x" alt="srcset with nested parentheses">
 <picture><source srcset="{{canary}}/picture-source.png"><img src="{{canary}}/picture-img.png" alt="picture"></picture>
 <img src="{{canary}}/lazy.png" loading="lazy" style="margin-top: 3000px" alt="lazy">
 <img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" lowsrc="{{canary}}/lowsrc.png" dynsrc="{{canary}}/dynsrc.png" alt="lowsrc">

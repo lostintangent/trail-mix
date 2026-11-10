@@ -174,8 +174,16 @@ export async function corpus(folder: 'hostile' | 'real', canary: Canary) {
     const html = await Bun.file(join(import.meta.dir, 'corpus', folder, name)).text();
     files.push({
       name,
-      html: html.replaceAll('{{canary}}', canary.origin).replaceAll('{{canary-host}}', canary.host),
+      html: html
+        .replaceAll('{{canary}}', canary.origin)
+        .replaceAll('{{canary-host}}', canary.host)
+        .replaceAll('{{canary-css}}', cssEscaped(canary.origin)),
     });
   }
   return files.sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/** Every character of a value as a CSS escape, so it can sit inside an identifier. */
+function cssEscaped(value: string): string {
+  return Array.from(value, (char) => `\\${char.codePointAt(0)?.toString(16)} `).join('');
 }

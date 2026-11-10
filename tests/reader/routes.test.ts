@@ -2,7 +2,11 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import type { Browser } from 'playwright';
 import type { MessageRef } from '../../src/features/mail/core/index.ts';
 import { MAX_IMAGE_BYTES, proxyImage } from '../../src/server/routes/images.ts';
-import { serveMessageBytes, type MessageBytes } from '../../src/server/routes/messages.ts';
+import {
+  byteHeaders,
+  serveMessageBytes,
+  type MessageBytes,
+} from '../../src/server/routes/messages.ts';
 import { BROWSERS, launch } from './browsers.ts';
 
 /**
@@ -22,6 +26,8 @@ const PNG = Uint8Array.from(
 let remote: ReturnType<typeof Bun.serve>;
 let app: ReturnType<typeof Bun.serve>;
 const ran: string[] = [];
+/** The headers of every request the remote host received, other than reports of what ran. */
+const remoteSaw: Headers[] = [];
 
 /** Markup that reports to the remote server if anything in it runs or loads. */
 const hostile = (id: string) =>
@@ -49,6 +55,7 @@ beforeAll(() => {
         ran.push(url.search);
         return new Response('');
       }
+      remoteSaw.push(request.headers);
       const reply = REMOTE[url.pathname];
       return reply ? reply() : new Response('', { status: 404 });
     },
@@ -58,7 +65,7 @@ beforeAll(() => {
     svg: {
       type: 'image/svg+xml',
       name: 'logo.svg',
-      bytes: `<svg xmlns="http://www.w3.org/2000/svg"><script>fetch('${remote.url.origin}/ran?svg-part')</script></svg>`,
+      bytes: `<svg xmlns="http://www.w3.org/2000/svg"><script>fetch('${remote.url.origin}/ran?svg-part')</script><image href="${remote.url.origin}/ran?svg-part-img" width="1" height="1"/><text y="20">svg-part</text></svg>`,
     },
     disguised: { type: 'image/png', name: 'photo.png', bytes: hostile('disguised-part') },
     photo: { type: 'image/png; name="photo.png"', name: 'photo.png', bytes: PNG },
@@ -74,7 +81,15 @@ beforeAll(() => {
     fetch(request) {
       const url = new URL(request.url);
       if (url.pathname === '/images') return proxyImage(request, internet);
-      const [, , attachmentId] = url.pathname.split('/');
+      const [, route, attachmentId] = url.pathname.split('/');
+      // A part served inline under the byte headers, as if a sender's type had slipped through.
+      if (route === 'inline') {
+        const part = PARTS[attachmentId ?? ''];
+        if (!part) return new Response('', { status: 404 });
+        return new Response(part.bytes, {
+          headers: byteHeaders({ type: part.type, name: part.name }),
+        });
+      }
       return serveMessageBytes({ ref: REF, attachmentId }, MAILROOM);
     },
   });
@@ -176,6 +191,28 @@ describe('the image proxy', () => {
     }
   });
 
+  test('tells the remote host nothing of the member, at any hop', async () => {
+    remoteSaw.length = 0;
+    const url = encodeURIComponent('http://images.example.com/to-a-photo');
+    const response = await fetch(`${app.url.origin}/images?url=${url}`, {
+      headers: {
+        Cookie: 'CF_Authorization=member-secret',
+        'Cf-Access-Jwt-Assertion': 'member-secret',
+        Authorization: 'Bearer member-secret',
+        Referer: `${app.url.origin}/conversations/member-secret`,
+      },
+    });
+
+    expect(response.status).toBe(200);
+    expect(remoteSaw).toHaveLength(2);
+    for (const headers of remoteSaw) {
+      for (const name of ['cookie', 'cf-access-jwt-assertion', 'authorization', 'referer']) {
+        expect(headers.get(name)).toBeNull();
+      }
+      expect(JSON.stringify([...headers])).not.toContain('member-secret');
+    }
+  });
+
   test('checks every redirect as it checks the first address', async () => {
     expect((await proxied('http://images.example.com/to-this-machine')).status).toBe(400);
     expect((await proxied('http://images.example.com/to-a-photo')).status).toBe(200);
@@ -226,6 +263,18 @@ for (const type of BROWSERS) {
       await context.close();
       expect(ran).toEqual([]);
     }, 30_000);
+
+    test('runs nothing even if an HTML or SVG part were served inline', async () => {
+      ran.length = 0;
+      const page = await browser.newPage();
+      await page.goto(`${app.url.origin}/inline/html`);
+      expect(await page.locator('body').textContent()).toContain('html-part');
+      await page.goto(`${app.url.origin}/inline/svg`);
+      expect(await page.locator('svg').textContent()).toContain('svg-part');
+      await page.waitForTimeout(300);
+      await page.close();
+      expect(ran).toEqual([]);
+    });
 
     test('shows the raw source as text', async () => {
       const page = await browser.newPage();

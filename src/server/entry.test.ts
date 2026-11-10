@@ -185,3 +185,44 @@ test('a message’s bytes come only from the signed-in member’s Mailroom, whoe
   expect(opened).toEqual(['ada@example.com']);
   expect(sources).toEqual(['ada@example.com']);
 });
+
+/** The internet, answering the proxy's one request with an image. */
+const anImage = () =>
+  spyOn(globalThis, 'fetch').mockResolvedValue(
+    new Response(new Uint8Array(8), { headers: { 'content-type': 'image/png' } }),
+  );
+const PROXIED = `/images?url=${encodeURIComponent('https://images.example.com/photo.png')}`;
+
+test('a message’s bytes and the image proxy refuse a request nobody signed in to', async () => {
+  const internet = anImage();
+  const { env, opened, sources } = developer();
+  for (const path of ['/messages/personal/INBOX/1/7', '/messages/personal/INBOX/1/7/1', PROXIED]) {
+    const response = await worker.fetch(
+      new Request(`${SITE}${path}`, { headers: SOMEONE_ELSE }),
+      env,
+    );
+    expect(response.status).toBe(401);
+  }
+
+  expect(opened).toEqual([]);
+  expect(sources).toEqual([]);
+  expect(internet).not.toHaveBeenCalled();
+  internet.mockRestore();
+});
+
+test('the image proxy refuses a signed-in member’s request that another site started', async () => {
+  const internet = anImage();
+  const { env } = developer();
+  for (const site of ['cross-site', 'same-site']) {
+    const request = new Request(`${LOCAL}${PROXIED}`, { headers: { 'Sec-Fetch-Site': site } });
+    expect((await worker.fetch(request, env)).status).toBe(403);
+  }
+  expect(internet).not.toHaveBeenCalled();
+
+  const fromTrailMix = new Request(`${LOCAL}${PROXIED}`, {
+    headers: { 'Sec-Fetch-Site': 'same-origin' },
+  });
+  expect((await worker.fetch(fromTrailMix, env)).status).toBe(200);
+  expect(internet).toHaveBeenCalledTimes(1);
+  internet.mockRestore();
+});

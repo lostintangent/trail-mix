@@ -28,6 +28,7 @@ body { background: #fff url({{canary}}/body-background.png); }
 .escaped-2 { background: \75 rl({{canary}}/escaped-2.png); height: 20px; }
 .upper { background: URL({{canary}}/uppercase.png); height: 20px; }
 .hex { background: url(\68ttp\3a //{{canary-host}}/hex-escaped.png); height: 20px; }
+.escaped-name { --escaped: \75 rl\28 {{canary-css}}\2f escaped-function-name\2e png\29 \2c linear-gradient(red, blue); background-image: var(--escaped); height: 20px; }
 </style>
 <p>Every way a stylesheet can load something.</p>
 <div class="set"></div><div class="webkit-set"></div><ul class="list"><li>item</li></ul>
@@ -38,3 +39,4 @@ body { background: #fff url({{canary}}/body-background.png); }
 <div class="layer"></div><div class="nest"><div class="nested"></div></div>
 <ol class="counter"><li>one</li></ol><div class="property"></div><div class="shape"></div>
 <div class="escaped"></div><div class="escaped-2"></div><div class="upper"></div><div class="hex"></div>
+<div class="escaped-name"></div>

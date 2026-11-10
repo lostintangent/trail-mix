@@ -47,7 +47,7 @@ for (const type of BROWSERS) {
       beforeAll(async () => {
         seen = await observe(
           browser,
-          hostile.map(({ html }) => ({ html, images: 'blocked' })),
+          hostile.map(({ html }) => ({ html, images: 'blocked', parts: HOSTILE_PARTS })),
         );
       }, 30_000);
 
@@ -73,7 +73,7 @@ for (const type of BROWSERS) {
       beforeAll(async () => {
         seen = await observe(
           browser,
-          hostile.map(({ html }) => ({ html, images: 'allowed' })),
+          hostile.map(({ html }) => ({ html, images: 'allowed', parts: HOSTILE_PARTS })),
         );
       }, 30_000);
 
@@ -110,7 +110,12 @@ for (const type of BROWSERS) {
       beforeAll(async () => {
         seen = await observe(
           browser,
-          hostile.map(({ html }) => ({ html, images: 'blocked', walls: 'frame' })),
+          hostile.map(({ html }) => ({
+            html,
+            images: 'blocked',
+            parts: HOSTILE_PARTS,
+            walls: 'frame',
+          })),
         );
       }, 30_000);
 
@@ -123,6 +128,13 @@ for (const type of BROWSERS) {
         expect(seen.canary).toEqual([]);
         expect(seen.elsewhere).toEqual([]);
       });
+
+      // The proxy serves any public image to the member, so the frame's policy is what keeps a
+      // message from reaching it before its sender is allowed.
+      test('the frame alone lets nothing through the image proxy or the message’s parts', () => {
+        expect(seen.proxied).toEqual([]);
+        expect(seen.parts).toEqual([]);
+      });
     });
 
     describe('hostile mail, sanitized into an open frame', () => {
@@ -130,7 +142,12 @@ for (const type of BROWSERS) {
       beforeAll(async () => {
         seen = await observe(
           browser,
-          hostile.map(({ html }) => ({ html, images: 'blocked', walls: 'sanitizer' })),
+          hostile.map(({ html }) => ({
+            html,
+            images: 'blocked',
+            parts: HOSTILE_PARTS,
+            walls: 'sanitizer',
+          })),
         );
       }, 30_000);
 
@@ -255,6 +272,9 @@ for (const type of BROWSERS) {
     });
   });
 }
+
+/** Hostile mail's one part, so a `cid:` can lead a list of candidates the sanitizer keeps. */
+const HOSTILE_PARTS = { 'logo@hostile.example': '/messages/demo/INBOX/1/9/1' };
 
 /** Where the receipt's inline logo is served, as one of its parts. */
 const RECEIPT_LOGO = '/messages/demo/INBOX/1/7/2';
