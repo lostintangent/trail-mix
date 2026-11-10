@@ -3,6 +3,7 @@ import * as stylex from '@stylexjs/stylex';
 import {
   createContext,
   use,
+  useCallback,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -22,7 +23,14 @@ import { hearsListeners, returnFocusFrom } from './focus.ts';
  * only because nothing in it can ever run, which the sandbox, the content security policy in its
  * document and the sanitizer each guarantee alone.
  *
- * Its document is written once per look and never touched after.
+ * Its document is written once per look and never touched after. It goes through the parser of
+ * the frame's own first document, all at once, rather than as a `srcdoc` the frame navigates to.
+ * A navigation crosses to the browser's process and back before the frame begins, and its parser
+ * stops for the page's next frame partway through long mail, which then lays the half it has out
+ * in full only to lay the whole out again. Written whole, it is laid out once, as it is fitted.
+ *
+ * A document keeps every content security policy it was ever given, so a document after the first,
+ * as when the sender's images are allowed or the theme changes, is written into a new frame.
  */
 export const FRAME_SANDBOX = 'allow-same-origin allow-popups allow-popups-to-escape-sandbox';
 
@@ -45,36 +53,49 @@ export function MessageFrame({ mail, quotes, title }: MessageFrameProps) {
   const sizer = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLIFrameElement>(null);
   const look = useLook(frame);
-  const srcDoc = useMemo(
+  const written = useMemo(
     () => (look ? frameDocument(mail, { ...look, quotes }) : undefined),
     [mail, look, quotes],
   );
   const fitToContent = useFitToContent(box, sizer, frame);
   const passKey = use(MessageKeys);
+  const passing = useRef(passKey);
+  useLayoutEffect(() => {
+    passing.current = passKey;
+  });
   const forgetFocus = useRef<() => void>(null);
   useLayoutEffect(() => () => forgetFocus.current?.(), []);
-  const onLoad = () => {
+  // Which frame this is, and the one that already holds a document.
+  const [frameKey, setFrameKey] = useState(0);
+  const holding = useRef<HTMLIFrameElement>(null);
+  useLayoutEffect(() => {
+    const element = frame.current;
+    const document = element?.contentDocument;
+    if (written === undefined || !element || !document || !box.current) return;
+    if (holding.current === element) {
+      setFrameKey((key) => key + 1);
+      return;
+    }
+    holding.current = element;
+    document.open();
+    document.write(written);
+    document.close();
     fitToContent();
-    const document = frame.current?.contentDocument;
-    document?.addEventListener('keydown', passKey);
+    document.addEventListener('keydown', (event) => passing.current(event));
     // Where the frame's document hears nothing, as in WebKit, the page takes the focus back instead.
     forgetFocus.current?.();
-    forgetFocus.current =
-      document && box.current && frame.current && !hearsListeners(document)
-        ? returnFocusFrom(frame.current, box.current)
-        : null;
-  };
+    forgetFocus.current = hearsListeners(document) ? null : returnFocusFrom(element, box.current);
+  }, [written, fitToContent, frameKey]);
 
   return (
     <div ref={box} tabIndex={-1} {...stylex.props(styles.box)}>
       <div ref={sizer} {...stylex.props(styles.sizer)}>
         <iframe
+          key={frameKey}
           ref={frame}
           title={title}
           sandbox={FRAME_SANDBOX}
           referrerPolicy="no-referrer"
-          srcDoc={srcDoc}
-          onLoad={onLoad}
           {...stylex.props(styles.frame, mail.ownColors ? styles.fixedPaper : styles.paper)}
         />
       </div>
@@ -89,9 +110,10 @@ export function MessageFrame({ mail, quotes, title }: MessageFrameProps) {
 function useLook(frame: RefObject<HTMLIFrameElement | null>) {
   const [look, setLook] = useState<Omit<FrameLook, 'quotes'>>();
   useLayoutEffect(() => {
-    const element = frame.current;
-    if (!element) return;
+    // The frame now, since a document after the first goes into a new one.
     const read = () => {
+      const element = frame.current;
+      if (!element) return;
       const next = readLook(element);
       setLook((current) => (JSON.stringify(current) === JSON.stringify(next) ? current : next));
     };
@@ -146,7 +168,7 @@ function useFitToContent(
   const observer = useRef<ResizeObserver>(null);
   useLayoutEffect(() => () => observer.current?.disconnect(), []);
 
-  return () => {
+  return useCallback(() => {
     const container = box.current;
     const inner = sizer.current;
     const element = frame.current;
@@ -191,7 +213,7 @@ function useFitToContent(
     });
     observer.current.observe(container);
     observer.current.observe(root);
-  };
+  }, [box, sizer, frame]);
 }
 
 const styles = stylex.create({
