@@ -1,12 +1,22 @@
 // The bench's mailbox: an Inbox of 50,000 messages on the test mail server, for bench@trailmix.test.
 // It is the demo's Personal Inbox, byte for byte, plus one conversation of 50 messages, the longest
 // the budgets read. Loading it takes about half a minute, so it is kept between runs and loaded
-// again only when what the demo says changes.
+// again only when what the demo says changes. CI loads it as a step of its own and keeps it then,
+// before any bench can fail, and keeps it only if the load finished.
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { writeMime } from '../../../src/features/mail/core/index.ts';
 import { DEMO_ACCOUNTS, demoMailbox, demoServer } from '../../../src/features/providers/index.ts';
-import { count, emptyFolder, homeOf, importInbox, users } from '../../mail-server/server.ts';
+import {
+  count,
+  emptyFolder,
+  homeOf,
+  importInbox,
+  running,
+  start,
+  stop,
+  users,
+} from '../../mail-server/server.ts';
 
 export const BENCH_INBOX = 50_000;
 export const LONG_THREAD = 50;
@@ -17,7 +27,10 @@ export const LONG_THREAD_SUBJECT = 'Review: the outbox state machine';
 const CREATED = '2026-11-09T17:41:00.000Z';
 const WINDOW = { since: '2025-11-09T17:41:00.000Z' };
 
-/** Fills the bench user's Inbox unless it already holds this exact mailbox. Says whether it loaded. */
+/**
+ * Fills the bench user's Inbox unless it already holds this exact mailbox. Says whether it loaded.
+ * The mailbox is marked as this one only once all of it is in, so one cut short loads again.
+ */
 export async function seedBenchMailbox(): Promise<boolean> {
   const mbox = await benchMbox();
   const key = Bun.hash(mbox).toString(16);
@@ -26,6 +39,7 @@ export async function seedBenchMailbox(): Promise<boolean> {
   const kept = existsSync(marker) && readFileSync(marker, 'utf8') === key;
   if (kept && (await count(benchUser.email, 'INBOX')) === BENCH_INBOX) return false;
 
+  rmSync(marker, { force: true });
   const scratch = join(home, 'seed');
   mkdirSync(scratch, { recursive: true });
   writeFileSync(join(scratch, 'inbox'), mbox);
@@ -104,8 +118,17 @@ function longThread(): string[] {
 }
 
 if (import.meta.main) {
-  const started = performance.now();
-  const loaded = await seedBenchMailbox();
-  const seconds = ((performance.now() - started) / 1000).toFixed(1);
-  console.log(`${loaded ? 'Loaded' : 'Kept'} the bench's ${BENCH_INBOX} messages in ${seconds} s.`);
+  // A server already running belongs to someone else, and is left as it is.
+  const ours = running() === null;
+  if (ours) await start('full');
+  try {
+    const started = performance.now();
+    const loaded = await seedBenchMailbox();
+    const seconds = ((performance.now() - started) / 1000).toFixed(1);
+    console.log(
+      `${loaded ? 'Loaded' : 'Kept'} the bench's ${BENCH_INBOX} messages in ${seconds} s.`,
+    );
+  } finally {
+    if (ours) await stop();
+  }
 }
