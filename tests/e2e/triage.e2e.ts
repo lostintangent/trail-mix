@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from 'bun:test';
+import { afterEach, expect } from 'bun:test';
 import type { Page, Request, Route } from 'playwright';
 import { suite } from './suite.ts';
 
@@ -15,6 +15,8 @@ const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch:
 const ELSEWHERE_MS = 5_000;
 
 const app = suite({ vars: { DEV_MEMBER: MEMBER } });
+// A test that fails leaves a screenshot of each page and what it showed, for CI to keep.
+const { test } = app;
 
 /** Every error a page threw during a test, which fails it. */
 const errors: string[] = [];

@@ -8,7 +8,7 @@
 // Mix with its formatting and its file. A draft another client wrote, quoting mail with remote
 // images, can be opened, written in, saved, copied from and closed, and its conversation read,
 // without the page or the Mailroom loading any of them.
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterAll, beforeAll, describe, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ImapFlow } from 'imapflow';
@@ -70,6 +70,8 @@ describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix
     vars: { DEMO_MAILBOX: '', DEV_MEMBER: `mail-clients-${Date.now()}@trailmix.test` },
     env: { NODE_EXTRA_CA_CERTS: caFile },
   });
+  // A test that fails leaves a screenshot of each page and what it showed, for CI to keep.
+  const { test } = app;
 
   beforeAll(async () => {
     webmail = await roundcube(ports.webmail);
@@ -87,7 +89,10 @@ describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix
     let written: string;
     let messageId: string;
 
-    beforeAll(async () => {
+    beforeAll(app.witnessed('a reply, sent', replyAndSend), 120_000);
+
+    /** Alice answers Bob with formatting, a pasted image and a file, and sends it. */
+    async function replyAndSend() {
       const page = await trailMix();
       await page.getByRole('option').filter({ hasText: 'Lunch on Thursday?' }).click();
       await page
@@ -134,7 +139,7 @@ describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix
       messageId = sent.messageId;
       written = sent.text;
       await page.close();
-    }, 120_000);
+    }
 
     test('its text part is the Markdown the composer saved', () => {
       expect(written).toContain('Thursday works for me, **noon at Café Rosa**.');

@@ -3,7 +3,7 @@
 // from the first-run screen. A password the host refuses keeps nothing, and the screen says why. An
 // account's name, stamp, From name and signature change from its page, and removing it says what
 // goes first. Each is done at a desktop's size and a phone's, as a member of its own.
-import { afterEach, beforeAll, describe, expect, test } from 'bun:test';
+import { afterEach, beforeAll, describe, expect } from 'bun:test';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -55,6 +55,8 @@ for (const [size, options] of Object.entries(SIZES)) {
       vars: { DEMO_MAILBOX: '', DEV_MEMBER: `accounts-${size}-${Date.now()}@trailmix.test` },
       env: { NODE_EXTRA_CA_CERTS: caFile },
     });
+    // A test that fails leaves a screenshot of each page and what it showed, for CI to keep.
+    const { test } = app;
 
     async function open(more: BrowserContextOptions = {}): Promise<Page> {
       const page = await (

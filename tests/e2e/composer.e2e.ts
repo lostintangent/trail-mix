@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, expect, test } from 'bun:test';
+import { afterEach, beforeAll, expect } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium, webkit, type Locator, type Page } from 'playwright';
@@ -23,6 +23,8 @@ const SIZE = IS_PHONE
 const ENGINE = process.env.E2E_ENGINE === 'webkit' ? webkit : chromium;
 
 const app = suite({ vars: { DEV_MEMBER: MEMBER }, engine: ENGINE });
+// A test that fails leaves a screenshot of each page and what it showed, for CI to keep.
+const { test } = app;
 
 beforeAll(() => {
   mkdirSync(SHOTS, { recursive: true });

@@ -1,4 +1,4 @@
-import { beforeAll, expect, test } from 'bun:test';
+import { beforeAll, expect } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BrowserContextOptions, Locator, Page } from 'playwright';
@@ -18,6 +18,8 @@ const SIZES = {
 const THEMES = ['light', 'dark'] as const;
 
 const app = suite();
+// A test that fails leaves a screenshot of each page and what it showed, for CI to keep.
+const { test } = app;
 
 beforeAll(() => {
   mkdirSync(SHOTS, { recursive: true });

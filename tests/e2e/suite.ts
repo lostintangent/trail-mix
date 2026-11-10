@@ -1,10 +1,13 @@
-import { afterAll, afterEach, beforeAll, beforeEach } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, test } from 'bun:test';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import {
   chromium,
   type Browser,
   type BrowserContext,
   type BrowserContextOptions,
   type BrowserType,
+  type Page,
 } from 'playwright';
 import { startPreview, type Preview } from './preview.ts';
 
@@ -14,7 +17,17 @@ export type Suite = {
   readonly url: string;
   /** A new context, as a fresh browser profile is, which closes after the test. */
   context: (options?: BrowserContextOptions) => Promise<BrowserContext>;
+  /**
+   * A test whose failure leaves evidence in `test-results/`, which CI keeps: a screenshot of each
+   * page still open, what a screen reader hears on it, and the end of the app's log.
+   */
+  test: (name: string, steps: () => void | Promise<void>, timeout?: number) => void;
+  /** Steps whose failure leaves the same evidence, for a hook that drives pages. */
+  witnessed: (name: string, steps: () => void | Promise<void>) => () => Promise<void>;
 };
+
+/** Where a failed test's evidence goes, the folder CI uploads. */
+const RESULTS = join(import.meta.dir, '../../test-results');
 
 /**
  * The built app and a browser for a suite, which outlive a test that hangs. When any test times
@@ -68,6 +81,49 @@ export function suite({
     await preview?.stop();
   });
 
+  /** Leaves what each page still open shows, and what the app logged, for a test that failed. */
+  async function witness(name: string, failure: unknown) {
+    mkdirSync(RESULTS, { recursive: true });
+    const file = `failed-${name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .slice(0, 80)}`;
+    const pages = opened.flatMap((context) => context.pages()).filter((page) => !page.isClosed());
+    const shown = await Promise.all(
+      pages.map(async (page, at) => {
+        const shot = `${file}-${at + 1}.png`;
+        const taken = await page
+          .screenshot({ path: join(RESULTS, shot), fullPage: true, timeout: 10_000 })
+          .then(() => shot)
+          .catch((error: unknown) => `no screenshot: ${String(error)}`);
+        return [`Page ${at + 1}: ${page.url()} (${taken})`, await heard(page)].join('\n');
+      }),
+    );
+    writeFileSync(
+      join(RESULTS, `${file}.txt`),
+      [
+        name,
+        failure instanceof Error ? (failure.stack ?? failure.message) : String(failure),
+        ...shown,
+        `The app's log:\n${preview?.log() ?? '(not running)'}`,
+      ].join('\n\n'),
+    );
+  }
+
+  function witnessed(name: string, steps: () => void | Promise<void>) {
+    return async () => {
+      try {
+        await steps();
+      } catch (failure) {
+        // Evidence that can't be left is said so, and the test still fails for its own reason.
+        await witness(name, failure).catch((error: unknown) => {
+          console.error(`No evidence of “${name}”:`, error);
+        });
+        throw failure;
+      }
+    };
+  }
+
   return {
     get url() {
       if (!preview) throw new Error('The app starts before the suite’s first test.');
@@ -82,7 +138,23 @@ export function suite({
       opened.push(context);
       return context;
     },
+    witnessed,
+    test: (name, steps, timeout) => test(name, witnessed(name, steps), timeout),
   };
+}
+
+/** What a screen reader hears on `page`, and which parts of it are still busy. */
+async function heard(page: Page): Promise<string> {
+  const snapshot = await page
+    .ariaSnapshot({ timeout: 10_000 })
+    .catch((error: unknown) => `no snapshot: ${String(error)}`);
+  const busy = await page
+    .locator('[aria-busy="true"]')
+    .evaluateAll((all) =>
+      all.map((element) => element.getAttribute('aria-label') ?? element.tagName),
+    )
+    .catch(() => []);
+  return [snapshot, `Busy: ${busy.length > 0 ? busy.join(', ') : 'nothing'}`].join('\n');
 }
 
 /** Whether the app at `url` answers at all. */

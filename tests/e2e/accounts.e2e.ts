@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, expect, test } from 'bun:test';
+import { afterEach, beforeAll, expect } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { unreadableText } from './contrast.ts';
@@ -19,6 +19,8 @@ const SIZES = {
 const app = suite({
   vars: { DEMO_MAILBOX: '', DEV_MEMBER: `first-run-${Date.now()}@trailmix.test` },
 });
+// A test that fails leaves a screenshot of each page and what it showed, for CI to keep.
+const { test } = app;
 
 beforeAll(() => {
   mkdirSync(SHOTS, { recursive: true });

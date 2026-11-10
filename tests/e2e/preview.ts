@@ -3,7 +3,15 @@ import { join } from 'node:path';
 
 const ROOT = join(import.meta.dir, '../..');
 
-export type Preview = { url: string; stop: () => Promise<void> };
+export type Preview = {
+  url: string;
+  stop: () => Promise<void>;
+  /** The last lines the app printed, the Worker's own logs and errors among them. */
+  log: () => string;
+};
+
+/** How many of the app's last lines a preview keeps. */
+const KEPT_LINES = 300;
 
 /**
  * Serves the built app the way production does, on workerd, through `vite preview` under Node. The
@@ -25,7 +33,7 @@ export async function startPreview(
     {
       cwd: ROOT,
       stdout: 'pipe',
-      stderr: 'inherit',
+      stderr: 'pipe',
       env: {
         ...process.env,
         // Vite colors its output whenever `CI` is set, which would break the address up with escapes.
@@ -38,7 +46,10 @@ export async function startPreview(
       },
     },
   );
-  const url = await listeningUrl(server.stdout);
+  const kept: string[] = [];
+  // What the Worker reports goes to the app's error output, which is still printed as it comes.
+  void keep(server.stderr, kept, (text) => process.stderr.write(text));
+  const url = await listeningUrl(server.stdout, kept);
   return {
     url,
     stop: async () => {
@@ -46,6 +57,7 @@ export async function startPreview(
       await server.exited;
       restoreVars();
     },
+    log: () => kept.join('\n'),
   };
 }
 
@@ -88,24 +100,40 @@ function writeVars(vars: Record<string, string>): () => void {
 }
 
 /**
- * The address Vite prints once it listens. Its output keeps draining afterward, since a server
- * whose output pipe closes dies at its next log line.
+ * The address Vite prints once it listens. Its output keeps draining afterward, into `kept`, since
+ * a server whose output pipe closes dies at its next log line.
  */
-async function listeningUrl(stdout: ReadableStream<Uint8Array>): Promise<string> {
-  const reader = stdout.getReader();
-  const decoder = new TextDecoder();
-  let printed = '';
-  for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) {
-    printed += decoder.decode(chunk.value);
+async function listeningUrl(stdout: ReadableStream<Uint8Array>, kept: string[]): Promise<string> {
+  // What it printed before it listened, which is all a failure to start has to say.
+  let printed: string | undefined = '';
+  const { promise: listening, resolve } = Promise.withResolvers<string | undefined>();
+  void keep(stdout, kept, (text) => {
+    if (printed === undefined) return;
+    printed += text;
     const url = /Local:\s+(http:\/\/\S+)/.exec(printed)?.[1];
-    if (url) {
-      void drain(reader);
-      return url;
-    }
-  }
-  throw new Error(`The preview stopped before it listened:\n${printed}`);
+    if (!url) return;
+    printed = undefined;
+    resolve(url);
+  }).finally(() => resolve(undefined));
+  const url = await listening;
+  if (url === undefined) throw new Error(`The preview stopped before it listened:\n${printed}`);
+  return url;
 }
 
-async function drain(reader: ReadableStreamDefaultReader<Uint8Array>): Promise<void> {
-  while (!(await reader.read()).done);
+/** Reads `output` to its end, keeping its last lines in `kept`, and hands each piece to `heard`. */
+async function keep(
+  output: ReadableStream<Uint8Array>,
+  kept: string[],
+  heard: (text: string) => void,
+): Promise<void> {
+  const decoder = new TextDecoder();
+  let partial = '';
+  for await (const chunk of output) {
+    const text = decoder.decode(chunk, { stream: true });
+    heard(text);
+    const lines = (partial + text).split('\n');
+    partial = lines.pop() ?? '';
+    kept.push(...lines);
+    kept.splice(0, Math.max(0, kept.length - KEPT_LINES));
+  }
 }

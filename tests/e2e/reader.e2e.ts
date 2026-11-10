@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, expect, test } from 'bun:test';
+import { afterEach, beforeAll, expect } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BrowserContextOptions, Page } from 'playwright';
@@ -16,6 +16,8 @@ const DESKTOP = { viewport: { width: 1440, height: 900 } };
 const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
 
 const app = suite({ vars: { DEV_MEMBER: `reader-${Date.now()}@trailmix.test` } });
+// A test that fails leaves a screenshot of each page and what it showed, for CI to keep.
+const { test } = app;
 
 beforeAll(() => {
   mkdirSync(SHOTS, { recursive: true });

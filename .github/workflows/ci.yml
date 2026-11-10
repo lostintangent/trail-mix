@@ -263,6 +263,7 @@ jobs:
       - name: Benchmark the Mailroom
         run: bun run bench mailroom
 
+      # Also what a failed mail test left: a screenshot of each page and what it showed.
       - name: Upload the Mailroom's numbers
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7

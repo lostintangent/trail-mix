@@ -1,4 +1,4 @@
-import { expect, test } from 'bun:test';
+import { expect } from 'bun:test';
 import type { Page } from 'playwright';
 import { serverFunctionIds } from './preview.ts';
 import { suite } from './suite.ts';
@@ -12,6 +12,8 @@ import { suite } from './suite.ts';
 const REFUSED = 'That isn’t something a browser can ask its Mailroom.';
 
 const app = suite();
+// A test that fails leaves a screenshot of each page and what it showed, for CI to keep.
+const { test } = app;
 
 /** Trail Mix's page, and the app's own request for the accounts, which the calls reuse. */
 async function trailMix(): Promise<{ page: Page; accounts: string }> {
