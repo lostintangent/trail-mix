@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { BrowserType } from 'playwright';
+import { Features } from 'lightningcss';
 import { build } from 'vite';
 import { stylexOptions } from '../../src/shared/build/stylexOptions.ts';
 
@@ -31,13 +32,22 @@ export type Canary = {
   stop: () => void;
 };
 
-/** A 1x1 transparent PNG: what the proxy and the parts answer with. */
+/** A small green image: what the proxy and the parts answer with, visible in screenshots. */
 const PIXEL = Uint8Array.from(
   atob(
-    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=',
+    'iVBORw0KGgoAAAANSUhEUgAAAAgAAAAECAIAAAA8r+mnAAAAEUlEQVR4nGPImlOBFTFQTwIAUqsvwYe2h+gAAAAASUVORK5CYII=',
   ),
   (c) => c.charCodeAt(0),
 );
+
+/** What the harness serves as any message's raw source: headers, and markup that must stay text. */
+export const SOURCE = [
+  'From: Ada Park <ada@example.com>',
+  'Subject: Re: Lunch on Thursday?',
+  'Content-Type: text/html; charset=utf-8',
+  '',
+  '<p>Perfect.</p><script>parent.__pwned("source")</script><img src=x onerror=parent.__pwned("source-img")>',
+].join('\r\n');
 
 export async function serveHarness(): Promise<Harness> {
   const dir = mkdtempSync(join(tmpdir(), 'trail-mix-reader-'));
@@ -47,6 +57,7 @@ export async function serveHarness(): Promise<Harness> {
     logLevel: 'silent',
     plugins: [stylex(stylexOptions), react()],
     build: { outDir: dir, emptyOutDir: true },
+    css: { lightningcss: { exclude: Features.LightDark } },
   });
   const proxied: string[] = [];
   const parts: string[] = [];
@@ -61,7 +72,11 @@ export async function serveHarness(): Promise<Harness> {
       }
       if (url.pathname.startsWith('/messages/')) {
         parts.push(url.pathname);
-        return new Response(PIXEL, { headers: { 'content-type': 'image/png' } });
+        // `/messages/<account>/<path>/<uidValidity>/<uid>` is the raw message, and a part adds one more.
+        const source = url.pathname.split('/').length === 6;
+        return source
+          ? new Response(SOURCE, { headers: { 'content-type': 'text/plain; charset=utf-8' } })
+          : new Response(PIXEL, { headers: { 'content-type': 'image/png' } });
       }
       const file = Bun.file(join(dir, url.pathname === '/' ? 'index.html' : url.pathname));
       return file

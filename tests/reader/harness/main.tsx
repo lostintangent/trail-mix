@@ -3,7 +3,9 @@ import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import '../../../src/app/global.css';
 import { sanitizeMail, type SafeMail } from '../../../src/features/reader/core/sanitize.ts';
+import { Reader, type MessageUrls } from '../../../src/features/reader/index.ts';
 import { MessageFrame } from '../../../src/features/reader/ui/MessageFrame.tsx';
+import { bodyKey, lunchThread, newsletter, type Fixture } from './fixtures.ts';
 
 /**
  * A page that shows messages in the reader's real frames, for tests to drive in real browsers.
@@ -31,6 +33,11 @@ export type Result = Omit<SafeMail, 'html' | 'sources'>;
 declare global {
   interface Window {
     show: (mails: Shown[]) => Result[];
+    /** Shows a fixture conversation in the reader, as its pane would. */
+    showConversation: (fixture: 'lunch' | 'newsletter', html: string) => void;
+    /** The senders the reader was asked to always show images from. */
+    allowed: string[];
+    setTheme: (mode: 'light' | 'dark') => void;
     /** What hostile mail calls if any of its script ever runs. */
     __pwned: (id: string) => void;
     pwned: string[];
@@ -39,6 +46,10 @@ declare global {
 
 window.pwned = [];
 window.__pwned = (id) => window.pwned.push(id);
+window.allowed = [];
+window.setTheme = (mode) => {
+  document.documentElement.dataset['theme'] = mode;
+};
 
 const root = createRoot(document.getElementById('root') as HTMLElement);
 
@@ -75,6 +86,34 @@ window.show = (mails) => {
     quote,
     inlineParts,
   }));
+};
+
+const message = (ref: Parameters<MessageUrls['source']>[0]) =>
+  `/messages/${[ref.account, ref.path, ref.uidValidity, ref.uid].map((part) => encodeURIComponent(part)).join('/')}`;
+
+const URLS: MessageUrls = {
+  source: message,
+  part: (ref, attachment) => `${message(ref)}/${encodeURIComponent(attachment)}`,
+  image: (url) => `/images?url=${encodeURIComponent(url)}`,
+};
+
+window.showConversation = (name, html) => {
+  const fixture: Fixture = name === 'lunch' ? lunchThread(html) : newsletter(html);
+  flushSync(() =>
+    root.render(
+      <StrictMode>
+        <section className="pane">
+          <Reader
+            conversation={fixture.conversation}
+            account={fixture.account}
+            bodyOf={(message) => fixture.bodies[bodyKey(message)]}
+            urls={URLS}
+            onAllowImages={(sender) => window.allowed.push(sender)}
+          />
+        </section>
+      </StrictMode>,
+    ),
+  );
 };
 
 function sanitize({ html, images, parts = {} }: Shown): SafeMail {

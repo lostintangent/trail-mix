@@ -95,10 +95,15 @@ export function sanitizeMail(html: string, images: Images): SafeMail {
     };
     switch (data.attrName) {
       case 'style': {
+        // A declaration without a `(` holds no function, so it can load nothing. Most mail's
+        // inline styles are like that, and they are kept as written.
+        const loads = value.includes('(');
+        const colors = !mail.ownColors && /color|background/i.test(value);
+        if (!loads && !colors) return;
         const scratch = element.ownerDocument.createElement('div');
         scratch.setAttribute('style', value);
-        if (setsColors(scratch.style)) mail.ownColors = true;
-        return keep(safeCss(scratch.style.cssText));
+        if (colors && setsColors(scratch.style)) mail.ownColors = true;
+        return keep(loads ? safeCss(scratch.style.cssText) : value);
       }
       case 'src':
         return keep(tag === 'img' ? imageSource(value) : null);
@@ -265,7 +270,9 @@ function markerOf(element: Element): QuoteMarker | null {
   });
   if (marker) return marker;
   // Outlook's desktop app opens its quoted original with a ruled header block and no marker.
-  if (element instanceof HTMLDivElement && element.style.borderTopStyle === 'solid') {
+  const style = element.getAttribute('style') ?? '';
+  if (style.includes('border') && element instanceof HTMLDivElement) {
+    if (element.style.borderTopStyle !== 'solid') return null;
     if (isAttribution(leadingText(element))) return 'rest';
   }
   return null;

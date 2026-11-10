@@ -26,25 +26,28 @@ export type MessageFrameProps = {
 
 export function MessageFrame({ mail, quotes, title }: MessageFrameProps) {
   const box = useRef<HTMLDivElement>(null);
+  const sizer = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLIFrameElement>(null);
   const look = useLook(frame);
   const document = useMemo(
     () => (look ? frameDocument(mail, { ...look, quotes }) : undefined),
     [mail, look, quotes],
   );
-  const onLoad = useFitToContent(box, frame);
+  const onLoad = useFitToContent(box, sizer, frame);
 
   return (
     <div ref={box} {...stylex.props(styles.box)}>
-      <iframe
-        ref={frame}
-        title={title}
-        sandbox={FRAME_SANDBOX}
-        referrerPolicy="no-referrer"
-        srcDoc={document}
-        onLoad={onLoad}
-        {...stylex.props(styles.frame, mail.ownColors ? styles.fixedPaper : styles.paper)}
-      />
+      <div ref={sizer} {...stylex.props(styles.sizer)}>
+        <iframe
+          ref={frame}
+          title={title}
+          sandbox={FRAME_SANDBOX}
+          referrerPolicy="no-referrer"
+          srcDoc={document}
+          onLoad={onLoad}
+          {...stylex.props(styles.frame, mail.ownColors ? styles.fixedPaper : styles.paper)}
+        />
+      </div>
     </div>
   );
 }
@@ -95,13 +98,17 @@ const MIN_SCALE = 0.5;
 
 /**
  * Sizes the frame to the document it shows, and keeps it sized as images load or the reader's width
- * changes. Mail wider than the reader is scaled down to fit, as a phone's mail app does.
+ * changes. Mail laid out wider than the reader is scaled down to fit, as a phone's mail app does.
+ * The sizer around the frame takes the scaled size, since a transform alone leaves the layout as
+ * wide as before.
  *
- * Content sized by the frame's own height, such as `100vh`, would grow without end, so once the
- * document grows because the frame did, the frame stops growing and scrolls instead.
+ * Content sized by the frame itself would grow without end: a `100vh` block grows the frame that
+ * grows it, and a `100%` table with padding is always wider than its frame. So the frame follows
+ * the document only where the document holds still, and otherwise stays put and scrolls.
  */
 function useFitToContent(
   box: RefObject<HTMLDivElement | null>,
+  sizer: RefObject<HTMLDivElement | null>,
   frame: RefObject<HTMLIFrameElement | null>,
 ) {
   const observer = useRef<ResizeObserver>(null);
@@ -109,32 +116,36 @@ function useFitToContent(
 
   return () => {
     const container = box.current;
+    const inner = sizer.current;
     const element = frame.current;
     const root = element?.contentDocument?.documentElement;
-    if (!container || !element || !root) return;
+    if (!container || !inner || !element || !root) return;
     observer.current?.disconnect();
-    let followsFrame = false;
-    let width = 0;
+    let followsHeight = true;
+    let fittedWidth = 0;
 
     const contentHeight = () => Math.ceil(root.getBoundingClientRect().height);
     const fit = () => {
       const available = container.clientWidth;
       element.style.width = '';
       element.style.transform = '';
+      let scale = 1;
       const natural = root.scrollWidth;
-      const scale = natural > available + 1 ? Math.max(MIN_SCALE, available / natural) : 1;
-      if (scale < 1) {
+      if (natural > available + 1) {
         element.style.width = `${natural}px`;
-        element.style.transform = `scale(${scale})`;
+        if (root.scrollWidth <= natural + 1) scale = Math.max(MIN_SCALE, available / natural);
+        else element.style.width = '';
       }
-      if (!followsFrame) {
+      if (scale < 1) element.style.transform = `scale(${scale})`;
+      if (followsHeight) {
         const height = contentHeight();
         element.style.height = `${height}px`;
-        followsFrame = contentHeight() > height;
-        if (followsFrame) element.style.height = `${Math.min(height, innerHeight)}px`;
+        followsHeight = contentHeight() <= height;
+        if (!followsHeight) element.style.height = `${Math.min(height, innerHeight)}px`;
       }
-      container.style.height = `${Math.ceil(element.offsetHeight * scale)}px`;
-      width = available;
+      inner.style.width = scale < 1 ? `${Math.ceil(element.offsetWidth * scale)}px` : '';
+      inner.style.height = `${Math.ceil(element.offsetHeight * scale)}px`;
+      fittedWidth = available;
       element.style.visibility = 'visible';
     };
 
@@ -142,7 +153,7 @@ function useFitToContent(
     // Refitting in the next frame keeps the observer from seeing the sizes it just set.
     let pending = 0;
     observer.current = new ResizeObserver(() => {
-      if (container.clientWidth === width && followsFrame) return;
+      if (container.clientWidth === fittedWidth && !followsHeight) return;
       cancelAnimationFrame(pending);
       pending = requestAnimationFrame(fit);
     });
@@ -153,9 +164,12 @@ function useFitToContent(
 
 const styles = stylex.create({
   box: {
-    position: 'relative',
     overflowX: 'auto',
     overflowY: 'hidden',
+  },
+  sizer: {
+    position: 'relative',
+    overflow: 'hidden',
   },
   frame: {
     display: 'block',

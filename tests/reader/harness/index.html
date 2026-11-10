@@ -4,6 +4,30 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Reader harness</title>
+    <style>
+      /* The reader's pane, as the workbench draws it: a sheet on the desk. */
+      body {
+        margin: 0;
+        padding: 6px;
+        background: var(--color-background-body);
+      }
+      .pane {
+        padding-top: 16px;
+        border-radius: 14px;
+        background: var(--color-background-surface);
+        box-shadow: 0 0 0 1px var(--color-border);
+      }
+      @media (width < 768px) {
+        body {
+          padding: 0;
+        }
+        .pane {
+          border-radius: 0;
+          box-shadow: none;
+          background: none;
+        }
+      }
+    </style>
   </head>
   <body>
     <main id="root"></main>
