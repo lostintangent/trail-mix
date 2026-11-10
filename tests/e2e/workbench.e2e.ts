@@ -161,6 +161,55 @@ test('a sheet that sets its own color scheme takes the theme’s colors for that
   await context.close();
 });
 
+test('the reader follows a move made after a rest at once, and waits while a key is held', async () => {
+  const { context, page, problems } = await open(SIZES.desktop);
+  await openConversation(page, 0);
+  // Long enough idle for the reader to prepare the conversations beside the open one.
+  await page.waitForTimeout(3_000);
+
+  const shown = await page.evaluate(async () => {
+    const reader = document.querySelector('section[aria-label="Reader"]')!;
+    const list = document.querySelector('[role="listbox"]')!;
+    const heading = () => reader.querySelector('h1')?.textContent ?? '';
+    const option = (index: number) => list.querySelectorAll('[role="option"]')[index]?.textContent;
+    const press = () =>
+      list.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+
+    const before = heading();
+    press();
+    await new Promise(requestAnimationFrame);
+    const afterRest = { before, heading: heading(), row: option(1) };
+
+    // Four more presses, 30 ms apart as a held key's repeats come, never let the selection rest.
+    const whileHeld: string[] = [];
+    // A conversation still loading shows no heading, and that is not one shown.
+    const observer = new MutationObserver(() => {
+      const now = heading();
+      if (now && now !== (whileHeld.at(-1) ?? afterRest.heading)) whileHeld.push(now);
+    });
+    observer.observe(reader, { subtree: true, childList: true, characterData: true });
+    for (let repeat = 0; repeat < 4; repeat++) {
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      press();
+    }
+    await new Promise(requestAnimationFrame);
+    const last = list.querySelector('[aria-selected="true"]')?.textContent ?? '';
+    while (!heading() || !last.includes(heading())) {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+    observer.disconnect();
+    return { afterRest, whileHeld, last, isLastRow5: last === option(5) };
+  });
+
+  expect(shown.afterRest.heading).not.toBe(shown.afterRest.before);
+  expect(shown.afterRest.row).toContain(shown.afterRest.heading);
+  expect(shown.isLastRow5).toBe(true);
+  expect(shown.whileHeld).toHaveLength(1);
+  expect(shown.last).toContain(shown.whileHeld[0] ?? '(none)');
+  expect(problems).toEqual([]);
+  await context.close();
+}, 30_000);
+
 /**
  * Opens a conversation from the unified Inbox and waits for its mail. On a phone it first goes back
  * to the list, from the reader or the folders.

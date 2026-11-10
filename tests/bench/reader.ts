@@ -4,14 +4,16 @@ import { slowDown } from './phone.ts';
 import { percentile, type BenchArea } from './budget.ts';
 
 /**
- * The reader's budget, as AGENTS.md sets it: moving by key to a conversation whose newest message
- * is 300 KB of HTML renders within 200 ms, its body fetched and sanitized ahead while the browser
- * was idle. It runs on the built app with a 50,000-message demo mailbox at the phone's CPU, and
- * moves onto the demo's Kernel Weekly, which is that newsletter.
+ * The reader's budgets, as AGENTS.md sets them. Moving by key to a conversation whose newest
+ * message is 300 KB of HTML renders within 200 ms, its body fetched and sanitized ahead while the
+ * browser was idle. That move comes after a rest, which the reader follows at once. Holding a key
+ * with a conversation open still moves through the list within 50 ms, because the reader waits for
+ * the selection to rest. It runs on the built app with a 50,000-message demo mailbox at the phone's
+ * CPU, around the demo's Kernel Weekly, which is that newsletter.
  *
- * The first open of the same newsletter, cold, with nothing prepared, is printed beside it.
+ * The first open of the same newsletter, cold, with nothing prepared, is printed beside them.
  */
-const BUDGET = { preparedMove: 200 };
+const BUDGET = { preparedMove: 200, heldKey: 50 };
 
 /** The workbench's bench member and mailbox, so a run of both fills the Mailroom once. */
 const MEMBER = 'bench@trailmix.test';
@@ -59,7 +61,17 @@ export const reader: BenchArea = {
         await press(page, 'ArrowUp');
         await page.waitForTimeout(IDLE_MS / 3);
       }
+
+      // Held: from the conversation above the newsletter, prepared and at rest, a key held down.
+      await page.waitForTimeout(IDLE_MS);
+      const newsletterRow = (await rows.nth(at).textContent()) ?? '';
+      const held = await heldKey(page);
       await page.context().close();
+      // The first move after the rest opens the newsletter at once. The repeats never rest, so
+      // the reader shows nothing else until the key comes up.
+      if (held.shown.length !== 1 || !newsletterRow.includes(held.shown[0] ?? '\u0000')) {
+        throw new Error(`While a key was held, the reader showed: ${held.shown.join(', ')}`);
+      }
 
       console.log(
         `reader: the first open of the 300 KB newsletter, cold, took ${coldOpen.toFixed(0)} ms`,
@@ -70,6 +82,13 @@ export const reader: BenchArea = {
           name: 'Moving to a prepared 300 KB conversation, p95',
           value: percentile(moves, 0.95),
           budget: BUDGET.preparedMove,
+          unit: 'ms',
+        },
+        {
+          area: 'reader',
+          name: 'Holding a key with a conversation open, p95',
+          value: percentile(held.times, 0.95),
+          budget: BUDGET.heldKey,
           unit: 'ms',
         },
       ];
@@ -89,6 +108,37 @@ export const reader: BenchArea = {
     }
   },
 };
+
+/**
+ * Each of 40 moves by a held key, timed until the frame after it is drawn, and the subjects of the
+ * conversations the reader showed meanwhile.
+ */
+function heldKey(page: Page): Promise<{ times: number[]; shown: string[] }> {
+  return page.evaluate(async () => {
+    const list = document.querySelector('[role="listbox"]')!;
+    const reader = document.querySelector('section[aria-label="Reader"]')!;
+    const heading = () => reader.querySelector('h1')?.textContent ?? '';
+    const before = heading();
+    const shown: string[] = [];
+    const observer = new MutationObserver(() => {
+      const now = heading();
+      if (now && now !== (shown.at(-1) ?? before)) shown.push(now);
+    });
+    observer.observe(reader, { subtree: true, childList: true, characterData: true });
+    const times: number[] = [];
+    for (let repeat = 0; repeat < 40; repeat++) {
+      times.push(
+        await new Promise<number>((resolve) => {
+          const start = performance.now();
+          list.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
+          requestAnimationFrame(() => setTimeout(() => resolve(performance.now() - start)));
+        }),
+      );
+    }
+    observer.disconnect();
+    return { times, shown };
+  });
+}
 
 /** Moves the list's selection by a key, as the member would. */
 function press(page: Page, key: 'ArrowDown' | 'ArrowUp'): Promise<void> {

@@ -43,7 +43,11 @@ for (const type of BROWSERS) {
       let page: Page;
       beforeAll(async () => {
         browser = await launch(type);
-      }, 30_000);
+        // A browser's first page starts its processes and compiles the harness. That happens
+        // here, so no test's own time pays for it.
+        await open('lunch');
+        await page.close();
+      }, 60_000);
       afterAll(() => browser.close());
 
       async function open(fixture: 'lunch' | 'newsletter', upcoming: string[] = []) {

@@ -87,7 +87,7 @@ function usePrepared(upcoming: ConversationId[]) {
       for (const id of key ? key.split('\u0000') : []) {
         await idle();
         if (cancelled) return;
-        await prepareConversation(queryClient, id).catch(() => {});
+        await prepareConversation(queryClient, id, () => cancelled).catch(() => {});
       }
     };
     void prepare();
@@ -97,7 +97,11 @@ function usePrepared(upcoming: ConversationId[]) {
   }, [queryClient, key]);
 }
 
-async function prepareConversation(queryClient: QueryClient, id: ConversationId) {
+async function prepareConversation(
+  queryClient: QueryClient,
+  id: ConversationId,
+  isCancelled: () => boolean,
+) {
   const messages = await queryClient.ensureQueryData(conversationQuery(id));
   const newest = messages.toSorted((a, b) => a.date.localeCompare(b.date)).at(-1);
   if (!newest) return;
@@ -105,13 +109,15 @@ async function prepareConversation(queryClient: QueryClient, id: ConversationId)
   const accounts = queryClient.getQueryData(accountsQuery.queryKey) ?? [];
   const account = accounts.find(({ id: accountId }) => accountId === newest.account);
   await idle();
+  // Sanitizing a large body is one long task, so it never starts once the member has moved on.
+  if (isCancelled()) return;
   safeMail(newest, body, imagesAllowed(newest, account?.allowImagesFrom ?? []));
 }
 
 /** Resolves when the browser has nothing more pressing to do. Safari has no idle callback. */
 function idle(): Promise<void> {
   return new Promise((resolve) => {
-    if ('requestIdleCallback' in window) requestIdleCallback(() => resolve(), { timeout: 1000 });
+    if ('requestIdleCallback' in window) requestIdleCallback(() => resolve());
     else setTimeout(resolve, 50);
   });
 }

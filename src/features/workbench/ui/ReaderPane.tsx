@@ -5,7 +5,7 @@ import { borderVars, colorVars, spacingVars } from '@astryxdesign/core/theme/tok
 import * as stylex from '@stylexjs/stylex';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, MailOpen } from 'lucide-react';
-import { lazy, Suspense, useEffect } from 'react';
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, ConversationId } from '../../mail/core/index.ts';
 import { conversationQuery } from '../../mailroom/client/index.ts';
@@ -42,9 +42,10 @@ export function ReaderPane({
   upcoming: ConversationId[];
   onBack: () => void;
 }) {
+  const shown = useRestingSelection(selected);
   const { data: conversation } = useQuery({
-    ...conversationQuery(selected ?? ''),
-    enabled: selected !== undefined,
+    ...conversationQuery(shown ?? ''),
+    enabled: shown !== undefined,
   });
   const account = accounts.find(({ id }) => id === conversation?.[0]?.account);
   usePreloadedReader(upcoming.length > 0);
@@ -59,10 +60,14 @@ export function ReaderPane({
           onClick={onBack}
         />
       </header>
-      {selected && conversation?.length && account ? (
+      {shown && conversation?.length && account ? (
         <div {...stylex.props(styles.scroll)}>
           <Suspense>
-            <Reader conversation={conversation} account={account} upcoming={upcoming} />
+            <Reader
+              conversation={conversation}
+              account={account}
+              upcoming={shown === selected ? upcoming : []}
+            />
           </Suspense>
         </div>
       ) : (
@@ -76,6 +81,31 @@ export function ReaderPane({
       )}
     </section>
   );
+}
+
+/** How long a selection rests before the reader follows it, while the member moves quickly. */
+const REST_MS = 150;
+
+/**
+ * The selection the reader shows. One made after a rest shows at once. While the member moves
+ * quickly, as when holding a key, the reader waits until the selection rests, so it does no work
+ * nobody would see, and the list keeps up.
+ */
+function useRestingSelection(selected: ConversationId | undefined): ConversationId | undefined {
+  const [shown, setShown] = useState(selected);
+  const changedAt = useRef(-Infinity);
+  useLayoutEffect(() => {
+    const now = performance.now();
+    const hasRested = now - changedAt.current >= REST_MS;
+    changedAt.current = now;
+    if (hasRested) {
+      setShown(selected);
+      return;
+    }
+    const timer = setTimeout(() => setShown(selected), REST_MS);
+    return () => clearTimeout(timer);
+  }, [selected]);
+  return shown;
 }
 
 /** How long after the list first shows something to open the reader starts loading. */
