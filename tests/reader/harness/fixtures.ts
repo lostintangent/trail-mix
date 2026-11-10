@@ -50,7 +50,7 @@ function message(
 }
 
 /** A three-message thread: a plain-text question, a reply, and an HTML answer with attachments. */
-export function lunchThread(gmailReply: string): Fixture {
+export function lunchThread(): Fixture {
   const question = message(5, {
     subject: 'Lunch on Thursday?',
     date: '2026-11-09T10:02:00.000Z',
@@ -62,12 +62,12 @@ export function lunchThread(gmailReply: string): Fixture {
     to: [ada],
     subject: 'Re: Lunch on Thursday?',
     date: '2026-11-09T11:15:00.000Z',
-    preview: 'Thursday works for me. I will book the table by the window.',
+    preview: "Thursday works for me. I'll book the table by the window.",
   });
   const answer = message(7, {
     subject: 'Re: Lunch on Thursday?',
     date: '2026-11-09T12:40:00.000Z',
-    preview: 'Perfect. The menu is attached, and here is the place.',
+    preview: "Perfect, Thursday it is. The menu is attached, and here's where we're going.",
     hasAttachments: true,
   });
   return {
@@ -81,7 +81,9 @@ export function lunchThread(gmailReply: string): Fixture {
       },
       [bodyKey(reply)]: {
         text: [
-          'Thursday works for me. I will book the table by the window.',
+          "Thursday works for me. I'll book the table by the window.",
+          '',
+          'Jonas',
           '',
           'On Mon, Nov 9, 2026 at 10:02 AM Ada Park <ada@example.com> wrote:',
           '> Are you free for lunch this week? Thursday or Friday both suit me.',
@@ -92,10 +94,15 @@ export function lunchThread(gmailReply: string): Fixture {
         headers: headers(reply),
       },
       [bodyKey(answer)]: {
-        html: gmailReply.replace(
-          'Thursday works for me.',
-          'Perfect, Thursday it is. The menu is attached, and here is the place:<br><img src="cid:map@example.com" alt="A map of the station" width="240" height="120"><br>',
-        ),
+        // Gmail's markup, quoting Jonas's reply below Ada's answer.
+        html: [
+          `<div dir="ltr">Perfect, Thursday it is. The menu is attached, and here's where we're going:`,
+          `<div><img src="cid:map@example.com" alt="A map of the station" width="240" height="120"></div>`,
+          `<div><br></div><div>Ada</div></div><br>`,
+          `<div class="gmail_quote gmail_quote_container"><div dir="ltr" class="gmail_attr">On Mon, Nov 9, 2026 at 11:15 AM Jonas Berg &lt;<a href="mailto:me@trailmix.test">me@trailmix.test</a>&gt; wrote:<br></div>`,
+          `<blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex;border-left:1px solid rgb(204,204,204);padding-left:1ex">`,
+          `<div dir="ltr">Thursday works for me. I'll book the table by the window.<div><br></div><div>Jonas</div></div></blockquote></div>`,
+        ].join(''),
         attachments: [
           {
             id: '0',

@@ -88,14 +88,16 @@ export function MessageSheet({ message, body, account, urls, onAllowImages }: Me
           <span {...stylex.props(styles.imagesText)}>
             Images from {displayName(message.from)} are hidden.
           </span>
-          <Button label="Show" variant="ghost" size="sm" onClick={() => setShowOnce(true)} />
-          <Button
-            label="Always show"
-            tooltip={`Always show images from ${message.from.email}`}
-            variant="ghost"
-            size="sm"
-            onClick={() => onAllowImages(sender)}
-          />
+          <span {...stylex.props(styles.imagesActions)}>
+            <Button label="Show" variant="ghost" size="sm" onClick={() => setShowOnce(true)} />
+            <Button
+              label="Always show"
+              tooltip={`Always show images from ${message.from.email}`}
+              variant="ghost"
+              size="sm"
+              onClick={() => onAllowImages(sender)}
+            />
+          </span>
         </div>
       )}
 
@@ -316,6 +318,11 @@ const styles = stylex.create({
   },
   imagesText: {
     flexGrow: 1,
+  },
+  // The two choices wrap as one, so they stay together on a narrow sheet.
+  imagesActions: {
+    display: 'flex',
+    marginInlineStart: 'auto',
   },
   quoteToggle: {
     alignSelf: 'flex-start',

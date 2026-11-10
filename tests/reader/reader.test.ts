@@ -17,14 +17,12 @@ import {
 
 let harness: Harness;
 let canary: Canary;
-let gmailReply: string;
 let newsletter: string;
 
 beforeAll(async () => {
   canary = serveCanary();
   harness = await serveHarness();
   const real = await corpus('real', canary);
-  gmailReply = real.find(({ name }) => name === 'gmail-reply.html')?.html ?? '';
   newsletter = real.find(({ name }) => name === 'newsletter.html')?.html ?? '';
 }, 60_000);
 
@@ -54,7 +52,7 @@ for (const type of BROWSERS) {
         await page.goto(harness.origin);
         await page.evaluate(
           ([name, html]) => window.showConversation(name as 'lunch' | 'newsletter', html ?? ''),
-          [fixture, fixture === 'lunch' ? gmailReply : newsletter],
+          [fixture, fixture === 'lunch' ? '' : newsletter],
         );
         await framesFitted(page);
       }
@@ -74,16 +72,16 @@ for (const type of BROWSERS) {
       test('folds the quote until it is asked for', async () => {
         await open('lunch');
         const frame = page.frameLocator('iframe');
-        expect(await frame.getByText('Are you free for lunch').isVisible()).toBe(false);
+        expect(await frame.getByText('book the table by the window').isVisible()).toBe(false);
         await page.getByRole('button', { name: 'Quoted text' }).click();
         await framesFitted(page);
-        await frame.getByText('Are you free for lunch').waitFor({ state: 'visible' });
+        await frame.getByText('book the table by the window').waitFor({ state: 'visible' });
         await page.close();
       });
 
       test('opens an older message from its folded line, with its own quote folded', async () => {
         await open('lunch');
-        expect(await page.getByText('I will book the table by the window.').count()).toBe(1);
+        expect(await page.getByRole('article').count()).toBe(1);
         await page.getByRole('button', { name: /^You/ }).click();
         const sheet = page.getByRole('article', { name: 'Message from Jonas Berg' });
         expect(await sheet.getByText('Thursday works for me.').isVisible()).toBe(true);

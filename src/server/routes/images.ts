@@ -1,0 +1,108 @@
+import { byteHeaders, rasterImage } from './messages.ts';
+
+/**
+ * `/images?url=<url>` loads a remote image that a message shows once the member allows its sender.
+ * The remote host sees only Trail Mix's Worker: no address, no cookie and no referrer of the
+ * member's. What comes back is served only if it is a raster image of a sane size, under the same
+ * headers as a message's own bytes, so it can never run as a page.
+ */
+
+/** The largest remote image served. */
+export const MAX_IMAGE_BYTES = 10 * 1024 * 1024;
+
+/** How many redirects a remote image may take, each checked like the first address. */
+const MAX_REDIRECTS = 5;
+
+export async function proxyImage(
+  request: Request,
+  fetchRemote: typeof fetch = fetch,
+): Promise<Response> {
+  let target = remoteUrl(new URL(request.url).searchParams.get('url') ?? '');
+  if (!target) return refuse(400, 'Not a remote image address.');
+
+  let response: Response | undefined;
+  for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+    response = await fetchRemote(target, {
+      redirect: 'manual',
+      headers: {
+        accept: 'image/avif,image/webp,image/png,image/*;q=0.8',
+        'user-agent': 'Trail Mix',
+      },
+      signal: AbortSignal.timeout(10_000),
+    });
+    const location = response.headers.get('location');
+    if (response.status < 300 || response.status >= 400 || !location) break;
+    await response.body?.cancel();
+    target = remoteUrl(new URL(location, target).href);
+    if (!target) return refuse(400, 'The image redirected somewhere it may not go.');
+    response = undefined;
+  }
+
+  if (!response?.ok || !response.body) return refuse(502, 'The image could not be loaded.');
+  const type = rasterImage(response.headers.get('content-type') ?? '');
+  if (!type) {
+    await response.body.cancel();
+    return refuse(415, 'That is not an image.');
+  }
+  if (Number(response.headers.get('content-length') ?? 0) > MAX_IMAGE_BYTES) {
+    await response.body.cancel();
+    return refuse(413, 'The image is too large.');
+  }
+  return new Response(response.body.pipeThrough(limit(MAX_IMAGE_BYTES)), {
+    headers: byteHeaders({ type, name: 'image', cache: 'private, max-age=86400' }),
+  });
+}
+
+/** An http or https address on the public internet, or null. */
+export function remoteUrl(raw: string): URL | null {
+  const url = URL.parse(raw);
+  if (!url || (url.protocol !== 'http:' && url.protocol !== 'https:')) return null;
+  if (url.username || url.password || !isPublicHost(url.hostname)) return null;
+  return url;
+}
+
+/**
+ * Whether a host can only be somewhere on the internet. A Worker cannot reach a private network,
+ * but the local runtime can, so names and addresses that mean this machine or its network are out.
+ */
+function isPublicHost(hostname: string): boolean {
+  const host = hostname.toLowerCase().replace(/\.$/, '');
+  if (!host.includes('.') || /\.(localhost|local|internal|home\.arpa)$/.test(host)) return false;
+  if (host.startsWith('[')) return false;
+  const octets = host.split('.');
+  if (octets.length !== 4 || !octets.every((octet) => /^\d+$/.test(octet))) return true;
+  const [a = 0, b = 0] = octets.map(Number);
+  return !(
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    a >= 224 ||
+    (a === 100 && b >= 64 && b < 128) ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b < 32) ||
+    (a === 192 && b === 168)
+  );
+}
+
+/** Passes bytes through until there are more than `max`, then fails the stream. */
+function limit(max: number): TransformStream<Uint8Array, Uint8Array> {
+  let seen = 0;
+  return new TransformStream({
+    transform(chunk, controller) {
+      seen += chunk.byteLength;
+      if (seen > max) controller.error(new Error('The image is too large.'));
+      else controller.enqueue(chunk);
+    },
+  });
+}
+
+function refuse(status: number, message: string): Response {
+  return new Response(message, {
+    status,
+    headers: byteHeaders({
+      type: 'text/plain; charset=utf-8',
+      name: 'error.txt',
+      cache: 'no-store',
+    }),
+  });
+}

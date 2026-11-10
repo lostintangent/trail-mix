@@ -88,7 +88,9 @@ function readLook(element: HTMLIFrameElement): Omit<FrameLook, 'quotes'> {
     paper: style.backgroundColor,
     ink: style.color,
     link: style.accentColor,
-    font: `${style.fontSize}/${style.lineHeight} ${style.fontFamily}`,
+    // The leading stays a ratio, as the theme writes it, so a message's larger type keeps its
+    // proportion. A computed line height would be one length for every size.
+    font: `${style.fontSize}/${style.getPropertyValue('--text-body-leading') || 'normal'} ${style.fontFamily}`,
     monospace: style.getPropertyValue('--font-family-code') || 'monospace',
   };
 }

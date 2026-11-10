@@ -34,7 +34,7 @@ declare global {
   interface Window {
     show: (mails: Shown[]) => Result[];
     /** Shows a fixture conversation in the reader, as its pane would. */
-    showConversation: (fixture: 'lunch' | 'newsletter', html: string) => void;
+    showConversation: (fixture: 'lunch' | 'newsletter', html?: string) => void;
     /** The senders the reader was asked to always show images from. */
     allowed: string[];
     setTheme: (mode: 'light' | 'dark') => void;
@@ -98,7 +98,7 @@ const URLS: MessageUrls = {
 };
 
 window.showConversation = (name, html) => {
-  const fixture: Fixture = name === 'lunch' ? lunchThread(html) : newsletter(html);
+  const fixture: Fixture = name === 'lunch' ? lunchThread() : newsletter(html ?? '');
   flushSync(() =>
     root.render(
       <StrictMode>
