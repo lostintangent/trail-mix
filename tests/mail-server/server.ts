@@ -23,14 +23,19 @@ export const users = {
   bob: { email: `bob@${domain}`, password: 'bob-test-password' },
 } as const;
 
+/**
+ * The ports, the standard ones moved up by MAIL_SERVER_PORTS, 3000 unless set. Checkouts that set
+ * different values run their own servers side by side.
+ */
+const base = Number(process.env.MAIL_SERVER_PORTS ?? 3000);
 export const ports = {
-  imap: 3143, // STARTTLS
-  imaps: 3993, // implicit TLS
-  submission: 3587, // STARTTLS
-  submissions: 3465, // implicit TLS
-  lmtp: 3024, // local delivery into Dovecot
-  identity: 3080, // the stand-in for Microsoft's sign-in
-} as const;
+  imap: base + 143, // STARTTLS
+  imaps: base + 993, // implicit TLS
+  submission: base + 587, // STARTTLS
+  submissions: base + 465, // implicit TLS
+  lmtp: base + 24, // local delivery into Dovecot
+  identity: base + 80, // the stand-in for Microsoft's sign-in
+};
 
 /** The stand-in for login.microsoftonline.com, for the device-code flow and XOAUTH2. */
 export const identity = { authority: `http://127.0.0.1:${ports.identity}/consumers` } as const;
@@ -64,7 +69,7 @@ const conf = join(state, 'dovecot.conf');
 // Unix socket paths are capped near 104 bytes, so Dovecot's runtime directory stays short.
 const run = join(
   tmpdir().startsWith('/var/') ? '/tmp' : tmpdir(),
-  `trail-mix-mail-${userInfo().uid}`,
+  `trail-mix-mail-${userInfo().uid}-${base}`,
 );
 
 /** The certificate authority clients trust to reach this server, as they trust a real host's. */
@@ -140,6 +145,20 @@ export function running(): Profile | null {
 /** Drops every IMAP connection of a user, as a server restart or a network blip would. */
 export async function kick(user: string) {
   await $`${(await dovecot()).doveadm} -c ${conf} kick ${user}`.quiet();
+}
+
+/** Empties a user's mailbox: every message expunged, and every folder but the standard ones gone. */
+export async function empty(user: string) {
+  const { doveadm } = await dovecot();
+  await $`${doveadm} -c ${conf} expunge -u ${user} mailbox ${'*'} all`.quiet();
+  const standard = new Set(['INBOX', 'Drafts', 'Sent', 'Archive', 'Trash', 'Junk']);
+  const listed = (await $`${doveadm} -c ${conf} mailbox list -u ${user}`.text()).split('\n');
+  // Children before their parents, so each folder is empty of folders when it goes.
+  const extra = listed
+    .filter((path) => path && !standard.has(path))
+    .sort((a, b) => b.length - a.length);
+  for (const path of extra)
+    await $`${doveadm} -c ${conf} mailbox delete -u ${user} -s ${path}`.quiet().nothrow();
 }
 
 /** Gives a folder a new UIDVALIDITY, which tells clients to forget everything they knew of it. */

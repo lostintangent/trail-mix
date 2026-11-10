@@ -30,8 +30,8 @@ describe('the check command', () => {
 
     const lines = out.trim().split('\n').slice(1);
     expect(lines.map((line) => line.slice(0, 4))).toEqual(['PASS', 'PASS', 'PASS', 'PASS']);
-    expect(out).toContain('send to self over 3465 (implicit TLS)');
-    expect(out).toContain('send to self over 3587 (STARTTLS)');
+    expect(out).toContain(`send to self over ${ports.submissions} (implicit TLS)`);
+    expect(out).toContain(`send to self over ${ports.submission} (STARTTLS)`);
     expect(out).toContain('watch INBOX for 15s, then see new mail');
     expect(out + err).not.toContain(alice.password);
     expect(exit).toBe(0);
@@ -58,7 +58,7 @@ describe('the check command', () => {
 
     const lines = out.trim().split('\n').slice(1);
     expect(lines.map((line) => line.slice(0, 4))).toEqual(['PASS', 'PASS']);
-    expect(out).toContain('send to self over 3587 (STARTTLS)');
+    expect(out).toContain(`send to self over ${ports.submission} (STARTTLS)`);
     expect(exit).toBe(0);
   });
 
