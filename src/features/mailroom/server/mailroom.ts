@@ -7,6 +7,7 @@ import type {
   AccountId,
   Body,
   ConversationId,
+  Envelope,
   Flags,
   Folder,
   FolderRef,
@@ -37,9 +38,10 @@ import {
   type DemoSettings,
 } from './accounts.ts';
 import { memberKey, open, seal } from './credentials.ts';
-import { envelopeIndex, type EnvelopeIndex } from './envelope-index.ts';
+import { envelopeIndex, pageAfter, type EnvelopeIndex } from './envelope-index.ts';
 import * as input from './input.ts';
 import { upgrade, type Sql, type SqlValue } from './schema.ts';
+import { foundOf, opened, sameRef, type Found } from './search.ts';
 import { syncQueue, type SyncQueue } from './sync.ts';
 
 export type MailroomEnv = {
@@ -82,6 +84,8 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   /** When every account was last owed a check. A cold start checks at its first wake. */
   private checkedAt = 0;
   private key: Promise<CryptoKey> | undefined;
+  /** The last full-text search. Only memory holds it, so a restart forgets it. */
+  private found: Found | undefined;
   private readonly demo: DemoSettings | undefined;
 
   constructor(ctx: DurableObjectState, env: MailroomEnv) {
@@ -120,16 +124,22 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     return Promise.resolve(this.store.folders());
   }
 
-  conversations(view: View, after?: string): Promise<Page> {
+  async conversations(view: View, after?: string): Promise<Page> {
     const checked = input.viewOf(view);
     const cursor = input.cursorOf(after);
-    // Search and the Outbox arrive with their own steps, and are empty until then.
-    if (checked.in === 'search' || checked.in === 'outbox') return Promise.resolve({ items: [] });
-    return Promise.resolve(this.store.page(checked, cursor));
+    // The Outbox arrives with its own step, and is empty until then.
+    if (checked.in === 'outbox') return { items: [] };
+    if (checked.in !== 'search') return this.store.page(checked, cursor);
+    if (!checked.fullText) return this.store.search(checked.text, cursor);
+    // A first page asks the servers again. Later pages read what that one found.
+    if (cursor === undefined || this.found?.text !== checked.text) {
+      this.found = await this.searchServers(checked.text);
+    }
+    return pageAfter(this.found.rows, cursor);
   }
 
   conversation(id: ConversationId): Promise<Message[]> {
-    return Promise.resolve(this.store.conversation(input.conversationOf(id)));
+    return Promise.resolve(opened(input.conversationOf(id), this.store, this.found?.outside ?? []));
   }
 
   async body(ref: MessageRef): Promise<Body> {
@@ -224,6 +234,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       this.book.remove(account);
       this.store.forget(account);
     });
+    this.found = undefined;
     this.hint({ changed: 'accounts' });
     this.hint({ changed: 'folders', account });
     for (const folder of folders)
@@ -246,6 +257,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   async eraseEverything(): Promise<void> {
     const accounts = this.book.all();
     for (const { id } of accounts) await this.disconnect(id);
+    this.found = undefined;
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
     upgrade(this.sql);
@@ -490,6 +502,31 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     await opened?.close().catch(report);
   }
 
+  /** Asks every folder of every account's server, and keeps what they found apart from the index. */
+  private async searchServers(text: string): Promise<Found> {
+    const hits = await Promise.all(
+      this.book.all().map(async ({ id }) => {
+        const found: Envelope[] = [];
+        try {
+          const provider = await this.provider(id);
+          for (const { path } of this.store.folders(id)) {
+            // A folder the server won't search leaves out its hits, and the rest still count.
+            found.push(
+              ...(await provider.search(path, text).catch((error: unknown) => {
+                report(error);
+                return [];
+              })),
+            );
+          }
+        } catch (error) {
+          report(error);
+        }
+        return found;
+      }),
+    );
+    return foundOf(text, hits.flat(), this.store);
+  }
+
   /** Adds the first demo account not yet here, Personal and then Work. */
   private addDemo(): Account {
     if (!this.demo) throw new Error('This deployment has no demo mailbox.');
@@ -532,7 +569,9 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     const key = `${this.member}/${ref.account}/${encodeURIComponent(ref.path)}/${ref.uidValidity}/${ref.uid}`;
     const cached = await this.env.BODIES.get(key);
     if (cached) return new Uint8Array(await cached.arrayBuffer());
-    if (!this.store.reads.message(ref)) return null;
+    const known =
+      this.store.reads.message(ref) ?? this.found?.outside.find((hit) => sameRef(hit, ref));
+    if (!known) return null;
     const stream = await (await this.provider(ref.account)).body(ref);
     const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
     await this.env.BODIES.put(key, bytes);

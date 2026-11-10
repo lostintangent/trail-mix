@@ -148,6 +148,29 @@ describe('The Mailroom', () => {
     await ada.until(async () => Bun.deepEquals(await ada.page({ in: 'inbox' }), before));
   }, 30_000);
 
+  test('searches the index as each word is typed', async () => {
+    expect((await ada.page({ in: 'search', text: 're lun' })).map((row) => row.subject)).toEqual([
+      'Re: Lunch',
+    ]);
+    expect(await ada.page({ in: 'search', text: 'periwinkle' })).toEqual([]);
+  });
+
+  test('finds what only an older message holds on the server, opens it, and leaves the index be', async () => {
+    const before = (await ada.call<{ tables: Record<string, unknown[]> }>('stored')).tables;
+    const rows = await ada.page({ in: 'search', text: 'periwinkle', fullText: true });
+    expect(rows.map((row) => row.subject)).toEqual(['Old letter']);
+    const [message] = await ada.call<Message[]>('conversation', rows[0]!.id);
+    expect(message).toMatchObject({ subject: 'Old letter', path: 'Archive' });
+    expect((await ada.call<{ text: string }>('body', message)).text).toContain('periwinkle');
+    expect((await ada.call<{ tables: Record<string, unknown[]> }>('stored')).tables).toEqual(
+      before,
+    );
+
+    // A restart forgets what the search found, and the conversation reads as one gone elsewhere.
+    await ada.call('restart').catch(() => {});
+    expect(await ada.call('conversation', rows[0]!.id)).toEqual([]);
+  }, 30_000);
+
   test('another member reaches none of it', async () => {
     const [row] = await ada.page({ in: 'inbox' });
     const [message] = await ada.call<Message[]>('conversation', row!.id);
@@ -164,7 +187,7 @@ describe('The Mailroom', () => {
     const before = await ada.snapshot();
     const [message] = await ada.call<Message[]>('conversation', before.inbox[0]!.id);
     const body = await ada.call('body', message);
-    expect((await ada.call<{ bodies: string[] }>('stored')).bodies).toHaveLength(1);
+    expect((await ada.call<{ bodies: string[] }>('stored')).bodies.length).toBeGreaterThan(0);
 
     await ada.call('eraseIndex');
     expect(await ada.page({ in: 'inbox' })).toEqual([]);
@@ -185,9 +208,13 @@ describe('The Mailroom', () => {
       'stored',
     );
     expect(bodies).toEqual([]);
+    // Only the schema's version and the search table's own bookkeeping remain, with no word of mail.
     expect(
-      Object.entries(tables).filter(([name, rows]) => name !== 'schema' && rows.length),
+      Object.entries(tables).filter(
+        ([name, rows]) => name !== 'schema' && !name.startsWith('search_') && rows.length,
+      ),
     ).toEqual([]);
+    expect(JSON.stringify(tables).toLowerCase()).not.toMatch(/garden|tickets|lunch|alice|bob/);
   });
 });
 
@@ -245,6 +272,12 @@ describe('The Mailroom with the demo mailbox', () => {
       }
     }
     expect(last.map(({ status }) => status)).toEqual(['ready', 'ready']);
+
+    // Search reads every account at once: Sam is on mail in both.
+    const found = await cy.call<Page>('conversations', { in: 'search', text: 'sam rivera' });
+    expect(new Set(found.items.map(({ account }) => account))).toEqual(
+      new Set(accounts.map(({ id }) => id)),
+    );
     device.close();
   }, 180_000);
 });
@@ -356,6 +389,14 @@ async function seed() {
     'INBOX',
     raw({ id: 'lunch-reply', subject: 'Re: Lunch', minutesAgo: 10, inReplyTo: 'lunch' }),
   );
+  // Older than the index keeps, so only the server's own search finds it.
+  const twoYears = 2 * 365 * 24 * 60;
+  await client.append(
+    'Archive',
+    raw({ id: 'old', subject: 'Old letter', minutesAgo: twoYears, text: 'A periwinkle teapot.' }),
+    ['\\Seen'],
+    new Date(Date.now() - twoYears * 60_000),
+  );
   await client.logout();
 }
 
@@ -379,6 +420,7 @@ function raw(fields: {
   from?: string;
   to?: string;
   inReplyTo?: string;
+  text?: string;
 }) {
   return [
     `From: ${fields.from ?? bob.email}`,
@@ -390,7 +432,7 @@ function raw(fields: {
     'MIME-Version: 1.0',
     'Content-Type: text/plain; charset=utf-8',
     '',
-    `This is ${fields.subject}.`,
+    fields.text ?? `This is ${fields.subject}.`,
     '',
   ].join('\r\n');
 }

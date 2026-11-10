@@ -31,6 +31,12 @@ export class TestMailroom extends Mailroom {
     return Promise.resolve(this.wakes);
   }
 
+  /** Ends this instance, as a deploy or an eviction would. The next request starts a new one. */
+  restart(): Promise<void> {
+    this.ctx.abort('A test restarted the Mailroom.');
+    return Promise.resolve();
+  }
+
   /** Erases the envelope index and the body cache, which sync rebuilds from the servers. */
   async eraseIndex(): Promise<void> {
     for (const { id } of await this.accounts()) this.store.forget(id);

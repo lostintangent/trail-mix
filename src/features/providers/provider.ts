@@ -1,4 +1,4 @@
-import type { Flags, Folder, MessageRef, SyncEvent } from '../mail/core/index.ts';
+import type { Envelope, Flags, Folder, MessageRef, SyncEvent } from '../mail/core/index.ts';
 
 /**
  * The MailProvider contract: everything Trail Mix needs from a mail host. Adding a protocol means
@@ -48,8 +48,12 @@ export interface MailProvider {
    */
   send(draft: MessageRef): Promise<void>;
 
-  /** The UIDs of a folder's messages whose text contains `text`, searched by the server. */
-  search(folder: string, text: string): Promise<number[]>;
+  /**
+   * A folder's messages whose headers or body contain `text`, searched by the server across the
+   * whole folder, not only the sync window. The newest to arrive, at most `SEARCH_LIMIT`, newest
+   * first. A hit is reported, never folded: the index learns of mail only through sync.
+   */
+  search(folder: string, text: string): Promise<Envelope[]>;
 
   /**
    * Calls `onChange` when the server says a folder changed, until the returned function is called.
@@ -69,6 +73,9 @@ export interface MailProvider {
 export type { SyncEvent };
 
 /** Where a folder's sync stopped. It belongs to the provider and is opaque to the Mailroom. */
+/** How many messages one folder's search reports at most. */
+export const SEARCH_LIMIT = 100;
+
 /** Where a moved message was, and where it is now. */
 export type Moved = { from: MessageRef; to: MessageRef };
 

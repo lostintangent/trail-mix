@@ -25,6 +25,17 @@ export type EnvelopeIndex = ReturnType<typeof envelopeIndex>;
 const PAGE_SIZE = 50;
 
 export function envelopeIndex(sql: Sql) {
+  /** Folder roles by folder, read once for each fold, since nothing in a fold changes them. */
+  let roles: Map<string, FolderRole | undefined> | undefined;
+  const rolesNow = () =>
+    new Map(
+      sql
+        .all<{ account: string; path: string; role: string | null }>(
+          `SELECT account, path, role FROM folders`,
+        )
+        .map((row) => [placeOf(row), (row.role ?? undefined) as FolderRole | undefined]),
+    );
+
   const reads: Index = {
     message: (ref) =>
       sql
@@ -49,31 +60,43 @@ export function envelopeIndex(sql: Sql) {
       sql
         .all<Row>(`SELECT ${COLUMNS} FROM messages WHERE account = ? AND path = ?`, account, path)
         .map(messageOf),
-    role: ({ account, path }) =>
-      (sql.all<{ role: string | null }>(
-        `SELECT role FROM folders WHERE account = ? AND path = ?`,
-        account,
-        path,
-      )[0]?.role ?? undefined) as FolderRole | undefined,
+    role: (folder) => (roles ?? rolesNow()).get(placeOf(folder)),
   };
 
-  /** Writes one change: its removals, then its messages. Returns the conversations it touched. */
+  /**
+   * Writes one change: its removals, then its messages, each with its links and its search row.
+   * Returns the conversations it touched.
+   */
   function write(change: ReturnType<typeof applySyncEvent>, touched: Set<ConversationId>) {
     for (const ref of [...change.remove, ...change.put]) {
-      const held = reads.message(ref);
+      const [held] = sql.all<{ rowid: number; conversation: string }>(
+        `SELECT rowid, conversation FROM messages WHERE ${BY_REF}`,
+        ...keyOf(ref),
+      );
       if (!held) continue;
       touched.add(held.conversation);
-      sql.run(`DELETE FROM messages WHERE ${BY_REF}`, ...keyOf(ref));
+      sql.run(`DELETE FROM search WHERE rowid = ?`, held.rowid);
+      sql.run(`DELETE FROM messages WHERE rowid = ?`, held.rowid);
       sql.run(`DELETE FROM links WHERE ${BY_REF}`, ...keyOf(ref));
     }
     for (const message of change.put) {
       touched.add(message.conversation);
       const { conversation, ...envelope } = message;
-      sql.run(
-        `INSERT INTO messages (account, path, uid_validity, uid, conversation, message) VALUES (?, ?, ?, ?, ?, ?)`,
+      const [inserted] = sql.all<{ rowid: number }>(
+        `INSERT INTO messages (account, path, uid_validity, uid, conversation, message)
+         VALUES (?, ?, ?, ?, ?, ?) RETURNING rowid`,
         ...keyOf(message),
         conversation,
         JSON.stringify(envelope),
+      );
+      const { senders, recipients } = searchTextOf(message);
+      sql.run(
+        `INSERT INTO search (rowid, senders, recipients, subject, preview) VALUES (?, ?, ?, ?, ?)`,
+        inserted!.rowid,
+        senders,
+        recipients,
+        message.subject,
+        message.preview,
       );
       for (const id of linkIdsOf(message)) {
         sql.run(
@@ -88,16 +111,19 @@ export function envelopeIndex(sql: Sql) {
     }
   }
 
-  /** Brings a conversation's row and its placements in line with the messages it now holds. */
-  function summarize(id: ConversationId, roles: Map<string, FolderRole | undefined>) {
+  /**
+   * Brings a conversation's row and its placements in line with the messages it now holds, and
+   * returns its latest message in each folder it is placed in now.
+   */
+  function summarize(id: ConversationId, roles: Map<string, FolderRole | undefined>): Message[] {
     sql.run(`DELETE FROM placements WHERE conversation = ?`, id);
     const messages = reads.conversation(id);
     const summary = summaryOf(id, messages);
     if (!summary) {
       sql.run(`DELETE FROM conversations WHERE id = ?`, id);
-      return;
+      return [];
     }
-    const roleOf = (message: Message) => roles.get(JSON.stringify([message.account, message.path]));
+    const roleOf = (message: Message) => roles.get(placeOf(message));
     sql.run(
       `INSERT OR REPLACE INTO conversations (id, date, summary, inbox, drafts, flagged) VALUES (?, ?, ?, ?, ?, ?)`,
       id,
@@ -109,7 +135,7 @@ export function envelopeIndex(sql: Sql) {
     );
     const latest = new Map<string, Message>();
     for (const message of messages) {
-      const key = JSON.stringify([message.account, message.path]);
+      const key = placeOf(message);
       const held = latest.get(key);
       if (!held || held.date < message.date) latest.set(key, message);
     }
@@ -122,6 +148,7 @@ export function envelopeIndex(sql: Sql) {
         message.date,
       );
     }
+    return [...latest.values()];
   }
 
   return {
@@ -132,37 +159,24 @@ export function envelopeIndex(sql: Sql) {
      * the folders whose lists changed. Run it inside a transaction with the cursor it reached.
      */
     fold(events: readonly SyncEvent[]): FolderRef[] {
-      const touched = new Set<ConversationId>();
-      for (const event of events) write(applySyncEvent(reads, event), touched);
-      const roles = new Map(
-        sql
-          .all<{ account: string; path: string; role: string | null }>(
-            `SELECT account, path, role FROM folders`,
-          )
-          .map((row) => [
-            JSON.stringify([row.account, row.path]),
-            (row.role ?? undefined) as FolderRole | undefined,
-          ]),
-      );
-      const changed = new Map<string, FolderRef>();
-      const note = (account: string, path: string) =>
-        changed.set(JSON.stringify([account, path]), { account, path });
-      for (const id of touched) {
-        for (const row of sql.all<{ account: string; path: string }>(
-          `SELECT account, path FROM placements WHERE conversation = ?`,
-          id,
-        )) {
-          note(row.account, row.path);
+      roles = rolesNow();
+      try {
+        const touched = new Set<ConversationId>();
+        for (const event of events) write(applySyncEvent(reads, event), touched);
+        const changed = new Map<string, FolderRef>();
+        const note = ({ account, path }: FolderRef) =>
+          changed.set(placeOf({ account, path }), { account, path });
+        for (const id of touched) {
+          // Where it was placed, and where it is placed now.
+          sql
+            .all<FolderRef>(`SELECT account, path FROM placements WHERE conversation = ?`, id)
+            .forEach(note);
+          summarize(id, roles).forEach(note);
         }
-        summarize(id, roles);
-        for (const row of sql.all<{ account: string; path: string }>(
-          `SELECT account, path FROM placements WHERE conversation = ?`,
-          id,
-        )) {
-          note(row.account, row.path);
-        }
+        return [...changed.values()];
+      } finally {
+        roles = undefined;
       }
-      return [...changed.values()];
     },
 
     /** The folders an account has, as last listed, with their counts from the server. */
@@ -229,9 +243,7 @@ export function envelopeIndex(sql: Sql) {
       after?: PageCursor,
       size = PAGE_SIZE,
     ): Page {
-      const position = after === undefined ? undefined : positionOf(after);
-      const before = position ? `AND (date < ? OR (date = ? AND id < ?))` : '';
-      const bound = position ? [position[0], position[0], position[1]] : [];
+      const { before, bound } = from(after);
       const rows =
         view.in === 'folder'
           ? sql.all<{ summary: string; date: string; id: string }>(
@@ -248,27 +260,50 @@ export function envelopeIndex(sql: Sql) {
               ...bound,
               size + 1,
             );
-      const items = rows.slice(0, size);
-      const last = items.at(-1);
-      return {
-        items: items.map((row) => JSON.parse(row.summary) as ConversationSummary),
-        ...(rows.length > size && last ? { next: btoa(JSON.stringify([last.date, last.id])) } : {}),
-      };
+      return pageOf(rows, size);
+    },
+
+    /**
+     * One page of the conversations with a message whose senders, recipients, subject or preview
+     * hold every word of `text`, each word as typed so far, newest first across every account.
+     */
+    search(text: string, after?: PageCursor, size = PAGE_SIZE): Page {
+      const match = matchOf(text);
+      if (!match) return { items: [] };
+      const { before, bound } = from(after);
+      const rows = sql.all<{ summary: string; date: string; id: string }>(
+        `SELECT summary, date, id FROM conversations
+         WHERE id IN (
+           SELECT m.conversation FROM search JOIN messages m ON m.rowid = search.rowid
+           WHERE search MATCH ?
+         ) ${before}
+         ORDER BY date DESC, id DESC LIMIT ?`,
+        match,
+        ...bound,
+        size + 1,
+      );
+      return pageOf(rows, size);
     },
 
     conversation: (id: ConversationId): Message[] =>
       [...reads.conversation(id)].sort((a, b) => a.date.localeCompare(b.date)),
 
-    /** Forgets an account's mail and folders. */
+    /** Forgets an account's mail and folders, leaving nothing of them on disk. */
     forget(account: string) {
       const ids = sql.all<{ conversation: string }>(
         `SELECT DISTINCT conversation FROM messages WHERE account = ?`,
+        account,
+      );
+      sql.run(
+        `DELETE FROM search WHERE rowid IN (SELECT rowid FROM messages WHERE account = ?)`,
         account,
       );
       for (const table of ['messages', 'links', 'folders', 'placements'])
         sql.run(`DELETE FROM ${table} WHERE account = ?`, account);
       for (const { conversation } of ids)
         sql.run(`DELETE FROM conversations WHERE id = ?`, conversation);
+      // A deleted search row stays readable in the table's segments until they merge, so they merge now.
+      sql.run(`INSERT INTO search (search) VALUES ('optimize')`);
     },
   };
 }
@@ -296,6 +331,58 @@ export function summaryOf(
   };
 }
 
+/** One page of rows already in order, newest first, as the index pages its own. */
+export function pageAfter(
+  rows: readonly ConversationSummary[],
+  after?: PageCursor,
+  size = PAGE_SIZE,
+): Page {
+  const position = after === undefined ? undefined : positionOf(after);
+  const rest = position
+    ? rows.filter(
+        ({ date, id }) => date < position[0] || (date === position[0] && id < position[1]),
+      )
+    : rows;
+  return pageOf(
+    rest
+      .slice(0, size + 1)
+      .map((row) => ({ summary: JSON.stringify(row), date: row.date, id: row.id })),
+    size,
+  );
+}
+
+/** The SQL that starts a page after the one a cursor ends, and its parameters. */
+function from(after: PageCursor | undefined) {
+  const position = after === undefined ? undefined : positionOf(after);
+  return {
+    before: position ? `AND (date < ? OR (date = ? AND id < ?))` : '',
+    bound: position ? [position[0], position[0], position[1]] : [],
+  };
+}
+
+/** A page of rows, read one past its size to know whether another follows. */
+function pageOf(rows: { summary: string; date: string; id: string }[], size: number): Page {
+  const items = rows.slice(0, size);
+  const last = items.at(-1);
+  return {
+    items: items.map((row) => JSON.parse(row.summary) as ConversationSummary),
+    ...(rows.length > size && last ? { next: btoa(JSON.stringify([last.date, last.id])) } : {}),
+  };
+}
+
+/**
+ * Search text as an FTS5 query: every word must match, each as a prefix, so results follow typing.
+ * Words are runs of letters and digits, so nothing typed can be FTS5 syntax. Nothing, without one.
+ */
+export function matchOf(text: string): string | undefined {
+  const words =
+    text
+      .normalize('NFKC')
+      .match(/[\p{L}\p{N}]+/gu)
+      ?.slice(0, 16) ?? [];
+  return words.length ? words.map((word) => `"${word}"*`).join(' ') : undefined;
+}
+
 /** Where a page cursor says the next page starts: after this date and conversation. */
 function positionOf(cursor: PageCursor): [date: string, id: string] {
   try {
@@ -311,6 +398,16 @@ function positionOf(cursor: PageCursor): [date: string, id: string] {
     // Not base64 JSON, so not a cursor this index wrote.
   }
   throw new TypeError('That is not a page cursor.');
+}
+
+/** A folder as a map key. */
+const placeOf = ({ account, path }: FolderRef) => JSON.stringify([account, path]);
+
+/** What search reads of a message's people: names and addresses, each as written. */
+function searchTextOf({ from, to, cc }: Message) {
+  const people = (addresses: Message['to']) =>
+    addresses.map(({ name, email }) => (name ? `${name} ${email}` : email)).join(' ');
+  return { senders: people([from]), recipients: people([...to, ...cc]) };
 }
 
 type Row = { message: string; conversation: string };

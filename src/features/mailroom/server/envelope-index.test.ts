@@ -244,3 +244,94 @@ describe('a list', () => {
     expect(subjects({ in: 'flagged' })).toEqual(['work']);
   });
 });
+
+describe('search', () => {
+  /** The subjects of every conversation a search finds, newest first. */
+  const found = (store: EnvelopeIndex, text: string) =>
+    store.search(text).items.map((item) => item.subject);
+
+  test('finds a word as it is typed in senders, recipients, subjects and previews', () => {
+    const store = fresh();
+    store.fold(
+      arrive(
+        envelope('From Mina', { from: { name: 'Mina Okafor', email: 'mina@example.org' } }),
+        envelope('To Ravi', { to: [{ name: 'Ravi Shah', email: 'ravi@example.net' }] }),
+        envelope('Cc Lee', { cc: [{ email: 'lee@corp.example' }] }),
+        envelope('Garden plans', { preview: 'The tomatoes are in.' }),
+      ),
+    );
+    expect(found(store, 'oka')).toEqual(['From Mina']);
+    expect(found(store, 'ravi@exam')).toEqual(['To Ravi']);
+    expect(found(store, 'corp')).toEqual(['Cc Lee']);
+    expect(found(store, 'garden')).toEqual(['Garden plans']);
+    expect(found(store, 'tomat')).toEqual(['Garden plans']);
+  });
+
+  test('needs every word, ignores case and accents, and reads anything typed as words', () => {
+    const store = fresh();
+    store.fold(
+      arrive(
+        envelope('Café on Friday', { date: '2026-11-02T08:00:00.000Z' }),
+        envelope('Friday standup', { date: '2026-11-01T08:00:00.000Z' }),
+      ),
+    );
+    expect(found(store, 'FRIDAY')).toEqual(['Café on Friday', 'Friday standup']);
+    expect(found(store, 'cafe fri')).toEqual(['Café on Friday']);
+    expect(found(store, 'café standup')).toEqual([]);
+    // FTS5's own syntax is just more words.
+    expect(found(store, 'friday OR NEAR( "* ^')).toEqual([]);
+    expect(store.search('  "* ')).toEqual({ items: [] });
+  });
+
+  test('finds across every account, one row per conversation, and pages newest first', () => {
+    const store = fresh();
+    const first = envelope('Lunch', { date: '2026-11-01T08:00:00.000Z' });
+    store.fold(
+      arrive(
+        first,
+        envelope('Re: Lunch', {
+          references: [first.messageId],
+          path: 'Sent',
+          date: '2026-11-02T08:00:00.000Z',
+        }),
+        ...Array.from({ length: 6 }, (_, i) =>
+          envelope(`Lunch ${i}`, { account: 'work', date: `2026-11-0${3 + i}T08:00:00.000Z` }),
+        ),
+      ),
+    );
+    const rows: string[] = [];
+    let after: string | undefined;
+    do {
+      const page = store.search('lunch', after, 3);
+      rows.push(...page.items.map((item) => `${item.account} ${item.subject}`));
+      after = page.next;
+    } while (after);
+    expect(rows).toEqual([
+      ...[5, 4, 3, 2, 1, 0].map((i) => `work Lunch ${i}`),
+      'personal Re: Lunch',
+    ]);
+  });
+
+  test('forgets a message the moment the index does', () => {
+    const store = fresh();
+    const gone = envelope('Periwinkle');
+    store.fold(arrive(gone, envelope('Kept', { account: 'work', preview: 'periwinkle too' })));
+    store.fold([{ type: 'gone', ref: gone }]);
+    expect(found(store, 'periwinkle')).toEqual(['Kept']);
+    store.forget('work');
+    expect(found(store, 'periwinkle')).toEqual([]);
+  });
+
+  test('keeps no word of an account it forgot anywhere on disk', () => {
+    const sql = testSql();
+    const store = envelopeIndex(sql);
+    // Folded one at a time, each message lands in a segment of its own.
+    for (let i = 0; i < 50; i++) store.fold(arrive(envelope(`Zanzibar${i}`)));
+    store.forget('personal');
+    const blocks = sql
+      .all<{ block: Uint8Array }>(`SELECT block FROM search_data`)
+      .map(({ block }) => new TextDecoder('latin1').decode(block))
+      .join('');
+    expect(blocks.toLowerCase()).not.toContain('zanzibar');
+  });
+});

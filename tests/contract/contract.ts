@@ -4,7 +4,11 @@
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import type { Envelope, MessageRef, SyncEvent } from '../../src/features/mail/core/index.ts';
-import type { Cursor, MailProvider } from '../../src/features/providers/index.ts';
+import {
+  SEARCH_LIMIT,
+  type Cursor,
+  type MailProvider,
+} from '../../src/features/providers/index.ts';
 
 export type Harness = {
   provider: MailProvider;
@@ -327,7 +331,19 @@ export function describeContract(
       );
       await world().deliver(message({ id: 'hay', subject: 'Plain too', text: 'Nothing here.' }));
       const envelope = await only('INBOX', 'Plain');
-      expect(await provider.search('INBOX', 'periwinkle')).toEqual([envelope.uid]);
+      expect(await provider.search('INBOX', 'periwinkle')).toEqual([envelope]);
+    });
+
+    it('reports only the newest hits of a search that finds many, newest first', async () => {
+      for (let i = 0; i <= SEARCH_LIMIT; i++) {
+        await world().deliver(
+          message({ id: `many-${i}`, subject: `Many ${i}`, minutesAgo: SEARCH_LIMIT - i }),
+        );
+      }
+      const found = await provider.search('INBOX', 'many');
+      expect(found.map(({ subject }) => subject)).toEqual(
+        Array.from({ length: SEARCH_LIMIT }, (_, i) => `Many ${SEARCH_LIMIT - i}`),
+      );
     });
 
     it('tells a watcher about new mail until it stops watching', async () => {

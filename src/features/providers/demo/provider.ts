@@ -11,7 +11,7 @@ import {
 } from '../../mail/core/index.ts';
 import { previewOf } from '../imap/core/envelope.ts';
 import { planSync } from '../imap/core/sync.ts';
-import type { MailProvider, Moved } from '../provider.ts';
+import { SEARCH_LIMIT, type MailProvider, type Moved } from '../provider.ts';
 import * as server from './mailbox.ts';
 import { DEMO_ACCOUNTS, type DemoKind } from './stories.ts';
 
@@ -70,6 +70,12 @@ export function demoServer(
     return new Map([...byFolder].map(([path, inFolder]) => [path, inFolder.map(({ uid }) => uid)]));
   }
 
+  /** What a provider reports of the message at a UID, as sync and search both report it. */
+  function envelopeAt(path: string, uid: number): Envelope | undefined {
+    const message = server.messageAt(mailbox, path, uid);
+    return message && { ...refOf(path, uid), ...message.content(), flags: message.flags };
+  }
+
   /** The message a ref names, while it is still where the ref says. */
   function find(ref: MessageRef) {
     const message = current(ref) ? server.messageAt(mailbox, ref.path, ref.uid) : undefined;
@@ -119,12 +125,7 @@ export function demoServer(
           highestModSeq: BigInt(folder.modSeq),
           inWindow,
         });
-        const envelopes = plan.envelopes.flatMap((uid): Envelope[] => {
-          const message = server.messageAt(mailbox, path, uid);
-          return message
-            ? [{ ...refOf(path, uid), ...message.content(), flags: message.flags }]
-            : [];
-        });
+        const envelopes = plan.envelopes.flatMap((uid) => envelopeAt(path, uid) ?? []);
         const flags =
           plan.flags === 'none'
             ? undefined
@@ -212,12 +213,17 @@ export function demoServer(
     search: (path, text) =>
       settle(() => {
         const needle = text.toLowerCase();
-        return server.uidsIn(mailbox, path).filter((uid) => {
+        const found = server.uidsIn(mailbox, path).filter((uid) => {
           const message = server.messageAt(mailbox, path, uid)!;
           const { subject, from, to, cc } = message.content();
           const people = [from, ...to, ...cc].map(({ name, email }) => `${name ?? ''} ${email}`);
           return [subject, ...people, message.text()].join('\n').toLowerCase().includes(needle);
         });
+        return found
+          .sort((a, b) => b - a)
+          .slice(0, SEARCH_LIMIT)
+          .flatMap((uid) => envelopeAt(path, uid) ?? [])
+          .sort((a, b) => b.date.localeCompare(a.date) || b.uid - a.uid);
       }),
 
     watch(path, onChange) {

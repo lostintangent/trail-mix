@@ -24,7 +24,7 @@ flowchart LR
 - **Operator and members.** The operator deploys Trail Mix, pays for it and invites people. A member is anyone invited. Sign-in belongs to Cloudflare Access, which emails a one-time code, so Trail Mix holds no password and has no sign-in code of its own.
 - **Worker.** Serves the app, verifies the Cloudflare Access identity on every request, and routes to the Mailroom of that member.
 - **Mailroom.** One Durable Object per member, created on first sign-in, with private storage. It is the only writer of anything Trail Mix stores for that member and the only thing that opens a mail connection.
-- **Envelope index.** SQLite inside the Mailroom, with a full-text table over senders, subjects and previews. Lists, conversations and search read it.
+- **Envelope index.** SQLite inside the Mailroom, with a full-text table over senders, recipients, subjects and previews. Lists, conversations and search read it.
 - **Body cache.** Raw messages in object storage, keyed by `MessageRef`. A body is fetched from the mail server the first time it is opened and kept after that.
 - **Outbox.** A schedule of drafts to send, driven by the Mailroom's alarm. Undo send and send later are the same mechanism.
 - **MailProvider.** The one contract every mail host is reached through. It has two implementations: IMAP with SMTP, of which Zoho and Outlook are presets, and a seeded demo mailbox that tests, agents, previews and the public demo all use.
@@ -63,7 +63,7 @@ Every layer uses the same nouns, with the same names in the index, the contracts
 Every feature is built against three contracts. Change one only together with this file.
 
 - **The mail vocabulary**, in `src/features/mail/core`. It is the one set of types every layer shares.
-- **MailProvider**, in `src/features/providers/provider.ts`. Adding a protocol means implementing this interface and nothing else. `sync` reports events (`message`, `flags`, `gone`, `reset`) since a cursor, one bounded batch at a time and newest first, and the index is the fold of those events. The fold returns the rows to write, and the Mailroom writes nothing else. The cursor belongs to the provider and is opaque to the Mailroom. `watch` is best effort, so the Mailroom still polls.
+- **MailProvider**, in `src/features/providers/provider.ts`. Adding a protocol means implementing this interface and nothing else. `sync` reports events (`message`, `flags`, `gone`, `reset`) since a cursor, one bounded batch at a time and newest first, and the index is the fold of those events. The fold returns the rows to write, and the Mailroom writes nothing else. The cursor belongs to the provider and is opaque to the Mailroom. `search` asks the server across a whole folder and resolves with envelopes, newest first and at most 100. A full-text result outside the index opens like any other and is never written to the index. `watch` is best effort, so the Mailroom still polls.
 - **What a browser can ask its Mailroom**, in `src/features/mailroom/client`. Typed server functions carry queries and commands, one WebSocket carries hints, and plain GET routes carry the bytes of messages and remote images. There is no other channel. Queries return snapshots. Commands return once the Mailroom has accepted them. `addAccount` is the only call that carries a secret. Archive and delete are moves to a folder role.
 
 ## Architecture rules

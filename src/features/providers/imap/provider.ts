@@ -10,7 +10,14 @@ import nodemailer from 'nodemailer';
 import type { SMTPTransportGetSocket } from 'nodemailer/lib/smtp-transport';
 import PostalMime from 'postal-mime';
 import type { AccountId, Flags, Folder, FolderRole, MessageRef } from '../../mail/core/index.ts';
-import type { Cursor, MailProvider, Moved, SyncBatch, SyncWindow } from '../provider.ts';
+import {
+  SEARCH_LIMIT,
+  type Cursor,
+  type MailProvider,
+  type Moved,
+  type SyncBatch,
+  type SyncWindow,
+} from '../provider.ts';
 import { envelopeOf, previewPartOf, type ImapMessage } from './core/envelope.ts';
 import { flagsOf, planSync, type SyncPlan } from './core/sync.ts';
 
@@ -110,6 +117,19 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
         lock.release();
       }
     });
+  }
+
+  /**
+   * Runs `use` with `path` selected afresh. A session sees what arrived since it selected a folder
+   * only once the server catches it up, so whatever must see the folder as it is now selects again.
+   */
+  function inFresh<T>(
+    path: string,
+    use: (connection: ImapFlow, mailbox: MailboxObject) => Promise<T>,
+  ) {
+    return inFolder(path, async (connection) =>
+      use(connection, await connection.mailboxOpen(path)),
+    );
   }
 
   /** The UIDs of these refs that still name messages in their folder, grouped by folder. */
@@ -275,10 +295,8 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
     },
 
     sync(path: string, cursor: Cursor | null, window: SyncWindow): Promise<SyncBatch> {
-      return inFolder(path, async (connection) => {
-        // Selected again, because a session sees what arrived since it selected the folder only
-        // once the server catches it up, and UIDNEXT and HIGHESTMODSEQ only from a fresh SELECT.
-        const mailbox = await connection.mailboxOpen(path);
+      // UIDNEXT and HIGHESTMODSEQ, too, come only from a fresh SELECT.
+      return inFresh(path, async (connection, mailbox) => {
         const found = await connection.search({ since: new Date(window.since) }, { uid: true });
         const inWindow = Array.isArray(found) ? found : [];
         const uidValidity = Number(mailbox.uidValidity);
@@ -367,7 +385,7 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
           }
           continue;
         }
-        const found = await inFolder(to, async (connection, mailbox) => {
+        const found = await inFresh(to, async (connection, mailbox) => {
           const pairs: Moved[] = [];
           for (const [was, messageId] of done.ids) {
             const ref = from(was);
@@ -393,7 +411,7 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
       const filed =
         uidplus && appended && appended.uid !== undefined && appended.uidValidity !== undefined
           ? refIn(drafts, appended.uidValidity, appended.uid)
-          : await inFolder(drafts, async (connection, mailbox) => {
+          : await inFresh(drafts, async (connection, mailbox) => {
               const messageId = (await PostalMime.parse(message)).messageId;
               const uid = messageId ? await uidOf(connection, messageId) : undefined;
               return uid === undefined ? undefined : refIn(drafts, mailbox.uidValidity, uid);
@@ -446,9 +464,13 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
     },
 
     async search(path: string, text: string) {
-      return inFolder(path, async (connection) => {
+      return inFresh(path, async (connection, mailbox) => {
         const found = await connection.search({ text }, { uid: true });
-        return Array.isArray(found) ? found : [];
+        const newest = (Array.isArray(found) ? found : [])
+          .sort((a, b) => b - a)
+          .slice(0, SEARCH_LIMIT);
+        const hits = await envelopes(connection, path, Number(mailbox.uidValidity), newest);
+        return hits.sort((a, b) => b.date.localeCompare(a.date) || b.uid - a.uid);
       });
     },
 

@@ -19,15 +19,34 @@ import {
 
 /**
  * The Mailroom's budgets, as AGENTS.md sets them: the first sync of a 50,000-message folder from the
- * test mail server, with no batch over a second of CPU, and then a page of the unified Inbox and a
- * 50-message conversation read from that index.
+ * test mail server, with no batch over a second of CPU, and then a page of the unified Inbox, a
+ * 50-message conversation and search as it is typed, read from that index.
  *
  * The sync is the real one, on workerd, provider, fold and SQLite included. A device is open while
  * it runs, and the Mailroom hints that device once for each Inbox batch it folds. The CPU workerd
  * spends between two hints is one batch's: parsing what the server sent, folding it and writing it.
  * Waiting on the mail server, and any pause between batches, costs no CPU, so neither counts.
  */
-const BUDGET = { firstSync: 120_000, batch: 1_000, inboxPage: 10, conversation: 10 };
+const BUDGET = {
+  firstSync: 120_000,
+  batch: 1_000,
+  inboxPage: 10,
+  conversation: 10,
+  search: 100,
+};
+
+/**
+ * What a member types into search, a keystroke at a time: a sender's name, a newsletter's, and a
+ * word nearly every message holds, which makes the first keystrokes the broadest searches.
+ */
+const TYPED = ['mina okafor', 'kernel weekly', 'are'].flatMap((text) =>
+  Array.from({ length: text.length }, (_, i) => text.slice(0, i + 1)).filter(
+    (t) => !t.endsWith(' '),
+  ),
+);
+
+/** How many times each typed search is asked. */
+const SEARCHES = 10;
 
 /** How many times each read is asked, for its 95th percentile. */
 const READS = 200;
@@ -61,6 +80,7 @@ export const mailroom: BenchArea = {
         measured('Slowest batch of that sync, CPU', sync.slowest, BUDGET.batch),
         measured('A page of the unified Inbox, p95', reads.page, BUDGET.inboxPage),
         measured('A 50-message conversation, p95', reads.conversation, BUDGET.conversation),
+        measured('Search as it is typed, p95', reads.search, BUDGET.search),
       ];
     } finally {
       worker?.stop();
@@ -143,7 +163,17 @@ async function readTimes(url: string) {
   }
   const page = await call<number[]>(url, 'timed', 'conversations', [INBOX], READS);
   const conversation = await call<number[]>(url, 'timed', 'conversation', [thread.id], READS);
-  return { page: percentile(page, 0.95), conversation: percentile(conversation, 0.95) };
+  const search: number[] = [];
+  for (const text of TYPED) {
+    search.push(
+      ...(await call<number[]>(url, 'timed', 'conversations', [{ in: 'search', text }], SEARCHES)),
+    );
+  }
+  return {
+    page: percentile(page, 0.95),
+    conversation: percentile(conversation, 0.95),
+    search: percentile(search, 0.95),
+  };
 }
 
 /** The 50-message conversation, found by its subject in the unified Inbox, newest first. */
