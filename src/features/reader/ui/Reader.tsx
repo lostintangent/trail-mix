@@ -190,7 +190,8 @@ const styles = stylex.create({
     borderRadius: tm.sheetRadius,
     boxShadow: `0 0 0 ${borderVars['--border-width']} ${colorVars['--color-border']}`,
     backgroundColor: { default: 'transparent', ':hover': colorVars['--color-overlay-hover'] },
-    color: tm.textQuiet,
+    // Quiet ink falls under 4.5:1 on the hover's shade, so a hovered line takes darker ink.
+    color: { default: tm.textQuiet, ':hover': colorVars['--color-text-secondary'] },
     fontFamily: typographyVars['--font-family-body'],
     fontSize: typeScaleVars['--text-supporting-size'],
     textAlign: 'start',
