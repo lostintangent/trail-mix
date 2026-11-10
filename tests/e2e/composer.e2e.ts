@@ -78,7 +78,7 @@ test('a reply is saved as it is written, opens again with its words and files, a
 
   // Discarding it moves it to the Trash, and it leaves the conversation.
   await reopened.getByRole('button', { name: 'Discard draft' }).click();
-  await page.getByText('Draft discarded').waitFor();
+  await page.getByRole('region', { name: 'Notifications' }).getByText('Draft discarded').waitFor();
   await page.waitForTimeout(2_000);
   await expect(draft.count()).resolves.toBe(0);
 }, 60_000);
