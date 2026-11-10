@@ -23,7 +23,7 @@ export function NameField({
   place,
   onDone,
 }: {
-  /** What the field is for, such as "Rename Trips", for assistive tech. */
+  /** What the field is for, such as "New name for Trips", for assistive tech. */
   label: string;
   initial?: string;
   /** How many folders the folder sits inside, which sets how far in the field starts. */
@@ -70,6 +70,7 @@ export function NameField({
         // The field opens where the member asked for it, so it takes the keys at once.
         autoFocus
         enterKeyHint="done"
+        placeholder="Folder name"
         value={name}
         onChange={(event) => {
           setName(event.target.value);

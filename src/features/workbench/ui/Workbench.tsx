@@ -491,7 +491,7 @@ export function Workbench({
                     </Suspense>
                   )
                 }
-                isSearch={view.in === 'search'}
+                viewIn={view.in}
                 conversations={conversations}
                 isUpdating={isFetching}
                 marks={marks}

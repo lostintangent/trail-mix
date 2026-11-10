@@ -11,7 +11,7 @@ import {
   typeScaleVars,
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { ChevronRight, Inbox, Menu, SearchX } from 'lucide-react';
+import { ChevronRight, File, FolderOpen, Inbox, Menu, SearchX, Star } from 'lucide-react';
 import { useId, type ReactNode } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { PhoneIsland } from './PhoneIsland.tsx';
@@ -22,6 +22,7 @@ import type {
   ConversationSummary,
   Marks,
   StampColor,
+  View,
 } from '../../mail/core/index.ts';
 import { StampDot } from '../../../app/theme/StampDot.tsx';
 
@@ -38,7 +39,7 @@ export function ListPane({
   scope,
   below,
   list,
-  isSearch,
+  viewIn,
   conversations,
   isUpdating,
   marks,
@@ -65,8 +66,8 @@ export function ListPane({
   below?: ReactNode;
   /** A list of the view's own in place of its conversations, as the Outbox lists its sends. */
   list?: ReactNode;
-  /** Whether the list holds a search's results. */
-  isSearch: boolean;
+  /** What kind of view the list shows, which says what an empty list means. */
+  viewIn: View['in'];
   /** Nothing until the view's first page arrives. */
   conversations: readonly ConversationSummary[] | undefined;
   /** Whether newer rows are on their way. */
@@ -133,19 +134,7 @@ export function ListPane({
         {list ? (
           list
         ) : conversations?.length === 0 ? (
-          isSearch ? (
-            <EmptyState
-              icon={<Icon icon={SearchX} size="lg" color="secondary" />}
-              title="No matches"
-              description="Nothing in any account matches every word you typed."
-            />
-          ) : (
-            <EmptyState
-              icon={<Icon icon={Inbox} size="lg" color="secondary" />}
-              title="No mail yet"
-              description="Mail from the accounts you connect will gather here, newest first."
-            />
-          )
+          <Empty viewIn={viewIn} title={title} />
         ) : conversations ? (
           <ConversationList
             label={title}
@@ -176,6 +165,47 @@ export function ListPane({
         </PhoneIsland>
       )}
     </section>
+  );
+}
+
+/** What an empty list says, for the kind of view it is. */
+const EMPTY = {
+  inbox: {
+    icon: Inbox,
+    title: () => 'No mail yet',
+    description: 'Mail from the accounts you connect will gather here, newest first.',
+  },
+  flagged: {
+    icon: Star,
+    title: () => 'Nothing flagged',
+    description: 'Mail you flag gathers here, from every account.',
+  },
+  drafts: {
+    icon: File,
+    title: () => 'No drafts',
+    description: 'Messages you start and haven’t sent gather here.',
+  },
+  folder: {
+    icon: FolderOpen,
+    title: (name: string) => `${name} is empty`,
+    description: 'Mail you move here will show up in this folder.',
+  },
+  search: {
+    icon: SearchX,
+    title: () => 'No matches',
+    description: 'Nothing in any account matches every word you typed.',
+  },
+} satisfies Record<Exclude<View['in'], 'outbox'>, unknown>;
+
+function Empty({ viewIn, title }: { viewIn: View['in']; title: string }) {
+  // The Outbox lists its own sends, and says when there are none.
+  const empty = EMPTY[viewIn === 'outbox' ? 'inbox' : viewIn];
+  return (
+    <EmptyState
+      icon={<Icon icon={empty.icon} size="lg" color="secondary" />}
+      title={empty.title(title)}
+      description={empty.description}
+    />
   );
 }
 

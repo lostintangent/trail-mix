@@ -99,8 +99,9 @@ test('folders are made, nested and renamed in place, and show before the server 
   await folderRow(page, 'Trips').waitFor({ timeout: 1_000 });
   await release();
 
-  // Inside the folder in view, from the menu at the end of its row.
+  // Inside the folder in view, from the menu at the end of its row. An empty folder says so.
   await folderRow(page, 'Trips').click();
+  await page.getByText('Trips is empty', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'More for this folder' }).click();
   await page.getByRole('menuitem', { name: 'New folder in Trips' }).click();
   await page.getByRole('textbox', { name: 'Name of the new folder in Trips' }).fill('Japan');
@@ -189,6 +190,7 @@ test('on a phone, folder controls are 44 pixels, and a folder is named in the si
   await page.getByRole('menuitem', { name: 'New folder in Archive' }).click();
   const field = page.getByRole('textbox', { name: 'Name of the new folder in Archive' });
   await field.waitFor();
+  await expect(field.getAttribute('placeholder')).resolves.toBe('Folder name');
   await expect(field.evaluate((input) => !input.closest('[inert]'))).resolves.toBe(true);
   for (const control of [add, page.getByRole('button', { name: 'More for this folder' }), field]) {
     const box = (await control.boundingBox())!;
