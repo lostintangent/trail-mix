@@ -50,7 +50,7 @@ Every layer uses the same nouns, with the same names in the index, the contracts
 | Message      | What the index holds for one message: its `Envelope` and the conversation it belongs to.                      |
 | `MessageRef` | A message's identity, which is the mail server's own: account, folder path, UIDVALIDITY and UID.              |
 | Envelope     | What a provider reports about a message: everything a list or a search needs, and no body.                    |
-| Conversation | The messages of one account that reply to each other, gathered from its Inbox, Sent and Archive.              |
+| Conversation | The messages of one account that reply to each other, gathered from its Inbox, Sent, Archive and Drafts.      |
 | Body         | The content of one message, fetched on first open. It never changes for a `MessageRef`.                       |
 | Draft        | A message in a folder whose role is `drafts`. It lives on the mail server, not in Trail Mix.                  |
 | Outgoing     | An Outbox entry: a draft, when to send it, and how the attempt is going.                                      |
@@ -63,8 +63,8 @@ Every layer uses the same nouns, with the same names in the index, the contracts
 Every feature is built against three contracts. Change one only together with this file.
 
 - **The mail vocabulary**, in `src/features/mail/core`. It is the one set of types every layer shares.
-- **MailProvider**, in `src/features/providers/provider.ts`. Adding a protocol means implementing this interface and nothing else. `sync` reports events (`message`, `flags`, `gone`, `reset`) since a cursor, and the index is the fold of those events. The cursor belongs to the provider and is opaque to the Mailroom. `watch` is best effort, so the Mailroom still polls.
-- **What a browser can ask its Mailroom**, in `src/features/mailroom/client`. Typed server functions carry queries and commands, and one WebSocket carries hints. There is no other channel. Queries return snapshots. Commands return once the Mailroom has accepted them. `addAccount` is the only call that carries a secret. Archive and delete are moves to a folder role.
+- **MailProvider**, in `src/features/providers/provider.ts`. Adding a protocol means implementing this interface and nothing else. `sync` reports events (`message`, `flags`, `gone`, `reset`) since a cursor, one bounded batch at a time and newest first, and the index is the fold of those events. The fold returns the rows to write, and the Mailroom writes nothing else. The cursor belongs to the provider and is opaque to the Mailroom. `watch` is best effort, so the Mailroom still polls.
+- **What a browser can ask its Mailroom**, in `src/features/mailroom/client`. Typed server functions carry queries and commands, one WebSocket carries hints, and plain GET routes carry the bytes of messages and remote images. There is no other channel. Queries return snapshots. Commands return once the Mailroom has accepted them. `addAccount` is the only call that carries a secret. Archive and delete are moves to a folder role.
 
 ## Architecture rules
 
@@ -73,12 +73,13 @@ These are invariants. Breaking one needs an amendment to this file, not a clever
 - **One authority.** The mail server is the truth for mail. The index and the body cache are disposable: deleting them loses nothing, and they rebuild from the server.
 - **The server's identity.** A message is its account, folder path, UIDVALIDITY and UID. Trail Mix mints no message ids of its own.
 - **One write path into the index.** Only folded sync events change it. A command changes the mail server, the next sync reports the change, and the fold records it. Browsers show the change optimistically in the meantime.
-- **A pure core.** Conversation linking, the index fold, IMAP sync reconciliation, folder-role detection, quote detection, Markdown-to-mail rendering and the Outbox state machine are pure functions. A `core` module never reaches React, Astryx, StyleX, Cloudflare or a mail library, directly or through another module.
-- **Providers per protocol, presets per vendor.** Zoho and Outlook are presets of the one IMAP and SMTP provider: hosts, ports, sign-in method, and quirks such as whether the server files its own copy in Sent.
+- **Safe to repeat.** Every write is idempotent. Folding an event again, replaying a sync batch after a cold start, retrying a command and refetching on a duplicate hint change nothing the first time did not, so the recovery from any failure is to try again.
+- **A pure core.** Conversation linking, the index fold, IMAP sync reconciliation, quote detection, Markdown-to-mail rendering and the Outbox state machine are pure functions. A `core` module never reaches React, Astryx, StyleX, Cloudflare or a mail library, directly or through another module.
+- **Providers per protocol, presets per vendor.** Zoho and Outlook are presets of the one IMAP and SMTP provider: hosts, ports, sign-in method, and quirks such as whether the server files its own copy in Sent. Folder roles come from the server's SPECIAL-USE flags, then imapflow's table of common folder names, and a preset adds hints only for a vendor that needs them.
 - **One writer.** Everything for a member runs inside that member's Mailroom. Nothing else opens a mail connection or touches storage.
 - **Snapshots and hints.** Queries return snapshots. Hints arrive at most once, in no guaranteed order, and may be lost, so a browser refetches what a hint names and refetches everything on screen after a reconnect. Nothing needs an ordered, replayable stream.
 - **Secrets enter once.** A password or refresh token is sent to the server once and encrypted before it is stored, with a key derived for that member from a Worker secret. No query returns it. Outlook sign-in uses the device-code flow, so there is no public callback route.
-- **Mail is hostile.** Message HTML is sanitized once in the browser with DOMPurify, with every rewrite done inside its hooks and nothing changed afterwards. It is then rendered in an iframe sandboxed without scripts under a restrictive content security policy. Remote images load only through the Worker's proxy, after the member allows the sender.
+- **Mail is hostile.** Message HTML is sanitized once in the browser with DOMPurify, with every rewrite done inside its hooks and nothing changed afterwards. It is then rendered in an iframe sandboxed without scripts under a restrictive content security policy. Remote images load only through the Worker's proxy, after the member allows the sender. Every route that returns the bytes of a message or a remote image answers with a sandboxing content security policy and `nosniff`, so opening one directly runs nothing.
 - **Never lose a message being written.** A draft is saved before Send schedules it and is removed only after the mail server accepts the send. Exactly one copy lands in Sent.
 - **Every request is a member.** The Worker verifies the Cloudflare Access token on each request, and the verified identity alone names the Mailroom. No query, command, socket or file route accepts a member identity from the browser. Preview and demo deployments use separate storage and can never reach a real account.
 - **One member list.** Cloudflare Access holds it. The Members page reads and edits that list for the operator and never keeps a copy.
@@ -134,9 +135,9 @@ src/
       built/           the theme compiled by `bun run theme`, which the app loads
       tokens.stylex.ts Trail Mix's own tokens
   features/
-    mail/core/         the shared vocabulary: model, conversation linking, folder roles
+    mail/core/         the shared vocabulary: model, conversation linking, the index fold
     providers/         provider.ts is the MailProvider contract
-      imap/            the IMAP and SMTP provider, its sync reconciliation, vendor presets
+      imap/            the IMAP and SMTP provider and vendor presets, with sync reconciliation in core/
       demo/            the demo provider and its seeded mailbox
     mailroom/
       server/          the Durable Object: schema versions, sync, Outbox, credentials
@@ -152,13 +153,14 @@ src/
   server/
     entry.ts           the Worker entry
     access.ts          the sign-in seam
-    routes/            what is not a server function: hint socket, attachments, image proxy
+    routes/            what is not a server function: hint socket, message bytes, image proxy
   shared/
     build/             build configuration shared with tests, such as the StyleX options
     query-client.ts
 tests/
   contract/            the provider contract suite
   e2e/                 the Playwright smoke suite
+  reader/              the hostile-mail corpus and the tests that render it in real browsers
 .github/workflows/     ci.yml and deploy.yml
 ```
 
