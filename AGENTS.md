@@ -1,0 +1,245 @@
+# Trail Mix
+
+Trail Mix is an open-source, keyboard-first mail client that you host yourself. A TanStack Start single-page app, styled with Astryx and StyleX, runs as one Cloudflare Worker. That one deployment serves its operator and the people they invite, and each of them gets a private Mailroom for their own IMAP accounts. It is dense, quiet and fast, and as good on a phone as on a desktop.
+
+This file is the working agreement for everyone who changes this repository, human or agent. A change is reviewed against the rules below. When a change needs a concept, a guarantee or a folder that this file does not name, stop and get this file amended first. Do not invent it in code.
+
+## How it fits together
+
+Every request goes through the Worker to the Mailroom of the signed-in member, and only the Mailroom talks to mail servers.
+
+```mermaid
+flowchart LR
+  Browser[Trail Mix in a browser] -->|queries and commands| Worker
+  Worker -->|routes as the signed-in member| Mailroom
+  Mailroom -->|reads lists, folds sync events| Index[Envelope index]
+  Mailroom -->|keeps opened bodies| Bodies[Body cache]
+  Mailroom -->|schedules the draft| Outbox
+  Mailroom -->|syncs, fetches, changes| Provider[MailProvider]
+  Outbox -->|sends when due| Provider
+  Provider -->|IMAP and SMTP| Servers[Mail servers]
+  Mailroom -->|hints what changed| Devices[Every open device]
+```
+
+- **Operator and members.** The operator deploys Trail Mix, pays for it and invites people. A member is anyone invited. Sign-in belongs to Cloudflare Access, which emails a one-time code, so Trail Mix holds no password and has no sign-in code of its own.
+- **Worker.** Serves the app, verifies the Cloudflare Access identity on every request, and routes to the Mailroom of that member.
+- **Mailroom.** One Durable Object per member, created on first sign-in, with private storage. It is the only writer of anything Trail Mix stores for that member and the only thing that opens a mail connection.
+- **Envelope index.** SQLite inside the Mailroom, with a full-text table over senders, subjects and previews. Lists, conversations and search read it.
+- **Body cache.** Raw messages in object storage, keyed by `MessageRef`. A body is fetched from the mail server the first time it is opened and kept after that.
+- **Outbox.** A schedule of drafts to send, driven by the Mailroom's alarm. Undo send and send later are the same mechanism.
+- **MailProvider.** The one contract every mail host is reached through. It has two implementations: IMAP with SMTP, of which Zoho and Outlook are presets, and a seeded demo mailbox that tests, agents, previews and the public demo all use.
+- **Browser.** TanStack Query holds snapshots and applies changes optimistically. Each tab holds one WebSocket to its Mailroom.
+
+Three routes cover the whole system:
+
+- **Reading.** Lists come from the index. A body comes from the mail server once and from the cache after that.
+- **Sending.** Send schedules a saved draft, and the Outbox submits it when the undo window closes.
+- **Staying current.** The Mailroom syncs, folds what changed into the index, and hints every open device to refetch. Inbox is watched live while a device has Trail Mix open and checked every few minutes otherwise. A deploy or an eviction can drop the held connection at any time, so every wake is a cold start: reconnect, sync from the stored cursor, resume watching.
+
+The mail server stays the only authority for mail. Trail Mix owns three things: account settings, encrypted credentials, and the schedule of messages waiting in the Outbox.
+
+### Vocabulary
+
+Every layer uses the same nouns, with the same names in the index, the contracts and the interface. `src/features/mail/core/model.ts` defines them.
+
+| Noun         | Meaning                                                                                                       |
+| ------------ | ------------------------------------------------------------------------------------------------------------- |
+| Account      | One mailbox a member has connected, with a name, a stamp color, an optional signature and a status.           |
+| Folder       | A folder on the mail server, named by a `FolderRef` (account and path), with an optional role and its counts. |
+| Folder role  | `inbox`, `sent`, `drafts`, `archive`, `trash` or `junk`. Folders are recognized by role, never by name.       |
+| Message      | What the index holds for one message: its `Envelope` and the conversation it belongs to.                      |
+| `MessageRef` | A message's identity, which is the mail server's own: account, folder path, UIDVALIDITY and UID.              |
+| Envelope     | What a provider reports about a message: everything a list or a search needs, and no body.                    |
+| Conversation | The messages of one account that reply to each other, gathered from its Inbox, Sent and Archive.              |
+| Body         | The content of one message, fetched on first open. It never changes for a `MessageRef`.                       |
+| Draft        | A message in a folder whose role is `drafts`. It lives on the mail server, not in Trail Mix.                  |
+| Outgoing     | An Outbox entry: a draft, when to send it, and how the attempt is going.                                      |
+| View         | What a list shows: one folder, a unified Inbox, Flagged, Drafts or Outbox across every account, or a search.  |
+| Hint         | A message on the WebSocket that names what changed, so the browser knows what to refetch.                     |
+| Stamp        | An account's color. It marks each row in the unified views and the From chip in the composer.                 |
+
+### Contracts
+
+Every feature is built against three contracts. Change one only together with this file.
+
+- **The mail vocabulary**, in `src/features/mail/core`. It is the one set of types every layer shares.
+- **MailProvider**, in `src/features/providers/provider.ts`. Adding a protocol means implementing this interface and nothing else. `sync` reports events (`message`, `flags`, `gone`, `reset`) since a cursor, and the index is the fold of those events. The cursor belongs to the provider and is opaque to the Mailroom. `watch` is best effort, so the Mailroom still polls.
+- **What a browser can ask its Mailroom**, in `src/features/mailroom/client`. Typed server functions carry queries and commands, and one WebSocket carries hints. There is no other channel. Queries return snapshots. Commands return once the Mailroom has accepted them. `addAccount` is the only call that carries a secret. Archive and delete are moves to a folder role.
+
+## Architecture rules
+
+These are invariants. Breaking one needs an amendment to this file, not a clever exception.
+
+- **One authority.** The mail server is the truth for mail. The index and the body cache are disposable: deleting them loses nothing, and they rebuild from the server.
+- **The server's identity.** A message is its account, folder path, UIDVALIDITY and UID. Trail Mix mints no message ids of its own.
+- **One write path into the index.** Only folded sync events change it. A command changes the mail server, the next sync reports the change, and the fold records it. Browsers show the change optimistically in the meantime.
+- **A pure core.** Conversation linking, the index fold, IMAP sync reconciliation, folder-role detection, quote detection, Markdown-to-mail rendering and the Outbox state machine are pure functions. A `core` module never reaches React, Astryx, StyleX, Cloudflare or a mail library, directly or through another module.
+- **Providers per protocol, presets per vendor.** Zoho and Outlook are presets of the one IMAP and SMTP provider: hosts, ports, sign-in method, and quirks such as whether the server files its own copy in Sent.
+- **One writer.** Everything for a member runs inside that member's Mailroom. Nothing else opens a mail connection or touches storage.
+- **Snapshots and hints.** Queries return snapshots. Hints arrive at most once, in no guaranteed order, and may be lost, so a browser refetches what a hint names and refetches everything on screen after a reconnect. Nothing needs an ordered, replayable stream.
+- **Secrets enter once.** A password or refresh token is sent to the server once and encrypted before it is stored, with a key derived for that member from a Worker secret. No query returns it. Outlook sign-in uses the device-code flow, so there is no public callback route.
+- **Mail is hostile.** Message HTML is sanitized once in the browser with DOMPurify, with every rewrite done inside its hooks and nothing changed afterwards. It is then rendered in an iframe sandboxed without scripts under a restrictive content security policy. Remote images load only through the Worker's proxy, after the member allows the sender.
+- **Never lose a message being written.** A draft is saved before Send schedules it and is removed only after the mail server accepts the send. Exactly one copy lands in Sent.
+- **Every request is a member.** The Worker verifies the Cloudflare Access token on each request, and the verified identity alone names the Mailroom. No query, command, socket or file route accepts a member identity from the browser. Preview and demo deployments use separate storage and can never reach a real account.
+- **One member list.** Cloudflare Access holds it. The Members page reads and edits that list for the operator and never keeps a copy.
+- **Sign-in is one seam.** Proving who sent a request is a single function that returns a verified email address. Nothing else knows how sign-in works, so it can be replaced without touching the rest.
+- **Closed until configured.** A deployment with no sign-in configured answers every request with a setup page. The one exception is the health endpoint, which reports only the running version.
+- **The operator is trusted, and members are told.** Whoever controls the Cloudflare account can read everything stored in it, encryption included, because the key is theirs. The README and the first-run screen say so.
+- **Storage upgrades itself.** Each Mailroom records its schema version and applies newer versions, in order, when it wakes. Versions are only ever appended, so any deployment can move forward from any earlier release.
+- **Idle Mailrooms wind down.** A Mailroom nobody has opened for 30 days stops checking mail, and after 90 days it erases itself.
+
+## Design
+
+### Paper and ink
+
+Trail Mix uses system fonts, dense rows, one `light-dark()` palette, and a recessed backdrop with raised panes. Five ideas make up its identity. Extend them to new screens instead of adding a sixth.
+
+- **A desk and sheets.** The sidebar sits directly on the desk. The conversation list and the reader are sheets lying on it, and inside the reader each message is its own sheet of paper. Light mode is warm paper. Dark mode is a blue-black desk at night, not neutral gray.
+- **Ink.** Text is blue-black ink, and the one accent is ink blue: unread marks, links, focus rings, the primary button.
+- **The highlighter.** Yellow has exactly one job: marking what the member flagged and what a search matched.
+- **Stamps.** Every account has a color, so it is always clear which inbox a message came from and which one a message is about to leave from.
+- **Airmail.** A red-and-blue airmail stripe means one thing, that this message is leaving: the undo countdown, Outbox rows, a scheduled send.
+
+Conversation subjects in the reader are set in the system serif. Everything else is system sans, with system monospace for plain-text mail, code and headers. No web fonts load. Selection lifts instead of tinting: the selected conversation rises from the list sheet onto paper.
+
+### Design-system rules
+
+- **Two tools, no third.** Astryx supplies the components and the token vocabulary. StyleX styles everything Trail Mix lays out itself. There is no Tailwind and no second component library. When Astryx lacks a component, build it from Astryx primitives and StyleX. When an Astryx component cannot be bent with its `xstyle` prop or the theme, eject its source with `astryx swizzle` and own it.
+- **Tokens, never literals.** Colors come from the Astryx theme in `src/app/theme/trail-mix.ts`, each as a light and dark pair. Every value Astryx has no name for lives in `src/app/theme/tokens.stylex.ts`. Components use neither raw colors nor raw sizes.
+- **The virtualized list.** Astryx has none, so the conversation list uses TanStack Virtual, with rows styled in StyleX.
+- **StyleX wiring.** The class name prefix is `tm`, so no class collides with the `x` classes Astryx ships precompiled. `useCSSLayers` is on, and lightningcss runs with `Features.LightDark` excluded. In development the HTML loads `/virtual:stylex.css` and `virtual:stylex:runtime`. A test compiles the app's styles and fails if any class name also appears in Astryx's stylesheet.
+- **Pinned versions.** Every `@astryxdesign/*` and `@stylexjs/*` package is pinned to an exact version, with core and theme on the same version. Upgrade them together, in a pull request that does nothing else and includes before-and-after screenshots of every screen.
+- **A single-page app.** No route is rendered on the server. A small inline script applies the saved theme mode and pane widths before first paint, so nothing flashes.
+- **Theme.** It follows the system by default. A manual Light or Dark choice is saved per device.
+- **Width picks the layout, pointer picks the size.** Below 768 pixels there is one pane at a time on a sliding track. On a coarse pointer, at any width, every target is at least 44 pixels.
+- **Side panels.** They have pixel widths, resize by drag and by arrow keys, snap to a rail when dragged below their midpoint, keep their widths across a reload, and expose `role="separator"`. Use Astryx's `useResizable` and `ResizeHandle` if they can do all of this. Otherwise the workbench owns a `SidePanel` that does.
+- **Accessibility.** All text meets a 4.5:1 contrast ratio in both themes. Each component declares its own reduced-motion and forced-colors behavior. CI checks contrast on every screen of the demo mailbox, light and dark.
+- **Motion.** State changes take 125 milliseconds. Panes and the phone track move for 300 milliseconds on the layout easing. Nothing moves under reduced motion.
+- **Message content is foreign.** It never inherits Trail Mix's styles. HTML mail renders inside its own sandboxed frame, on paper, and mail that sets its own colors stays on light paper in the dark theme.
+- **One command registry.** Every action is a command. The registry feeds the palette, the shortcut sheet and the visible controls, so a shortcut cannot exist without its palette entry.
+
+## Code layout
+
+```text
+src/
+  app/                 boots the router and the theme
+    main.tsx
+    router.tsx
+    global.css
+    prepaint.ts        the inline script that runs before first paint
+    theme/
+      trail-mix.ts     the Astryx theme
+      tokens.stylex.ts Trail Mix's own tokens
+  features/
+    mail/core/         the shared vocabulary: model, conversation linking, folder roles
+    providers/         provider.ts is the MailProvider contract
+      imap/            the IMAP and SMTP provider, its sync reconciliation, vendor presets
+      demo/            the demo provider and its seeded mailbox
+    mailroom/
+      server/          the Durable Object: schema versions, sync, Outbox, credentials
+      client/          queries and commands, and the hint socket
+    workbench/ui/      the panes, the side panels and the phone track
+    folders/ui/
+    conversations/ui/
+    reader/            core/ sanitizes and folds quotes, ui/ renders the sandboxed frame
+    composer/          core/ renders Markdown to mail and builds MIME, ui/ is the editor
+    outbox/ui/
+    commands/          registry.ts and the palette
+    members/           server/ edits the Cloudflare Access list, ui/ is the Members page
+  server/
+    entry.ts           the Worker entry
+    access.ts          the sign-in seam
+    routes/            what is not a server function: hint socket, attachments, image proxy
+  shared/
+    build/             build configuration shared with tests, such as the StyleX options
+    query-client.ts
+tests/
+  contract/            the provider contract suite
+  e2e/                 the Playwright smoke suite
+.github/workflows/     ci.yml and deploy.yml
+```
+
+- A feature owns a framework-free `core`, its `server` code and its `ui`. Not every feature needs all three.
+- Features reach each other only through an `index.ts`. Inside a feature, modules import each other freely.
+- `mail/core` is the shared vocabulary that every other feature imports.
+- `src/app` and `src/server` compose features. `src/shared` holds only generic mechanics and knows no feature.
+- Imports are relative and carry their file extension. There is no path alias.
+- `tests/boundaries.test.ts` walks the import graph and fails on a shortcut between features or on a `core` that reaches a framework.
+
+## Writing Great Code
+
+Great code pursues simplicity by placing a rich domain model at the center, decomposing it into clear responsibilities, and applying functional principles to express its behavior directly. Architecture, state, control flow, boundaries, and tests should follow from real requirements and preserve the product experience with as little machinery as possible.
+
+- Domain coherence
+  - Define the smallest coherent ontology of concepts and relationships, then use that vocabulary consistently across every subsystem and layer. These become the system's nouns; scrutinize every addition.
+  - Express operations over those values as domain verbs (the subsystem's algebra). A subsystem's public surface should expose capabilities rather than incidental types, wrappers, or implementation steps.
+  - Use that model to make valid states, transitions, true dependencies, expected side effects, and ownership explicit. Prefer one source of truth and representations that exclude invalid combinations when practical.
+- Semantic decomposition
+  - Decompose the domain into subsystems with independently nameable roles, ownership, and contracts. Each subsystem should expose a coherent capability rather than mirror implementation mechanics.
+  - Within each subsystem, give every module and component one semantic responsibility. Create or extract one when it gives a capability a clear owner, removes real repetition, or clarifies composition; inline wrappers that only add indirection.
+  - Grow the system by extension. Before building a capability, look for an existing one in the owning feature, shared modules and components, sibling features, the installed libraries, and the platform, and extend what fits instead of building a parallel version.
+  - Within each file, optimize for linear top-to-bottom reading. Establish its role, domain concepts, and common control flow before supporting mechanics and edge cases; comment only to explain a non-obvious role or invariant.
+- Functional architecture
+  - Within each boundary, implement domain behavior as a pure, referentially transparent core over immutable values, with explicit inputs, outputs, and transitions.
+  - Isolate unavoidable effects, including UI animation, persistence, timers, and external communication, at the owning component or module boundary, with explicit lifetimes and failure behavior.
+  - Compose subsystems through narrow contracts. Keep policy and orchestration with their owning layer, and share only genuinely generic mechanics.
+- Verifiable contracts
+  - Encode domain invariants and policy in executable tests. Verify observable behavior, valid transitions, lifecycle outcomes, and boundary guarantees rather than private implementation details or duplicated logic.
+  - Concentrate exhaustive coverage around foundational state machines, reducers, policies, codecs, and boundaries where one defect propagates widely. Test leaf consumers when they own distinct behavior, lifecycle, or integration risk.
+  - Keep tests deterministic and readable as specifications: order common behavior before edge cases, prove one contract per test, and introduce narrow seams or protocol-faithful fakes only when needed.
+
+## Engineering
+
+### Toolchain
+
+- **Bun canary 1.4.4 or newer** owns install, format, lint, type-check and test. Install it with `bun upgrade --canary`. `bun fmt`, `bun lint` and `bun check` are built in, so there is no Prettier, ESLint or `typescript` package to install.
+- **Vite** runs the dev server and the build, under Bun. `bunfig.toml` sets `[run] bun = true`, so a package script never falls back to Node. The one exception is `wrangler deploy`, which runs on Node.
+- **Setup.** `bun install`, then `bun run dev`.
+- **Dependencies are exact versions.** `bun add` pins what it installs, and CI installs from the frozen lockfile. An upgrade is a deliberate edit.
+- **Lint is strict.** Type-aware rules are on and a warning fails the run. To relax a rule, change `bunfig.toml` or add an `eslint-disable-next-line` comment, and say why in either place.
+
+### Tests
+
+Tests concentrate where a defect spreads.
+
+- Exhaustive `bun test` coverage of the pure core.
+- One provider contract suite that runs against the demo provider and against the IMAP provider talking to the test mail server.
+- A Playwright smoke suite that drives the built app on the demo mailbox, at desktop and phone sizes in both themes, and attaches screenshots to the CI run.
+
+### Mail safety
+
+- Never touch anyone's real mail. Development, tests and previews use the demo provider and the test mail server. Only an operator connects real accounts.
+- The test mail server runs natively, with no Docker or other container. One Bun script starts and stops it, on a laptop and in CI alike.
+
+### A public repository
+
+- The repository holds no secret, account name, personal address or local path. Secrets live in Worker secrets and GitHub secrets.
+- Workflows that deploy run only where the Cloudflare secrets exist, so forks and outside pull requests build and test but never deploy.
+
+### Pipeline
+
+- **CI** runs on every pull request and every push to main: install from the frozen lockfile, format check, lint, type-check, test and build, then the provider contract suite against the test mail server and the Playwright smoke suite against the built app.
+- **Preview** runs on every pull request, after CI. It deploys the branch to an isolated environment with its own storage that enables only the demo provider, and posts the address on the pull request.
+- **Production** runs on every push to main, after CI. It deploys with the commit as its version and then calls the health endpoint. If the endpoint does not report that commit, the workflow rolls back and fails.
+- **Demo** runs after production. It deploys the public demo: no sign-in, demo provider only, one Mailroom per visitor that erases itself after a day.
+
+## Definition of done
+
+- `bun fmt --check`, `bun lint`, `bun check`, `bun test` and `bun run build` all pass locally before a push, and CI is green on main afterwards.
+- Work lands directly on main, one coherent step at a time, and never leaves main undeployable. Open a pull request, which gets a preview, for a change that wants a look before it lands.
+- The change keeps every rule in this file, or amends this file in the same change.
+
+## Not in scope
+
+Adding any of these is a decision for the maintainer, not something a change drifts into.
+
+- Snooze, reminders when nobody replies, saved searches as split inboxes, and snippets.
+- AI triage, summaries and drafted replies.
+- A Microsoft Graph or Zoho REST provider, and POP3.
+- Presets beyond Zoho and Outlook. Any IMAP server already works by entering its hosts.
+- Calendar invitations, contacts sync and sender screening.
+- Writing or queuing mail while offline.
+- Roles beyond operator and member, limits per member, and a sign-in of Trail Mix's own.
+- Sharing between members: shared mailboxes, delegation or a common address book.
+- Versioned releases, a changelog, and update notices for operators.
+- Server rendering of pages, and a floating composer that can be minimized.
