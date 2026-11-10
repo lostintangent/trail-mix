@@ -1,4 +1,3 @@
-import { Button } from '@astryxdesign/core/Button';
 import { useQueryClient, type InfiniteData } from '@tanstack/react-query';
 import { useCallback } from 'react';
 import { folderName } from '../../folders/index.ts';
@@ -96,19 +95,9 @@ export function useTriage(view: View, folders: readonly Folder[]): Triage {
           const moved = await send(command);
           if (laid) overlays.settle(laid);
           if (quietly) return;
-          const dismiss = await toast({
+          void toast({
             body: said(action, ids.length, folders),
-            endContent: (
-              <Button
-                label="Undo"
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  dismiss();
-                  void undo(command, moved);
-                }}
-              />
-            ),
+            action: { label: 'Undo', onAction: () => void undo(command, moved) },
           });
         } catch (error) {
           if (laid) overlays.lift(laid);

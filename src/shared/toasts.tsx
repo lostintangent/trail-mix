@@ -1,5 +1,5 @@
-import type { ToastDismissFn, ToastOptions, ToastViewportProps } from '@astryxdesign/core/Toast';
-import { lazy, Suspense, useEffect, useState } from 'react';
+import type { ToastDismissFn, ToastViewportProps } from '@astryxdesign/core/Toast';
+import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
 
 /**
  * Toasts, kept off the first load. Astryx's toasts carry their own layers and gestures, which the
@@ -10,7 +10,15 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 /** How long after `Toasts` mounts they start loading, leaving the first screen the network. */
 const LOAD_AFTER_MS = 1_000;
 
-type Show = (options: ToastOptions) => ToastDismissFn;
+/** A toast: what it says, whether it reports an error, and the one thing it offers to do. */
+export type Toast = {
+  body: ReactNode;
+  type?: 'info' | 'error';
+  /** A button at the toast's end, such as Undo, which also dismisses the toast. */
+  action?: { label: string; onAction: () => void };
+};
+
+export type Show = (toast: Toast) => ToastDismissFn;
 
 let wanted = false;
 const wanters = new Set<() => void>();
@@ -20,9 +28,9 @@ const shown = new Promise<Show>((resolve) => (resolveShow = resolve));
 const Host = lazy(() => import('./toast-host.tsx'));
 
 /** Shows a toast once toasts have loaded, and says how to dismiss it. */
-export async function toast(options: ToastOptions): Promise<ToastDismissFn> {
+export async function toast(toast: Toast): Promise<ToastDismissFn> {
   want();
-  return (await shown)(options);
+  return (await shown)(toast);
 }
 
 /** Where toasts appear, loaded a moment after the first screen or when a toast is first shown. */
