@@ -1,4 +1,5 @@
-import type { Endpoint } from './provider.ts';
+/** Where a host listens. Implicit TLS when `secure`, STARTTLS otherwise. */
+export type Endpoint = { host: string; port: number; secure: boolean };
 
 /**
  * Vendors are presets of the one IMAP and SMTP provider: their hosts and ports, how a member signs
@@ -14,7 +15,9 @@ export type Preset = {
 };
 
 export const PRESETS = {
-  // Zoho accounts on a domain of their own. Addresses at zoho.com use imap.zoho.com and smtp.zoho.com.
+  // Zoho's server names depend on the account's plan and data center: imappro and smtppro for a paid
+  // organization, imap and smtp for a personal or free one, and other domains outside the US. These
+  // are only filled in, and an account uses the names its own Zoho settings list.
   // Whether Zoho files submitted mail in Sent is measured when the operator's account connects.
   zoho: {
     imap: { host: 'imappro.zoho.com', port: 993, secure: true },

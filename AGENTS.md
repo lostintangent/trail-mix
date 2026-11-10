@@ -137,7 +137,7 @@ src/
   features/
     mail/core/         the shared vocabulary: model, conversation linking, the index fold, MIME
     providers/         provider.ts is the MailProvider contract
-      imap/            the IMAP and SMTP provider and vendor presets, with sync reconciliation in core/
+      imap/            the IMAP and SMTP provider, with sync reconciliation and vendor presets in core/
       demo/            the demo provider and its seeded mailbox
     mailroom/
       server/          the Durable Object: schema versions, sync, Outbox, credentials

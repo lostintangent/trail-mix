@@ -23,10 +23,8 @@ import {
 import { envelopeOf, previewPartOf, type ImapMessage } from './core/envelope.ts';
 import { flagsOf, planSync, type SyncPlan } from './core/sync.ts';
 import { subtree } from './core/folders.ts';
+import type { Endpoint } from './core/presets.ts';
 import { submitFailure } from './core/send.ts';
-
-/** Where a host listens. Implicit TLS when `secure`, STARTTLS otherwise. */
-export type Endpoint = { host: string; port: number; secure: boolean };
 
 export type ImapAccount = {
   account: AccountId;

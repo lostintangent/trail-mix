@@ -8,5 +8,5 @@ export {
   type DemoMailbox,
   type DemoServer,
 } from './demo/provider.ts';
-export { imapProvider, type Endpoint, type ImapAccount, type Network } from './imap/provider.ts';
-export { PRESETS, type Preset, type PresetName } from './imap/presets.ts';
+export { imapProvider, type ImapAccount, type Network } from './imap/provider.ts';
+export { PRESETS, type Endpoint, type Preset, type PresetName } from './imap/core/index.ts';
