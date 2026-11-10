@@ -47,10 +47,14 @@ declare global {
     /** What hostile mail calls if any of its script ever runs. */
     __pwned: (id: string) => void;
     pwned: string[];
+    /** The keys the reader handed on from inside its messages. */
+    messageKeys: string[];
   }
 }
 
 window.pwned = [];
+window.messageKeys = [];
+const recordKey = (event: KeyboardEvent) => window.messageKeys.push(event.key);
 window.__pwned = (id) => window.pwned.push(id);
 window.setTheme = (mode) => {
   document.documentElement.dataset['theme'] = mode;
@@ -123,7 +127,12 @@ function Pane({ fixture, upcoming }: { fixture: Fixture; upcoming?: Conversation
   const account = accounts?.find(({ id }) => id === fixture.account.id) ?? fixture.account;
   return (
     <section className="pane">
-      <Reader conversation={fixture.conversation} account={account} upcoming={upcoming} />
+      <Reader
+        conversation={fixture.conversation}
+        account={account}
+        upcoming={upcoming}
+        onMessageKey={recordKey}
+      />
     </section>
   );
 }

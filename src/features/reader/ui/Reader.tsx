@@ -15,6 +15,7 @@ import { stampStyles } from '../../../app/theme/stamps.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, ConversationId, Message } from '../../mail/core/index.ts';
 import { accountsQuery, bodyQuery, conversationQuery } from '../../mailroom/client/index.ts';
+import { MessageKeys } from './MessageFrame.tsx';
 import { displayName, MessageSheet, when } from './MessageSheet.tsx';
 import { imagesAllowed, refKey, refOf, safeMail } from './safeMail.ts';
 
@@ -24,6 +25,11 @@ export type ReaderProps = {
   account: Account;
   /** The conversations the member is likely to open next, prepared while the browser is idle. */
   upcoming?: ConversationId[];
+  /**
+   * Keys pressed inside a message's frame, which the page around the frame never hears, for the
+   * workbench's shortcuts. The same function from one render to the next.
+   */
+  onMessageKey?: (event: KeyboardEvent) => void;
 };
 
 /**
@@ -34,17 +40,24 @@ export type ReaderProps = {
  * It renders again only when what it shows or prepares changes, so moving through the list while
  * the reader waits costs it nothing.
  */
-export const Reader = memo(function Reader({ upcoming = [], ...props }: ReaderProps) {
+export const Reader = memo(function Reader({ upcoming = [], onMessageKey, ...props }: ReaderProps) {
   usePrepared(upcoming);
   const id = props.conversation[0]?.conversation ?? '';
-  return <Conversation key={id} {...props} />;
+  return (
+    <MessageKeys value={onMessageKey ?? IGNORE_KEY}>
+      <Conversation key={id} {...props} />
+    </MessageKeys>
+  );
 }, isSameReading);
+
+const IGNORE_KEY = () => {};
 
 function isSameReading(before: ReaderProps, after: ReaderProps): boolean {
   const ids = (props: ReaderProps) => (props.upcoming ?? []).join('\u0000');
   return (
     before.conversation === after.conversation &&
     before.account === after.account &&
+    before.onMessageKey === after.onMessageKey &&
     ids(before) === ids(after)
   );
 }

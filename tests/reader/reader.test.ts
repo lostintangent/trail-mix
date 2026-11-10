@@ -98,6 +98,19 @@ for (const type of BROWSERS) {
         await page.close();
       });
 
+      // WebKit runs no listener at all in a document whose sandbox allows no scripts, even one the
+      // page added, so there a key pressed inside a message stays inside it.
+      test.if(type.name() === 'chromium')(
+        'hands on the keys pressed inside a message, which the page never hears',
+        async () => {
+          await open('lunch');
+          await page.frameLocator('iframe').locator('body').click();
+          await page.keyboard.press('e');
+          expect(await page.evaluate(() => window.messageKeys)).toEqual(['e']);
+          await page.close();
+        },
+      );
+
       test('shows the raw source and headers as text, never as markup', async () => {
         await open('lunch');
         await page.getByRole('button', { name: 'View source' }).click();

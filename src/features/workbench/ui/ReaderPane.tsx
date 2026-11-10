@@ -52,6 +52,7 @@ export function ReaderPane({
   upcoming,
   onShown,
   actions,
+  onMessageKey,
   onBack,
 }: {
   selected: ConversationId | undefined;
@@ -68,6 +69,8 @@ export function ReaderPane({
    * the island at the bottom of the screen, which has room for fewer.
    */
   actions?: (reading: Reading, place: 'bar' | 'island') => ReactNode;
+  /** Keys pressed inside a message, which the window never hears. The same function each render. */
+  onMessageKey?: (event: KeyboardEvent) => void;
   onBack: () => void;
 }) {
   const shown = useRestingSelection(selected);
@@ -116,6 +119,7 @@ export function ReaderPane({
               conversation={reading.conversation}
               account={reading.account}
               upcoming={shown === selected ? preparing : []}
+              onMessageKey={onMessageKey}
             />
           </Suspense>
         </div>

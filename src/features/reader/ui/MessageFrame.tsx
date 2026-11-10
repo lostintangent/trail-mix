@@ -1,6 +1,14 @@
 import { colorVars, typeScaleVars, typographyVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
+import {
+  createContext,
+  use,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from 'react';
 import { tm } from '../../../app/theme/tokens.stylex.ts';
 import { frameDocument, type FrameLook, type SafeMail } from '../core/sanitize.ts';
 
@@ -16,6 +24,13 @@ import { frameDocument, type FrameLook, type SafeMail } from '../core/sanitize.t
  * Its document is written once per look and never touched after.
  */
 export const FRAME_SANDBOX = 'allow-same-origin allow-popups allow-popups-to-escape-sandbox';
+
+/**
+ * Where keys pressed inside a message go. Once the member clicks into a message, its frame has the
+ * focus, and the page around it never hears a key. Nothing in the frame runs, so the page listens
+ * on the frame's document and hands each key on.
+ */
+export const MessageKeys = createContext<(event: KeyboardEvent) => void>(() => {});
 
 export type MessageFrameProps = {
   mail: SafeMail;
@@ -33,7 +48,12 @@ export function MessageFrame({ mail, quotes, title }: MessageFrameProps) {
     () => (look ? frameDocument(mail, { ...look, quotes }) : undefined),
     [mail, look, quotes],
   );
-  const onLoad = useFitToContent(box, sizer, frame);
+  const fitToContent = useFitToContent(box, sizer, frame);
+  const passKey = use(MessageKeys);
+  const onLoad = () => {
+    fitToContent();
+    frame.current?.contentDocument?.addEventListener('keydown', passKey);
+  };
 
   return (
     <div ref={box} {...stylex.props(styles.box)}>
