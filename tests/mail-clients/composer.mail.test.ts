@@ -5,7 +5,9 @@
 // message it answers: Roundcube as Dovecot threads it, and mutt by itself from the headers alone.
 // A draft is in Roundcube's Drafts within ten seconds of the first keystroke, a tab closed
 // mid-sentence keeps all it had written up to the last save, and the draft opens again in Trail
-// Mix with its formatting and its file.
+// Mix with its formatting and its file. A draft another client wrote, quoting mail with remote
+// images, can be opened, written in, saved, copied from and closed, and its conversation read,
+// without the page or the Mailroom loading any of them.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -346,6 +348,151 @@ describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix
     await page.context().close();
   }, 60_000);
 
+  describe('a draft another client wrote, answering mail with remote images, loads none of them', () => {
+    // A web server on this machine that counts every request, standing in for a tracking pixel.
+    const asked: string[] = [];
+    let pixels: ReturnType<typeof Bun.serve>;
+    const pixel = (name: string) => `http://127.0.0.1:${pixels.port}/${name}.png`;
+
+    beforeAll(() => {
+      pixels = Bun.serve({
+        hostname: '127.0.0.1',
+        port: 0,
+        fetch(request) {
+          asked.push(new URL(request.url).pathname);
+          return new Response(Uint8Array.from(Buffer.from(PNG, 'base64')), {
+            headers: { 'content-type': 'image/png' },
+          });
+        },
+      });
+    });
+    afterAll(() => pixels?.stop(true));
+
+    test('quoted in its text, which opens as Markdown', async () => {
+      const offer = await fromMallory();
+      await draftReplying(offer, {
+        text: [
+          'Not for me, thanks.',
+          '',
+          '> Claim your prize:',
+          '>',
+          `> ![prize](${pixel('quoted-markdown')})`,
+          '>',
+          `> <img src="${pixel('quoted-html')}" alt="prize">`,
+          '>',
+          '> Reply by Friday.',
+        ].join('\r\n'),
+        html: `<p>Not for me, thanks.</p><blockquote><p>Claim your prize:</p><img src="${pixel('draft-html')}" alt="prize"></blockquote>`,
+      });
+      await writeInAndRead(offer);
+    }, 90_000);
+
+    test('in its HTML alone', async () => {
+      const offer = await fromMallory();
+      await draftReplying(offer, {
+        html: [
+          '<p>Not for me, thanks.</p>',
+          `<blockquote style="background: url(${pixel('background')})">`,
+          '<p>Claim your prize:</p>',
+          `<img src="${pixel('src')}" srcset="${pixel('srcset')} 2x" alt="prize">`,
+          `<picture><source srcset="${pixel('source')}"><img src="${pixel('picture')}"></picture>`,
+          `<video poster="${pixel('poster')}"></video>`,
+          '<p>Reply by Friday.</p>',
+          '</blockquote>',
+        ].join(''),
+      });
+      await writeInAndRead(offer);
+    }, 90_000);
+
+    /**
+     * Opens the draft in the reader and then in the composer, types and lets it save, copies all of
+     * it, closes the composer, and reads its conversation. The pixel server hears nothing.
+     */
+    async function writeInAndRead(offer: { subject: string }) {
+      asked.length = 0;
+      const page = await trailMix();
+      const reader = page.getByRole('region', { name: 'Reader' });
+      await page
+        .getByRole('button', { name: /^Drafts/ })
+        .first()
+        .click();
+      await page.getByRole('option').filter({ hasText: offer.subject }).click({ timeout: 30_000 });
+      await reader.getByRole('button', { name: /^Draft/ }).click();
+      const composer = page.getByRole('region', { name: 'Reply' });
+      const words = composer.getByRole('textbox', { name: 'Reply' });
+      await words.getByText('Claim your prize:').waitFor();
+      // Typed in the quote's last words, so its images stay in the document as it saves and closes.
+      await words.getByText('Reply by Friday.').click();
+      await page.keyboard.type(' Please stop writing.');
+      await page.getByRole('status').filter({ hasText: 'Saved to Drafts' }).waitFor();
+      await page.keyboard.press('ControlOrMeta+A');
+      await page.keyboard.press('ControlOrMeta+C');
+      await composer.getByRole('button', { name: 'Close' }).click();
+      await composer.waitFor({ state: 'detached' });
+
+      await page
+        .getByRole('button', { name: /^Inbox/ })
+        .first()
+        .click();
+      await page.getByRole('option').filter({ hasText: offer.subject }).click({ timeout: 30_000 });
+      await reader.getByText('Images from Mallory are hidden.').waitFor();
+      // Long enough for a load the page started to reach the server.
+      await page.waitForTimeout(1_000);
+      expect(asked).toEqual([]);
+      await page.context().close();
+    }
+
+    /** A message in Alice's Inbox whose text and HTML both show remote images. */
+    async function fromMallory() {
+      const id = `offer-${Date.now()}@example.com`;
+      const subject = `You have won ${Date.now()}`;
+      await withImap(alice, (client) =>
+        client.append(
+          'INBOX',
+          alternative({
+            headers: [
+              `Message-ID: <${id}>`,
+              'From: Mallory <mallory@example.com>',
+              `To: ${alice.email}`,
+              `Subject: ${subject}`,
+            ],
+            text: `Claim your prize:\r\n![prize](${pixel('inbox-markdown')})`,
+            html: `<p>Claim your prize:</p><img src="${pixel('inbox-html')}" alt="prize">`,
+          }),
+        ),
+      );
+      return { id, subject };
+    }
+
+    /** Alice's reply to `offer`, as a client that quotes what it answers saves it to Drafts. */
+    async function draftReplying(
+      offer: { id: string; subject: string },
+      body: { text?: string; html: string },
+    ) {
+      const headers = [
+        `Message-ID: <reply-${Date.now()}@example.com>`,
+        `From: Alice <${alice.email}>`,
+        'To: Mallory <mallory@example.com>',
+        `Subject: Re: ${offer.subject}`,
+        `In-Reply-To: <${offer.id}>`,
+        `References: <${offer.id}>`,
+      ];
+      const draft =
+        body.text === undefined
+          ? [
+              ...headers,
+              `Date: ${new Date().toUTCString()}`,
+              'MIME-Version: 1.0',
+              'Content-Type: text/html; charset=utf-8',
+              '',
+              body.html,
+              '',
+            ].join('\r\n')
+          : alternative({ headers, text: body.text, html: body.html });
+      await withImap(alice, (client) => client.append('Drafts', draft, ['\\Draft', '\\Seen']));
+    }
+  });
+
   /** Trail Mix in a desktop browser that may use the clipboard. */
   async function trailMix(): Promise<Page> {
     const context = await app.context({
@@ -507,6 +654,27 @@ function htmlDraft(subject: string): string {
     '',
     PNG,
     '--plan--',
+    '',
+  ].join('\r\n');
+}
+
+/** A message with a text and an HTML version of the same words. */
+function alternative({ headers, text, html }: { headers: string[]; text: string; html: string }) {
+  return [
+    ...headers,
+    `Date: ${new Date().toUTCString()}`,
+    'MIME-Version: 1.0',
+    'Content-Type: multipart/alternative; boundary="versions"',
+    '',
+    '--versions',
+    'Content-Type: text/plain; charset=utf-8',
+    '',
+    text,
+    '--versions',
+    'Content-Type: text/html; charset=utf-8',
+    '',
+    html,
+    '--versions--',
     '',
   ].join('\r\n');
 }
