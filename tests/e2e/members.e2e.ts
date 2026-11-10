@@ -73,6 +73,10 @@ test('the operator sees each member’s last sign-in, and what else the policy a
   await row(page, 'bo@example.org').getByText('Last signed in', { exact: false }).waitFor();
   expect(await row(page, OPERATOR).getByRole('button', { name: 'Remove' }).count()).toBe(0);
   await page.getByText('Everyone at family.example').waitFor();
+  // The sidebar opens the same page.
+  const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
+  await sidebar.getByRole('button', { name: 'Members' }).scrollIntoViewIfNeeded();
+  expect(await sidebar.getByRole('button', { name: 'Members' }).isVisible()).toBe(true);
   await readable(page, 'desktop-light');
 }, 60_000);
 
