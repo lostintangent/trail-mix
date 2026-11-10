@@ -7,7 +7,8 @@ import { stylexOptions } from './stylexOptions.ts';
  * Atomic StyleX classes hash only the property and value. Astryx ships its CSS precompiled with
  * StyleX's default `x` prefix, so a class of ours with the same name would carry our declaration in
  * a later layer and drop the states Astryx attaches to it, such as a menu item's focus background.
- * The app's own prefix keeps the two sets disjoint, and these tests hold it to that.
+ * The app's own prefix keeps the two sets disjoint, and these tests hold it to that. They also hold
+ * StyleX's layers after Astryx's, so a component's `xstyle` wins over Astryx's own styles.
  */
 
 const ROOT = resolve(import.meta.dir, '../../..');
@@ -17,9 +18,11 @@ interface StylexPlugin {
   __stylexGetSharedStore(): { rulesById: Map<string, [string, ...unknown[]][]> };
 }
 
+const GLOBAL_CSS = join(ROOT, 'src/app/global.css');
+
 test("no StyleX class of ours shares a name with Astryx's stylesheet", async () => {
   const ours = await appClasses(stylexOptions.classNamePrefix);
-  const theirs = await stylesheetClasses(join(ROOT, 'src/app/global.css'));
+  const theirs = stylesheetClasses(await stylesheets(GLOBAL_CSS));
 
   expect(ours.size).toBeGreaterThan(0);
   expect(theirs.size).toBeGreaterThan(1000);
@@ -28,10 +31,17 @@ test("no StyleX class of ours shares a name with Astryx's stylesheet", async () 
 
 test("the check finds the clash that Astryx's own prefix would cause", async () => {
   const ours = await appClasses('x');
-  const theirs = await stylesheetClasses(join(ROOT, 'src/app/global.css'));
+  const theirs = stylesheetClasses(await stylesheets(GLOBAL_CSS));
 
   expect(shared(ours, theirs).length).toBeGreaterThan(0);
 }, 30_000);
+
+test("StyleX's layers come after every layer Astryx's stylesheet declares", async () => {
+  const theirs = stylesheetLayers(await stylesheets(GLOBAL_CSS));
+
+  expect(theirs.length).toBeGreaterThan(0);
+  expect(theirs).toEqual([...stylexOptions.useCSSLayers.before]);
+});
 
 /** Every class the app's sources generate, by the file that generates it. */
 async function appClasses(classNamePrefix: string): Promise<Map<string, string>> {
@@ -50,21 +60,41 @@ async function appClasses(classNamePrefix: string): Promise<Map<string, string>>
   return classes;
 }
 
-/** Class selectors in a stylesheet and every stylesheet it `@import`s. */
-async function stylesheetClasses(entry: string, seen = new Set<string>()): Promise<Set<string>> {
-  const classes = new Set<string>();
-  if (seen.has(entry)) return classes;
+/** A stylesheet and every stylesheet it `@import`s, depth first, without comments or URLs. */
+async function stylesheets(entry: string, seen = new Set<string>()): Promise<string[]> {
+  if (seen.has(entry)) return [];
   seen.add(entry);
   const css = await Bun.file(entry).text();
+  const sheets: string[] = [];
   for (const [, specifier = ''] of css.matchAll(/@import\s+['"]([^'"]+)['"]/g)) {
     const path = specifier.startsWith('.')
       ? resolve(dirname(entry), specifier)
       : Bun.resolveSync(specifier, ROOT);
-    for (const name of await stylesheetClasses(path, seen)) classes.add(name);
+    sheets.push(...(await stylesheets(path, seen)));
   }
-  const rules = css.replace(/\/\*[\s\S]*?\*\//g, '').replace(/url\([^)]*\)/g, '');
-  for (const [, name = ''] of rules.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)) classes.add(name);
+  sheets.push(css.replace(/\/\*[\s\S]*?\*\//g, '').replace(/url\([^)]*\)/g, ''));
+  return sheets;
+}
+
+function stylesheetClasses(sheets: string[]): Set<string> {
+  const classes = new Set<string>();
+  for (const css of sheets) {
+    for (const [, name = ''] of css.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)) classes.add(name);
+  }
   return classes;
+}
+
+/** Every cascade layer the stylesheets name, in the order they first name it. */
+function stylesheetLayers(sheets: string[]): string[] {
+  const layers: string[] = [];
+  for (const css of sheets) {
+    for (const [, names = ''] of css.matchAll(/@layer\s+([^{;]+)[{;]/g)) {
+      for (const name of names.split(',').map((layer) => layer.trim())) {
+        if (name && !layers.includes(name)) layers.push(name);
+      }
+    }
+  }
+  return layers;
 }
 
 function shared(ours: Map<string, string>, theirs: Set<string>): string[] {

@@ -12,7 +12,12 @@ import { Features } from 'lightningcss';
 export const stylexOptions = {
   devMode: 'full',
   classNamePrefix: 'tm',
-  useCSSLayers: true,
+  useCSSLayers: {
+    // Our layers come after Astryx's, so a component's `xstyle` overrides Astryx's own styles. The
+    // production stylesheet gets this order from where StyleX appends its CSS. The development one
+    // is a separate style element that can load first, so it declares the order itself.
+    before: ['reset', 'astryx-base', 'astryx-theme'],
+  },
   // Astryx themes already require native light-dark(), and lowering it breaks custom tokens.
   lightningcssOptions: { exclude: Features.LightDark },
 } as const;
