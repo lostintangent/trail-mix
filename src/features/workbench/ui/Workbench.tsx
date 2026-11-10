@@ -13,6 +13,7 @@ import { ListPane } from './ListPane.tsx';
 import { PanelEdge } from './PanelEdge.tsx';
 import { PANELS } from './panels.ts';
 import { ReaderPane } from './ReaderPane.tsx';
+import { StatusLine } from './StatusLine.tsx';
 import { Sidebar, UNIFIED_VIEWS, type ViewCounts } from '../../folders/index.ts';
 import { useMediaQuery } from './useMediaQuery.ts';
 import { usePanel } from './usePanel.ts';
@@ -79,7 +80,12 @@ export function Workbench({
             folders={folders}
             counts={counts}
             isCollapsed={!isPhone && sidebar.isCollapsed}
-            footer={sidebarFooter}
+            footer={
+              <>
+                <StatusLine accounts={accounts} isCollapsed={!isPhone && sidebar.isCollapsed} />
+                {sidebarFooter}
+              </>
+            }
           />
           <PanelEdge
             spec={PANELS.sidebar}

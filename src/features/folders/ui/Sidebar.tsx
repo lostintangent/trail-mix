@@ -298,11 +298,16 @@ const styles = stylex.create({
   countUnread: {
     color: colorVars['--color-text-accent'],
   },
+  // The footer's line takes the room, and its controls sit at the end.
   footer: {
     display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: spacingVars['--spacing-1'],
     paddingTop: spacingVars['--spacing-2'],
   },
   railFooter: {
+    flexDirection: 'column',
     justifyContent: 'center',
   },
 });
