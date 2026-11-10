@@ -16,8 +16,11 @@ import type {
 import type { AccountSetup, Page } from '../client/index.ts';
 import { caFile, empty, ports, start, stop, users } from '../../../../tests/mail-server/server.ts';
 import { startWorker, type LocalWorker } from '../../../../tests/workerd.ts';
+import { WAKE } from './sync.ts';
+import type { Wake } from './test-worker.ts';
 
 const { alice, bob } = users;
+const AT = '2026-11-09T12:00:00.000Z';
 const setup: AccountSetup = {
   provider: 'imap',
   name: 'Alice',
@@ -169,7 +172,7 @@ describe('The Mailroom', () => {
 describe('The Mailroom with the demo mailbox', () => {
   let worker: LocalWorker;
   beforeAll(async () => {
-    worker = await mailrooms({ DEMO_MAILBOX: '10000' });
+    worker = await mailrooms({ DEMO_MAILBOX: '10000', DEMO_MAILBOX_AT: AT });
   }, 120_000);
   afterAll(() => worker?.stop());
 
@@ -199,6 +202,27 @@ describe('The Mailroom with the demo mailbox', () => {
     // Sent and Archive fill in, but not which ones they are or their order in the Inbox.
     const final = await cy.call<Page>('conversations', { in: 'folder', folder });
     expect(early.items.map(({ id }) => id)).toEqual(final.items.map(({ id }) => id));
+    // The newest mail is dated just before the fixed creation time, whenever this runs.
+    const newest = Date.parse(final.items[0]!.date);
+    expect(newest).toBeLessThan(Date.parse(AT));
+    expect(newest).toBeGreaterThan(Date.parse(AT) - 86_400_000);
+
+    // It filled over several wakes, none landing more than its share, and each account read ready
+    // only once all of its mail was in.
+    const wakes = await cy.call<Wake[]>('wakeLog');
+    console.log(
+      `It took ${wakes.length} wakes: ${wakes.map(({ steps }) => steps).join(', ')} steps.`,
+    );
+    expect(wakes.length).toBeGreaterThan(2);
+    for (const { steps } of wakes) expect(steps).toBeLessThanOrEqual(WAKE.steps);
+    const last = wakes.at(-1)!.accounts;
+    expect(wakes[0]!.accounts.map(({ status }) => status)).toEqual(['syncing', 'syncing']);
+    for (const { accounts } of wakes) {
+      for (const [i, { status, messages }] of accounts.entries()) {
+        if (status === 'ready') expect(messages).toBe(last[i]!.messages);
+      }
+    }
+    expect(last.map(({ status }) => status)).toEqual(['ready', 'ready']);
     device.close();
   }, 180_000);
 });

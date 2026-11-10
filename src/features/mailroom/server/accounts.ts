@@ -128,3 +128,31 @@ export function accountBook(sql: Sql) {
     },
   };
 }
+
+/** The demo mailbox a deployment offers: the size of Personal's Inbox, and when it was made. */
+export type DemoSettings = { inbox: number; createdAt?: string };
+
+/**
+ * Reads `DEMO_MAILBOX` and `DEMO_MAILBOX_AT`, refusing anything else, so a deployment set up wrong
+ * says so when its Mailroom starts rather than showing the wrong mail. Without `DEMO_MAILBOX` there
+ * is no demo. `DEMO_MAILBOX_AT` is an ISO 8601 instant, with its offset.
+ */
+export function demoSettings(size?: string, at?: string): DemoSettings | undefined {
+  if (!size) {
+    if (at) throw new Error('DEMO_MAILBOX_AT dates the demo mailbox, so it needs DEMO_MAILBOX.');
+    return undefined;
+  }
+  if (!/^[1-9]\d{0,6}$/.test(size)) {
+    throw new Error(`DEMO_MAILBOX must be a number of messages, not ${JSON.stringify(size)}.`);
+  }
+  if (!at) return { inbox: Number(size) };
+  const instant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/.test(at)
+    ? Date.parse(at)
+    : Number.NaN;
+  if (Number.isNaN(instant)) {
+    throw new Error(
+      `DEMO_MAILBOX_AT must be an ISO 8601 instant such as 2026-11-09T12:00:00Z, not ${JSON.stringify(at)}.`,
+    );
+  }
+  return { inbox: Number(size), createdAt: new Date(instant).toISOString() };
+}

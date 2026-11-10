@@ -12,3 +12,6 @@ CREDENTIALS_KEY=development-only-not-a-secret-0123456789
 # Every new Mailroom gets the demo mailbox: Personal with this many messages in its Inbox, and Work
 # with a tenth as many.
 DEMO_MAILBOX=2000
+
+# Uncomment to date the demo mailbox from a fixed instant instead of when the Mailroom adds it.
+# DEMO_MAILBOX_AT=2026-11-09T12:00:00Z

@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { demoMailbox } from '../../providers/index.ts';
-import { accountBook, type Connection } from './accounts.ts';
+import { accountBook, demoSettings, type Connection } from './accounts.ts';
 import { testSql } from './test-sql.ts';
 
 const imap: Connection = {
@@ -51,4 +51,21 @@ test('removing an account forgets its secret and its demo server', () => {
   expect(sql.all(`SELECT * FROM credentials`)).toEqual([]);
   expect(sql.all(`SELECT * FROM demo`)).toEqual([]);
   expect(book.all()).toEqual([]);
+});
+
+test('the demo is a size and an optional instant, and anything else is refused', () => {
+  expect(demoSettings()).toBeUndefined();
+  expect(demoSettings('2000')).toEqual({ inbox: 2000 });
+  expect(demoSettings('50000', '2026-11-09T13:00:00+01:00')).toEqual({
+    inbox: 50000,
+    createdAt: '2026-11-09T12:00:00.000Z',
+  });
+  for (const size of ['0', '-5', '1e4', '2,000', 'lots']) {
+    expect(() => demoSettings(size)).toThrow('DEMO_MAILBOX');
+  }
+  // A date alone, or a time without its offset, could mean a different instant on each machine.
+  for (const at of ['2026-11-09', '2026-11-09T12:00:00', 'yesterday', '2026-13-40T12:00:00Z']) {
+    expect(() => demoSettings('2000', at)).toThrow('DEMO_MAILBOX_AT');
+  }
+  expect(() => demoSettings(undefined, '2026-11-09T12:00:00Z')).toThrow('DEMO_MAILBOX_AT');
 });

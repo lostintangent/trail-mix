@@ -28,12 +28,18 @@ import {
   type SyncWindow,
 } from '../../providers/index.ts';
 import type { AccountSetup, DraftInput, Mailroom as Contract, Page } from '../client/index.ts';
-import { accountBook, type AccountBook, type Connection } from './accounts.ts';
+import {
+  accountBook,
+  demoSettings,
+  type AccountBook,
+  type Connection,
+  type DemoSettings,
+} from './accounts.ts';
 import { memberKey, open, seal } from './credentials.ts';
 import { envelopeIndex, type EnvelopeIndex } from './envelope-index.ts';
 import * as input from './input.ts';
 import { upgrade, type Sql, type SqlValue } from './schema.ts';
-import { syncFolder, syncFolders, type Syncing } from './sync.ts';
+import { syncQueue, type SyncQueue } from './sync.ts';
 
 export type MailroomEnv = {
   /** The body cache: raw messages, by member, account and ref. */
@@ -45,6 +51,8 @@ export type MailroomEnv = {
    * many messages in its Inbox, and Work with a tenth as many.
    */
   DEMO_MAILBOX?: string;
+  /** Fixes the demo accounts' creation time, an ISO 8601 instant, so their dates never move. */
+  DEMO_MAILBOX_AT?: string;
 };
 
 /** How far back mail is indexed. Older mail stays on the server. */
@@ -69,17 +77,31 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   private readonly book: AccountBook;
   private readonly providers = new Map<AccountId, Promise<MailProvider>>();
   private readonly watchers = new Map<AccountId, () => void>();
-  private readonly runs = new Map<string, Run>();
+  protected readonly queue: SyncQueue;
+  /** When every account was last owed a check. A cold start checks at its first wake. */
   private checkedAt = 0;
   private key: Promise<CryptoKey> | undefined;
+  private readonly demo: DemoSettings | undefined;
 
   constructor(ctx: DurableObjectState, env: MailroomEnv) {
     super(ctx, env);
+    this.demo = demoSettings(env.DEMO_MAILBOX, env.DEMO_MAILBOX_AT);
     this.sql = durableSql(ctx.storage);
     const found = upgrade(this.sql);
     this.store = envelopeIndex(this.sql);
     this.book = accountBook(this.sql);
-    if (found === 0 && env.DEMO_MAILBOX) {
+    this.queue = syncQueue({
+      sql: this.sql,
+      store: this.store,
+      hint: (hint) => this.hint(hint),
+      provider: (account) => this.provider(account),
+      window: (account) => this.windowOf(account),
+      settled: (account, error) => {
+        if (error) report(error);
+        this.setStatus(account, error ? 'error' : 'ready');
+      },
+    });
+    if (found === 0 && this.demo) {
       this.addDemo();
       this.addDemo();
       // The alarm fills the index, whether or not a device opens.
@@ -138,7 +160,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     if (checked.provider === 'demo') {
       const account = this.addDemo();
       this.hint({ changed: 'accounts' });
-      this.background(this.check(true));
+      await this.owe(() => this.queue.check(account.id));
       return account;
     }
     if (!('password' in checked)) throw new Error('Outlook sign-in arrives with its own step.');
@@ -176,7 +198,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       { sealed: await seal(await this.memberKey(), checked.password, id) },
     );
     this.hint({ changed: 'accounts' });
-    this.background(this.check(true));
+    await this.owe(() => this.queue.check(id));
     return account;
   }
 
@@ -235,9 +257,10 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     const checked = input.flagsOf(change);
     for (const [account, held] of this.byAccount(refs)) {
       await (await this.provider(account)).setFlags(held, checked);
-      for (const path of new Set(held.map((ref) => ref.path))) {
-        this.background(this.syncFolder({ account, path }));
-      }
+      await this.owe(() => {
+        for (const path of new Set(held.map((ref) => ref.path)))
+          this.queue.folder({ account, path });
+      });
     }
   }
 
@@ -249,9 +272,11 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
           ? this.pathWithRole(account, destination)
           : destination.path;
       await (await this.provider(account)).move(held, path);
-      for (const from of new Set([...held.map((ref) => ref.path), path])) {
-        this.background(this.syncFolder({ account, path: from }));
-      }
+      await this.owe(() => {
+        for (const from of new Set([...held.map((ref) => ref.path), path])) {
+          this.queue.folder({ account, path: from });
+        }
+      });
     }
   }
 
@@ -270,20 +295,20 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   async createFolder(folder: FolderRef): Promise<void> {
     const { account, path } = this.ownFolder(folder);
     await (await this.provider(account)).createFolder(path);
-    this.background(this.syncAccount(account));
+    await this.owe(() => this.queue.check(account));
   }
 
   async renameFolder(folder: FolderRef, to: string): Promise<void> {
     const { account, path } = this.ownFolder(folder);
     const renamed = input.folderOf({ account, path: to }).path;
     await (await this.provider(account)).renameFolder(path, renamed);
-    this.background(this.syncAccount(account));
+    await this.owe(() => this.queue.check(account));
   }
 
   async deleteFolder(folder: FolderRef): Promise<void> {
     const { account, path } = this.ownFolder(folder);
     await (await this.provider(account)).deleteFolder(path);
-    this.background(this.syncAccount(account));
+    await this.owe(() => this.queue.check(account));
   }
 
   // A message's bytes, for the Worker's routes. Null means the message or part is gone.
@@ -322,7 +347,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     const { 0: device, 1: socket } = new WebSocketPair();
     this.ctx.acceptWebSocket(socket);
     // A device just opened: catch up now, and watch while any device stays open.
-    this.background(this.check(true));
+    this.background(this.owe(() => this.checkAll()));
     return Promise.resolve(new Response(null, { status: 101, webSocket: device }));
   }
 
@@ -340,29 +365,50 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 
   /**
    * The alarm is the Mailroom's heartbeat, and the first thing that runs after a deploy or an
-   * eviction drops what it held in memory.
+   * eviction drops what it held in memory. It is also the only place sync runs: everything else
+   * owes sync and sets the alarm for now, so every wake lands a bounded share.
    */
   override async alarm(): Promise<void> {
-    await this.check(false);
+    await this.wake();
   }
 
   /**
-   * While a device is open, the alarm fires every minute, which keeps the Mailroom in memory and
-   * reopens the Inbox watchers. Every account is checked every few minutes either way, and at once
-   * when asked, as when a device opens.
+   * One wake. While a device is open, the alarm fires every minute, which keeps the Mailroom in
+   * memory and the Inbox watchers alive. Every account is owed a check every few minutes either
+   * way. A wake lands what is owed within its budget, and if more remains, the next wake follows at
+   * once and picks up from the stored cursors. Returns how many steps it landed.
    */
-  private async check(now: boolean) {
+  protected async wake(): Promise<number> {
     const accounts = this.book.all();
-    if (accounts.length === 0) return;
+    if (accounts.length === 0) return 0;
     const open = this.devices() > 0;
+    // If this wake ends early, as an eviction would end it, the next one is already set.
     await this.ctx.storage.setAlarm(Date.now() + (open ? WATCHING_MS : CHECKING_MS));
-    for (const { id } of accounts) {
+    if (Date.now() - this.checkedAt >= CHECKING_MS) this.checkAll();
+    await this.watchAll(open);
+    const landed = await this.queue.run();
+    // A new account's Inbox is known only once its folders are.
+    await this.watchAll(this.devices() > 0);
+    if (this.queue.owing()) await this.ctx.storage.setAlarm(Date.now());
+    return landed;
+  }
+
+  private checkAll() {
+    this.checkedAt = Date.now();
+    for (const { id } of this.book.all()) this.queue.check(id);
+  }
+
+  /** Owes sync, and has the next wake land it at once. */
+  private async owe(owing: () => void) {
+    owing();
+    await this.ctx.storage.setAlarm(Date.now());
+  }
+
+  private async watchAll(open: boolean) {
+    for (const { id } of this.book.all()) {
       if (open) await this.watch(id).catch(report);
       else this.unwatch(id);
     }
-    if (!now && open && Date.now() - this.checkedAt < CHECKING_MS) return;
-    this.checkedAt = Date.now();
-    await Promise.all(accounts.map(({ id }) => this.syncAccount(id).catch(report)));
   }
 
   private async watch(account: AccountId) {
@@ -374,7 +420,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     const folder = folderRef(inbox);
     this.watchers.set(
       account,
-      provider.watch(folder.path, () => this.background(this.syncFolder(folder))),
+      provider.watch(folder.path, () => this.background(this.owe(() => this.queue.folder(folder)))),
     );
   }
 
@@ -398,65 +444,6 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
         // Closing as this sends.
       }
     }
-  }
-
-  // Sync: one run at a time for each account and folder, and one more if asked again meanwhile
-
-  private syncAccount(account: AccountId) {
-    return this.once(account, 'account', async () => {
-      try {
-        const provider = await this.provider(account);
-        // The folders were just counted, so the folder syncs needn't count them again.
-        for (const folder of await syncFolders(this.syncing, account, provider)) {
-          await this.syncFolder(folderRef(folder), false);
-        }
-        this.setStatus(account, 'ready');
-      } catch (error) {
-        this.setStatus(account, 'error');
-        throw error;
-      }
-    });
-  }
-
-  /** Syncs a folder, then counts the account's folders again if the server reported a change. */
-  private syncFolder(folder: FolderRef, recount = true) {
-    return this.once(folder.account, `folder ${folder.path}`, async () => {
-      if (!this.book.get(folder.account)) return;
-      const provider = await this.provider(folder.account);
-      const window = this.windowOf(folder.account);
-      const changed = await syncFolder(this.syncing, folder, provider, window);
-      if (changed && recount) await syncFolders(this.syncing, folder.account, provider);
-    });
-  }
-
-  /**
-   * Runs `run` unless the same sync of the same account is under way. Then that one goes once more
-   * when it finishes, as the latest caller asked, and both callers wait for it.
-   */
-  private once(account: AccountId, what: string, run: () => Promise<void>): Promise<void> {
-    const key = JSON.stringify([account, what]);
-    const running = this.runs.get(key);
-    if (running) {
-      running.next = run;
-      return running.done;
-    }
-    const entry: Run = { account, done: Promise.resolve(), next: run };
-    entry.done = (async () => {
-      try {
-        for (let current = entry.next; current; current = entry.next) {
-          entry.next = undefined;
-          await current();
-        }
-      } finally {
-        this.runs.delete(key);
-      }
-    })();
-    this.runs.set(key, entry);
-    return entry.done;
-  }
-
-  private get syncing(): Syncing {
-    return { sql: this.sql, store: this.store, hint: (hint) => this.hint(hint) };
   }
 
   private setStatus(account: AccountId, status: Account['status']) {
@@ -489,25 +476,20 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     return provider;
   }
 
-  /**
-   * Closes an account's provider, which ends any sync under way at its next call, and waits for
-   * those syncs to stop, so no late batch lands after the account is gone.
-   */
+  /** Forgets what an account owes, so a step of it under way lands nothing, and closes its provider. */
   private async disconnect(account: AccountId) {
+    this.queue.forget(account);
     this.unwatch(account);
     const provider = this.providers.get(account);
     this.providers.delete(account);
     const opened = await provider?.catch(() => undefined);
     await opened?.close().catch(report);
-    const syncs = [...this.runs.values()].filter((run) => run.account === account);
-    await Promise.allSettled(syncs.map((run) => run.done));
   }
 
   /** Adds the first demo account not yet here, Personal and then Work. */
   private addDemo(): Account {
-    const size = Number(this.env.DEMO_MAILBOX);
-    if (!Number.isInteger(size) || size < 1)
-      throw new Error('This deployment has no demo mailbox.');
+    if (!this.demo) throw new Error('This deployment has no demo mailbox.');
+    const { inbox: size, createdAt = new Date().toISOString() } = this.demo;
     const here = new Set(
       this.book
         .connections()
@@ -520,7 +502,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     return this.book.add(
       { id: crypto.randomUUID(), name, address: me.email, provider: 'demo' },
       { provider: 'demo', kind },
-      { demo: demoMailbox(kind, inbox, new Date().toISOString()) },
+      { demo: demoMailbox(kind, inbox, createdAt) },
     );
   }
 
@@ -613,9 +595,6 @@ function imapOver(
     },
   );
 }
-
-/** A sync under way, and the one to run after it, if asked for meanwhile. */
-type Run = { account: AccountId; done: Promise<void>; next: (() => Promise<void>) | undefined };
 
 /** The Mailroom's storage, as `schema.ts` speaks to it, on a Durable Object's SQLite. */
 function durableSql(storage: DurableObjectStorage): Sql {
