@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+<meta name="color-scheme" content="light dark">
+<meta name="supported-color-schemes" content="light dark">
+<style>
+  :root { color-scheme: light dark; supported-color-schemes: light dark; }
+  body { margin: 0; background: #f2f4f1; color: #1d2420; font-family: Helvetica, Arial, sans-serif; }
+  .card { background: #ffffff; color: #1d2420; padding: 24px; border-radius: 8px; }
+  .card a { color: #1e6b3f; }
+  .muted { color: #5c6660; }
+  @media (prefers-color-scheme: dark) {
+    body, .page { background: #121614 !important; color: #e6ece8 !important; }
+    .card { background: #1d2420 !important; color: #e6ece8 !important; }
+    .card a { color: #8fd3a8 !important; }
+    .muted { color: #a9b4ad !important; }
+  }
+</style>
+</head>
+<body>
+<div class="page" style="padding: 24px">
+  <div class="card">
+    <h1 style="font-size: 20px; margin: 0 0 12px">Your permit for the north ridge is ready</h1>
+    <p>Permit 2026-0417 covers two nights at the ridge camp, Friday and Saturday.</p>
+    <p><a href="https://example.com/permits/2026-0417">Show the permit</a></p>
+    <p class="muted">Carry it with you on the trail, printed or on your phone.</p>
+  </div>
+</div>
+</body>
+</html>

@@ -26,7 +26,7 @@ export const tm = stylex.defineVars({
 
   // Color roles beyond Astryx's
   textQuiet: 'light-dark(oklch(0.52 0.015 265), oklch(0.66 0 0))', // previews, times: still 4.5:1
-  paperFixed: 'oklch(0.975 0.004 85)', // HTML mail that sets its own colors sits on this in both themes
+  paperFixed: 'oklch(0.975 0.004 85)', // HTML mail that paints its own backgrounds sits on this in both themes
   highlight: 'oklch(0.86 0.17 92)', // the suite yellow: flagged, search match
   onHighlight: 'oklch(0.25 0.03 265)', // ink on the highlighter, dark in both themes
   danger: 'light-dark(oklch(0.55 0.2 27), oklch(0.74 0.15 27))',

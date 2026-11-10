@@ -1,4 +1,5 @@
 import DOMPurify from 'dompurify';
+import { mailColors, schemeRule, SCHEME_ATTRIBUTE, type DarkPaper, type Paper } from './colors.ts';
 import { rewriteCssResources } from './css.ts';
 import { isAttribution, isForward, quoteMarker, type QuoteMarker } from './quotes.ts';
 
@@ -13,6 +14,8 @@ import { isAttribution, isForward, quoteMarker, type QuoteMarker } from './quote
  *   every `url()` and image function in CSS, which the browser's own CSS parser normalizes first.
  * - Links open in a new tab, with no opener and no referrer, and only to http, mail and phone.
  * - A quote that ends the message is marked so the frame can fold it.
+ * - The colors the message sets are rewritten to read on the dark theme's paper as well, and its
+ *   styles for a color scheme follow the theme's, as `colors.ts` describes.
  *
  * The frame is a second, independent wall: a sandbox without scripts or forms, and a content
  * security policy that names exactly the images this sanitizer let through.
@@ -31,8 +34,8 @@ export type SafeMail = {
   html: string;
   /** Remote images were left out, because the sender is not allowed yet. */
   blockedImages: boolean;
-  /** The message sets its own colors, so it stays on light paper in the dark theme. */
-  ownColors: boolean;
+  /** The paper it sits on: the theme's, or light paper in both themes for mail that paints. */
+  paper: Paper;
   /** A quote ends the message and is marked to fold. */
   quote: boolean;
   /** The Content-IDs shown inline, which the list of attachments leaves out. */
@@ -41,11 +44,11 @@ export type SafeMail = {
   sources: string[];
 };
 
-export function sanitizeMail(html: string, images: Images): SafeMail {
+export function sanitizeMail(html: string, images: Images, dark: DarkPaper): SafeMail {
   const purify = DOMPurify(window);
+  const colors = mailColors(dark);
   const mail = {
     blockedImages: false,
-    ownColors: false,
     quote: false,
     inlineParts: new Set<string>(),
     sources: new Set<string>(),
@@ -74,16 +77,33 @@ export function sanitizeMail(html: string, images: Images): SafeMail {
   };
 
   const safeCss = (css: string) => rewriteCssResources(css, imageSource);
+  // Inline styles as written, and as they are kept.
+  const styles = new Map<string, string>();
+
+  const adaptAttribute = (element: Element, name: 'color' | 'background-color', value: string) => {
+    const css = colors.attribute(name, value);
+    if (css && element instanceof HTMLElement && !element.style.getPropertyValue(name)) {
+      element.style.setProperty(name, css);
+    }
+  };
 
   purify.addHook('beforeSanitizeElements', (node) => {
     if (node.nodeName === 'BODY') wrapBody(node as HTMLElement);
   });
 
   purify.addHook('uponSanitizeElement', (node, data) => {
+    // A meta never stays, but the scheme it declares does.
+    if (data.tagName === 'meta' && node instanceof Element) {
+      const name = node.getAttribute('name')?.toLowerCase();
+      if (name === 'color-scheme' || name === 'supported-color-schemes') {
+        colors.declare(node.getAttribute('content') ?? '');
+      }
+    }
     if (data.tagName !== 'style') return;
     const sheet = new window.CSSStyleSheet();
     sheet.replaceSync(node.textContent ?? '');
-    if (keepSafeRules(sheet.cssRules)) mail.ownColors = true;
+    colors.scan(sheet.cssRules);
+    keepSafeRules(sheet.cssRules, colors.adapt);
     node.textContent = safeCss([...sheet.cssRules].map((rule) => rule.cssText).join('\n'));
   });
 
@@ -96,15 +116,25 @@ export function sanitizeMail(html: string, images: Images): SafeMail {
     };
     switch (data.attrName) {
       case 'style': {
-        // A declaration without a `(` holds no function, so it can load nothing. Most mail's
-        // inline styles are like that, and they are kept as written.
+        // Mail repeats the same style on line after line, and it comes out the same each time.
+        const again = styles.get(value);
+        if (again !== undefined) return keep(again);
+        // A declaration without a `(` holds no function, so it can load nothing, and one that
+        // names no color sets none. Most mail's inline styles are one or the other, and they are
+        // kept as written.
         const loads = value.includes('(');
-        const colors = !mail.ownColors && /color|background/i.test(value);
-        if (!loads && !colors) return;
+        const colored = /color|background/i.test(value) && colors.listening(value);
+        if (!loads && !colored) return;
         const scratch = element.ownerDocument.createElement('div');
         scratch.setAttribute('style', value);
-        if (colors && setsColors(scratch.style)) mail.ownColors = true;
-        return keep(loads ? safeCss(scratch.style.cssText) : value);
+        const adapted = colored && colors.adapt(scratch.style);
+        const rewritten = loads
+          ? safeCss(scratch.style.cssText)
+          : adapted
+            ? scratch.style.cssText
+            : value;
+        styles.set(value, rewritten);
+        return keep(rewritten);
       }
       case 'src':
         return keep(tag === 'img' ? imageSource(value) : null);
@@ -114,12 +144,6 @@ export function sanitizeMail(html: string, images: Images): SafeMail {
         return keep(imageSource(value));
       case 'href':
         return keep(tag === 'a' || tag === 'area' ? linkTarget(value) : null);
-      case 'bgcolor':
-        mail.ownColors = true;
-        return;
-      case 'color':
-        if (tag === 'font') mail.ownColors = true;
-        return;
       default:
         // Only the sanitizer marks what folds.
         if (data.attrName.startsWith('data-tm-')) data.keepAttr = false;
@@ -127,6 +151,11 @@ export function sanitizeMail(html: string, images: Images): SafeMail {
   });
 
   purify.addHook('afterSanitizeAttributes', (element) => {
+    // Legacy color attributes take no `light-dark()`, so the element's style carries it instead.
+    const bgcolor = element.getAttribute('bgcolor');
+    if (bgcolor !== null) adaptAttribute(element, 'background-color', bgcolor);
+    const color = element.localName === 'font' ? element.getAttribute('color') : null;
+    if (color !== null) adaptAttribute(element, 'color', color);
     if (element.hasAttribute('href')) {
       element.setAttribute('target', '_blank');
       element.setAttribute('rel', 'noopener noreferrer');
@@ -163,7 +192,7 @@ export function sanitizeMail(html: string, images: Images): SafeMail {
   return {
     html: markup,
     blockedImages: mail.blockedImages,
-    ownColors: mail.ownColors,
+    paper: colors.paper(),
     quote: mail.quote,
     inlineParts: [...mail.inlineParts],
     sources: [...mail.sources],
@@ -202,7 +231,7 @@ export function frameDocument(mail: SafeMail, look: FrameLook): FrameDocument {
     "base-uri 'none'",
   ].join('; ');
   const style = frameStyle(look);
-  const head = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${escapeAttribute(policy)}"><meta name="referrer" content="no-referrer"><base target="_blank"><style>${style}</style></head><body>`;
+  const head = `<!doctype html><html ${SCHEME_ATTRIBUTE}="${look.colorScheme}"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${escapeAttribute(policy)}"><meta name="referrer" content="no-referrer"><base target="_blank"><style>${style}</style></head><body>`;
   const end = '</body></html>';
   const cut = cutOf(mail.html);
   return cut === undefined
@@ -226,21 +255,12 @@ const FOLD = 'data-tm-quote';
 const FORMS = ['form', 'input', 'button', 'select', 'option', 'optgroup', 'textarea', 'datalist'];
 const POPOVERS = ['popover', 'popovertarget', 'popovertargetaction', 'command', 'commandfor'];
 
-/** The colors a style declares that would be unreadable on paper of the other theme. */
-const COLOR_PROPERTIES = ['color', 'background-color', 'background-image', 'background'];
-const NEUTRAL = /^(|inherit|initial|unset|revert|revert-layer|currentcolor|transparent|none)$/i;
-
-function setsColors(style: CSSStyleDeclaration): boolean {
-  return COLOR_PROPERTIES.some((name) => !NEUTRAL.test(style.getPropertyValue(name).trim()));
-}
-
 /**
  * Drops the rules that load something no image rewrite can make safe: fonts, and counter styles
- * and registered properties, whose images CSS reaches without `url()` in a value. Returns whether
- * any remaining declaration sets a color.
+ * and registered properties, whose images CSS reaches without `url()` in a value. Every rule kept
+ * has its colors adapted, and a rule for one color scheme is rewritten to follow the frame's.
  */
-function keepSafeRules(rules: CSSRuleList): boolean {
-  let colored = false;
+function keepSafeRules(rules: CSSRuleList, adapt: (style: CSSStyleDeclaration) => void) {
   for (let i = rules.length - 1; i >= 0; i--) {
     const rule = rules[i];
     if (!rule) continue;
@@ -253,19 +273,30 @@ function keepSafeRules(rules: CSSRuleList): boolean {
       deleteRule(rule, i);
       continue;
     }
-    if ('style' in rule && rule.style instanceof CSSStyleDeclaration && setsColors(rule.style)) {
-      colored = true;
-    }
+    if ('style' in rule && rule.style instanceof CSSStyleDeclaration) adapt(rule.style);
     if ('cssRules' in rule && rule.cssRules instanceof CSSRuleList) {
-      if (keepSafeRules(rule.cssRules)) colored = true;
+      keepSafeRules(rule.cssRules, adapt);
     }
+    const themed = name === 'CSSMediaRule' ? schemeRule(rule as CSSMediaRule) : undefined;
+    if (themed) replaceRule(rule, i, themed);
   }
-  return colored;
 }
 
 function deleteRule(rule: CSSRule, index: number) {
   const parent = rule.parentRule ?? rule.parentStyleSheet;
   if (parent && 'deleteRule' in parent) parent.deleteRule(index);
+}
+
+/** Puts `text` in the place of a rule, or leaves the rule as it is where a browser can't read it. */
+function replaceRule(rule: CSSRule, index: number, text: string) {
+  const parent = rule.parentRule ?? rule.parentStyleSheet;
+  if (!parent || !('insertRule' in parent)) return;
+  try {
+    parent.insertRule(text, index);
+  } catch {
+    return;
+  }
+  parent.deleteRule(index + 1);
 }
 
 /**

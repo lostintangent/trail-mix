@@ -9,6 +9,7 @@ import {
   type Canary,
   type Harness,
 } from './browsers.ts';
+import type { Paper } from '../../src/features/reader/core/colors.ts';
 import type { Result, Shown } from './harness/main.tsx';
 
 /**
@@ -264,9 +265,9 @@ for (const type of BROWSERS) {
           expect(seen.results[index]?.quote).toBe(Boolean(expected.quoted));
         });
 
-        test(`${name}: ${expected.ownColors ? 'stays on light paper' : 'follows the theme'}`, () => {
+        test(`${name}: ${expected.paper === 'light' ? 'stays on light paper' : 'follows the theme'}`, () => {
           const index = real.findIndex((mail) => mail.name === name);
-          expect(seen.results[index]?.ownColors).toBe(expected.ownColors);
+          expect(seen.results[index]?.paper).toBe(expected.paper);
         });
       }
     });
@@ -279,43 +280,51 @@ const HOSTILE_PARTS = { 'logo@hostile.example': '/messages/demo/INBOX/1/9/1' };
 /** Where the receipt's inline logo is served, as one of its parts. */
 const RECEIPT_LOGO = '/messages/demo/INBOX/1/7/2';
 
-/** What each real-world message shows, hides behind its quote fold, and how it is colored. */
-const REAL: Record<string, { reply: string; quoted?: string; ownColors: boolean }> = {
+/** What each real-world message shows, hides behind its quote fold, and the paper it sits on. */
+const REAL: Record<string, { reply: string; quoted?: string; paper: Paper }> = {
   'apple-mail-reply.html': {
     reply: 'See you at the trailhead',
     quoted: 'Shall we hike on Saturday',
-    ownColors: false,
+    paper: 'theme',
   },
-  'forward.html': { reply: 'Park at the north lot', ownColors: false },
+  'dark-scheme.html': { reply: 'Permit 2026-0417 covers two nights', paper: 'theme' },
+  'forward.html': { reply: 'Park at the north lot', paper: 'theme' },
+  'github-notification.html': { reply: 'Should a loop allow a short road walk', paper: 'theme' },
   'gmail-reply.html': {
     reply: 'Thursday works for me',
     quoted: 'Are you free for lunch',
-    ownColors: false,
+    paper: 'theme',
   },
-  'inline-reply.html': { reply: 'Should I bring the projector', ownColors: false },
-  'newsletter.html': { reply: 'The north ridge loop', ownColors: true },
-  'notification.html': { reply: 'Should two-digit years', ownColors: false },
+  'inline-reply.html': { reply: 'Should I bring the projector', paper: 'theme' },
+  'newsletter.html': { reply: 'The north ridge loop', paper: 'theme' },
+  'notification.html': { reply: 'Should two-digit years', paper: 'theme' },
   'outlook-desktop-reply.html': {
     reply: 'Approved. Please go ahead',
     quoted: 'Can you approve purchase order',
-    ownColors: true,
+    paper: 'theme',
+  },
+  'outlook-mobile-reply.html': {
+    reply: 'The hut has room for four',
+    quoted: 'Is there still room at the hut',
+    paper: 'theme',
   },
   'outlook-web-reply.html': {
     reply: 'The quarterly numbers are attached',
     quoted: 'Could you send over the quarterly numbers',
-    ownColors: true,
+    paper: 'theme',
   },
-  'plain-html.html': { reply: 'The cabin is booked', ownColors: false },
-  'receipt.html': { reply: 'Trail runners, size 42', ownColors: true },
+  'pasted-colors.html': { reply: 'Bring a headlamp', paper: 'theme' },
+  'plain-html.html': { reply: 'The cabin is booked', paper: 'theme' },
+  'receipt.html': { reply: 'Trail runners, size 42', paper: 'light' },
   'thunderbird-reply.html': {
     reply: 'The patch looks right',
     quoted: 'Here is the patch',
-    ownColors: false,
+    paper: 'theme',
   },
   'zoho-reply.html': {
     reply: 'The invoice is paid',
     quoted: 'Invoice 2026-114 is due',
-    ownColors: false,
+    paper: 'theme',
   },
 };
 

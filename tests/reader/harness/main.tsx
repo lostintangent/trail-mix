@@ -10,6 +10,7 @@ import { sourceCommand } from '../../../src/features/reader/ui/commands.ts';
 import { Reader } from '../../../src/features/reader/ui/Reader.tsx';
 import { SourceDialog } from '../../../src/features/reader/ui/SourceDialog.tsx';
 import { MessageFrame } from '../../../src/features/reader/ui/MessageFrame.tsx';
+import { darkPaper } from '../../../src/features/reader/ui/safeMail.ts';
 import { createQueryClient } from '../../../src/shared/query-client.ts';
 import { bodyKey, lunchThread, newsletter, type Fixture } from './fixtures.ts';
 
@@ -46,6 +47,8 @@ declare global {
       upcoming?: ConversationId[],
     ) => void;
     setTheme: (mode: 'light' | 'dark') => void;
+    /** How many times a message was sanitized. */
+    sanitized: number;
     /** What hostile mail calls if any of its script ever runs. */
     __pwned: (id: string) => void;
     pwned: string[];
@@ -57,6 +60,7 @@ declare global {
 }
 
 window.pwned = [];
+window.sanitized = 0;
 window.messageKeys = [];
 window.pageKeys = [];
 addEventListener('keydown', (event: KeyboardEvent) => window.pageKeys.push(event.key));
@@ -95,9 +99,9 @@ window.show = (mails) => {
       </StrictMode>,
     ),
   );
-  return safe.map(({ blockedImages, ownColors, quote, inlineParts }) => ({
+  return safe.map(({ blockedImages, paper, quote, inlineParts }) => ({
     blockedImages,
-    ownColors,
+    paper,
     quote,
     inlineParts,
   }));
@@ -152,21 +156,26 @@ function Pane({ fixture, upcoming }: { fixture: Fixture; upcoming?: Conversation
 }
 
 function sanitize({ html, images, parts = {} }: Shown): SafeMail {
-  return sanitizeMail(html, {
-    part: (contentId) =>
-      parts[contentId] ? new URL(parts[contentId], location.origin).href : undefined,
-    remote:
-      images === 'allowed'
-        ? (url) => new URL(`/images?url=${encodeURIComponent(url)}`, location.origin).href
-        : undefined,
-  });
+  window.sanitized++;
+  return sanitizeMail(
+    html,
+    {
+      part: (contentId) =>
+        parts[contentId] ? new URL(parts[contentId], location.origin).href : undefined,
+      remote:
+        images === 'allowed'
+          ? (url) => new URL(`/images?url=${encodeURIComponent(url)}`, location.origin).href
+          : undefined,
+    },
+    darkPaper(),
+  );
 }
 
 function unsanitized(html: string): SafeMail {
   return {
     html,
     blockedImages: false,
-    ownColors: false,
+    paper: 'theme',
     quote: false,
     inlineParts: [],
     sources: [],

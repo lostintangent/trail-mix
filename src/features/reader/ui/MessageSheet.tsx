@@ -56,7 +56,7 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
   return (
     <article
       aria-label={`Message from ${displayName(message.from)}`}
-      {...stylex.props(styles.sheet, mail?.ownColors && styles.fixedPaper)}
+      {...stylex.props(styles.sheet, mail?.paper === 'light' && styles.fixedPaper)}
     >
       <header {...stylex.props(styles.from)}>
         <span aria-hidden {...stylex.props(styles.avatar)}>
@@ -253,7 +253,7 @@ const styles = stylex.create({
       [media.forcedColors]: `${borderVars['--border-width']} solid CanvasText`,
     },
   },
-  // Mail that sets its own colors is written for light paper, and stays on it.
+  // Mail that paints its own backgrounds is written for light paper, and stays on it.
   fixedPaper: {
     colorScheme: 'light',
     backgroundColor: tm.paperFixed,

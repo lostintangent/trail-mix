@@ -106,7 +106,7 @@ export function MessageFrame({ mail, quotes, title }: MessageFrameProps) {
           title={title}
           sandbox={FRAME_SANDBOX}
           referrerPolicy="no-referrer"
-          {...stylex.props(styles.frame, mail.ownColors ? styles.fixedPaper : styles.paper)}
+          {...stylex.props(styles.frame, mail.paper === 'light' ? styles.fixedPaper : styles.paper)}
         />
       </div>
     </div>
