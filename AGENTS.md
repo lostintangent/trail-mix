@@ -159,7 +159,8 @@ src/
     query-client.ts
 tests/
   contract/            the provider contract suite
-  e2e/                 the Playwright smoke suite
+  e2e/                 the Playwright smoke suite, run by `bun run e2e`
+  bench/               one module of budgets per area, measured together by run.ts
   reader/              the hostile-mail corpus and the tests that render it in real browsers
   mail-server/         server.ts starts and stops the native test mail server
   mail-check/          the mail check: check.ts, and worker.ts, the Durable Object it runs in
@@ -218,7 +219,7 @@ Tests concentrate where a defect spreads.
 
 ### Performance budgets
 
-`bun run bench` measures each budget on the built app, fails when one is exceeded, and runs locally and in CI, which attaches the numbers. Budgets are measured against a demo mailbox that scales deterministically to 50,000 messages, and the browser ones use a phone profile of four times CPU slowdown.
+`bun run bench` measures each budget on the built app, fails when one is exceeded, and runs locally and in CI, which attaches the numbers. It and `bun run e2e` need a build, so they stay out of `bun test`. Budgets are measured against a demo mailbox that scales deterministically to 50,000 messages, and the browser ones use a phone profile of four times CPU slowdown.
 
 | What                                                      | Budget                                        |
 | --------------------------------------------------------- | --------------------------------------------- |
@@ -234,6 +235,7 @@ Tests concentrate where a defect spreads.
 ### Mail safety
 
 - Never touch anyone's real mail. Development, tests and previews use the demo provider and the test mail server. Only an operator connects real accounts.
+- One Worker variable, `DEMO_MAILBOX`, gives every new Mailroom the demo account with that many messages. Development, the smoke suite and the benchmarks start that way.
 - The test mail server runs natively, with no Docker or other container. One Bun script starts and stops it, on a laptop and in CI alike: `bun run mail-server start`, with `--profile zoho` or `--profile outlook` to withhold what those hosts lack. Dovecot 2.4 serves IMAP. A Bun process serves submission on implicit TLS and STARTTLS, delivers only to `trailmix.test`, and stands in for Microsoft's sign-in. Everything binds to loopback.
 - On a Mac, the script builds Dovecot 2.4.5 with the upstream fix for TLS logins once, into `.mail-server/`, until Homebrew has 2.4.6. It needs Xcode's command line tools and `brew install openssl@4 pkgconf`. On Ubuntu, Dovecot comes from repo.dovecot.org, as CI installs it.
 - The mail check, `bun run mail-check`, is how an operator tests a real account. A password comes from a prompt with echo off or from a pipe, never from an argument or environment variable, and nothing writes it to disk or prints it. Outlook signs in with Microsoft's device-code flow.
