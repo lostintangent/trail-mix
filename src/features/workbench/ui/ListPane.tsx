@@ -54,6 +54,7 @@ export function ListPane({
   isCollapsed,
   onExpand,
   onShowFolders,
+  find,
   write,
   actions,
 }: {
@@ -86,6 +87,8 @@ export function ListPane({
   isCollapsed: boolean;
   onExpand: () => void;
   onShowFolders: () => void;
+  /** On a phone, the island's way to the search field and the commands it finds. */
+  find?: ReactNode;
   /** Starts a new message: at the end of the title on a desktop, and in the island on a phone. */
   write?: ReactNode;
   /** What can be done to the view itself, such as renaming its folder, at the header's end. */
@@ -161,6 +164,7 @@ export function ListPane({
             variant="ghost"
             onClick={onShowFolders}
           />
+          {find}
           {write}
         </PhoneIsland>
       )}

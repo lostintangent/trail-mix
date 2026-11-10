@@ -270,6 +270,56 @@ test('quick presses never rest, however long a slow phone takes to draw each mov
   await context.close();
 }, 30_000);
 
+test('the search field is the palette: ⌘K, a click or the phone’s island opens it, and Enter runs the best match', async () => {
+  const { context, page, problems } = await open(SIZES.desktop);
+  await page.getByRole('option').first().waitFor();
+  const field = page.getByRole('searchbox', { name: 'Search mail' });
+  const commands = page.getByRole('listbox', { name: 'Commands' });
+  const heading = (name: string) => page.getByRole('heading', { name, level: 2 });
+
+  // ⌘K lists every command, and typing part of a title highlights the best match for Enter.
+  await page.keyboard.press('ControlOrMeta+k');
+  await expect(field.evaluate((node) => node === document.activeElement)).resolves.toBe(true);
+  await commands.getByRole('option').first().waitFor();
+  await page.screenshot({ path: join(SHOTS, 'desktop-light-palette.png') });
+  await page.keyboard.type('go to drafts');
+  await page.keyboard.press('Enter');
+  await heading('Drafts').waitFor();
+  await expect(field.inputValue()).resolves.toBe('');
+  await expect(commands.count()).resolves.toBe(0);
+
+  // A click into the field works the same, and the arrows move the highlight.
+  await field.click();
+  await page.keyboard.type('go to');
+  await commands.getByRole('option').first().waitFor();
+  await page.keyboard.press('ArrowDown');
+  await expect(commands.getByRole('option', { selected: true }).textContent()).resolves.toMatch(
+    /^Go to Flagged/,
+  );
+  await page.keyboard.press('Enter');
+  await heading('Flagged').waitFor();
+
+  // Esc puts the commands away and leaves what was typed, before it means Back.
+  await field.click();
+  await page.keyboard.type('archive');
+  await commands.waitFor();
+  await page.keyboard.press('Escape');
+  await expect(commands.count()).resolves.toBe(0);
+  await expect(field.inputValue()).resolves.toBe('archive');
+  expect(problems).toEqual([]);
+  await context.close();
+
+  // A phone reaches it through the list's island.
+  const phone = await open(SIZES.phone);
+  await phone.page.getByRole('button', { name: 'Search and commands' }).click();
+  await phone.page.getByRole('listbox', { name: 'Commands' }).getByRole('option').first().waitFor();
+  await phone.page.keyboard.type('go to outbox');
+  await phone.page.keyboard.press('Enter');
+  await phone.page.getByRole('heading', { name: 'Outbox', level: 2 }).waitFor();
+  expect(phone.problems).toEqual([]);
+  await phone.context.close();
+});
+
 test('search finds mail as it is typed, marks what matched, and reads bodies only when asked', async () => {
   const { context, page, problems } = await open(SIZES.desktop);
   const field = page.getByRole('searchbox', { name: 'Search mail' });

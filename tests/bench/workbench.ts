@@ -163,7 +163,8 @@ function matched(text: string): Promise<number> {
   return new Promise((resolve) => {
     const check = () => {
       const field = document.querySelector<HTMLInputElement>('input[type="search"]');
-      const list = document.querySelector('[role="listbox"]');
+      // The conversation list, and not the palette's commands, which can show as the field is typed in.
+      const list = document.querySelector('[role="listbox"][aria-busy]');
       if (field?.value === text && list?.getAttribute('aria-busy') === 'false') {
         setTimeout(() =>
           resolve(performance.now() - (window as unknown as { pressedAt: number }).pressedAt),

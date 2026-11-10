@@ -383,6 +383,7 @@ export function Workbench({
   );
 
   const newMessage = commands.find(({ id }) => id === 'message.new');
+  const searchAndCommands = commands.find(({ id }) => id === 'search.focus');
   const writing =
     compose &&
     ({
@@ -508,6 +509,7 @@ export function Workbench({
                 isCollapsed={!isPhone && list.isCollapsed}
                 onExpand={() => setList({ ...list, isCollapsed: false })}
                 onShowFolders={() => setPhonePane('sidebar')}
+                find={searchAndCommands && <CommandButton command={searchAndCommands} />}
                 write={newMessage && <CommandButton command={newMessage} />}
                 actions={
                   view.in === 'folder' && (

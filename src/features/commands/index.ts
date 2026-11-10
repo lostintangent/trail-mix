@@ -12,3 +12,4 @@ export {
 } from './registry.ts';
 export { CommandButton } from './ui/CommandButton.tsx';
 export { CommandMatches, ShortcutSheet } from './ui/lazy.ts';
+export type { PaletteKeys } from './ui/CommandMatches.tsx';

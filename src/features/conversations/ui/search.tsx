@@ -12,8 +12,9 @@ import {
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { Search, X } from 'lucide-react';
-import { createContext, use, useEffect, useRef, useState } from 'react';
+import { createContext, Suspense, use, useEffect, useId, useRef, useState } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
+import { CommandMatches, registerSearchFocus, type PaletteKeys } from '../../commands/index.ts';
 import { highlight, type Marks } from '../../mail/core/index.ts';
 import type { SearchScopeProps } from './SearchScope.tsx';
 
@@ -35,35 +36,94 @@ export const SearchContext = createContext<SearchState>({ text: '', onSearch: ()
 export function SearchField() {
   const { text, onSearch } = use(SearchContext);
   const input = useRef<HTMLInputElement>(null);
+  // The commands show while the member works in the field: at once when ⌘K opened it, and
+  // otherwise for whatever typed text names one.
+  const [commands, setCommands] = useState<'closed' | 'typed' | 'all'>('closed');
+  useEffect(
+    () =>
+      registerSearchFocus(() => {
+        input.current?.focus();
+        input.current?.select();
+        setCommands('all');
+      }),
+    [],
+  );
+  const done = () => {
+    setCommands('closed');
+    onSearch('');
+    input.current?.blur();
+  };
+  const isOpen = commands === 'all' || (commands === 'typed' && text.trim() !== '');
+  const keys = useRef<PaletteKeys['current']>(undefined);
+  const listId = useId();
+  const [active, setActive] = useState<string>();
+
   return (
-    <label {...stylex.props(styles.field)}>
-      <Icon icon={Search} size="sm" color="secondary" />
-      <input
-        ref={input}
-        type="search"
-        aria-label="Search mail"
-        placeholder="Search mail"
-        value={text}
-        onChange={(event) => onSearch(event.target.value)}
-        onFocus={() => void loadScope().catch(() => {})}
-        enterKeyHint="search"
-        autoComplete="off"
-        spellCheck={false}
-        {...stylex.props(styles.input)}
-      />
-      {text && (
-        <IconButton
-          label="Clear search"
-          icon={<Icon icon={X} />}
-          variant="ghost"
-          size="sm"
-          onClick={() => {
-            onSearch('');
-            input.current?.focus();
-          }}
+    <div
+      {...stylex.props(styles.palette)}
+      onFocus={() => setCommands((was) => (was === 'closed' ? 'typed' : was))}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setCommands('closed');
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape' && isOpen) {
+          // The field closes its commands first, before Escape means Back.
+          event.preventDefault();
+          setCommands('closed');
+        } else if (
+          isOpen &&
+          (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Enter') &&
+          !event.nativeEvent.isComposing &&
+          keys.current?.(event.key)
+        ) {
+          event.preventDefault();
+        }
+      }}
+    >
+      <label {...stylex.props(styles.field)}>
+        <Icon icon={Search} size="sm" color="secondary" />
+        <input
+          ref={input}
+          type="search"
+          aria-label="Search mail"
+          placeholder="Search mail"
+          value={text}
+          aria-controls={isOpen ? listId : undefined}
+          aria-activedescendant={isOpen ? active : undefined}
+          onChange={(event) => onSearch(event.target.value)}
+          onFocus={() => void loadScope().catch(() => {})}
+          enterKeyHint="search"
+          autoComplete="off"
+          spellCheck={false}
+          {...stylex.props(styles.input)}
         />
+        {text && (
+          <IconButton
+            label="Clear search"
+            icon={<Icon icon={X} />}
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              onSearch('');
+              input.current?.focus();
+            }}
+          />
+        )}
+      </label>
+      {isOpen && (
+        <div {...stylex.props(styles.matches)}>
+          <Suspense>
+            <CommandMatches
+              text={text}
+              onDone={done}
+              keys={keys}
+              id={listId}
+              onActive={setActive}
+            />
+          </Suspense>
+        </div>
       )}
-    </label>
+    </div>
   );
 }
 
@@ -99,6 +159,24 @@ export function Marked({ text, marks }: { text: string; marks: Marks }) {
 }
 
 const styles = stylex.create({
+  palette: {
+    position: 'relative',
+  },
+  // The commands lie over what's below the field, on a sheet of their own, so nothing moves.
+  matches: {
+    position: 'absolute',
+    insetInline: 0,
+    top: `calc(100% + ${spacingVars['--spacing-1']})`,
+    zIndex: 1,
+    borderRadius: tm.sheetRadius,
+    backgroundColor: colorVars['--color-background-surface'],
+    boxShadow: tm.sheetEdge,
+    outline: {
+      default: null,
+      [media.forcedColors]: `${borderVars['--border-width']} solid CanvasText`,
+    },
+    ':empty': { display: 'none' },
+  },
   // As Astryx draws an input: an emphasized edge that turns accent with a muted ring on focus.
   field: {
     boxSizing: 'border-box',
