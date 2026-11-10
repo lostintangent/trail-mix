@@ -79,19 +79,14 @@ export const reader: BenchArea = {
       await page.waitForTimeout(IDLE_MS);
       await watcher.steady();
       await timed(page, () => press(page, 'ArrowDown'));
-      // The list draws only the rows near the selection, so the next row is found by position.
-      const next = await page.evaluate(() => {
-        const selected = document.querySelector('[role="option"][aria-selected="true"]');
-        const position = Number(selected?.getAttribute('aria-posinset')) + 1;
-        return document.querySelector(`[role="option"][aria-posinset="${position}"]`)?.textContent;
-      });
       await page.waitForTimeout(REPEAT_DELAY_MS);
       const held = await watcher.during('Holding a key', () => heldKey(page));
       await page.context().close();
-      if (held.shown.length > 1 || !held.shown.every((subject) => next?.includes(subject))) {
+      // A hint can reorder the rows meanwhile, so what counts is the row the first repeat selected.
+      if (held.shown.length > 1 || !held.shown.every((subject) => held.first.includes(subject))) {
         throw new Error(
-          `While a key repeated, the reader showed ${held.shown.join(', ')}. The row after ` +
-            `the newsletter was ${next?.slice(0, 80)}, and the longest repeat took ` +
+          `While a key repeated, the reader showed ${held.shown.join(', ')}. The first repeat ` +
+            `selected ${held.first.slice(0, 80)}, and the longest repeat took ` +
             `${Math.max(...held.times).toFixed(0)} ms, against the reader's 150 ms rest.`,
         );
       }
@@ -137,10 +132,10 @@ export const reader: BenchArea = {
 };
 
 /**
- * Each of 40 repeats of a held key, timed until the frame after it is drawn, and the subjects of
- * the conversations the reader showed meanwhile.
+ * Each of 40 repeats of a held key, timed until the frame after it is drawn, the subjects of the
+ * conversations the reader showed meanwhile, and the row the first repeat selected.
  */
-function heldKey(page: Page): Promise<{ times: number[]; shown: string[] }> {
+function heldKey(page: Page): Promise<{ times: number[]; shown: string[]; first: string }> {
   return page.evaluate(async () => {
     const list = document.querySelector('[role="listbox"]')!;
     const reader = document.querySelector('section[aria-label="Reader"]')!;
@@ -153,6 +148,7 @@ function heldKey(page: Page): Promise<{ times: number[]; shown: string[] }> {
     });
     observer.observe(reader, { subtree: true, childList: true, characterData: true });
     const times: number[] = [];
+    let first = '';
     for (let repeat = 0; repeat < 40; repeat++) {
       times.push(
         await new Promise<number>((resolve) => {
@@ -161,9 +157,10 @@ function heldKey(page: Page): Promise<{ times: number[]; shown: string[] }> {
           requestAnimationFrame(() => setTimeout(() => resolve(performance.now() - start)));
         }),
       );
+      if (repeat === 0) first = list.querySelector('[aria-selected="true"]')?.textContent ?? '';
     }
     observer.disconnect();
-    return { times, shown };
+    return { times, shown, first };
   });
 }
 
