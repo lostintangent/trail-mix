@@ -1,13 +1,14 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BenchArea, Measurement } from './budget.ts';
+import { workbench } from './workbench.ts';
 
 /**
  * `bun run bench`: measures every performance budget in AGENTS.md, one area at a time, prints them,
  * writes `test-results/bench.json` for CI to attach, and fails when one is over its budget. Each
  * area is a module beside this one that exports a `BenchArea`.
  */
-const AREAS: BenchArea[] = [];
+const AREAS: BenchArea[] = [workbench];
 
 const results: Measurement[] = [];
 for (const area of AREAS) results.push(...(await area.measure()));
