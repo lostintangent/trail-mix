@@ -640,7 +640,6 @@ type ImapLogger = Exclude<
   false
 >;
 
-/** Ascending UIDs as an IMAP sequence set, with runs collapsed, so a long list stays short. */
 /** What each connection's server said when it last refused a command. */
 const refusals = new WeakMap<ImapFlow, string>();
 
@@ -677,6 +676,7 @@ async function uidOf(connection: ImapFlow, messageId: string): Promise<number | 
   return Array.isArray(found) && found.length ? Math.max(...found) : undefined;
 }
 
+/** Ascending UIDs as an IMAP sequence set, with runs collapsed, so a long list stays short. */
 export function rangeOf(uids: number[]): string {
   const sorted = [...new Set(uids)].sort((a, b) => a - b);
   const runs: string[] = [];
