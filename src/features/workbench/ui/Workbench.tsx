@@ -311,7 +311,7 @@ export function Workbench({
     <TriageActions commands={selectedCommands} isCompact={place === 'island'} />
   );
 
-  const outbox = useOutboxCommands(undefined);
+  const outbox = useOutboxCommands();
 
   // Send sends what the open composer holds, once it's saved, and Undo brings the composer back as
   // it was, under its conversation if that's still the one open.

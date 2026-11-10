@@ -1,12 +1,5 @@
 import { Clock, Send } from 'lucide-react';
 import type { Command } from '../../commands/index.ts';
-import {
-  sameRef,
-  type Folder,
-  type Message,
-  type MessageRef,
-  type Outgoing,
-} from '../../mail/core/index.ts';
 import { laterTimes, type Later } from '../core/later.ts';
 
 export const SEND = 'outbox.send';
@@ -17,7 +10,7 @@ export const GROUP = 'Send';
 
 /**
  * Send, and Send later at each time it offers now, as commands for whatever holds a draft: the
- * composer, which gives Send its key, or the reader beside a saved draft. `SendActions` draws them.
+ * composer, which gives Send its key. `SendActions` draws them.
  */
 export function sendCommands({
   onSend,
@@ -43,28 +36,3 @@ export function sendCommands({
     })),
   ];
 }
-
-/** The draft in a conversation that Send sends: its newest message in a Drafts folder. */
-export function draftIn(
-  conversation: readonly Message[],
-  folders: readonly Folder[],
-): MessageRef | undefined {
-  const draft = conversation.findLast((message) =>
-    folders.some(
-      ({ account, path, role }) =>
-        role === 'drafts' && account === message.account && path === message.path,
-    ),
-  );
-  return (
-    draft && {
-      account: draft.account,
-      path: draft.path,
-      uidValidity: draft.uidValidity,
-      uid: draft.uid,
-    }
-  );
-}
-
-/** Whether a draft is on its way, so it can't be sent again until its send is undone. */
-export const isOnItsWay = (outbox: readonly Outgoing[], draft: MessageRef) =>
-  outbox.some((outgoing) => sameRef(outgoing.draft, draft) && outgoing.state !== 'failed');

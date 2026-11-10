@@ -1,37 +1,30 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { RotateCw, Undo2 } from 'lucide-react';
 import type { Command } from '../../commands/index.ts';
-import type { MessageRef, Outgoing } from '../../mail/core/index.ts';
+import type { Outgoing } from '../../mail/core/index.ts';
 import { outboxQuery } from '../../mailroom/client/index.ts';
 import { briefly } from '../core/standing.ts';
-import { GROUP, isOnItsWay, sendCommands } from './sendCommands.ts';
+import { GROUP } from './sendCommands.ts';
 import { useUndoable } from './undoable.ts';
-import { loadSending, useSend } from './useSend.ts';
+import { loadSending } from './useSend.ts';
 
 const NONE: readonly Outgoing[] = [];
 
 /**
- * The Outbox's commands for the registry: Send and Send later for the draft open in the reader, if
- * one is, Undo send while this device's latest send can still be taken back, and Retry for each
- * send that failed. `undoSend` is the same undo, for a key the workbench shares with its own Undo.
+ * The Outbox's commands for the registry: Undo send while this device's latest send can still be
+ * taken back, and Retry for each send that failed. `undoSend` is the same undo, for a key the
+ * workbench shares with its own Undo. The composer brings Send and Send later.
  */
-export function useOutboxCommands(draft: MessageRef | undefined): {
+export function useOutboxCommands(): {
   commands: Command[];
   undoSend: (() => void) | undefined;
 } {
-  const send = useSend();
   const undoable = useUndoable();
   const outbox = useQuery(outboxQuery).data ?? NONE;
   const queryClient = useQueryClient();
   return {
     undoSend: undoable?.takeBack,
     commands: [
-      ...(draft
-        ? sendCommands({
-            onSend: (at) => void send(draft, { at }),
-            isEnabled: !isOnItsWay(outbox, draft),
-          })
-        : []),
       {
         id: 'outbox.undo',
         title: 'Undo send',
