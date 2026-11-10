@@ -110,7 +110,7 @@ Conversation subjects in the reader are set in the system serif. Everything else
 - **The virtualized list.** Astryx has none, so the conversation list uses TanStack Virtual, with rows styled in StyleX.
 - **StyleX wiring.** The class name prefix is `tm`, so no class collides with the `x` classes Astryx ships precompiled. `useCSSLayers` is on, and lightningcss runs with `Features.LightDark` excluded. In development the HTML loads `/virtual:stylex.css` and `virtual:stylex:runtime`, and every `.stylex.ts` file is transformed before that stylesheet is served, because a `defineConsts` value such as a media query resolves only once its defining file has been. A test compiles the app's styles and fails if any class name also appears in Astryx's stylesheet.
 - **Pinned versions.** Every `@astryxdesign/*` and `@stylexjs/*` package is pinned to an exact version, with core and theme on the same version. Upgrade them together, in a pull request that does nothing else and includes before-and-after screenshots of every screen.
-- **A single-page app.** No route is rendered on the server. The Worker answers a page request with the document shell alone, rendered when it is requested rather than prerendered at build time, and a small inline script in that shell applies the saved theme mode, accent and pane widths before first paint, so nothing flashes.
+- **A single-page app.** No route is rendered on the server. The Worker answers a page request with the document shell alone, rendered when it is requested rather than prerendered at build time, and a small inline script in that shell applies the saved theme mode, accent and pane widths before first paint, so nothing flashes. The browser's own chrome, such as a phone's status bar, takes the desk of the mode shown, through one `theme-color` meta per scheme. The shell links the manifest with `crossorigin="use-credentials"`, because a manifest is otherwise fetched without the member's cookie and Access answers it with its sign-in page.
 - **Theme.** It follows the system by default. A manual Light or Dark choice is saved per device. So is the accent, any color the member picks from the palette or beside the theme choice. Every pick keeps 4.5:1: text on the accent turns black or white, and where the accent is itself text or a mark it is darkened on paper and lightened on charcoal until it passes. The default, ink blue, passes as it is. The math is pure, in `src/shared/color.ts`, and the policy in `src/app/theme/readableAccent.ts`. The highlighter, the stamps and the airmail stripe never follow the accent.
 - **Width picks the layout, pointer picks the size.** Below 768 pixels there is one pane at a time on a sliding track. On a coarse pointer, at any width, every target is at least 44 pixels.
 - **Side panels.** They have pixel widths, resize by drag and by arrow keys, snap to a rail when dragged below their midpoint, fold to that rail and back with a button and a command (`Mod+B` for the sidebar) as in GistPad and Toy Box, keep their widths and folds across a reload, and expose `role="separator"`. Sheets on the desk sit 8 pixels apart, as in Toy Box, and each resize handle lies in that gutter: nothing shows at rest, and on hover or drag it is a line of the accent that fades out toward both ends. Use Astryx's `useResizable` and `ResizeHandle` if they can do all of this. Otherwise the workbench owns a `SidePanel` that does. Their widths are numbers that the side panels own, because the drag and the prepaint script both need them.
@@ -131,6 +131,7 @@ src/
     root.tsx           the document shell, the one thing the Worker renders
     workbench.tsx      the route that shows the workbench
     prepaint.ts        the inline script that runs before first paint
+    icons.ts           makes public/icons from favicon.svg, run by `bun run icons`
     theme/
       trail-mix.ts     the Astryx theme
       built/           the theme compiled by `bun run theme`, which the app loads
@@ -167,6 +168,7 @@ tests/
   mail-server/         server.ts starts and stops the native test mail server
   mail-check/          the mail check: check.ts, and worker.ts, the Durable Object it runs in
   workerd.ts           runs a Worker on the local Workers runtime, for the mail check and tests
+public/                the manifest, favicon.svg and the icons made from it, served as they are
 .github/workflows/     ci.yml and deploy.yml
 ```
 

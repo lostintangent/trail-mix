@@ -43,6 +43,18 @@ export function subscribeToThemeMode(onChange: () => void): () => void {
   };
 }
 
+/**
+ * Paints the browser's own chrome, such as a phone's status bar or an installed app's title bar,
+ * the desk of the chosen mode, or of each scheme when the system decides. The shell carries one
+ * `theme-color` meta per scheme. Self-contained, since the prepaint script inlines it.
+ */
+export function paintThemeColor(mode: string | null, desk: { light: string; dark: string }): void {
+  for (const meta of document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')) {
+    const scheme = meta.media.includes('dark') ? 'dark' : 'light';
+    meta.content = mode === 'light' || mode === 'dark' ? desk[mode] : desk[scheme];
+  }
+}
+
 export function parse(saved: string | null): ThemeMode {
   return saved === 'light' || saved === 'dark' ? saved : 'system';
 }

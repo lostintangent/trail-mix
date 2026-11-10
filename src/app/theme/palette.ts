@@ -7,6 +7,11 @@ export type Halves = { light: string; dark: string };
 
 /** Behind everything. */
 export const DESK: Halves = { light: 'oklch(0.94 0.008 85)', dark: 'oklch(0.165 0 0)' };
+/**
+ * The desk in hex, for what can't read the theme: the manifest and the browser's own chrome, such as
+ * a phone's status bar. A test holds them to `DESK`.
+ */
+export const DESK_HEX = { light: '#eeebe5', dark: '#0e0e0e' } as const satisfies Halves;
 /** The list, the reader, menus. */
 export const PANE: Halves = { light: 'oklch(0.985 0.004 85)', dark: 'oklch(0.21 0 0)' };
 /** A message, the composer, a lifted row. */

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { BrowserContext, BrowserContextOptions, Locator, Page } from 'playwright';
 import { ACCENT_STORAGE_KEY } from '../../src/app/theme/accent.ts';
 import { parseHex } from '../../src/shared/color.ts';
+import { DESK_HEX } from '../../src/app/theme/palette.ts';
 import { accentRule, accentTokens } from '../../src/app/theme/readableAccent.ts';
 import { textContrasts, unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
@@ -189,6 +190,11 @@ test('side panels resize by pointer and key, snap to a rail, and come back the s
   await page.keyboard.press('ArrowLeft');
   expect(await size(sidebar)).toBe(start + moved - 16);
 
+  // The sidebar eases to its new width, carrying the list's handle with it, so the handle is found
+  // once it has come to rest.
+  await page.waitForFunction(() =>
+    document.getAnimations().every(({ playState }) => playState !== 'running'),
+  );
   const listBox = (await list.boundingBox())!;
   await page.mouse.move(listBox.x + listBox.width / 2, listBox.y + 200);
   await page.mouse.down();
@@ -212,7 +218,7 @@ test('side panels resize by pointer and key, snap to a rail, and come back the s
   await context.close();
 }, 30_000);
 
-test('a saved theme paints the desk before any of the app runs', async () => {
+test('a saved theme paints the desk, and the browser’s chrome, before any of the app runs', async () => {
   for (const [saved, system] of [
     ['dark', 'light'],
     ['light', 'dark'],
@@ -223,8 +229,24 @@ test('a saved theme paints the desk before any of the app runs', async () => {
     await page.route(/\.js(\?|$)/, (route) => route.abort());
     await page.goto(app.url, { waitUntil: 'load' });
     expect(await page.evaluate(() => getComputedStyle(document.body).colorScheme)).toBe(saved);
+    expect(await chromeColors(page)).toEqual([DESK_HEX[saved], DESK_HEX[saved]]);
     await context.close();
   }
+});
+
+test('the browser’s chrome follows the theme as it is switched', async () => {
+  const { context, page, problems } = await open({ ...SIZES.desktop, colorScheme: 'dark' });
+  const each = [DESK_HEX.light, DESK_HEX.dark];
+  expect(await chromeColors(page)).toEqual(each);
+  // System, then Light, then Dark.
+  await page.getByRole('button', { name: 'Theme: System' }).click();
+  expect(await chromeColors(page)).toEqual([DESK_HEX.light, DESK_HEX.light]);
+  await page.getByRole('button', { name: 'Theme: Light' }).click();
+  expect(await chromeColors(page)).toEqual([DESK_HEX.dark, DESK_HEX.dark]);
+  await page.getByRole('button', { name: 'Theme: Dark' }).click();
+  expect(await chromeColors(page)).toEqual(each);
+  expect(problems).toEqual([]);
+  await context.close();
 });
 
 test('a saved accent paints before any of the app runs, made readable in each theme', async () => {
@@ -569,6 +591,15 @@ test('the reader says where its conversation sits, and steps to the ones either 
  * Opens a conversation from the unified Inbox and waits for its mail. On a phone it first goes back
  * to the list, from the reader or the folders.
  */
+/** The colors the shell's theme-color metas give the browser's chrome, light scheme first. */
+function chromeColors(page: Page): Promise<string[]> {
+  return page.evaluate(() =>
+    [...document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]')].map(
+      ({ content }) => content,
+    ),
+  );
+}
+
 /** Saves an accent as picking it would, before the page loads. */
 async function pickBeforeLoad(context: BrowserContext, color: string) {
   const saved = JSON.stringify({ color, css: accentRule(color) });

@@ -3,6 +3,8 @@ import type { DefinedTheme, ThemeMode } from '@astryxdesign/core/theme';
 import { colorVars, typographyVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { useLayoutEffect, useMemo, type ReactNode } from 'react';
+import { paintThemeColor } from './mode.ts';
+import { DESK_HEX } from './palette.ts';
 
 /**
  * The app's root theme provider, for a theme prebuilt by `astryx theme build`.
@@ -23,12 +25,14 @@ export function AppTheme({
   registerTheme(theme);
 
   // `<html>` carries the mode, which the theme's CSS maps to `color-scheme`, and the theme's name,
-  // so its scoped rules reach portals outside this subtree. The prepaint script set both already.
+  // so its scoped rules reach portals outside this subtree. The browser's chrome takes the mode's
+  // desk. The prepaint script did all three already.
   useLayoutEffect(() => {
     const root = document.documentElement;
     if (mode === 'system') root.removeAttribute('data-theme');
     else root.setAttribute('data-theme', mode);
     root.setAttribute('data-astryx-theme', theme.name);
+    paintThemeColor(mode, DESK_HEX);
   }, [mode, theme.name]);
 
   const value = useMemo(() => ({ theme, mode }), [theme, mode]);
