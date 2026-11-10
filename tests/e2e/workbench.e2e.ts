@@ -62,7 +62,10 @@ test('every screen renders cleanly, with readable text, at both sizes in both th
       const { context, page, problems } = await open({ ...options, colorScheme });
       const screens: [string, (page: Page) => Promise<void>][] = [['list', async () => {}]];
       if (size === 'phone') {
-        screens.push(['folders', (page) => page.getByRole('button', { name: 'Folders' }).click()]);
+        screens.push([
+          'folders',
+          (page) => page.getByRole('button', { name: 'Folders', exact: true }).click(),
+        ]);
       }
       // The newest conversation, a thread, then the newsletter, which sets its own colors.
       screens.push(['reader', (page) => openConversation(page, 0)]);
@@ -166,7 +169,7 @@ async function openConversation(page: Page, which: number | RegExp) {
   // A pane off a phone's screen is inert, so only the pane in view can be used.
   const inView = async (locator: Locator) =>
     (await locator.count()) > 0 && locator.evaluate((element) => !element.closest('[inert]'));
-  const back = page.getByRole('button', { name: 'Back' });
+  const back = page.getByRole('button', { name: 'Back', exact: true });
   if (await inView(back)) await back.click();
   const inbox = page.getByRole('button', { name: /^Inbox/ }).first();
   if (await inView(inbox)) await inbox.click();
