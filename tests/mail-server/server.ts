@@ -21,6 +21,8 @@ export const domain = 'trailmix.test';
 export const users = {
   alice: { email: `alice@${domain}`, password: 'alice-test-password' },
   bob: { email: `bob@${domain}`, password: 'bob-test-password' },
+  // The bench's mailbox, which holds 50,000 messages between runs, so no test empties it.
+  bench: { email: `bench@${domain}`, password: 'bench-test-password' },
 } as const;
 
 /**
@@ -178,6 +180,33 @@ export async function resetUidValidity(user: string, folder: string) {
   const current = Number(/uidvalidity=(\d+)/.exec(status)?.[1]);
   if (!current) throw new Error(`No UIDVALIDITY for ${user}'s ${folder}: ${status}`);
   await $`${doveadm} -c ${conf} mailbox update -u ${user} --uid-validity ${current + 1} ${folder}`.quiet();
+}
+
+/**
+ * Fills a user's Inbox from an mbox file, in the file's order, which is far quicker than delivering
+ * a large mailbox one message at a time.
+ */
+export async function importInbox(user: string, mbox: string) {
+  const { doveadm } = await dovecot();
+  await $`${doveadm} -c ${conf} import -u ${user} -p mail_inbox_path=${mbox} mbox:${dirname(mbox)} ${''} mailbox INBOX all`.quiet();
+}
+
+/** Expunges every message in one of a user's folders. */
+export async function emptyFolder(user: string, folder: string) {
+  const { doveadm } = await dovecot();
+  await $`${doveadm} -c ${conf} expunge -u ${user} mailbox ${folder} all`.quiet();
+}
+
+/** How many messages a user's folder holds. */
+export async function count(user: string, folder: string): Promise<number> {
+  const { doveadm } = await dovecot();
+  const status = await $`${doveadm} -c ${conf} mailbox status -u ${user} messages ${folder}`.text();
+  return Number(/messages=(\d+)/.exec(status)?.[1] ?? 0);
+}
+
+/** Where a user's mail lives, for anything kept beside it between runs. */
+export function homeOf(user: string): string {
+  return join(state, 'mail', user);
 }
 
 // Dovecot's configuration

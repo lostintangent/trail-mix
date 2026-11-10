@@ -7,7 +7,12 @@ import shellConfig from '../wrangler.jsonc';
 
 const shell = shellConfig as { compatibility_date: string; compatibility_flags: string[] };
 
-export type LocalWorker = { url: string; stop: () => void };
+export type LocalWorker = {
+  url: string;
+  stop: () => void;
+  /** The process group of everything it started, workerd among them. */
+  group: number;
+};
 
 /**
  * Runs a Worker on the local Workers runtime, for the check command and the tests that need
@@ -79,7 +84,7 @@ export async function startWorker(
     stop();
     throw error;
   }
-  return { url, stop };
+  return { url, stop, group: workerd.pid! };
 }
 
 function freePort(): Promise<number> {

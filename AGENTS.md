@@ -222,7 +222,7 @@ Tests concentrate where a defect spreads.
 
 ### Performance budgets
 
-`bun run bench` measures each budget on the built app, fails when one is exceeded, and runs locally and in CI, which attaches the numbers. It and `bun run e2e` need a build, so they stay out of `bun test`. Budgets are measured against a demo mailbox that scales deterministically to 50,000 messages, and the browser ones use a phone profile of four times CPU slowdown.
+`bun run bench` measures each budget on the built app, fails when one is exceeded, and runs locally and in CI, which attaches the numbers. It and `bun run e2e` need a build, so they stay out of `bun test`. Budgets are measured against a demo mailbox that scales deterministically to 50,000 messages, and the browser ones use a phone profile of four times CPU slowdown. `bun run bench <area>` measures one area, as CI does in the job that has what that area needs. The Mailroom's area syncs from the test mail server, whose `bench` user holds the demo's Personal Inbox at 50,000 messages, kept between runs, and it counts a batch's CPU as what workerd spends between the hints for two batches.
 
 | What                                                      | Budget                                                          |
 | --------------------------------------------------------- | --------------------------------------------------------------- |
@@ -251,7 +251,7 @@ Tests concentrate where a defect spreads.
 
 ### Pipeline
 
-- **CI** runs on every pull request and every push to main: install from the frozen lockfile, format check, lint, type-check, test and build, then a check under Node that the built Worker deploys (`wrangler deploy --dry-run`) and starts within Cloudflare's limit (`wrangler check startup`), then the Playwright smoke suite against the built app. A second job installs Dovecot and runs `bun run test:mail`, which includes the provider contract suite against the test mail server.
+- **CI** runs on every pull request and every push to main: install from the frozen lockfile, format check, lint, type-check, test and build, then a check under Node that the built Worker deploys (`wrangler deploy --dry-run`) and starts within Cloudflare's limit (`wrangler check startup`), then the Playwright smoke suite against the built app. A second job installs Dovecot and runs `bun run test:mail`, which includes the provider contract suite against the test mail server, then `bun run bench mailroom`.
 - **Preview** runs on every pull request, after CI. It deploys the branch to an isolated environment with its own storage that enables only the demo provider, and posts the address on the pull request.
 - **Production** runs on every push to main, after CI. It deploys with the commit as its version and then calls the health endpoint. If the endpoint does not report that commit, the workflow rolls back and fails.
 - **Demo** runs after production. It deploys the public demo: no sign-in, demo provider only, one Mailroom per visitor that erases itself after a day.
