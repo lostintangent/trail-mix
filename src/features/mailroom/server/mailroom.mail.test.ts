@@ -173,6 +173,102 @@ describe('The Mailroom', () => {
     expect(await ada.call('conversation', rows[0]!.id)).toEqual([]);
   }, 30_000);
 
+  describe('triage, as the browser sends it, on the server', () => {
+    /** The message with this subject, as the index holds it. */
+    const held = async (subject: string) => {
+      const row = (await ada.page({ in: 'search', text: subject })).find(
+        (found) => found.subject === subject,
+      );
+      const messages = await ada.call<Message[]>('conversation', row!.id);
+      return refOf(messages.find((message) => message.subject === subject)!);
+    };
+    type Moved = { from: MessageRef; to: MessageRef };
+    /** Undoes moves as the browser does, each back to its folder. Returns where each landed. */
+    const undo = async (moved: Moved[]) =>
+      (
+        await Promise.all(
+          moved.map(({ from, to }) =>
+            ada.call<Moved[]>('move', [to], { account: from.account, path: from.path }),
+          ),
+        )
+      ).flat();
+
+    test('archives and deletes as moves to a role, and each undo moves it back', async () => {
+      let tickets = await held('Tickets');
+      for (const role of ['archive', 'trash'] as const) {
+        const moved = await ada.call<{ from: MessageRef; to: MessageRef }[]>(
+          'move',
+          [tickets],
+          role,
+        );
+        const path = role === 'archive' ? 'Archive' : 'Trash';
+        expect(moved.map(({ to }) => to.path)).toEqual([path]);
+        expect(await onServer(path)).toContainKey('<tickets@trailmix.test>');
+        expect(await onServer('INBOX')).not.toContainKey('<tickets@trailmix.test>');
+        // Back in the Inbox under a new UID, which the undo says.
+        tickets = (await undo(moved))[0]!.to;
+        expect(tickets.path).toBe('INBOX');
+        expect(await onServer('INBOX')).toContainKey('<tickets@trailmix.test>');
+        expect(await onServer(path)).not.toContainKey('<tickets@trailmix.test>');
+      }
+    }, 30_000);
+
+    test('moves to a folder of the account, and deletes a search hit from Archive', async () => {
+      await ada.call('createFolder', { account: account.id, path: 'Receipts' });
+      const garden = await held('Garden');
+      const moved = await ada.call<{ from: MessageRef; to: MessageRef }[]>('move', [garden], {
+        account: account.id,
+        path: 'Receipts',
+      });
+      expect(await onServer('Receipts')).toContainKey('<garden@trailmix.test>');
+      await undo(moved);
+      expect(await onServer('INBOX')).toContainKey('<garden@trailmix.test>');
+
+      // Found only by the server's own search, outside the index.
+      const [row] = await ada.page({ in: 'search', text: 'periwinkle', fullText: true });
+      const [old] = await ada.call<Message[]>('conversation', row!.id);
+      const deleted = await ada.call<{ from: MessageRef; to: MessageRef }[]>(
+        'move',
+        [refOf(old!)],
+        'trash',
+      );
+      expect(await onServer('Trash')).toContainKey('<old@trailmix.test>');
+      await undo(deleted);
+      expect(await onServer('Archive')).toContainKey('<old@trailmix.test>');
+    }, 30_000);
+
+    test('flags and marks read on the server, and the opposite change undoes it', async () => {
+      const lunch = await held('Re: Lunch');
+      const flagged = async () => {
+        const flags = (await onServer('INBOX'))['<lunch-reply@trailmix.test>'] ?? [];
+        return ['\\Flagged', '\\Seen'].filter((flag) => flags.includes(flag));
+      };
+      await ada.call('setFlags', [lunch], { flagged: true, seen: true });
+      expect(await flagged()).toEqual(['\\Flagged', '\\Seen']);
+      await ada.call('setFlags', [lunch], { flagged: false, seen: false });
+      expect(await flagged()).toEqual([]);
+    });
+
+    test('creates, renames and deletes folders on the server', async () => {
+      const folder = { account: account.id, path: 'Receipts' };
+      await ada.call('renameFolder', folder, 'Receipts 2026');
+      expect(await foldersOnServer()).toContain('Receipts 2026');
+      await ada.call('deleteFolder', { ...folder, path: 'Receipts 2026' });
+      expect(await foldersOnServer()).not.toContain('Receipts 2026');
+      await ada.until(async () =>
+        (await ada.call<Folder[]>('folders')).every(({ path }) => !path.startsWith('Receipts')),
+      );
+    }, 30_000);
+
+    test('a move the server refuses rejects with what the server said', async () => {
+      const garden = await held('Garden');
+      // Another client deleted this folder a moment ago, as far as the browser knows.
+      const refused = ada.call('move', [garden], { account: account.id, path: 'Gone' });
+      await expect(refused).rejects.toThrow(/doesn't exist/i);
+      expect(await onServer('INBOX')).toContainKey('<garden@trailmix.test>');
+    });
+  });
+
   test('another member reaches none of it', async () => {
     const [row] = await ada.page({ in: 'inbox' });
     const [message] = await ada.call<Message[]>('conversation', row!.id);
@@ -367,6 +463,44 @@ function member(name: string, worker: () => LocalWorker) {
       };
     },
   };
+}
+
+/** Each message in one of Alice's folders on the server, by Message-ID, with its flags. */
+async function onServer(path: string): Promise<Record<string, string[]>> {
+  return asAlice(async (client) => {
+    const lock = await client.getMailboxLock(path);
+    try {
+      const found: Record<string, string[]> = {};
+      if (!client.mailbox || client.mailbox.exists === 0) return found;
+      for await (const message of client.fetch('1:*', { envelope: true, flags: true })) {
+        found[message.envelope?.messageId ?? ''] = [...(message.flags ?? [])];
+      }
+      return found;
+    } finally {
+      lock.release();
+    }
+  });
+}
+
+/** Alice's folders, as the server lists them. */
+const foldersOnServer = () =>
+  asAlice(async (client) => (await client.list()).map((folder) => folder.path));
+
+async function asAlice<T>(use: (client: ImapFlow) => Promise<T>): Promise<T> {
+  const client = new ImapFlow({
+    host: 'localhost',
+    port: ports.imaps,
+    secure: true,
+    auth: { user: alice.email, pass: alice.password },
+    tls: { ca: [ca] },
+    logger: false,
+  });
+  await client.connect();
+  try {
+    return await use(client);
+  } finally {
+    await client.logout();
+  }
 }
 
 /** Alice's mailbox: two letters, and a question in Sent with its reply in Inbox. */

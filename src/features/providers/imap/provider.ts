@@ -57,13 +57,23 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
   /** A watcher idles as soon as it can, and starts IDLE again every few minutes. */
   function open(watching = false): ImapFlow {
     const { host, port, secure } = account.imap;
-    const connection = new ImapFlow({
+    const quiet = () => {};
+    const connection: ImapFlow = new ImapFlow({
       host,
       port,
       secure,
       doSTARTTLS: secure ? undefined : true,
       auth: account.auth,
-      logger: false,
+      // imapflow logs some refusals instead of throwing them. What the server said is kept.
+      logger: {
+        debug: quiet,
+        info: quiet,
+        error: quiet,
+        warn: (entry: { err?: { response?: unknown } }) => {
+          const said = entry.err?.response;
+          if (typeof said === 'string' && said) refusals.set(connection, said);
+        },
+      },
       ...(watching ? { autoIdleDelay: 100, maxIdleTime: 4 * 60_000 } : {}),
       ...(network.imapTransport ? { transport: network.imapTransport } : {}),
       ...(network.ca ? { tls: { ca: [toText(network.ca)] } } : {}),
@@ -351,9 +361,17 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
         await inFolder(path, async (connection, mailbox) => {
           const uids = current(group, mailbox);
           if (!uids.length) return;
-          if (add.length) await connection.messageFlagsAdd(rangeOf(uids), add, { uid: true });
-          if (remove.length)
-            await connection.messageFlagsRemove(rangeOf(uids), remove, { uid: true });
+          const range = rangeOf(uids);
+          if (add.length) {
+            await unlessRefused(connection, 'change those flags', () =>
+              connection.messageFlagsAdd(range, add, { uid: true }),
+            );
+          }
+          if (remove.length) {
+            await unlessRefused(connection, 'change those flags', () =>
+              connection.messageFlagsRemove(range, remove, { uid: true }),
+            );
+          }
         });
       }
     },
@@ -371,8 +389,9 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
           if (!uids.length) return undefined;
           const uidplus = connection.capabilities.has('UIDPLUS');
           const ids = uidplus ? new Map<number, string>() : await messageIdsOf(connection, uids);
-          const result = await connection.messageMove(rangeOf(uids), to, { uid: true });
-          if (!result) throw new Error(`The server would not move those messages to ${to}.`);
+          const result = await unlessRefused(connection, `move those messages to ${to}`, () =>
+            connection.messageMove(rangeOf(uids), to, { uid: true }),
+          );
           return { uidplus, ids, result };
         });
         if (!done) continue;
@@ -566,7 +585,10 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
   async function remove(ref: MessageRef) {
     await inFolder(ref.path, async (connection, mailbox) => {
       const uids = current([ref], mailbox);
-      if (uids.length) await connection.messageDelete(rangeOf(uids), { uid: true });
+      if (!uids.length) return;
+      await unlessRefused(connection, 'remove that message', () =>
+        connection.messageDelete(rangeOf(uids), { uid: true }),
+      );
     });
   }
 
@@ -584,6 +606,26 @@ const ROLES: Record<string, FolderRole> = {
 const roleOf = (specialUse: string | undefined) => (specialUse ? ROLES[specialUse] : undefined);
 
 /** Ascending UIDs as an IMAP sequence set, with runs collapsed, so a long list stays short. */
+/** What each connection's server said when it last refused a command. */
+const refusals = new WeakMap<ImapFlow, string>();
+
+/**
+ * Runs a command that imapflow reports refused by resolving `false`, and rejects with what the
+ * server said instead, so a member sees why.
+ */
+async function unlessRefused<T>(
+  connection: ImapFlow,
+  what: string,
+  command: () => Promise<T | false>,
+): Promise<T> {
+  refusals.delete(connection);
+  const result = await command();
+  if (result === false) {
+    throw new Error(refusals.get(connection) ?? `The server would not ${what}.`);
+  }
+  return result;
+}
+
 /** The Message-IDs of messages in the selected folder, by UID. */
 async function messageIdsOf(connection: ImapFlow, uids: number[]): Promise<Map<number, string>> {
   const ids = new Map<number, string>();
