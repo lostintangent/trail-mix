@@ -11,6 +11,7 @@ import {
 } from 'react';
 import { tm } from '../../../app/theme/tokens.stylex.ts';
 import { frameDocument, type FrameLook, type SafeMail } from '../core/sanitize.ts';
+import { hearsListeners, returnFocusFrom } from './focus.ts';
 
 /**
  * One message's HTML in its own frame, sized to fit what it shows.
@@ -50,13 +51,22 @@ export function MessageFrame({ mail, quotes, title }: MessageFrameProps) {
   );
   const fitToContent = useFitToContent(box, sizer, frame);
   const passKey = use(MessageKeys);
+  const forgetFocus = useRef<() => void>(null);
+  useLayoutEffect(() => () => forgetFocus.current?.(), []);
   const onLoad = () => {
     fitToContent();
-    frame.current?.contentDocument?.addEventListener('keydown', passKey);
+    const document = frame.current?.contentDocument;
+    document?.addEventListener('keydown', passKey);
+    // Where the frame's document hears nothing, as in WebKit, the page takes the focus back instead.
+    forgetFocus.current?.();
+    forgetFocus.current =
+      document && box.current && frame.current && !hearsListeners(document)
+        ? returnFocusFrom(frame.current, box.current)
+        : null;
   };
 
   return (
-    <div ref={box} {...stylex.props(styles.box)}>
+    <div ref={box} tabIndex={-1} {...stylex.props(styles.box)}>
       <div ref={sizer} {...stylex.props(styles.sizer)}>
         <iframe
           ref={frame}
@@ -185,9 +195,11 @@ function useFitToContent(
 }
 
 const styles = stylex.create({
+  // It takes the focus back from its frame only so the page hears keys, so it draws no ring.
   box: {
     overflowX: 'auto',
     overflowY: 'hidden',
+    outline: 'none',
   },
   sizer: {
     position: 'relative',

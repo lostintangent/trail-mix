@@ -98,15 +98,74 @@ for (const type of BROWSERS) {
         await page.close();
       });
 
-      // WebKit runs no listener at all in a document whose sandbox allows no scripts, even one the
-      // page added, so there a key pressed inside a message stays inside it.
-      test.if(type.name() === 'chromium')(
-        'hands on the keys pressed inside a message, which the page never hears',
+      /** Every key a shortcut could hear: those the page heard and those a message handed on. */
+      const heard = () => page.evaluate(() => [...window.pageKeys, ...window.messageKeys]);
+      /** The focused element, or the frame whose document holds the focus. */
+      const focused = () => page.evaluate(() => document.activeElement?.tagName);
+      /** Every element that held the focus over the given time. */
+      const focusedOver = (ms: number) =>
+        page.evaluate(
+          (ms) =>
+            new Promise<(string | undefined)[]>((resolve) => {
+              const seen = new Set<string | undefined>();
+              const look = setInterval(() => seen.add(document.activeElement?.tagName), 20);
+              setTimeout(() => {
+                clearInterval(look);
+                resolve([...seen]);
+              }, ms);
+            }),
+          ms,
+        );
+      /** The open message's first lines, and what's selected in its frame. */
+      const message = () => page.frameLocator('iframe').getByText('Perfect, Thursday it is.');
+      const selected = () =>
+        page.evaluate(
+          () => document.querySelector('iframe')?.contentDocument?.getSelection()?.toString() ?? '',
+        );
+
+      // Chromium hands on the keys a message's document hears. WebKit runs no listener at all in a
+      // document whose sandbox allows no scripts, so there the page takes the focus back instead.
+      test('a key pressed after a click inside a message still reaches the shortcuts', async () => {
+        await open('lunch');
+        await message().click();
+        await page.waitForTimeout(500);
+        await page.keyboard.press('e');
+        expect(await heard()).toEqual(['e']);
+        await page.close();
+      });
+
+      test('text selected inside a message keeps the focus there, to copy, until a click lets it go', async () => {
+        await open('lunch');
+        // A double click on the first word of its first line selects the word.
+        await message().dblclick({ position: { x: 12, y: 8 } });
+        await page.waitForTimeout(500);
+        expect(await selected()).toBe('Perfect');
+        expect(await focusedOver(1_000)).toEqual(['IFRAME']);
+
+        // A click on another word, which selects nothing, gives the keys back to the shortcuts.
+        await message().click({ position: { x: 120, y: 8 } });
+        await page.waitForTimeout(500);
+        await page.keyboard.press('e');
+        expect(await heard()).toEqual(['e']);
+        await page.close();
+      });
+
+      // Only WebKit takes the focus back from a message, and in Chromium a Playwright drag over a
+      // frame that runs no scripts never finishes.
+      test.skipIf(type.name() === 'chromium')(
+        'text selected by a drag that began slowly takes the focus back, to copy',
         async () => {
           await open('lunch');
-          await page.frameLocator('iframe').locator('body').click();
-          await page.keyboard.press('e');
-          expect(await page.evaluate(() => window.messageKeys)).toEqual(['e']);
+          const line = (await message().boundingBox())!;
+          await page.mouse.move(line.x + 1, line.y + 8);
+          await page.mouse.down();
+          // Long enough for the page to take the focus back before anything is selected.
+          await page.waitForTimeout(500);
+          await page.mouse.move(line.x + 60, line.y + 8);
+          await page.mouse.up();
+          await page.waitForTimeout(300);
+          expect(await selected()).toStartWith('Perfect');
+          expect(await focused()).toBe('IFRAME');
           await page.close();
         },
       );

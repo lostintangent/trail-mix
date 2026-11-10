@@ -49,11 +49,15 @@ declare global {
     pwned: string[];
     /** The keys the reader handed on from inside its messages. */
     messageKeys: string[];
+    /** The keys the page itself heard, as the workbench's shortcuts do. */
+    pageKeys: string[];
   }
 }
 
 window.pwned = [];
 window.messageKeys = [];
+window.pageKeys = [];
+addEventListener('keydown', (event: KeyboardEvent) => window.pageKeys.push(event.key));
 const recordKey = (event: KeyboardEvent) => window.messageKeys.push(event.key);
 window.__pwned = (id) => window.pwned.push(id);
 window.setTheme = (mode) => {
