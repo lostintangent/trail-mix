@@ -18,6 +18,7 @@ import {
   type ReactNode,
 } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
+import { afterPaint } from '../../../shared/afterPaint.ts';
 import type { Command } from '../../commands/index.ts';
 import type {
   Account,
@@ -94,7 +95,7 @@ export function ReaderPane({
   page?: ReactNode;
   onBack: () => void;
 }) {
-  const shown = useRestingSelection(selected);
+  const { shown, isPassing } = useRestingSelection(selected);
   const { data: conversation } = useQuery({
     ...conversationQuery(shown ?? ''),
     enabled: shown !== undefined,
@@ -119,8 +120,15 @@ export function ReaderPane({
   // A page lies on the sheet as a new message's composer does, filling it.
   const isFilled = writing?.place === 'filled' || page !== undefined;
   const announce = useEffectEvent((id: ConversationId) => onShown?.(id));
+  // A conversation counts as shown once a frame has drawn it, so what that sets off, its read mark,
+  // waits for that frame instead of holding up the key or click that opened it.
   useEffect(() => {
-    if (shown !== undefined && isShowing) announce(shown);
+    if (shown === undefined || !isShowing) return;
+    let isStill = true;
+    void afterPaint().then(() => isStill && announce(shown));
+    return () => {
+      isStill = false;
+    };
   }, [shown, isShowing]);
   usePreloadedReader(upcoming.length > 0);
   usePreloadedComposer(isShowing ? shown : undefined);
@@ -163,11 +171,11 @@ export function ReaderPane({
               account={reading.account}
               folders={folders}
               actionsFor={actionsFor}
-              upcoming={shown === selected ? preparing : []}
+              upcoming={isPassing ? [] : preparing}
               onMessageKey={onMessageKey}
               hidden={hidden}
               onOpenDraft={openDraft}
-              isPassing={shown !== selected}
+              isPassing={isPassing}
             />
           </Suspense>
           {isDocked && <div {...stylex.props(styles.writing)}>{writing?.composer}</div>}
@@ -191,15 +199,19 @@ export function ReaderPane({
 }
 
 /**
- * The selection the reader shows. One made after a rest shows at once. While the member moves
- * quickly, as when holding a key, the reader waits until the selection rests, so it does no work
- * nobody would see, and the list keeps up.
+ * The selection the reader shows, and whether the selection is passing it by. One made after a rest
+ * shows at once. While the member moves quickly, as when holding a key, the reader waits until the
+ * selection rests, so it does no work nobody would see, and the list keeps up.
+ *
+ * Only a move that doesn't rest passes the conversation shown by. The selection's own commit leaves
+ * the reader as it was, so a move that rests turns it to the next conversation directly.
  *
  * A move is timed by the press that made it, not by when it was drawn, so on a slow phone a render
  * that runs long can't make quick presses look like rests.
  */
-function useRestingSelection(selected: ConversationId | undefined): ConversationId | undefined {
+function useRestingSelection(selected: ConversationId | undefined) {
   const [shown, setShown] = useState(selected);
+  const [isPassing, setPassing] = useState(false);
   const pressedAt = useLastPress();
   const movedAt = useRef(-Infinity);
   useLayoutEffect(() => {
@@ -207,14 +219,19 @@ function useRestingSelection(selected: ConversationId | undefined): Conversation
     const at = pressedAt.current > movedAt.current ? pressedAt.current : now;
     const hasRested = at - movedAt.current >= REST_MS;
     movedAt.current = at;
-    if (hasRested) {
+    const show = () => {
       setShown(selected);
+      setPassing(false);
+    };
+    if (hasRested) {
+      show();
       return;
     }
-    const timer = setTimeout(() => setShown(selected), REST_MS);
+    setPassing(true);
+    const timer = setTimeout(show, REST_MS);
     return () => clearTimeout(timer);
   }, [selected, pressedAt]);
-  return shown;
+  return { shown, isPassing: isPassing && shown !== selected };
 }
 
 /** When the member last pressed a key or a pointer, as the event says, however late it ran. */

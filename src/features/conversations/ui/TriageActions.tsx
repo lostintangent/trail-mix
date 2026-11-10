@@ -2,7 +2,7 @@ import { DropdownMenu, type DropdownMenuOption } from '@astryxdesign/core/Dropdo
 import { Icon } from '@astryxdesign/core/Icon';
 import * as stylex from '@stylexjs/stylex';
 import { Ellipsis, FolderInput } from 'lucide-react';
-import { memo, useMemo, type ReactNode } from 'react';
+import { memo, useMemo, useState, type ReactNode } from 'react';
 import { tm } from '../../../app/theme/tokens.stylex.ts';
 import { CommandButton, useSteadyCommands, type Command } from '../../commands/index.ts';
 import { MOVE } from './commands.ts';
@@ -67,7 +67,10 @@ const asItem = ({ id, title, run }: Command): DropdownMenuOption => ({
 const MOVE_ICON = <Icon icon={FolderInput} />;
 const MORE_ICON = <Icon icon={Ellipsis} />;
 
-/** A menu behind an icon button, which renders again only when its items change. */
+/**
+ * A menu behind an icon button, which renders again only when its items change. Its items are drawn
+ * only while it is open, so a conversation opened while the menu is closed costs it nothing.
+ */
 const Menu = memo(function Menu({
   label,
   icon,
@@ -77,14 +80,19 @@ const Menu = memo(function Menu({
   icon: ReactNode;
   items: DropdownMenuOption[];
 }) {
+  const [isOpen, setOpen] = useState(false);
   return (
     <DropdownMenu
       button={{ label, tooltip: label, icon, isIconOnly: true, variant: 'ghost' }}
       hasChevron={false}
-      items={items}
+      items={isOpen ? items : CLOSED}
+      isMenuOpen={isOpen}
+      onOpenChange={setOpen}
     />
   );
 });
+
+const CLOSED: DropdownMenuOption[] = [];
 
 const styles = stylex.create({
   flagged: {
