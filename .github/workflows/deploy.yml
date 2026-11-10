@@ -112,7 +112,7 @@ jobs:
           }
 
           if [ "$(api workers/subdomain)" != 200 ]; then
-            failed "There is no workers.dev subdomain yet. Open Workers & Pages once to choose one"
+            failed "Couldn't read the workers.dev subdomain, which Workers & Pages asks for the first time it opens"
           fi
           address="https://$worker.$(jq -er .result.subdomain "$RUNNER_TEMP/api.json").workers.dev"
 
@@ -128,8 +128,9 @@ jobs:
           # The version serving now, which a failed deploy rolls back to. None before the first.
           case "$(api "workers/scripts/$worker/deployments")" in
             200)
-              previous=$(jq -r '.result.deployments | sort_by(.created_on) | last
-                | (.versions // []) | max_by(.percentage) | .version_id // empty' "$RUNNER_TEMP/api.json")
+              # The API lists the deployment serving now first.
+              previous=$(jq -r '.result.deployments[0] | (.versions // []) | max_by(.percentage)
+                | .version_id // empty' "$RUNNER_TEMP/api.json")
               ;;
             404) previous= ;;
             *) failed "Couldn't read what $worker serves now" ;;
@@ -181,7 +182,6 @@ jobs:
             secrets="$RUNNER_TEMP/secrets.json"
             trap 'rm -f "$secrets"' EXIT
             key=$(openssl rand -base64 48 | tr -d '\n')
-            echo "::add-mask::$key"
             printf '{"CREDENTIALS_KEY":"%s"}' "$key" > "$secrets"
             unset key
             args+=(--secrets-file "$secrets")
@@ -207,7 +207,7 @@ jobs:
             fi
             sleep 5
           done
-          echo "::error::After two minutes, $ADDRESS/health answers with $reported, not $COMMIT."
+          echo "::error::$ADDRESS/health didn't report $COMMIT within two minutes. Its last answer was $reported."
           exit 1
 
       - name: Roll back
@@ -328,7 +328,7 @@ jobs:
             fi
             sleep 5
           done
-          echo "::error::After two minutes, $ADDRESS/health answers with $reported, not $COMMIT."
+          echo "::error::$ADDRESS/health didn't report $COMMIT within two minutes. Its last answer was $reported."
           exit 1
 
       - name: Post the address on the pull request
