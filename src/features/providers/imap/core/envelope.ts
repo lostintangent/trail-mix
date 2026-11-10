@@ -6,6 +6,7 @@ import {
   type Flags,
   type MessageRef,
 } from '../../../mail/core/index.ts';
+import { previewOf } from './preview.ts';
 
 /**
  * Envelopes from what an IMAP server reports. Fetching is the provider's work, and this turns the
@@ -48,8 +49,6 @@ export type ImapMessage = {
   /** The decoded start of the part `previewPartOf` chose, or empty when there is none. */
   previewText: string;
 };
-
-const PREVIEW_LENGTH = 200;
 
 export function envelopeOf(message: ImapMessage): Envelope {
   const { ref, flags, envelope, structure } = message;
@@ -108,16 +107,6 @@ export function hasAttachments(structure: Structure): boolean {
   );
 }
 
-/** The first 200 characters a person would read: quoted lines and markup left out. */
-export function previewOf(text: string, html: boolean): string {
-  const readable = html ? textOfHtml(text) : text;
-  const unquoted = readable
-    .split(/\r?\n/)
-    .filter((line) => !line.trimStart().startsWith('>'))
-    .join(' ');
-  return unquoted.replace(/\s+/g, ' ').trim().slice(0, PREVIEW_LENGTH);
-}
-
 function leavesOf(node: Structure): Structure[] {
   // A message attached whole is one attachment, whatever is inside it.
   if (node.type === 'message/rfc822') return [node];
@@ -148,34 +137,4 @@ function headerValues(block: string): Map<string, string> {
 
 function idIn(header: string | undefined) {
   return /<([^>]+)>/.exec(header ?? '')?.[1] ?? header?.trim() ?? '';
-}
-
-const ENTITIES: Record<string, string> = {
-  amp: '&',
-  lt: '<',
-  gt: '>',
-  quot: '"',
-  apos: "'",
-  nbsp: ' ',
-};
-
-/** Text a person would read in HTML, closely enough for a preview. Nothing here is rendered. */
-function textOfHtml(html: string): string {
-  return html
-    .replace(/<(head|style|script|title)\b[\s\S]*?(<\/\1\s*>|$)/gi, ' ')
-    .replace(/<blockquote\b[\s\S]*?(<\/blockquote\s*>|$)/gi, ' ')
-    .replace(/<(br|p|div|tr|li|h\d)\b[^>]*>/gi, '\n')
-    .replace(/<[^>]*>?/g, ' ')
-    .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entity: string, name: string) => {
-      if (name.startsWith('#')) {
-        const code =
-          name[1]?.toLowerCase() === 'x'
-            ? parseInt(name.slice(2), 16)
-            : parseInt(name.slice(1), 10);
-        return Number.isFinite(code) && code > 0 && code < 0x110000
-          ? String.fromCodePoint(code)
-          : ' ';
-      }
-      return ENTITIES[name.toLowerCase()] ?? entity;
-    });
 }

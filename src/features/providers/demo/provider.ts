@@ -9,7 +9,7 @@ import {
   type Folder,
   type MessageRef,
 } from '../../mail/core/index.ts';
-import { previewOf } from '../imap/core/envelope.ts';
+import { previewOf } from '../imap/core/preview.ts';
 import { planSync } from '../imap/core/sync.ts';
 import {
   SEARCH_LIMIT,

@@ -1,11 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import {
-  envelopeOf,
-  hasAttachments,
-  previewOf,
-  previewPartOf,
-  type Structure,
-} from './envelope.ts';
+import { envelopeOf, hasAttachments, previewPartOf, type Structure } from './envelope.ts';
 
 const text = (part: string, extra: Partial<Structure> = {}): Structure => ({
   part,
@@ -73,30 +67,6 @@ describe('attachments', () => {
     const inline = { part: '2', type: 'image/png', id: '<logo@example.com>' };
     expect(hasAttachments(multipart('related', html('1'), inline))).toBe(false);
     expect(hasAttachments(multipart('alternative', text('1'), html('2')))).toBe(false);
-  });
-});
-
-describe('the preview', () => {
-  test('leaves out quoted lines and folds whitespace', () => {
-    expect(
-      previewOf('Sounds good.\r\n\r\nOn Monday, Ada wrote:\r\n> Lunch?\r\n>   Friday', false),
-    ).toBe('Sounds good. On Monday, Ada wrote:');
-  });
-
-  test('reads HTML as text: no head, styles, scripts or quotes, and entities decoded', () => {
-    const page =
-      '<html><head><title>Hi</title><style>p{color:red}</style></head><body>' +
-      '<p>Fish &amp; chips&nbsp;at&#32;noon&#x21;</p><blockquote>old reply</blockquote><script>x()</script>' +
-      '<p>See you</p></body></html>';
-    expect(previewOf(page, true)).toBe('Fish & chips at noon! See you');
-  });
-
-  test('stops at 200 characters', () => {
-    expect(previewOf('word '.repeat(100), false)).toHaveLength(200);
-  });
-
-  test('keeps a markup character that starts no tag', () => {
-    expect(previewOf('<p>2 &lt; 3 and 3 > 2</p>', true)).toBe('2 < 3 and 3 > 2');
   });
 });
 

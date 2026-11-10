@@ -166,6 +166,16 @@ export const versions: readonly (readonly string[])[] = [
         AND (json_extract(connection, '$.imap.host') LIKE '%.zoho.%'
           OR json_extract(connection, '$.imap.host') LIKE '%.zohocloud.%')`,
   ],
+  [
+    // A preview now reads like its message, without Markdown's marks, table bars or rules, so the
+    // index rebuilds with every preview made again.
+    `DELETE FROM search`,
+    `DELETE FROM messages`,
+    `DELETE FROM links`,
+    `DELETE FROM conversations`,
+    `DELETE FROM placements`,
+    `UPDATE folders SET cursor = NULL`,
+  ],
 ];
 
 /**
