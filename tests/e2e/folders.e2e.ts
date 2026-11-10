@@ -1,15 +1,9 @@
-import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
+import { afterEach, beforeAll, expect, test } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import {
-  chromium,
-  type Browser,
-  type BrowserContextOptions,
-  type Page,
-  type Route,
-} from 'playwright';
+import type { BrowserContextOptions, Page, Route } from 'playwright';
 import { unreadableText } from './contrast.ts';
-import { startPreview, type Preview } from './preview.ts';
+import { suite } from './suite.ts';
 
 /**
  * Folders, end to end: the built app on workerd, changing the demo mailbox's folders. A change
@@ -21,14 +15,11 @@ const SHOTS = join(import.meta.dir, '../../test-results');
 const DESKTOP = { viewport: { width: 1440, height: 900 } };
 const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
 
-let preview: Preview;
-let browser: Browser;
+const app = suite({ vars: { DEV_MEMBER: `folders-${Date.now()}@trailmix.test` } });
 
-beforeAll(async () => {
+beforeAll(() => {
   mkdirSync(SHOTS, { recursive: true });
-  preview = await startPreview({ DEV_MEMBER: `folders-${Date.now()}@trailmix.test` });
-  browser = await chromium.launch();
-}, 60_000);
+});
 
 /** Every error a page threw during a test, which fails it. */
 const errors: string[] = [];
@@ -36,15 +27,10 @@ afterEach(() => {
   expect(errors.splice(0)).toEqual([]);
 });
 
-afterAll(async () => {
-  await browser?.close();
-  await preview?.stop();
-});
-
 async function open(options: BrowserContextOptions): Promise<Page> {
-  const page = await (await browser.newContext({ deviceScaleFactor: 2, ...options })).newPage();
+  const page = await (await app.context({ deviceScaleFactor: 2, ...options })).newPage();
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.goto(preview.url);
+  await page.goto(app.url);
   await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
   return page;
 }

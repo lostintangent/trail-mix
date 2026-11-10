@@ -1,13 +1,6 @@
-import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
-import {
-  chromium,
-  type Browser,
-  type BrowserContext,
-  type Page,
-  type Request,
-  type Route,
-} from 'playwright';
-import { startPreview, type Preview } from './preview.ts';
+import { afterEach, expect, test } from 'bun:test';
+import type { Page, Request, Route } from 'playwright';
+import { suite } from './suite.ts';
 
 /**
  * Triage, end to end: the built app on workerd, with two browsers open on one member's demo mail.
@@ -21,44 +14,19 @@ const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch:
 /** How soon every other open browser shows a change, as the triage step promises. */
 const ELSEWHERE_MS = 5_000;
 
-let preview: Preview;
-let browser: Browser;
-
-beforeAll(async () => {
-  preview = await startPreview({ DEV_MEMBER: MEMBER });
-  browser = await chromium.launch();
-}, 60_000);
+const app = suite({ vars: { DEV_MEMBER: MEMBER } });
 
 /** Every error a page threw during a test, which fails it. */
 const errors: string[] = [];
-/** Every browser a test opened, closed after it so the next starts with only its own. */
-const opened: BrowserContext[] = [];
-afterEach(async () => {
-  await Promise.all(
-    opened.splice(0).map((context) =>
-      // A test that timed out takes the browser down with its contexts, as the next one finds.
-      context.close().catch((error: unknown) => {
-        if (browser.isConnected()) throw error;
-      }),
-    ),
-  );
+afterEach(() => {
   expect(errors.splice(0)).toEqual([]);
-});
-
-afterAll(async () => {
-  await browser?.close();
-  await preview?.stop();
 });
 
 /** A browser on the unified Inbox, once the Mailroom has filled it. */
 async function inbox(size: typeof DESKTOP | typeof PHONE = DESKTOP): Promise<Page> {
-  // So one test that hangs fails alone, a browser it took down is started again for the next.
-  if (!browser.isConnected()) browser = await chromium.launch();
-  const context = await browser.newContext(size);
-  opened.push(context);
-  const page = await context.newPage();
+  const page = await (await app.context(size)).newPage();
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.goto(preview.url);
+  await page.goto(app.url);
   await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
   return page;
 }

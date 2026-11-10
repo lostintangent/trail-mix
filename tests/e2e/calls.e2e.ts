@@ -1,6 +1,7 @@
-import { afterAll, beforeAll, expect, test } from 'bun:test';
-import { chromium, type Browser, type Page } from 'playwright';
-import { serverFunctionIds, startPreview, type Preview } from './preview.ts';
+import { expect, test } from 'bun:test';
+import type { Page } from 'playwright';
+import { serverFunctionIds } from './preview.ts';
+import { suite } from './suite.ts';
 
 /**
  * The built Worker answering the browser's Mailroom, from Trail Mix's own page. A query travels as
@@ -10,42 +11,34 @@ import { serverFunctionIds, startPreview, type Preview } from './preview.ts';
 
 const REFUSED = 'That isn’t something a browser can ask its Mailroom.';
 
-let preview: Preview;
-let browser: Browser;
-let page: Page;
-let accounts: string;
+const app = suite();
 
-beforeAll(async () => {
-  preview = await startPreview();
-  browser = await chromium.launch();
-  page = await browser.newPage();
+/** Trail Mix's page, and the app's own request for the accounts, which the calls reuse. */
+async function trailMix(): Promise<{ page: Page; accounts: string }> {
+  const page = await (await app.context()).newPage();
   const asked = page.waitForRequest((request) =>
     request.url().includes(encodeURIComponent('"accounts"')),
   );
-  await page.goto(preview.url);
-  accounts = (await asked).url();
-}, 60_000);
-
-afterAll(async () => {
-  await browser?.close();
-  await preview?.stop();
-});
+  await page.goto(app.url);
+  return { page, accounts: (await asked).url() };
+}
 
 /** What the Worker answers the page for a GET, as its status and text. */
-const get = (url: string) =>
+const get = (page: Page, url: string) =>
   page.evaluate(async (url) => {
     const response = await fetch(url, { headers: { 'x-tsr-serverFn': 'true' } });
     return { status: response.status, text: await response.text() };
   }, url);
 
 test('a command can’t travel as a GET, through either server function', async () => {
+  const { page, accounts } = await trailMix();
   const asCommand = accounts.replace(
     encodeURIComponent('"accounts"'),
     encodeURIComponent('"eraseEverything"'),
   );
-  const commandFunction = new URL(`/_serverFn/${serverFunctionIds().command}`, preview.url).href;
+  const commandFunction = new URL(`/_serverFn/${serverFunctionIds().command}`, app.url).href;
 
-  expect(await get(accounts)).toMatchObject({ status: 200 });
-  expect((await get(asCommand)).text).toContain(REFUSED);
-  expect(await get(commandFunction)).toMatchObject({ status: 405 });
+  expect(await get(page, accounts)).toMatchObject({ status: 200 });
+  expect((await get(page, asCommand)).text).toContain(REFUSED);
+  expect(await get(page, commandFunction)).toMatchObject({ status: 405 });
 });

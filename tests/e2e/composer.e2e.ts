@@ -1,9 +1,9 @@
-import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
+import { afterEach, beforeAll, expect, test } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { chromium, webkit, type Browser, type Page } from 'playwright';
+import { chromium, webkit, type Page } from 'playwright';
 import { SAVE_AFTER_MS, SAVE_AT_LEAST_EVERY_MS } from '../../src/features/composer/core/session.ts';
-import { startPreview, type Preview } from './preview.ts';
+import { suite } from './suite.ts';
 
 /**
  * Writing, end to end: the built app on workerd with a member's demo mail. What the member writes
@@ -22,14 +22,11 @@ const SIZE = IS_PHONE
   : { viewport: { width: 1440, height: 900 } };
 const ENGINE = process.env.E2E_ENGINE === 'webkit' ? webkit : chromium;
 
-let preview: Preview;
-let browser: Browser;
+const app = suite({ vars: { DEV_MEMBER: MEMBER }, engine: ENGINE });
 
-beforeAll(async () => {
+beforeAll(() => {
   mkdirSync(SHOTS, { recursive: true });
-  preview = await startPreview({ DEV_MEMBER: MEMBER });
-  browser = await ENGINE.launch();
-}, 60_000);
+});
 
 /** Every error a page threw during a test, which fails it. */
 const errors: string[] = [];
@@ -37,16 +34,11 @@ afterEach(() => {
   expect(errors.splice(0)).toEqual([]);
 });
 
-afterAll(async () => {
-  await browser?.close();
-  await preview?.stop();
-});
-
 /** A browser on the unified Inbox, once the Mailroom has filled it. */
 async function inbox(): Promise<Page> {
-  const page = await (await browser.newContext(SIZE)).newPage();
+  const page = await (await app.context(SIZE)).newPage();
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.goto(preview.url);
+  await page.goto(app.url);
   await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
   return page;
 }

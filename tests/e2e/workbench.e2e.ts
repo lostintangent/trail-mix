@@ -1,15 +1,9 @@
-import { afterAll, beforeAll, expect, test } from 'bun:test';
+import { beforeAll, expect, test } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import {
-  chromium,
-  type Browser,
-  type BrowserContextOptions,
-  type Locator,
-  type Page,
-} from 'playwright';
+import type { BrowserContextOptions, Locator, Page } from 'playwright';
 import { unreadableText } from './contrast.ts';
-import { startPreview, type Preview } from './preview.ts';
+import { suite } from './suite.ts';
 
 /**
  * The smoke suite: the built app, served on workerd, driven in Chromium at a desktop and a phone
@@ -23,27 +17,15 @@ const SIZES = {
 } satisfies Record<string, BrowserContextOptions>;
 const THEMES = ['light', 'dark'] as const;
 
-let preview: Preview;
-let browser: Browser;
+const app = suite();
 
-beforeAll(async () => {
+beforeAll(() => {
   mkdirSync(SHOTS, { recursive: true });
-  preview = await startPreview();
-  browser = await chromium.launch().catch((cause: unknown) => {
-    throw new Error('Chromium for Playwright is missing. Run `bunx playwright install chromium`.', {
-      cause,
-    });
-  });
-}, 60_000);
-
-afterAll(async () => {
-  await browser?.close();
-  await preview?.stop();
 });
 
 /** A page that records every console error and failed response, to assert there were none. */
 async function open(options: BrowserContextOptions, path = '/') {
-  const context = await browser.newContext({ deviceScaleFactor: 2, ...options });
+  const context = await app.context({ deviceScaleFactor: 2, ...options });
   const page = await context.newPage();
   const problems: string[] = [];
   page.on('pageerror', (error) => problems.push(`page error: ${error.message}`));
@@ -53,7 +35,7 @@ async function open(options: BrowserContextOptions, path = '/') {
   page.on('response', (response) => {
     if (response.status() >= 400) problems.push(`${response.status()} ${response.url()}`);
   });
-  await page.goto(new URL(path, preview.url).href, { waitUntil: 'networkidle' });
+  await page.goto(new URL(path, app.url).href, { waitUntil: 'networkidle' });
   return { context, page, problems };
 }
 
@@ -137,7 +119,7 @@ test('side panels resize by pointer and key, snap to a rail, and come back the s
   // After a reload, the shell paints both sizes before any of the app's code runs.
   const shellOnly = await context.newPage();
   await shellOnly.route(/\.js(\?|$)/, (route) => route.abort());
-  await shellOnly.goto(preview.url, { waitUntil: 'load' });
+  await shellOnly.goto(app.url, { waitUntil: 'load' });
   expect(
     await shellOnly.evaluate(() => {
       const style = getComputedStyle(document.documentElement);
@@ -155,11 +137,11 @@ test('a saved theme paints the desk before any of the app runs', async () => {
     ['dark', 'light'],
     ['light', 'dark'],
   ] as const) {
-    const context = await browser.newContext({ colorScheme: system });
+    const context = await app.context({ colorScheme: system });
     await context.addInitScript((mode) => localStorage.setItem('trail-mix.theme', mode), saved);
     const page = await context.newPage();
     await page.route(/\.js(\?|$)/, (route) => route.abort());
-    await page.goto(preview.url, { waitUntil: 'load' });
+    await page.goto(app.url, { waitUntil: 'load' });
     expect(await page.evaluate(() => getComputedStyle(document.body).colorScheme)).toBe(saved);
     await context.close();
   }
