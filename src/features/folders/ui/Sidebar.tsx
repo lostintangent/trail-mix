@@ -1,6 +1,6 @@
 import { Button } from '@astryxdesign/core/Button';
 import { Icon } from '@astryxdesign/core/Icon';
-import { durationVars, spacingVars } from '@astryxdesign/core/theme/tokens.stylex';
+import { colorVars, durationVars, spacingVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { MailPlus, Users } from 'lucide-react';
 import { memo, useEffect, useState, type ReactNode } from 'react';
@@ -269,19 +269,23 @@ const styles = stylex.create({
     flexDirection: 'column',
     gap: spacingVars['--spacing-2'],
     padding: '1px',
-    paddingBottom: spacingVars['--spacing-2'],
   },
   headerLine: {
     display: 'flex',
     alignItems: 'center',
     gap: spacingVars['--spacing-1'],
   },
+  // The tree scrolls between the header and the footer, and fades out at either edge, as Toy Box's
+  // does, so a row passing under one is never seen cut. At rest, the first and last rows sit clear
+  // of the fades. The padding's pixel is room for a selected row's lifted edge.
   scroll: {
     flexGrow: 1,
     minHeight: 0,
     overflowY: 'auto',
-    // Room for the selected row's lifted edge, which the scroll area would otherwise clip.
     padding: '1px',
+    paddingTop: `calc(${spacingVars['--spacing-2']} + 1px)`,
+    paddingBottom: `calc(${spacingVars['--spacing-4']} + 1px)`,
+    maskImage: `linear-gradient(transparent, #000 ${spacingVars['--spacing-2']}, #000 calc(100% - ${spacingVars['--spacing-4']}), transparent)`,
   },
   addAccount: {
     display: 'flex',
@@ -291,12 +295,18 @@ const styles = stylex.create({
     paddingInline: spacingVars['--spacing-1'],
   },
   // The footer's line takes the room, and its controls sit at the end.
+  // A rule across the sidebar sets the footer off from the tree above it, as in Toy Box.
   footer: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'flex-end',
     gap: spacingVars['--spacing-1'],
+    marginInline: `calc(-1 * ${spacingVars['--spacing-2']})`,
     paddingTop: spacingVars['--spacing-2'],
+    paddingInline: spacingVars['--spacing-2'],
+    borderTopWidth: '1px',
+    borderTopStyle: 'solid',
+    borderTopColor: colorVars['--color-border'],
   },
   rail: {
     alignItems: 'center',
