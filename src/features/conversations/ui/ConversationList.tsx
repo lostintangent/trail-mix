@@ -8,7 +8,11 @@ import {
 } from '@astryxdesign/core/theme/tokens.stylex';
 import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
 import * as stylex from '@stylexjs/stylex';
-import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
+import {
+  defaultRangeExtractor,
+  observeElementOffset,
+  useVirtualizer,
+} from '@tanstack/react-virtual';
 import { Paperclip, Star } from 'lucide-react';
 import {
   memo,
@@ -59,9 +63,14 @@ export function ConversationList({
   const listId = useId();
   const rowHeight = useRowHeight(scroller);
   const selectedIndex = conversations.findIndex(({ id }) => id === selected);
+  const reportOffset = useRef<(offset: number, isScrolling: boolean) => void>(null);
   const virtualizer = useVirtualizer({
     count: conversations.length,
     getScrollElement: () => scroller.current,
+    observeElementOffset: (instance, report) => {
+      reportOffset.current = report;
+      return observeElementOffset(instance, report);
+    },
     estimateSize: () => rowHeight,
     getItemKey: (index) => conversations[index]?.id ?? index,
     overscan: 6,
@@ -95,8 +104,15 @@ export function ConversationList({
     const target = to === undefined ? undefined : conversations[to];
     if (to === undefined || !target) return;
     event.preventDefault();
-    virtualizer.scrollToIndex(to, { align: 'auto' });
     onSelect(target.id);
+    // A move that scrolls the list tells the virtualizer where it went at once, instead of in the
+    // next frame's scroll event. So the rows it brings in render in the selection's own commit, and
+    // that scroll event, finding the offset already known, renders nothing.
+    const scrolledFrom = scroller.current?.scrollTop;
+    virtualizer.scrollToIndex(to, { align: 'auto' });
+    const scrolledTo = scroller.current?.scrollTop;
+    if (scrolledTo !== undefined && scrolledTo !== scrolledFrom)
+      reportOffset.current?.(scrolledTo, true);
   };
 
   return (
@@ -199,7 +215,8 @@ const Row = memo(function Row({
  * Every row is the same height, three lines of text and the row's padding, so the list places rows
  * by arithmetic. It watches one drawn row for that height, as when a finger makes the text and
  * padding larger, and moves to another only when that row is no longer drawn. So a render neither
- * measures nor, when the height stays the same, asks for another render.
+ * measures nor, when the height stays the same, asks for another render. The height is rounded up
+ * to a whole pixel, so rows start on whole pixels and a scroll lands exactly where it was asked to.
  */
 function useRowHeight(scroller: RefObject<HTMLDivElement | null>): number {
   const [height, setHeight] = useState(FIRST_GUESS);
@@ -208,8 +225,10 @@ function useRowHeight(scroller: RefObject<HTMLDivElement | null>): number {
     let measured = FIRST_GUESS;
     let watched: Element | null = null;
     const observer = new ResizeObserver(([entry]) => {
-      const next = entry?.borderBoxSize[0]?.blockSize;
-      if (next === undefined || next === measured) return;
+      const size = entry?.borderBoxSize[0]?.blockSize;
+      if (size === undefined) return;
+      const next = Math.ceil(size);
+      if (next === measured) return;
       measured = next;
       setHeight(next);
     });
