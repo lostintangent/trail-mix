@@ -1,0 +1,9 @@
+<p>Scripts in every form a message can carry them.</p>
+<script>parent.__pwned('script')</script>
+<script src="{{canary}}/script.js"></script>
+<script type="module">parent.__pwned('module')</script>
+<script type="text/javascript" defer>top.__pwned('defer')</script>
+<SCRIPT>parent.__pwned('uppercase')</SCRIPT>
+<script>fetch('{{canary}}/fetch');new Image().src='{{canary}}/image-from-script'</script>
+<template><script>parent.__pwned('template')</script></template>
+<noscript><img src="{{canary}}/noscript.png"></noscript>

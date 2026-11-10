@@ -1,0 +1,40 @@
+<style>
+@import url({{canary}}/import.css);
+@import "{{canary}}/import-string.css";
+body { background: #fff url({{canary}}/body-background.png); }
+.set { background-image: image-set("{{canary}}/image-set.png" 1x, url({{canary}}/image-set-2x.png) 2x); height: 20px; }
+.webkit-set { background-image: -webkit-image-set(url({{canary}}/webkit-image-set.png) 1x); height: 20px; }
+.list { list-style: url({{canary}}/list-style.png); }
+.cursor { cursor: url({{canary}}/cursor.png), auto; height: 20px; }
+.content::before { content: url({{canary}}/content.png); }
+.border { border: 10px solid; border-image: url({{canary}}/border-image.png) 30 round; }
+.mask { mask-image: url({{canary}}/mask.png); -webkit-mask-image: url({{canary}}/webkit-mask.png); height: 20px; }
+@font-face { font-family: tm-hostile; src: url({{canary}}/font.woff2) format("woff2"); }
+.font { font-family: tm-hostile; }
+.filter { filter: url({{canary}}/filter.svg#f); height: 20px; }
+.var { --hero: url({{canary}}/custom-property.png); background: var(--hero); height: 20px; }
+.hover:hover { background: url({{canary}}/hover.png); }
+@media (min-width: 1px) { .media { background: url({{canary}}/media.png); height: 20px; } }
+@supports (display: grid) { .supports { background: url({{canary}}/supports.png); height: 20px; } }
+@container (min-width: 1px) { .container { background: url({{canary}}/container.png); height: 20px; } }
+@layer mail { .layer { background: url({{canary}}/layer.png); height: 20px; } }
+.nest { & .nested { background: url({{canary}}/nested.png); height: 20px; } }
+@counter-style tm-images { system: cyclic; symbols: url({{canary}}/counter-style.png); }
+.counter { list-style: tm-images; }
+@property --tm-image { syntax: '<image>'; inherits: true; initial-value: url({{canary}}/property.png); }
+.property { background-image: var(--tm-image); height: 20px; }
+.shape { shape-outside: url({{canary}}/shape.png); float: left; width: 10px; height: 10px; }
+.escaped { background: u\72l({{canary}}/escaped-1.png); height: 20px; }
+.escaped-2 { background: \75 rl({{canary}}/escaped-2.png); height: 20px; }
+.upper { background: URL({{canary}}/uppercase.png); height: 20px; }
+.hex { background: url(\68ttp\3a //{{canary-host}}/hex-escaped.png); height: 20px; }
+</style>
+<p>Every way a stylesheet can load something.</p>
+<div class="set"></div><div class="webkit-set"></div><ul class="list"><li>item</li></ul>
+<div class="cursor"></div><div class="content"></div><div class="border">border</div>
+<div class="mask"></div><p class="font">font</p><div class="filter"></div><div class="var"></div>
+<div class="hover">hover</div><div class="media"></div><div class="supports"></div>
+<div style="container-type: inline-size"><div class="container"></div></div>
+<div class="layer"></div><div class="nest"><div class="nested"></div></div>
+<ol class="counter"><li>one</li></ol><div class="property"></div><div class="shape"></div>
+<div class="escaped"></div><div class="escaped-2"></div><div class="upper"></div><div class="hex"></div>

@@ -1,0 +1,19 @@
+<html><body background="{{canary}}/body-attribute.png">
+<p>Remote images, in every attribute that can hold one.</p>
+<img id="img" src="{{canary}}/img.png" alt="img">
+<img src="//{{canary-host}}/protocol-relative.png" alt="protocol-relative">
+<img srcset="{{canary}}/srcset-1x.png 1x, {{canary}}/srcset-2x.png 2x" alt="srcset">
+<picture><source srcset="{{canary}}/picture-source.png"><img src="{{canary}}/picture-img.png" alt="picture"></picture>
+<img src="{{canary}}/lazy.png" loading="lazy" style="margin-top: 3000px" alt="lazy">
+<img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" lowsrc="{{canary}}/lowsrc.png" dynsrc="{{canary}}/dynsrc.png" alt="lowsrc">
+<table background="{{canary}}/table-background.png"><tr><td background="{{canary}}/td-background.png">cell</td></tr></table>
+<video poster="{{canary}}/poster.png" src="{{canary}}/video.mp4" autoplay muted></video>
+<audio src="{{canary}}/audio.mp3" autoplay></audio>
+<video><source src="{{canary}}/video-source.mp4"><track src="{{canary}}/track.vtt"></video>
+<input type="image" src="{{canary}}/input-image.png" alt="input">
+<image src="{{canary}}/image-element.png">
+<img src="/images?url={{canary}}/through-relative-proxy.png" alt="relative proxy">
+<img src="/messages/x/INBOX/1/1/1" alt="relative part">
+<img src="cid:not-in-this-message@example.com" alt="missing part">
+<img src="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cimage href='{{canary}}/inside-data-svg.png' width='10' height='10'/%3E%3C/svg%3E" alt="svg data">
+</body></html>

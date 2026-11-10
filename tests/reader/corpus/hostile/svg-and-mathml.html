@@ -1,0 +1,14 @@
+<p>SVG and MathML, which bring their own links, loads and scripts.</p>
+<svg width="50" height="50">
+  <image href="{{canary}}/svg-image.png" width="10" height="10"/>
+  <use href="{{canary}}/sprite.svg#icon"/>
+  <filter id="f"><feImage href="{{canary}}/fe-image.png"/></filter>
+  <script>parent.__pwned('svg-script')</script>
+  <a id="svg-link" xlink:href="javascript:parent.__pwned('svg-link')"><text y="20">svg link</text></a>
+  <animate attributeName="href" values="javascript:parent.__pwned('svg-animate')"/>
+  <set attributeName="onmouseover" to="parent.__pwned('svg-set')"/>
+  <foreignObject width="10" height="10"><img src="{{canary}}/foreign-object.png"></foreignObject>
+</svg>
+<math href="javascript:parent.__pwned('math-href')"><mi>x</mi></math>
+<math><maction actiontype="statusline" xlink:href="javascript:parent.__pwned('maction')"><mi>y</mi></maction></math>
+<svg><style>@import url({{canary}}/svg-style-import.css);</style></svg>

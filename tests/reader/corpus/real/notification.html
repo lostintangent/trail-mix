@@ -1,0 +1,7 @@
+<p><b>@ada-park</b> commented on this pull request.</p>
+<hr>
+<p>In <a href="https://example.com/trail/pull/12#discussion_r1">src/dates.ts</a>:</p>
+<pre style="font-size: 85%"><code>- return year &lt; 100 ? 1900 + year : year;
++ return year &lt; 70 ? 2000 + year : year &lt; 100 ? 1900 + year : year;</code></pre>
+<p>Should two-digit years before 70 really land in this century?</p>
+<p style="font-size:small">&mdash;<br>Reply to this email directly, <a href="https://example.com/trail/pull/12#r1">view it on the web</a>, or <a href="https://example.com/notifications/unsubscribe">unsubscribe</a>.<img src="{{canary}}/notifications/beacon.gif" height="1" width="1" alt=""></p>

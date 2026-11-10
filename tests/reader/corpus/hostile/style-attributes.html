@@ -1,0 +1,10 @@
+<p>The same loads, written in style attributes.</p>
+<div style="background: url({{canary}}/inline.png); height: 20px">inline</div>
+<div style="background-image: u\72l({{canary}}/inline-escaped.png); height: 20px">escaped</div>
+<div style="background: var(--x, url({{canary}}/inline-var-fallback.png)); height: 20px">var</div>
+<div style="--y: url({{canary}}/inline-custom.png); background: var(--y); height: 20px">custom</div>
+<div style="background-image: image-set('{{canary}}/inline-image-set.png' 1x); height: 20px">set</div>
+<div style="list-style-image: url(&quot;{{canary}}/inline-entity.png&quot;); display: list-item">entity</div>
+<div style="behavior: url({{canary}}/behavior.htc); -moz-binding: url({{canary}}/binding.xml)">legacy</div>
+<div style="background:url({{canary}}/inline-uppercase.png">unclosed</div>
+<div style="content: url({{canary}}/inline-content.png)"></div>

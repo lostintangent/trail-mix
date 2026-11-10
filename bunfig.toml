@@ -8,8 +8,15 @@ exact = true
 [fmt]
 printWidth = 100
 singleQuote = true
-# Generated: the route tree by TanStack Start, the theme by `bun run theme`.
-ignorePatterns = ["src/app/routeTree.gen.ts", "src/app/theme/built/", "worker-configuration.d.ts"]
+# Generated: the route tree by TanStack Start, the theme by `bun run theme`, the Worker's types by
+# Wrangler. The reader's corpus is mail exactly as senders write it, malformed on purpose, so
+# formatting it would change the tests.
+ignorePatterns = [
+  "src/app/routeTree.gen.ts",
+  "src/app/theme/built/",
+  "worker-configuration.d.ts",
+  "tests/reader/corpus/",
+]
 
 [test]
 preload = ["./tests/preload.ts"]

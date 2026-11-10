@@ -1,0 +1,11 @@
+<p>Forms that submit when clicked, or on their own.</p>
+<form id="survey" action="{{canary}}/form" method="post">
+  <input name="answer" value="yes">
+  <button id="submit-button" type="submit">Submit</button>
+  <input id="submit-input" type="submit" value="Send">
+  <input id="submit-image" type="image" src="{{canary}}/input-image.png" alt="image submit">
+</form>
+<button id="formaction" form="survey" formaction="{{canary}}/formaction">Override</button>
+<form action="javascript:parent.__pwned('form-action')"><button id="js-submit">Go</button></form>
+<isindex action="{{canary}}/isindex">
+<form action="{{canary}}/autosubmit"><input name="q" autofocus onfocus="this.form.submit()"></form>

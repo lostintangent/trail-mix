@@ -1,0 +1,22 @@
+<html>
+<head>
+<meta http-equiv="refresh" content="0;url={{canary}}/refresh">
+<meta http-equiv="Content-Security-Policy" content="default-src *; script-src * 'unsafe-inline'">
+<meta http-equiv="set-cookie" content="tm=1">
+<base href="{{canary}}/base/">
+<link rel="stylesheet" href="{{canary}}/stylesheet.css">
+<link rel="prefetch" href="{{canary}}/prefetch">
+<link rel="preload" as="image" href="{{canary}}/preload.png">
+<link rel="dns-prefetch" href="{{canary}}">
+<link rel="preconnect" href="{{canary}}">
+<link rel="icon" href="{{canary}}/icon.png">
+<link rel="modulepreload" href="{{canary}}/module.js">
+<script type="speculationrules">{"prefetch":[{"source":"list","urls":["{{canary}}/speculation"]}]}</script>
+</head>
+<body>
+<p>Refresh, base, links and speculation rules from the head.</p>
+<img src="relative-to-base.png" alt="relative">
+<a href="relative-link">relative link</a>
+<meta http-equiv="refresh" content="1;url={{canary}}/refresh-in-body">
+</body>
+</html>

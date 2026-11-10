@@ -1,0 +1,15 @@
+<p>Links and frames that try to run script when followed.</p>
+<a id="js-plain" href="javascript:parent.__pwned('href')">plain</a>
+<a id="js-entity" href="&#106;avascript:parent.__pwned('entity')">entity</a>
+<a id="js-space" href=" javascript:parent.__pwned('leading-space')">space</a>
+<a id="js-tab" href="java&#x09;script:parent.__pwned('tab')">tab</a>
+<a id="js-newline" href="java&#10;script:parent.__pwned('newline')">newline</a>
+<a id="js-case" href="JaVaScRiPt:parent.__pwned('case')">case</a>
+<a id="js-blank" target="_blank" href="javascript:opener.__pwned('blank')">blank</a>
+<a id="data-html" href="data:text/html,<script>opener.__pwned('data-html')</script>">data</a>
+<a id="vbscript" href="vbscript:msgbox(1)">vbscript</a>
+<iframe src="javascript:parent.__pwned('iframe-src')"></iframe>
+<object data="javascript:parent.__pwned('object-data')"></object>
+<embed src="javascript:parent.__pwned('embed-src')">
+<map name="m"><area id="js-area" shape="rect" coords="0,0,100,100" href="javascript:parent.__pwned('area')"></map>
+<img usemap="#m" src="data:image/gif;base64,R0lGODlhAQABAAAAACw=" width="100" height="100">
