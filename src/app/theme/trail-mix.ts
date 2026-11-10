@@ -43,7 +43,7 @@ export const trailMix = defineTheme({
     '--color-background-popover': pane,
     '--color-background-card': paper,
     '--color-text-primary': pair('oklch(0.22 0.02 265)', 'oklch(0.93 0 0)'), // ink
-    '--color-text-secondary': ink2, // read mail, labels
+    '--color-text-secondary': ink2, // supporting text and labels
     '--color-text-disabled': inkDisabled, // disabled controls only
     // A control's icon is its label, so it is ink: 7:1 or more on every surface, and a quiet icon
     // at least 4.6:1. Ink, not the neutral theme's gray, in both themes.

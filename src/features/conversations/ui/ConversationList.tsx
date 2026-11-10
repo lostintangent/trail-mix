@@ -253,12 +253,7 @@ const Row = memo(function Row({
       aria-setsize={size}
       onClick={select}
       {...touch.handlers}
-      {...stylex.props(
-        styles.row,
-        styles.placed(top),
-        isUnread && styles.unread,
-        isSelected && styles.selected,
-      )}
+      {...stylex.props(styles.row, styles.placed(top), isSelected && styles.selected)}
     >
       <span {...stylex.props(styles.stamp, stampStyles[stamp])} />
       <span {...stylex.props(styles.lines)}>
@@ -450,7 +445,9 @@ const styles = stylex.create({
     WebkitTouchCallout: 'none',
     // Vertical moves scroll the list, and sideways ones reach the row as a swipe.
     touchAction: 'pan-y',
-    color: colorVars['--color-text-secondary'],
+    // Sender and subject lead in ink, read or not. Weight and the dot say which is unread, and the
+    // time and preview recede into the quiet tone.
+    color: colorVars['--color-text-primary'],
     fontSize: typeScaleVars['--text-body-size'],
     lineHeight: typeScaleVars['--text-body-leading'],
     backgroundColor: {
@@ -459,9 +456,6 @@ const styles = stylex.create({
     },
   },
   placed: (top: number) => ({ transform: `translate(var(${SWIPE}, 0px), ${top}px)` }),
-  unread: {
-    color: colorVars['--color-text-primary'],
-  },
   // Selection lifts instead of tinting: the open conversation rises from the sheet onto paper.
   selected: {
     backgroundColor: {

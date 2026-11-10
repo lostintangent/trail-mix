@@ -5,7 +5,7 @@ import type { BrowserContext, BrowserContextOptions, Locator, Page } from 'playw
 import { ACCENT_STORAGE_KEY } from '../../src/app/theme/accent.ts';
 import { parseHex } from '../../src/shared/color.ts';
 import { accentRule, accentTokens } from '../../src/app/theme/readableAccent.ts';
-import { unreadableText } from './contrast.ts';
+import { textContrasts, unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
 
 /**
@@ -122,6 +122,46 @@ for (const accent of ACCENTS) {
     }
   }, 60_000);
 }
+
+test('a row leads with its sender and subject, and sets unread apart by weight and the dot', async () => {
+  for (const colorScheme of THEMES) {
+    const { context, page, problems } = await open({ ...SIZES.desktop, colorScheme });
+    const rows = page.getByRole('option');
+    const accent = await accentShown(page);
+    const rowOf = async (row: Locator) => {
+      const time = await row.locator('time').textContent();
+      const texts = (await textContrasts(row)).filter(({ text }) => text !== 'Unread');
+      const [sender, , subject, preview] = texts;
+      expect(texts[1]?.text).toBe(time!);
+      const leads = Math.min(sender!.ratio, subject!.ratio);
+      const recedes = Math.max(texts[1]!.ratio, preview!.ratio);
+      const weight = await row
+        .getByText(sender!.text, { exact: true })
+        .evaluate((name) => Number(getComputedStyle(name).fontWeight));
+      const hasDot = await row.evaluate(
+        (row, accent) =>
+          [...row.querySelectorAll('span')].some(
+            (span) => getComputedStyle(span).backgroundColor === accent,
+          ),
+        accent,
+      );
+      return { leadsBy: leads / recedes, weight, hasDot };
+    };
+    const read = await rowOf(rows.filter({ hasNotText: 'Unread' }).first());
+    const unread = await rowOf(rows.filter({ hasText: 'Unread' }).first());
+
+    // Sender and subject have at least twice the contrast of the time and the preview.
+    expect({ colorScheme, read: read.leadsBy >= 2, unread: unread.leadsBy >= 2 }).toEqual({
+      colorScheme,
+      read: true,
+      unread: true,
+    });
+    expect(unread.weight).toBeGreaterThan(read.weight);
+    expect([read.hasDot, unread.hasDot]).toEqual([false, true]);
+    expect(problems).toEqual([]);
+    await context.close();
+  }
+});
 
 test('side panels resize by pointer and key, snap to a rail, and come back the same before the app runs', async () => {
   const { context, page } = await open(SIZES.desktop);

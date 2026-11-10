@@ -1,8 +1,15 @@
-import type { Page } from 'playwright';
+import type { Locator, Page } from 'playwright';
 
 /** Every visible text node whose contrast against what lies behind it falls under 4.5:1. */
-export function unreadableText(page: Page): Promise<string[]> {
-  return page.evaluate(() => {
+export async function unreadableText(page: Page): Promise<string[]> {
+  return (await textContrasts(page.locator('body')))
+    .filter(({ ratio }) => ratio < 4.5)
+    .map(({ text, ratio }) => `${ratio.toFixed(2)}:1 "${text.slice(0, 40)}"`);
+}
+
+/** Each visible text node under `root`, in document order, with its contrast against what lies behind it. */
+export function textContrasts(root: Locator): Promise<{ text: string; ratio: number }[]> {
+  return root.evaluate((root) => {
     const canvas = document.createElement('canvas');
     canvas.width = canvas.height = 1;
     const ink = canvas.getContext('2d', { willReadFrequently: true })!;
@@ -36,8 +43,8 @@ export function unreadableText(page: Page): Promise<string[]> {
         (v /= 255) <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
       return 0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
     };
-    const unreadable: string[] = [];
-    const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    const contrasts: { text: string; ratio: number }[] = [];
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     for (let node = walker.nextNode(); node; node = walker.nextNode()) {
       const element = node.parentElement;
       const text = node.textContent?.trim();
@@ -49,9 +56,8 @@ export function unreadableText(page: Page): Promise<string[]> {
         luminance(over(rgba(getComputedStyle(element).color), background)),
         luminance(background),
       ].sort((a, b) => b - a) as [number, number];
-      const ratio = (lighter + 0.05) / (darker + 0.05);
-      if (ratio < 4.5) unreadable.push(`${ratio.toFixed(2)}:1 "${text.slice(0, 40)}"`);
+      contrasts.push({ text, ratio: (lighter + 0.05) / (darker + 0.05) });
     }
-    return unreadable;
+    return contrasts;
   });
 }
