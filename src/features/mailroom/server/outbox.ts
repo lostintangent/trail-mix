@@ -122,6 +122,18 @@ export function outboxQueue(sending: Sending) {
       return all().some((entry) => sameRef(entry.draft, draft) && entry.state !== 'failed');
     },
 
+    /**
+     * Undoes a failed send of a draft the member has since changed. That draft is gone, so the
+     * send has nothing left to send, and the changed draft is sent anew.
+     */
+    release(draft: MessageRef) {
+      const failed = all().filter(
+        (entry) => sameRef(entry.draft, draft) && entry.state === 'failed',
+      );
+      for (const { id } of failed) sql.run(`DELETE FROM outbox WHERE id = ?`, id);
+      if (failed.length) changed();
+    },
+
     /** Forgets an account's sends, as removing the account does. */
     forget(account: AccountId) {
       sql.run(`DELETE FROM outbox WHERE account = ?`, account);

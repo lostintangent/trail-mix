@@ -574,7 +574,6 @@ describe('The Mailroom with the demo mailbox', () => {
   }, 30_000);
 });
 
-/** A member's Mailroom, reached as the test worker names it. */
 for (const profile of ['full', 'outlook'] as const satisfies Profile[]) {
   const filesSent = profile === 'outlook';
   const host = filesSent ? 'a host that files its own copy in Sent' : 'a host Trail Mix files for';
@@ -679,6 +678,22 @@ for (const profile of ['full', 'outlook'] as const satisfies Profile[]) {
       expect(await whereIs('Refused')).toEqual({ delivered: 1, sent: 1, drafts: 0 });
     }, 90_000);
 
+    test('changing a draft whose send failed takes that send out of the Outbox', async () => {
+      pauseSending(alice.email, true);
+      const saved = await drafted('Fixed');
+      try {
+        await cal.call<Outgoing>('send', saved);
+        await cal.until(async () => (await outbox())[0]?.state === 'failed', 60_000);
+      } finally {
+        pauseSending(alice.email, false);
+      }
+      const fixed = await cal.call<MessageRef>('saveDraft', draftOf('Fixed, again'), saved);
+      expect(await outbox()).toEqual([]);
+      const sending = await cal.call<Outgoing>('send', fixed);
+      expect(await outbox()).toEqual([sending]);
+      await cal.call('cancelSend', sending.id);
+    }, 90_000);
+
     test('a restart before the Outbox records acceptance holds the send, saying it may have gone', async () => {
       const saved = await drafted('Interrupted');
       await cal.call('restartWhenAccepted');
@@ -700,6 +715,7 @@ for (const profile of ['full', 'outlook'] as const satisfies Profile[]) {
   });
 }
 
+/** A member's Mailroom, reached as the test worker names it. */
 function member(name: string, worker: () => LocalWorker) {
   const call = async <T = unknown>(method: string, ...args: unknown[]): Promise<T> => {
     // As a browser sends it: a call carrying files goes as form data.

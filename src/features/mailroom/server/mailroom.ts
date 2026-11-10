@@ -375,6 +375,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       // Each save replaces the last, so the cache keeps only the newest draft's bytes.
       this.drafts.delete(refKeyOf(older));
       await this.env.BODIES.delete(this.bodyKey(older));
+      this.sending.release(older);
     }
     await this.owe(() => this.queue.folder({ account: account.id, path: saved.path }));
     return saved;
