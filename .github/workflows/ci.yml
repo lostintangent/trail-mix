@@ -55,3 +55,47 @@ jobs:
       # Starts the built Worker on workerd and profiles it against Cloudflare's one-second limit.
       - name: Check the Worker starts
         run: node node_modules/wrangler/bin/wrangler.js check startup
+
+  # Mail I/O against the native test mail server: the server's own tests, and the mail check
+  # running in a Durable Object on workerd.
+  mail:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Dovecot 2.4.5 from repo.dovecot.org
+        run: |
+          curl -fsSL https://repo.dovecot.org/DOVECOT-REPO-GPG-2.4 -o dovecot.asc
+          # Trust the key only if it is the one dovecot.org publishes.
+          gpg --show-keys --with-colons dovecot.asc | grep -q '^fpr:::::::::EF0882079FD4ED32BF8B23B2A1B09EF84EDC5219:'
+          gpg --dearmor < dovecot.asc | sudo tee /usr/share/keyrings/dovecot.gpg > /dev/null
+          # ubuntu-latest moves between releases, so the suite and the package build follow the runner.
+          . /etc/os-release
+          printf 'Types: deb\nURIs: https://repo.dovecot.org/ce-2.4.5/ubuntu/%s\nSuites: %s\nComponents: main\nSigned-By: /usr/share/keyrings/dovecot.gpg\n' \
+            "$VERSION_CODENAME" "$VERSION_CODENAME" | sudo tee /etc/apt/sources.list.d/dovecot.sources > /dev/null
+          # Only the test mail server's own unprivileged instance runs. The packaged service never starts.
+          printf '#!/bin/sh\nexit 101\n' | sudo tee /usr/sbin/policy-rc.d > /dev/null
+          sudo chmod +x /usr/sbin/policy-rc.d
+          sudo apt-get update -qq
+          v=2:2.4.5-2+ubuntu$VERSION_ID
+          sudo apt-get install -y -qq --no-install-recommends dovecot-core=$v dovecot-imapd=$v dovecot-lmtpd=$v
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: canary
+
+      # The mail check starts workerd, which runs under Node.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Mail tests
+        run: bun run test:mail
+
+      - name: Test mail server logs
+        if: failure()
+        run: tail -n 50 .mail-server/state/dovecot.log .mail-server/state/serve.log

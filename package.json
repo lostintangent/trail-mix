@@ -8,6 +8,8 @@
     "dev": "node node_modules/vite/bin/vite.js dev",
     "build": "bun --bun vite build",
     "preview": "node node_modules/vite/bin/vite.js preview",
+    "test:mail": "bun test --path-ignore-patterns=node_modules/** tests/mail-server",
+    "mail-server": "bun tests/mail-server/server.ts",
     "theme": "bun --bun astryx theme build src/app/theme/trail-mix.ts --out src/app/theme/built/trail-mix.css"
   },
   "dependencies": {
@@ -16,7 +18,9 @@
     "@stylexjs/stylex": "0.19.1",
     "@tanstack/react-router": "1.170.46",
     "@tanstack/react-start": "1.169.5",
+    "imapflow": "2.11.0",
     "lucide-react": "1.71.0",
+    "nodemailer": "10.4.0",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },
@@ -30,6 +34,7 @@
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.3.0",
     "lightningcss": "1.33.0",
+    "smtp-server": "3.21.3",
     "vite": "8.3.5",
     "wrangler": "4.157.0"
   }

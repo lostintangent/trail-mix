@@ -13,6 +13,8 @@ ignorePatterns = ["src/app/routeTree.gen.ts", "src/app/theme/built/"]
 
 [test]
 preload = ["./tests/preload.ts"]
+# Tests that need the test mail server and workerd run with `bun run test:mail`, not `bun test`.
+pathIgnorePatterns = ["**/*.mail.test.ts"]
 
 [lint]
 # Also run the rules that need types, such as a promise nobody awaits.
