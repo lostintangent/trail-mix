@@ -222,6 +222,9 @@ test('Link turns the selected words into a link, adding https to an address type
   await page.keyboard.type('the plan');
   await page.keyboard.press('ControlOrMeta+a');
   await composer.getByRole('button', { name: 'Link', exact: true }).click();
+  // The words chosen as Link was pressed are the ones it links, even once the selection has moved,
+  // as Safari moves it when the focus goes to the address.
+  await composer.getByRole('textbox', { name: 'Message' }).press('ArrowRight');
   await composer.getByRole('textbox', { name: 'Link address' }).fill('example.com/plan');
   await page.keyboard.press('Enter');
   const link = composer.getByRole('textbox', { name: 'Message' }).getByRole('link');

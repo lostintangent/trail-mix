@@ -249,7 +249,7 @@ function Writer({
   const account = accounts.find((each) => each.id === writing.account);
   const files = writing.attachments.filter((attached) => attached.contentId === undefined);
   const isCoarse = useMediaQuery(media.coarse);
-  const [isLinking, setLinking] = useState(false);
+  const [linking, setLinking] = useState<Range>();
   const band = useVisibleBand(isSheet);
 
   const title = isNew ? 'New message' : 'Reply';
@@ -406,13 +406,24 @@ function Writer({
         )}
       </div>
 
-      {isLinking && editor && <LinkField editor={editor} onDone={() => setLinking(false)} />}
+      {linking && editor && (
+        <LinkField editor={editor} range={linking} onDone={() => setLinking(undefined)} />
+      )}
       <div
         role="toolbar"
         aria-label="Formatting and files"
         {...stylex.props(styles.toolbar, isSheet && styles.sheetToolbar)}
       >
-        {editor && <Formatting editor={editor} tip={tip} onLink={() => setLinking(true)} />}
+        {editor && (
+          <Formatting
+            editor={editor}
+            tip={tip}
+            onLink={() => {
+              const { from, to } = editor.state.selection;
+              setLinking({ from, to });
+            }}
+          />
+        )}
         <FilePicker
           id={`${id}-image`}
           label="Insert an image"
@@ -508,24 +519,38 @@ function Formatting({
         active.link ? editor.chain().focus().extendMarkRange('link').unsetLink().run() : onLink(),
     ],
   ];
-  return buttons.map(([label, icon, key, run]) => (
-    <IconButton
-      key={label}
-      label={label}
-      tooltip={tip(label)}
-      icon={<Icon icon={icon} />}
-      variant="ghost"
-      aria-pressed={active[key]}
-      onClick={run}
-    />
-  ));
+  // Pressing one leaves the focus, and so the selection it acts on, in the text.
+  return (
+    <span onMouseDown={(event) => event.preventDefault()} {...stylex.props(styles.contents)}>
+      {buttons.map(([label, icon, key, run]) => (
+        <IconButton
+          key={label}
+          label={label}
+          tooltip={tip(label)}
+          icon={<Icon icon={icon} />}
+          variant="ghost"
+          aria-pressed={active[key]}
+          onClick={run}
+        />
+      ))}
+    </span>
+  );
 }
 
 /**
  * Where the member gives a link's address: for the selected text, or, with nothing selected, as
  * a link of its own where the cursor is. Enter adds it and Esc goes back to the text.
  */
-function LinkField({ editor, onDone }: { editor: TiptapEditor; onDone: () => void }) {
+function LinkField({
+  editor,
+  range,
+  onDone,
+}: {
+  editor: TiptapEditor;
+  /** The selection as Link was pressed. Focus moving into the field can lose the live one. */
+  range: Range;
+  onDone: () => void;
+}) {
   const [typed, setTyped] = useState('');
   const href = linkOf(typed);
   const done = () => {
@@ -538,8 +563,8 @@ function LinkField({ editor, onDone }: { editor: TiptapEditor; onDone: () => voi
       onSubmit={(event) => {
         event.preventDefault();
         if (!href) return;
-        const chain = editor.chain().focus();
-        if (editor.state.selection.empty) {
+        const chain = editor.chain().focus().setTextSelection(range);
+        if (range.from === range.to) {
           chain
             .insertContent({
               type: 'text',
@@ -707,6 +732,9 @@ function refOf({ account, path, uidValidity, uid }: MessageRef): MessageRef {
   return { account, path, uidValidity, uid };
 }
 
+/** Where in the text something applies, from one position to another. */
+type Range = { from: number; to: number };
+
 const FOCUS_WIDTH = `calc(${borderVars['--border-width']} * 2)`;
 
 /** A phone's sheet rises from the bottom of the screen. */
@@ -763,6 +791,9 @@ const styles = stylex.create({
     bottom: `${bottom}px`,
     paddingBottom: bottom > 0 ? 0 : tm.safeBottom,
   }),
+  contents: {
+    display: 'contents',
+  },
   linkField: {
     display: 'flex',
     alignItems: 'center',
