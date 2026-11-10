@@ -11,6 +11,9 @@ singleQuote = true
 # Generated: the route tree by TanStack Start, the theme by `bun run theme`.
 ignorePatterns = ["src/app/routeTree.gen.ts", "src/app/theme/built/"]
 
+[test]
+preload = ["./tests/preload.ts"]
+
 [lint]
 # Also run the rules that need types, such as a promise nobody awaits.
 typeAware = true
