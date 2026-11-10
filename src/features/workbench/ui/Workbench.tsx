@@ -21,11 +21,17 @@ import {
   type ConversationId,
   type ConversationSummary,
   type Folder,
-  type Message,
+  type MessageRef,
   type View,
 } from '../../mail/core/index.ts';
-import { conversationQuery, conversationsQuery } from '../../mailroom/client/index.ts';
-import { draftIn, OutboxList, SendDraft, useOutboxCommands } from '../../outbox/index.ts';
+import { conversationsQuery, outboxQuery } from '../../mailroom/client/index.ts';
+import {
+  OutboxList,
+  SendActions,
+  sendCommands,
+  useOutboxCommands,
+  useSend,
+} from '../../outbox/index.ts';
 import { ListPane } from './ListPane.tsx';
 import { PanelEdge } from './PanelEdge.tsx';
 import { PANELS } from './panels.ts';
@@ -55,7 +61,7 @@ import {
   useCommandKeys,
   type Command,
 } from '../../commands/index.ts';
-import { Composer, composerCommands } from '../../composer/ui/index.ts';
+import { Composer, composerCommands, type Sender, type Writing } from '../../composer/ui/index.ts';
 import { isDocked, useComposing } from './useComposing.ts';
 
 const NO_COMMANDS: readonly Command[] = [];
@@ -142,7 +148,14 @@ export function Workbench({
   const isOffscreen = (pane: Pane) => isPhone && pane !== phonePane;
 
   const { triage, undoLast, canUndo } = useTriage(view, folders);
-  const composing = useComposing(selected);
+  // Drafts on their way can't be written on until their send is undone.
+  const { data: outgoing } = useQuery(outboxQuery);
+  const leaving = useMemo(
+    () => (outgoing ?? []).filter(({ state }) => state !== 'failed').map(({ draft }) => draft),
+    [outgoing],
+  );
+  const composing = useComposing(selected, leaving);
+  const { compose } = composing;
   // A new message is from the account the view holds, or else the first.
   const writeFrom = scope ?? accounts[0];
   // On a phone, a new message closed with nothing open goes back to the list it was begun from.
@@ -206,7 +219,6 @@ export function Workbench({
         write: undefined,
         reply: (all) => replyIn(conversation, all),
       });
-      const draft = draftIn(conversation, folders);
       return (
         <>
           {reply && <CommandButton command={reply} />}
@@ -221,7 +233,6 @@ export function Workbench({
             })}
             isCompact={place === 'island'}
           />
-          {draft && <SendDraft draft={draft} isCompact={place === 'island'} />}
         </>
       );
     },
@@ -285,14 +296,34 @@ export function Workbench({
     <TriageActions commands={selectedCommands} isCompact={place === 'island'} />
   );
 
-  // The open conversation's draft, if it has one, which Send sends. Only a change of draft redraws.
-  const selectDraft = useCallback((messages: Message[]) => draftIn(messages, folders), [folders]);
-  const { data: openDraft } = useQuery({
-    ...conversationQuery(selected ?? ''),
-    enabled: selected !== undefined,
-    select: selectDraft,
+  const outbox = useOutboxCommands(undefined);
+
+  // Send sends what the open composer holds, once it's saved, and Undo brings the composer back as
+  // it was, under its conversation if that's still the one open.
+  const send = useSend();
+  const sender = useRef<Sender['current']>(undefined);
+  const [isSendable, setSendable] = useState(false);
+  const shownNow = useRef(selected);
+  useLayoutEffect(() => {
+    shownNow.current = selected;
   });
-  const outbox = useOutboxCommands(selected === undefined ? undefined : openDraft);
+  const sendWritten = (draft: MessageRef, at: string | undefined, writing: Writing) => {
+    const from = { conversation: selected, isDocked: compose !== undefined && isDocked(compose) };
+    void send(draft, {
+      at,
+      onUndone: (back) => {
+        composing.resume(writing, back, from.isDocked && shownNow.current === from.conversation);
+        setPhonePane('reader');
+      },
+    });
+  };
+  const writingCommands = compose
+    ? sendCommands({
+        onSend: (at) => sender.current?.(at),
+        isEnabled: isSendable,
+        shortcut: 'Mod+Enter',
+      })
+    : [];
 
   // The registry: every command the workbench can run now, gathered from each feature, which binds
   // their keys and feeds the palette and the shortcut sheet.
@@ -327,6 +358,7 @@ export function Workbench({
     ...viewCommands(accounts, folders, openView),
     ...outbox.commands,
     ...folderCommands({ accounts, folders, view, ask: setAsking }),
+    ...writingCommands,
     ...extraCommands,
   ];
   useCommandKeys(commands);
@@ -342,7 +374,6 @@ export function Workbench({
   );
 
   const newMessage = commands.find(({ id }) => id === 'message.new');
-  const { compose } = composing;
   const writing = compose && {
     composer: (
       <Suspense>
@@ -351,6 +382,18 @@ export function Workbench({
           compose={compose}
           accounts={accounts}
           onDraft={(saved, older) => composing.noteDraft(compose, saved, older)}
+          onSend={sendWritten}
+          sender={sender}
+          onSendable={setSendable}
+          sendActions={
+            <Suspense>
+              <SendActions
+                commands={writingCommands}
+                onPick={(at) => sender.current?.(at)}
+                isCompact={isPhone}
+              />
+            </Suspense>
+          }
           onClose={closeComposer}
         />
       </Suspense>

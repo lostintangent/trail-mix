@@ -15,6 +15,9 @@ import {
 /** How long after a save fails it is tried again. */
 const RETRY_AFTER_MS = 5_000;
 
+/** How many more times a composer that has closed tries its last save. */
+const RETRIES_ONCE_CLOSED = 2;
+
 export type SaveState = 'unsaved' | 'saving' | 'saved' | 'failed';
 
 /**
@@ -50,6 +53,8 @@ export function useAutosave({
     owedSince: 0,
     isDiscarded: false,
     hasFailed: false,
+    isClosed: false,
+    retriesClosed: 0,
     saving: undefined as Promise<void> | undefined,
     timer: undefined as ReturnType<typeof setTimeout> | undefined,
   });
@@ -89,7 +94,10 @@ export function useAutosave({
         current.hasFailed = true;
         current.isOwed = true;
         setState('failed');
-        current.timer = setTimeout(() => void save(), RETRY_AFTER_MS);
+        // A closed composer tries its last save a few more times, then gives up.
+        if (!current.isClosed || ++current.retriesClosed <= RETRIES_ONCE_CLOSED) {
+          current.timer = setTimeout(() => void save(), RETRY_AFTER_MS);
+        }
       } finally {
         current.saving = undefined;
       }
@@ -130,17 +138,20 @@ export function useAutosave({
     return () => {
       document.removeEventListener('visibilitychange', hide);
       window.removeEventListener('pagehide', hide);
+      current.isClosed = true;
       if (current.isOwed) void (current.saving ? current.saving.then(save) : save());
     };
   }, [save]);
 
-  /** The draft once everything written is saved, as Send needs it. */
-  const settle = useCallback(async (): Promise<MessageRef | undefined> => {
+  /** The draft once everything written is saved, as Send needs it, saving one if there's none. */
+  const settle = useCallback(async (): Promise<MessageRef> => {
     const current = session.current;
+    if (!current.draft) current.isOwed = true;
     while (current.saving || current.isOwed) {
       await (current.saving ?? save());
       if (current.hasFailed) throw new Error('The draft couldn’t be saved.');
     }
+    if (!current.draft) throw new Error('The draft couldn’t be saved.');
     return current.draft;
   }, [save]);
 

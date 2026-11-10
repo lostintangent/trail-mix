@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Account, ConversationId, Message, MessageRef } from '../../mail/core/index.ts';
 import { conversationQuery } from '../../mailroom/client/index.ts';
-import type { Compose } from '../../composer/ui/index.ts';
+import type { Compose, Writing } from '../../composer/ui/index.ts';
 
 /**
  * What the member is writing, if anything, and how writing starts and ends. A composer belongs to
@@ -10,7 +10,7 @@ import type { Compose } from '../../composer/ui/index.ts';
  * what it holds. The drafts it has saved stay out of the reader: the one being written while the
  * composer is open, and every one a later save replaced, which the server has dropped.
  */
-export function useComposing(selected: ConversationId | undefined) {
+export function useComposing(selected: ConversationId | undefined, leaving: readonly MessageRef[]) {
   const queryClient = useQueryClient();
   const [compose, setCompose] = useState<Compose>();
   const [editing, setEditing] = useState<MessageRef>();
@@ -23,7 +23,7 @@ export function useComposing(selected: ConversationId | undefined) {
   }, [compose]);
   const start = useCallback((next: Compose | undefined) => {
     setCompose(next);
-    setEditing(next?.as === 'draft' ? next.draft : undefined);
+    setEditing(next?.as === 'draft' || next?.as === 'resumed' ? next.draft : undefined);
     if (next) setSession((count) => count + 1);
   }, []);
 
@@ -57,6 +57,12 @@ export function useComposing(selected: ConversationId | undefined) {
     (draft: Message, conversation: Message[]) => start({ as: 'draft', draft, conversation }),
     [start],
   );
+  /** Brings back what was being written when a send of it was undone. */
+  const resume = useCallback(
+    (writing: Writing, draft: MessageRef, isDocked: boolean) =>
+      start({ as: 'resumed', writing, draft, isDocked }),
+    [start],
+  );
   const close = useCallback(() => start(undefined), [start]);
   // A save can land after its composer has closed, and then only what it replaced matters.
   const noteDraft = useCallback(
@@ -66,12 +72,24 @@ export function useComposing(selected: ConversationId | undefined) {
     },
     [],
   );
+  // Drafts on their way stay out too, since they can't be written on until their send is undone.
   const hidden = useMemo(
-    () => (editing && compose ? [...replaced, editing] : replaced),
-    [editing, compose, replaced],
+    () => [...replaced, ...leaving, ...(editing && compose ? [editing] : [])],
+    [editing, compose, replaced, leaving],
   );
 
-  return { compose, session, write, reply, replyIn, openDraft, close, noteDraft, hidden };
+  return {
+    compose,
+    session,
+    write,
+    reply,
+    replyIn,
+    openDraft,
+    resume,
+    close,
+    noteDraft,
+    hidden,
+  };
 }
 
 /** Whether a composer lies under the conversation it answers, rather than filling the reader. */
@@ -83,5 +101,7 @@ export function isDocked(compose: Compose): boolean {
       return true;
     case 'draft':
       return compose.conversation.some(({ flags }) => !flags.draft);
+    case 'resumed':
+      return compose.isDocked;
   }
 }

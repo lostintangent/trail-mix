@@ -1,4 +1,3 @@
-import { Button } from '@astryxdesign/core/Button';
 import { Icon } from '@astryxdesign/core/Icon';
 import { IconButton } from '@astryxdesign/core/IconButton';
 import {
@@ -12,17 +11,8 @@ import {
 import * as stylex from '@stylexjs/stylex';
 import { useQuery } from '@tanstack/react-query';
 import { useEditorState, type Editor as TiptapEditor } from '@tiptap/react';
-import {
-  Bold,
-  Code,
-  ImagePlus,
-  Italic,
-  Paperclip,
-  Send as SendIcon,
-  Trash2,
-  X,
-} from 'lucide-react';
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { Bold, Code, ImagePlus, Italic, Paperclip, Trash2, X } from 'lucide-react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { StampDot } from '../../../app/theme/StampDot.tsx';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, Message, MessageRef } from '../../mail/core/index.ts';
@@ -40,11 +30,18 @@ import {
 import { Editor, type EditorProps } from './Editor.tsx';
 import { useAutosave, type SaveState } from './useAutosave.ts';
 
-/** What the member asked to write: a new message, a reply, or a draft opened again. */
+/**
+ * What the member asked to write: a new message, a reply, a draft opened again, or what was being
+ * written when Send was pressed, back again after Undo took the send back.
+ */
 export type Compose =
   | { as: 'new'; account: Account }
   | { as: 'reply'; to: Message; all: boolean }
-  | { as: 'draft'; draft: Message; conversation: readonly Message[] };
+  | { as: 'draft'; draft: Message; conversation: readonly Message[] }
+  | { as: 'resumed'; writing: Writing; draft: MessageRef; isDocked: boolean };
+
+/** How the workbench's Send reaches the open composer: a time to send at, or now. */
+export type Sender = { current: ((at?: string) => void) | undefined };
 
 export type ComposerProps = {
   compose: Compose;
@@ -54,8 +51,17 @@ export type ComposerProps = {
    * written out of the conversation it shows.
    */
   onDraft?: (saved: MessageRef, replaced: MessageRef | undefined) => void;
-  /** Sends the draft once everything written is saved. Without it the composer only saves. */
-  onSend?: (draft: MessageRef) => void;
+  /**
+   * Sends the draft once everything written is saved, with what was written, which comes back
+   * if the send is undone. Then the composer closes.
+   */
+  onSend: (draft: MessageRef, at: string | undefined, writing: Writing) => void;
+  /** Filled with the composer's Send while it is open, for the registry's Send and its keys. */
+  sender: Sender;
+  /** Whether what's written can be sent now, which it can once it is to someone. */
+  onSendable: (isSendable: boolean) => void;
+  /** The Send and Send later buttons, drawn from the registry's commands. */
+  sendActions: ReactNode;
   /** Closes the composer, which saves what is still unsaved as it goes. */
   onClose: () => void;
 };
@@ -65,14 +71,14 @@ export type ComposerProps = {
  * filling the reader for a new message. It starts once what it needs has loaded: the parent's
  * headers for a reply, or the draft's words and files.
  */
-export function Composer({ compose, accounts, onDraft, onSend, onClose }: ComposerProps) {
+export function Composer({ compose, ...props }: ComposerProps) {
   const ref =
     compose.as === 'reply' ? compose.to : compose.as === 'draft' ? compose.draft : undefined;
   const { data: body, isError } = useQuery({
     ...bodyQuery(ref ?? NO_REF),
     enabled: ref !== undefined,
   });
-  const start = startOf(compose, accounts, body);
+  const start = startOf(compose, props.accounts, body);
   if (!start) {
     return (
       <section aria-label="Message" aria-busy={!isError} {...stylex.props(styles.sheet)}>
@@ -91,12 +97,9 @@ export function Composer({ compose, accounts, onDraft, onSend, onClose }: Compos
           ? { html: body.html }
           : { markdown: start.markdown }
       }
-      draft={compose.as === 'draft' ? refOf(compose.draft) : undefined}
+      draft={compose.as === 'draft' || compose.as === 'resumed' ? refOf(compose.draft) : undefined}
       isNew={compose.as === 'new' || !start.inReplyTo}
-      accounts={accounts}
-      onDraft={onDraft}
-      onSend={onSend}
-      onClose={onClose}
+      {...props}
     />
   );
 }
@@ -117,6 +120,8 @@ function startOf(
     }
     case 'draft':
       return body ? reopened(compose.draft, body, compose.conversation) : undefined;
+    case 'resumed':
+      return compose.writing;
   }
 }
 
@@ -128,14 +133,16 @@ function Writer({
   accounts,
   onDraft,
   onSend,
+  sender,
+  onSendable,
+  sendActions,
   onClose,
 }: {
   start: Writing;
   from: EditorProps['start'];
   draft: MessageRef | undefined;
   isNew: boolean;
-  accounts: readonly Account[];
-} & Pick<ComposerProps, 'onDraft' | 'onSend' | 'onClose'>) {
+} & Omit<ComposerProps, 'compose'>) {
   const [writing, setWriting] = useState(start);
   const [edits, setEdits] = useState(0);
   const [fields, setFields] = useState(() => ({
@@ -186,24 +193,28 @@ function Writer({
     if (!found) return undefined;
     return 'file' in found ? fileUrl(found.file) : partUrl(found.in, found.id);
   };
-  const [isSending, setSending] = useState(false);
-  const send =
-    onSend &&
-    (async () => {
-      if (isSending) return;
-      setSending(true);
-      try {
-        const saved = await autosave.settle();
-        if (saved) {
-          onSend(saved);
-          onClose();
-        }
-      } catch {
-        // The status says the save failed, and the save is tried again.
-      } finally {
-        setSending(false);
-      }
-    });
+  // Send saves what's left to save, then hands the draft over and closes. A second press while the
+  // first is saving does nothing.
+  const isSending = useRef(false);
+  const isSendable = writing.to.length + writing.cc.length + writing.bcc.length > 0;
+  const send = async (at?: string) => {
+    if (isSending.current || !isSendable) return;
+    isSending.current = true;
+    try {
+      const saved = await autosave.settle();
+      onSend(saved, at, { ...writing });
+      onClose();
+    } catch {
+      // The status says the save failed, and the save is tried again.
+    } finally {
+      isSending.current = false;
+    }
+  };
+  useLayoutEffect(() => {
+    sender.current = (at) => void send(at);
+  });
+  useEffect(() => () => void (sender.current = undefined), [sender]);
+  useEffect(() => onSendable(isSendable), [isSendable, onSendable]);
   const discard = () => {
     void autosave.discard();
     onClose();
@@ -362,17 +373,7 @@ function Writer({
           variant="ghost"
           onClick={onClose}
         />
-        {send && (
-          <Button
-            label="Send"
-            variant="primary"
-            icon={<Icon icon={SendIcon} />}
-            isDisabled={
-              isSending || writing.to.length + writing.cc.length + writing.bcc.length === 0
-            }
-            onClick={() => void send()}
-          />
-        )}
+        {sendActions}
       </div>
     </section>
   );

@@ -8,6 +8,7 @@ import {
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import Image from '@tiptap/extension-image';
+import { Selection } from '@tiptap/pm/state';
 import { Placeholder } from '@tiptap/extensions';
 import { Markdown } from '@tiptap/markdown';
 import { EditorContent, useEditor, type Editor as TiptapEditor } from '@tiptap/react';
@@ -57,7 +58,6 @@ export function Editor({
   });
   const known = useRef<string>(undefined);
   const editor = useEditor({
-    autofocus: isFocused ? 'end' : false,
     extensions: [
       StarterKit.configure({
         heading: { levels: [1, 2, 3], HTMLAttributes: { class: css(styles.heading) } },
@@ -86,6 +86,7 @@ export function Editor({
     onCreate: ({ editor: created }) => {
       known.current = created.getMarkdown();
       if ('html' in start) latest.current.onChange(known.current, false);
+      if (isFocused) focusAtEnd(created);
     },
     editorProps: {
       attributes: {
@@ -93,6 +94,10 @@ export function Editor({
         'aria-multiline': 'true',
         role: 'textbox',
         class: css(styles.prose),
+      },
+      // ⌘↵ is the registry's Send, so the editor leaves it alone rather than breaking the line.
+      handleDOMEvents: {
+        keydown: (_view, event) => event.key === 'Enter' && (event.metaKey || event.ctrlKey),
       },
       handlePaste: (_view, event) => place(event.clipboardData?.files),
       handleDrop: (_view, event) => place(event.dataTransfer?.files),
@@ -133,6 +138,17 @@ export function Editor({
   }, [editor, onEditor]);
 
   return <EditorContent editor={editor} {...stylex.props(styles.editor)} />;
+}
+
+/**
+ * Puts the cursor at the end of the text. Tiptap's own `focus` builds its transaction before it
+ * focuses the page on a phone, which applies one of its own first, so its transaction no longer
+ * fits. The cursor moves first here, then the page focuses.
+ */
+function focusAtEnd(editor: TiptapEditor) {
+  editor.view.dispatch(editor.state.tr.setSelection(Selection.atEnd(editor.state.doc)));
+  editor.view.focus();
+  editor.commands.scrollIntoView();
 }
 
 /** An image node that shows only what the draft holds, as `imageUrl` resolves it. */

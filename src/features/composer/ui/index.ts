@@ -2,4 +2,5 @@
 // feature's own index, so the Worker never takes in the editor.
 export { composerCommands } from './commands.ts';
 export { Composer, preloadComposer } from './lazy.ts';
-export type { Compose, ComposerProps } from './Composer.tsx';
+export type { Compose, ComposerProps, Sender } from './Composer.tsx';
+export type { Writing } from '../core/session.ts';

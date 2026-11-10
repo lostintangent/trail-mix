@@ -83,6 +83,24 @@ test('a reply is saved as it is written, opens again with its words and files, a
   await expect(draft.count()).resolves.toBe(0);
 }, 60_000);
 
+test('⌘↵ sends what was written, and Undo brings the composer back as it was', async () => {
+  const page = await inbox();
+  await page.getByRole('option').first().click();
+  await reader(page).getByRole('button', { name: 'Reply', exact: true }).click();
+  const reply = page.getByRole('region', { name: 'Reply' });
+  await reply.getByRole('textbox', { name: 'Reply' }).waitFor();
+  await page.keyboard.type('On my way.');
+  await page.keyboard.press('ControlOrMeta+Enter');
+  await reply.waitFor({ state: 'detached' });
+
+  const notifications = page.getByRole('region', { name: 'Notifications' });
+  await notifications.getByText(/^Sending to \w+ in \d+s$/).waitFor();
+  await notifications.getByRole('button', { name: 'Undo' }).click();
+  await expect(
+    reply.getByRole('textbox', { name: 'Reply' }).textContent({ timeout: 10_000 }),
+  ).resolves.toBe('On my way.');
+}, 60_000);
+
 test('a draft another client wrote as HTML opens with its words, and closed untouched stays as it was', async () => {
   const page = await inbox();
   // Every command this browser sends, by name, to find any that could change the draft.

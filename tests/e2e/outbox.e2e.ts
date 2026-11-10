@@ -61,14 +61,18 @@ async function goTo(page: Page, view: string) {
     .click();
 }
 
-/** Opens a draft from the Drafts view, ready to send from the reader. */
+/** Opens a draft from the Drafts view in the composer, ready to send. */
 async function openDraft(page: Page, subject: RegExp) {
   await goTo(page, 'Drafts');
   await page.getByRole('option', { name: subject }).click();
+  await page
+    .getByRole('region', { name: 'Reader' })
+    .getByRole('button', { name: /^Draft/ })
+    .click();
   await send(page).waitFor();
 }
 
-/** The Send button where the reader shows it: its bar on a desktop, its island on a phone. */
+/** The composer's Send button. */
 const send = (page: Page) =>
   page.getByRole('button', { name: 'Send', exact: true }).filter({ visible: true });
 
