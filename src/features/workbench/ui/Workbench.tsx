@@ -14,7 +14,7 @@ import { PanelEdge } from './PanelEdge.tsx';
 import { PANELS } from './panels.ts';
 import { ReaderPane } from './ReaderPane.tsx';
 import { StatusLine } from './StatusLine.tsx';
-import { Sidebar, UNIFIED_VIEWS, type ViewCounts } from '../../folders/index.ts';
+import { folderName, Sidebar, UNIFIED_VIEWS, type ViewCounts } from '../../folders/index.ts';
 import { useMediaQuery } from './useMediaQuery.ts';
 import { usePanel } from './usePanel.ts';
 
@@ -144,7 +144,7 @@ function describeView(
     case 'folder': {
       const { account, path } = view.folder;
       const folder = folders.find((each) => each.account === account && each.path === path);
-      return { title: folder?.name ?? path, unread: folder?.unread };
+      return { title: folder ? folderName(folder) : path, unread: folder?.unread };
     }
     case 'search':
       return { title: 'Search' };

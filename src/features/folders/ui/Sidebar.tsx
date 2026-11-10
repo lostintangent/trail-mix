@@ -13,6 +13,7 @@ import type { ReactNode } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, Folder, FolderRef, View } from '../../mail/core/index.ts';
 import { stampStyles } from '../../../app/theme/stamps.ts';
+import { folderName } from './name.ts';
 import { folderTree, type FolderNode } from './tree.ts';
 
 type UnifiedView = Exclude<View['in'], 'folder' | 'search'>;
@@ -108,7 +109,7 @@ function FolderRows({
       {nodes.map(({ folder, children }) => (
         <li key={folder.path}>
           <Row
-            label={folder.name}
+            label={folderName(folder)}
             depth={depth}
             count={folder.unread}
             isCountUnread={folder.role === 'inbox'}

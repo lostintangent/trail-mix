@@ -1,4 +1,5 @@
 import type { Folder, FolderRole } from '../../mail/core/index.ts';
+import { folderName } from './name.ts';
 
 /** A folder in an account's tree, with the folders inside it. */
 export type FolderNode = { folder: Folder; children: FolderNode[] };
@@ -38,4 +39,4 @@ export function folderTree(folders: readonly Folder[]): FolderNode[] {
 }
 
 const rank = ({ role }: Folder) => (role ? ROLE_ORDER[role] : OWN);
-const byName = (a: Folder, b: Folder) => a.name.localeCompare(b.name);
+const byName = (a: Folder, b: Folder) => folderName(a).localeCompare(folderName(b));
