@@ -1,0 +1,372 @@
+name: Deploy
+
+# Production for every push to main, and a preview for every pull request from this repository,
+# each once CI has passed: CI calls this workflow after its three jobs. Nothing deploys unless the
+# repository holds the Cloudflare secrets, so a fork's pull request, which never gets them, builds
+# and tests but never deploys. No step here runs a fork's code with a secret: there is no
+# pull_request_target or workflow_run, and every job that deploys runs only for this repository.
+on:
+  workflow_call:
+  # A pull request's preview goes when the pull request closes.
+  pull_request:
+    types: [closed]
+  # Exercises the rollback for real: a deploy of main whose /health reports another commit, the
+  # app otherwise unchanged. It goes once the rollback has been seen to work.
+  workflow_dispatch:
+    inputs:
+      rollback_drill:
+        description: Deploy main with /health reporting another commit, so the deploy rolls back
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+# Wrangler runs on Node, from the version the lockfile pins.
+env:
+  WRANGLER: node node_modules/wrangler/bin/wrangler.js
+
+jobs:
+  # Whether this repository can deploy, and whether its Access settings would let anyone sign in.
+  settings:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      ready: ${{ steps.secrets.outputs.ready }}
+    steps:
+      - name: Look for the Cloudflare secrets
+        id: secrets
+        env:
+          READY: ${{ secrets.CLOUDFLARE_API_TOKEN != '' && secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
+        run: |
+          echo "ready=$READY" >> "$GITHUB_OUTPUT"
+          if [ "$READY" != true ]; then
+            echo "::notice::There are no Cloudflare secrets here, so nothing deploys."
+          fi
+
+      # Until both are set, every address answers with the setup page, apart from /health.
+      - name: Check the Access settings
+        env:
+          ACCESS_TEAM_DOMAIN: ${{ vars.ACCESS_TEAM_DOMAIN }}
+          ACCESS_AUD: ${{ vars.ACCESS_AUD }}
+        run: |
+          if [ -z "$ACCESS_TEAM_DOMAIN$ACCESS_AUD" ]; then
+            echo "::notice::ACCESS_TEAM_DOMAIN and ACCESS_AUD aren't set, so Trail Mix shows only its setup page."
+            exit 0
+          fi
+          if ! [[ "$ACCESS_TEAM_DOMAIN" =~ ^[a-z0-9-]+\.cloudflareaccess\.com$ ]]; then
+            echo "::error::ACCESS_TEAM_DOMAIN is the team domain alone, such as myteam.cloudflareaccess.com."
+            exit 1
+          fi
+          if ! [[ "$ACCESS_AUD" =~ ^[0-9a-f]{64}$ ]]; then
+            echo "::error::ACCESS_AUD is the 64-character Application Audience (AUD) tag of the Trail Mix application."
+            exit 1
+          fi
+
+  production:
+    needs: settings
+    if: >-
+      needs.settings.outputs.ready == 'true' && github.ref == 'refs/heads/main' &&
+      (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # One deploy at a time, each to its end, so a rollback never undoes a newer deploy.
+    concurrency:
+      group: production
+      cancel-in-progress: false
+    env:
+      COMMIT: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: canary
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        run: bun run build
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Prepare the account
+        id: account
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          config=dist/server/wrangler.json
+          worker=$(jq -er .name "$config")
+          api() {
+            curl -sS --max-time 30 -o "$RUNNER_TEMP/api.json" -w '%{http_code}' \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/$1"
+          }
+          failed() {
+            echo "::error::$1: $(jq -c '.errors // .' "$RUNNER_TEMP/api.json" 2> /dev/null)"
+            exit 1
+          }
+
+          if [ "$(api workers/subdomain)" != 200 ]; then
+            failed "There is no workers.dev subdomain yet. Open Workers & Pages once to choose one"
+          fi
+          address="https://$worker.$(jq -er .result.subdomain "$RUNNER_TEMP/api.json").workers.dev"
+
+          # wrangler deploy won't create a bucket the Worker binds.
+          for bucket in $(jq -r '.r2_buckets[].bucket_name' "$config"); do
+            case "$(api "r2/buckets/$bucket")" in
+              200) ;;
+              404) $WRANGLER r2 bucket create "$bucket" ;;
+              *) failed "Couldn't look for the bucket $bucket" ;;
+            esac
+          done
+
+          # The version serving now, which a failed deploy rolls back to. None before the first.
+          case "$(api "workers/scripts/$worker/deployments")" in
+            200)
+              previous=$(jq -r '.result.deployments | sort_by(.created_on) | last
+                | (.versions // []) | max_by(.percentage) | .version_id // empty' "$RUNNER_TEMP/api.json")
+              ;;
+            404) previous= ;;
+            *) failed "Couldn't read what $worker serves now" ;;
+          esac
+
+          # Whether production has the key every member's passwords are sealed with.
+          case "$(api "workers/scripts/$worker/secrets")" in
+            200)
+              if jq -e '.result | any(.name == "CREDENTIALS_KEY")' "$RUNNER_TEMP/api.json" > /dev/null; then
+                key=kept
+              else
+                key=missing
+              fi
+              ;;
+            404) key=missing ;;
+            *) failed "Couldn't read $worker's secrets" ;;
+          esac
+
+          # The commit serving now, to see the rollback bring it back.
+          before=$(curl -sS --max-time 10 "$address/health" 2> /dev/null | jq -r '.version // empty' 2> /dev/null || true)
+          [[ "$before" =~ ^[0-9a-f]{40}$ ]] || before=
+
+          {
+            echo "worker=$worker"
+            echo "address=$address"
+            echo "previous=$previous"
+            echo "before=$before"
+            echo "key=$key"
+          } >> "$GITHUB_OUTPUT"
+          echo "Production is $address, now serving version ${previous:-none} (commit ${before:-unknown})."
+
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ACCESS_TEAM_DOMAIN: ${{ vars.ACCESS_TEAM_DOMAIN }}
+          ACCESS_AUD: ${{ vars.ACCESS_AUD }}
+          KEY: ${{ steps.account.outputs.key }}
+          REPORTED: ${{ inputs.rollback_drill && 'a version that is not this commit' || github.sha }}
+        run: |
+          args=(--var "VERSION:$REPORTED" --message "Commit $COMMIT")
+          if [ -n "$ACCESS_TEAM_DOMAIN" ]; then
+            args+=(--var "ACCESS_TEAM_DOMAIN:$ACCESS_TEAM_DOMAIN" --var "ACCESS_AUD:$ACCESS_AUD")
+          fi
+          # The key is made here once, goes to Cloudflare as a secret, and is never shown or kept.
+          # A deploy without it keeps the one production has.
+          if [ "$KEY" = missing ]; then
+            umask 077
+            secrets="$RUNNER_TEMP/secrets.json"
+            trap 'rm -f "$secrets"' EXIT
+            key=$(openssl rand -base64 48 | tr -d '\n')
+            echo "::add-mask::$key"
+            printf '{"CREDENTIALS_KEY":"%s"}' "$key" > "$secrets"
+            unset key
+            args+=(--secrets-file "$secrets")
+            echo "Production has no CREDENTIALS_KEY yet, so this deploy gives it one."
+          fi
+          $WRANGLER deploy "${args[@]}"
+
+      - name: Check /health reports the commit
+        id: health
+        env:
+          ADDRESS: ${{ steps.account.outputs.address }}
+        run: |
+          for _ in $(seq 24); do
+            code=$(curl -sS --max-time 10 -o "$RUNNER_TEMP/health.json" -w '%{http_code}' "$ADDRESS/health" || true)
+            case "$code" in
+              200) reported=$(jq -r '.version // "no version"' "$RUNNER_TEMP/health.json" 2> /dev/null || echo "no JSON") ;;
+              302) reported="a sign-in, so Access needs its bypass for /health" ;;
+              *) reported="HTTP ${code:-no answer}" ;;
+            esac
+            if [ "$reported" = "$COMMIT" ]; then
+              echo "$ADDRESS/health reports $COMMIT."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::After two minutes, $ADDRESS/health answers with $reported, not $COMMIT."
+          exit 1
+
+      - name: Roll back
+        if: failure() && steps.health.outcome == 'failure'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WORKER: ${{ steps.account.outputs.worker }}
+          ADDRESS: ${{ steps.account.outputs.address }}
+          PREVIOUS: ${{ steps.account.outputs.previous }}
+          BEFORE: ${{ steps.account.outputs.before }}
+        run: |
+          if [ -z "$PREVIOUS" ]; then
+            echo "::error::This was the first deploy, so there is no version to roll back to."
+            exit 1
+          fi
+          $WRANGLER rollback "$PREVIOUS" --name "$WORKER" --message "/health didn't report $COMMIT" --yes
+          if [ -z "$BEFORE" ]; then
+            echo "::error::Rolled back to version $PREVIOUS. /health wasn't readable before the deploy, so it can't be compared."
+            exit 1
+          fi
+          for _ in $(seq 24); do
+            reported=$(curl -sS --max-time 10 "$ADDRESS/health" 2> /dev/null | jq -r '.version // empty' 2> /dev/null || true)
+            if [ "$reported" = "$BEFORE" ]; then
+              echo "::error::Rolled back to version $PREVIOUS: $ADDRESS/health reports $BEFORE again."
+              exit 1
+            fi
+            sleep 5
+          done
+          echo "::error::Rolled back to version $PREVIOUS, but /health still reports ${reported:-nothing}, not $BEFORE."
+          exit 1
+
+  preview:
+    needs: settings
+    if: >-
+      needs.settings.outputs.ready == 'true' && github.event_name == 'pull_request' &&
+      github.event.action != 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      pull-requests: write
+    concurrency:
+      group: preview-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    env:
+      COMMIT: ${{ github.sha }}
+      PREVIEW: pr-${{ github.event.pull_request.number }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: canary
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        run: bun run build
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      # Previews share one bucket, apart from production's. Each preview has its own Mailrooms, and
+      # a body's key starts with its Mailroom's id, so no preview reads another's.
+      - name: Prepare the account
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          for bucket in $(jq -r '.previews.r2_buckets[].bucket_name' dist/server/wrangler.json); do
+            code=$(curl -sS --max-time 30 -o "$RUNNER_TEMP/api.json" -w '%{http_code}' \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/r2/buckets/$bucket")
+            case "$code" in
+              200) ;;
+              404) $WRANGLER r2 bucket create "$bucket" ;;
+              *) echo "::error::Couldn't look for the bucket $bucket: $(jq -c '.errors // .' "$RUNNER_TEMP/api.json")"; exit 1 ;;
+            esac
+          done
+
+      # A preview takes nothing from production, so it gets the Access settings here, and never
+      # CREDENTIALS_KEY. Its own settings are the `previews` block of wrangler.jsonc.
+      - name: Deploy the preview
+        id: deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          ACCESS_TEAM_DOMAIN: ${{ vars.ACCESS_TEAM_DOMAIN }}
+          ACCESS_AUD: ${{ vars.ACCESS_AUD }}
+        run: |
+          args=(--name "$PREVIEW" --var "VERSION:$COMMIT" --message "Commit $COMMIT" --json)
+          if [ -n "$ACCESS_TEAM_DOMAIN" ]; then
+            args+=(--var "ACCESS_TEAM_DOMAIN:$ACCESS_TEAM_DOMAIN" --var "ACCESS_AUD:$ACCESS_AUD")
+          fi
+          deployed=$($WRANGLER preview "${args[@]}")
+          address=$(jq -er '.preview.urls[0]' <<< "$deployed")
+          [[ "$address" == https://* ]] || address="https://$address"
+          echo "address=${address%/}" >> "$GITHUB_OUTPUT"
+
+      - name: Check /health reports the commit
+        env:
+          ADDRESS: ${{ steps.deploy.outputs.address }}
+        run: |
+          for _ in $(seq 24); do
+            code=$(curl -sS --max-time 10 -o "$RUNNER_TEMP/health.json" -w '%{http_code}' "$ADDRESS/health" || true)
+            case "$code" in
+              200) reported=$(jq -r '.version // "no version"' "$RUNNER_TEMP/health.json" 2> /dev/null || echo "no JSON") ;;
+              302) reported="a sign-in, so Access needs its bypass for /health" ;;
+              *) reported="HTTP ${code:-no answer}" ;;
+            esac
+            if [ "$reported" = "$COMMIT" ]; then
+              echo "$ADDRESS/health reports $COMMIT."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::After two minutes, $ADDRESS/health answers with $reported, not $COMMIT."
+          exit 1
+
+      - name: Post the address on the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ADDRESS: ${{ steps.deploy.outputs.address }}
+          NUMBER: ${{ github.event.pull_request.number }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          gh pr comment "$NUMBER" --repo "$GITHUB_REPOSITORY" --edit-last --create-if-none --body \
+            "The preview of $HEAD is at $ADDRESS. It serves only the demo mailbox, to whoever Cloudflare Access lets in."
+
+  # A closed pull request's preview goes, with its Mailrooms. Its bodies stay in the previews' bucket.
+  cleanup:
+    needs: settings
+    if: >-
+      needs.settings.outputs.ready == 'true' && github.event_name == 'pull_request' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: canary
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Delete the preview
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PREVIEW: pr-${{ github.event.pull_request.number }}
+        run: $WRANGLER preview delete --name "$PREVIEW" --skip-confirmation

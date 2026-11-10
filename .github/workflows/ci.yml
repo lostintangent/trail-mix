@@ -5,7 +5,8 @@ on:
     branches: [main]
   pull_request:
 
-# This workflow only reads the repository. It uses no secret, so it is safe on forks.
+# The checks only read the repository and use no secret, so they are safe on forks. Only the
+# deploy at the end touches a secret, and deploy.yml runs it only for this repository's own changes.
 permissions:
   contents: read
 
@@ -30,6 +31,17 @@ jobs:
 
       - name: Format
         run: bun fmt --check
+
+      # The workflows, and the shell in them, which the runner's ShellCheck reads.
+      - name: Lint the workflows
+        run: |
+          version=1.7.12
+          archive=actionlint_${version}_linux_amd64.tar.gz
+          curl -fsSLO "https://github.com/rhysd/actionlint/releases/download/v$version/$archive"
+          echo "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8  $archive" | sha256sum -c -
+          tar xzf "$archive" actionlint
+          ./actionlint -color
+          rm actionlint "$archive"
 
       - name: Lint
         run: bun lint
@@ -67,6 +79,14 @@ jobs:
       # Builds the exact upload without an account, so a Worker that would not deploy fails here.
       - name: Check the Worker deploys
         run: node node_modules/wrangler/bin/wrangler.js deploy --dry-run
+
+      # The same for a pull request's preview, as its own settings in wrangler.jsonc make it.
+      # `wrangler preview` has no dry run, so this deploys a Worker with those settings in their place.
+      - name: Check a preview deploys
+        run: |
+          jq '. + .previews | del(.previews)' dist/server/wrangler.json > dist/server/preview.json
+          node node_modules/wrangler/bin/wrangler.js deploy --dry-run --config dist/server/preview.json
+          rm dist/server/preview.json
 
       # Starts the built Worker on workerd and profiles it against Cloudflare's one-second limit.
       - name: Check the Worker starts
@@ -174,7 +194,7 @@ jobs:
           sudo chmod +x /usr/sbin/policy-rc.d
           sudo apt-get update -qq
           v=2:2.4.5-2+ubuntu$VERSION_ID
-          sudo apt-get install -y -qq --no-install-recommends dovecot-core=$v dovecot-imapd=$v dovecot-lmtpd=$v
+          sudo apt-get install -y -qq --no-install-recommends dovecot-core="$v" dovecot-imapd="$v" dovecot-lmtpd="$v"
 
       - name: Name the runner image
         id: image
@@ -274,3 +294,13 @@ jobs:
       - name: Test mail server logs
         if: failure()
         run: tail -n 50 .mail-server/state/dovecot.log .mail-server/state/serve.log
+
+  # Production for a push to main, and a preview for a pull request from this repository, once all
+  # three jobs pass. deploy.yml deploys nothing where the Cloudflare secrets don't exist.
+  deploy:
+    needs: [check, webkit, mail]
+    uses: ./.github/workflows/deploy.yml
+    secrets: inherit
+    permissions:
+      contents: read
+      pull-requests: write

@@ -5,9 +5,21 @@
   "compatibility_date": "2026-11-03",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
+  // Production answers at trail-mix.<subdomain>.workers.dev, where the deploy checks /health. To
+  // serve it from a domain of your own on Cloudflare as well, add one line:
+  // "routes": [{ "pattern": "mail.example.com", "custom_domain": true }],
+  "workers_dev": true,
   // One Mailroom per member, each with its own SQLite storage.
   "durable_objects": { "bindings": [{ "name": "MAILROOM", "class_name": "Mailroom" }] },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Mailroom"] }],
   // The body cache: the raw messages members have opened.
   "r2_buckets": [{ "binding": "BODIES", "bucket_name": "trail-mix-bodies" }],
+  // A pull request's preview, at pr-<n>-trail-mix.<subdomain>.workers.dev. Each preview gets its
+  // own Mailrooms, and none takes anything from production: not its variables, its secrets, its
+  // Mailrooms or its bucket. It serves only the demo mailbox, so it can never reach a real account.
+  "previews": {
+    "vars": { "DEMO_MAILBOX": "2000" },
+    "durable_objects": { "bindings": [{ "name": "MAILROOM", "class_name": "Mailroom" }] },
+    "r2_buckets": [{ "binding": "BODIES", "bucket_name": "trail-mix-preview-bodies" }],
+  },
 }

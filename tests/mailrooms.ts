@@ -12,8 +12,11 @@ import { sendable, type Page } from '../src/features/mailroom/client/contract.ts
 import { caFile } from './mail-server/server.ts';
 import { startWorker, type LocalWorker } from './workerd.ts';
 
-/** The test worker, with its own storage, and with `vars` added to its environment. */
-export function mailrooms(vars: Record<string, string> = {}) {
+/**
+ * The test worker, with its own storage, and with `vars` added to its environment. A variable given
+ * as `undefined` is left out, as `CREDENTIALS_KEY` is from a preview.
+ */
+export function mailrooms(vars: Record<string, string | undefined> = {}) {
   return startWorker(
     {
       name: 'trail-mix-mailroom-test',
@@ -21,7 +24,12 @@ export function mailrooms(vars: Record<string, string> = {}) {
       durable_objects: { bindings: [{ name: 'MAILROOM', class_name: 'TestMailroom' }] },
       migrations: [{ tag: 'v1', new_sqlite_classes: ['TestMailroom'] }],
       r2_buckets: [{ binding: 'BODIES', bucket_name: 'bodies' }],
-      vars: { CREDENTIALS_KEY: 'a-test-key-that-is-at-least-32-characters', ...vars },
+      vars: Object.fromEntries(
+        Object.entries({
+          CREDENTIALS_KEY: 'a-test-key-that-is-at-least-32-characters',
+          ...vars,
+        }).filter((entry): entry is [string, string] => entry[1] !== undefined),
+      ),
     },
     { env: { NODE_EXTRA_CA_CERTS: caFile } },
   );

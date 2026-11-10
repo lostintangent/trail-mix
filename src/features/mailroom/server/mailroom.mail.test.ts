@@ -2,6 +2,7 @@
 // envelope index, hints, the body cache, and what each member can reach.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { ImapFlow } from 'imapflow';
 import nodemailer from 'nodemailer';
 import type {
@@ -683,15 +684,6 @@ describe('The Mailroom with the demo mailbox', () => {
     device.close();
   }, 180_000);
 
-  test('takes no account but the demo mailbox, so a preview can never reach real mail', async () => {
-    const cy = member('cy', () => worker);
-    await expect(cy.call('addAccount', setup)).rejects.toThrow('only the demo mailbox');
-    expect((await cy.call<Account[]>('accounts')).map(({ provider }) => provider)).toEqual([
-      'demo',
-      'demo',
-    ]);
-  });
-
   test('saves a draft with its files in a demo account, where the composer finds it', async () => {
     const cy = member('cy', () => worker);
     const [, work] = await cy.call<Account[]>('accounts');
@@ -713,6 +705,36 @@ describe('The Mailroom with the demo mailbox', () => {
       'Sam Rivera <sam@work.trailmix.test>',
     );
   }, 30_000);
+});
+
+// A pull request's preview runs the Mailroom with the variables `wrangler.jsonc` gives previews,
+// and production with its own.
+describe('A pull request’s preview', () => {
+  let worker: LocalWorker;
+  let config: { vars?: Record<string, string>; previews: { vars: Record<string, string> } };
+  beforeAll(async () => {
+    config = Bun.JSONC.parse(
+      await Bun.file(join(import.meta.dir, '../../../../wrangler.jsonc')).text(),
+    ) as typeof config;
+    // Previews take nothing from production, so no preview holds the key passwords are sealed with.
+    worker = await mailrooms({ ...config.previews.vars, CREDENTIALS_KEY: undefined });
+  }, 120_000);
+  afterAll(() => worker?.stop());
+
+  test('opens the demo mailbox without a key, and takes no other account, so it can never reach real mail', async () => {
+    const dee = member('dee', () => worker);
+    await expect(dee.call('addAccount', setup)).rejects.toThrow('only the demo mailbox');
+    await dee.until(async () =>
+      (await dee.call<Account[]>('accounts')).every(({ status }) => status === 'ready'),
+    );
+    expect((await dee.call<Account[]>('accounts')).map(({ provider }) => provider)).toEqual([
+      'demo',
+      'demo',
+    ]);
+    expect((await dee.page({ in: 'inbox' })).length).toBeGreaterThan(0);
+    // Production's own variables never give it the demo mailbox, so it takes real accounts.
+    expect(config.vars?.DEMO_MAILBOX).toBeUndefined();
+  }, 120_000);
 });
 
 for (const profile of ['full', 'outlook'] as const satisfies Profile[]) {
