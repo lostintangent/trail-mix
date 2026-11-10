@@ -139,13 +139,18 @@ export function Workbench({
   );
 }
 
-/** The conversations just below and above the selected one, which the reader prepares ahead. */
+/**
+ * The conversations the member may open next, which the reader prepares ahead: those just below and
+ * above the selected one, or the first ones while nothing is selected.
+ */
 function neighbors(
   conversations: readonly ConversationSummary[] | undefined,
   selected: ConversationId | undefined,
 ): ConversationId[] {
-  const at = conversations?.findIndex(({ id }) => id === selected) ?? -1;
-  if (!conversations || at < 0) return [];
+  if (!conversations) return [];
+  if (selected === undefined) return conversations.slice(0, 2).map(({ id }) => id);
+  const at = conversations.findIndex(({ id }) => id === selected);
+  if (at < 0) return [];
   return [conversations[at + 1], conversations[at - 1]].flatMap((row) => (row ? [row.id] : []));
 }
 

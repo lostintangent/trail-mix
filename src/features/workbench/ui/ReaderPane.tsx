@@ -5,10 +5,26 @@ import { borderVars, colorVars, spacingVars } from '@astryxdesign/core/theme/tok
 import * as stylex from '@stylexjs/stylex';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, MailOpen } from 'lucide-react';
+import { lazy, Suspense, useEffect } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, ConversationId } from '../../mail/core/index.ts';
 import { conversationQuery } from '../../mailroom/client/index.ts';
-import { Reader } from '../../reader/index.ts';
+
+/**
+ * The reader, with its sanitizer, loads apart from the first rows, which don't need it. Once the
+ * list shows a conversation to open, it loads while the browser is idle, ready before the click.
+ */
+type ReaderModule = typeof import('../../reader/index.ts');
+let loaded: ReaderModule | undefined;
+const loadReader = async () => (loaded ??= await import('../../reader/index.ts'));
+const Reader = lazy(() => {
+  const ready = loaded && { default: loaded.Reader };
+  if (!ready) return loadReader().then(({ Reader }) => ({ default: Reader }));
+  // Loaded code comes through a thenable that settles at once, which React renders without
+  // suspending, so the first open doesn't wait out the pause React gives a Suspense reveal.
+  const settled = { then: (resolve: (module: typeof ready) => void) => resolve(ready) };
+  return settled as unknown as Promise<typeof ready>;
+});
 
 /**
  * The reader's sheet, where an open conversation lies. On a phone it fills the screen, with a way
@@ -31,6 +47,7 @@ export function ReaderPane({
     enabled: selected !== undefined,
   });
   const account = accounts.find(({ id }) => id === conversation?.[0]?.account);
+  usePreloadedReader(upcoming.length > 0);
 
   return (
     <section aria-label="Reader" {...stylex.props(styles.sheet)}>
@@ -44,7 +61,9 @@ export function ReaderPane({
       </header>
       {selected && conversation?.length && account ? (
         <div {...stylex.props(styles.scroll)}>
-          <Reader conversation={conversation} account={account} upcoming={upcoming} />
+          <Suspense>
+            <Reader conversation={conversation} account={account} upcoming={upcoming} />
+          </Suspense>
         </div>
       ) : (
         <div {...stylex.props(styles.empty)}>
@@ -57,6 +76,19 @@ export function ReaderPane({
       )}
     </section>
   );
+}
+
+function usePreloadedReader(isWanted: boolean) {
+  useEffect(() => {
+    if (!isWanted) return;
+    // Safari has no idle callback.
+    if ('requestIdleCallback' in window) {
+      const id = requestIdleCallback(() => void loadReader());
+      return () => cancelIdleCallback(id);
+    }
+    const id = setTimeout(() => void loadReader(), 200);
+    return () => clearTimeout(id);
+  }, [isWanted]);
 }
 
 const styles = stylex.create({
