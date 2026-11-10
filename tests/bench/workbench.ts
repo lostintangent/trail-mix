@@ -3,6 +3,7 @@ import { chromium, type Page } from 'playwright';
 import { startPreview } from '../e2e/preview.ts';
 import { percentile, type BenchArea, type Measurement } from './budget.ts';
 import { phone, slowDown } from './phone.ts';
+import { inputLatency, type InputLatency } from './latency.ts';
 import { watch, type Watch } from './steady.ts';
 
 /**
@@ -76,15 +77,16 @@ export const workbench: BenchArea = {
       await slowDown(desk);
       await desk.goto(preview.url);
       await firstRows(desk);
+      const latency = await inputLatency(desk);
       // The moves start from the first conversation, open, read and settled, so the read mark that
       // opening it sends lands before the moves are timed.
       await desk.getByRole('option').first().click();
       await deskWatch.steady();
       const keyMove = percentile(
-        await deskWatch.during('Moving by key', () => keyMoves(desk)),
+        await deskWatch.during('Moving by key', () => keyMoves(desk, latency)),
         0.95,
       );
-      const archive = percentile(await archives(desk, deskWatch), 0.95);
+      const archive = percentile(await archives(desk, deskWatch, latency), 0.95);
       await desktop.close();
 
       return [
@@ -168,64 +170,73 @@ function scrollFrames(page: Page): Promise<number[]> {
   );
 }
 
-/** Milliseconds from each Down key until the frame after the list has moved its selection. */
-async function keyMoves(page: Page): Promise<number[]> {
+/** How often a held key repeats, as a keyboard does after its first delay. */
+const KEY_REPEAT_MS = 33;
+const REPEATS = 40;
+
+/**
+ * The latency of each Down key while one is held, 40 repeats at a keyboard's pace, from each key's
+ * timestamp to the next frame painted. Each key carries the timestamp a keyboard would give it, so
+ * a slow frame shows as latency here, and never as a pause the reader would take for a rest. It
+ * fails unless the keys reached the list a repeat apart and the reader opened only the first and
+ * the last conversation, since anything else measured something other than a held key.
+ */
+async function keyMoves(page: Page, latency: InputLatency): Promise<number[]> {
   await page.locator('[role="listbox"]').focus();
-  const times: number[] = [];
-  for (let press = 0; press < 40; press++) {
-    times.push(
-      await page.evaluate(
-        () =>
-          new Promise<number>((resolve) => {
-            const start = performance.now();
-            document
-              .querySelector('[role="listbox"]')!
-              .dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
-            requestAnimationFrame(() => setTimeout(() => resolve(performance.now() - start)));
-          }),
-      ),
+  await page.evaluate(() => {
+    const seen = { keys: [] as number[], opened: [] as string[] };
+    (window as unknown as { seen: typeof seen }).seen = seen;
+    addEventListener('keydown', (event) => seen.keys.push(event.timeStamp), true);
+    const reader = document.querySelector('section[aria-label="Reader"]')!;
+    new MutationObserver(() => {
+      const title = reader.querySelector('h1')?.textContent;
+      if (title && title !== seen.opened.at(-1)) seen.opened.push(title);
+    }).observe(reader, { subtree: true, childList: true, characterData: true });
+  });
+  const keys = await page.context().newCDPSession(page);
+  const key = { key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 };
+  const since = await latency.now();
+  const start = Date.now() / 1000;
+  const sent: Promise<unknown>[] = [];
+  for (let repeat = 0; repeat < REPEATS; repeat++) {
+    // Each key goes when its timestamp says, by the clock, so the sending never drifts behind them.
+    const timestamp = start + (repeat * KEY_REPEAT_MS) / 1000;
+    await new Promise((done) => setTimeout(done, Math.max(0, timestamp * 1000 - Date.now())));
+    const autoRepeat = repeat > 0;
+    sent.push(
+      keys.send('Input.dispatchKeyEvent', { type: 'rawKeyDown', timestamp, autoRepeat, ...key }),
     );
   }
-  return times;
+  sent.push(keys.send('Input.dispatchKeyEvent', { type: 'keyUp', ...key }));
+  await Promise.all(sent);
+  await page.waitForTimeout(1_000);
+
+  const seen = await page.evaluate(
+    () => (window as unknown as { seen: { keys: number[]; opened: string[] } }).seen,
+  );
+  const gaps = seen.keys.slice(1).map((at, index) => at - seen.keys[index]!);
+  const gap = percentile(gaps, 0.5);
+  if (seen.keys.length !== REPEATS || Math.abs(gap - KEY_REPEAT_MS) > 5) {
+    throw new Error(`The list saw ${seen.keys.length} keys, a median ${gap.toFixed(1)} ms apart.`);
+  }
+  // Before the keys, the first conversation was open. The first key rests and opens the next, and
+  // the last opens once the keys stop. A conversation between them means a key was taken for a rest.
+  if (seen.opened.length > 2) {
+    throw new Error(`The reader opened ${seen.opened.length} conversations while a key was held.`);
+  }
+  return latency.of('keydown', since, REPEATS);
 }
 
 /**
- * Milliseconds from each click on the reader's Archive until the next frame painted, as the browser
- * times it: the latency of that interaction in Event Timing, which only reports one of 16 ms or
- * more, so a faster one counts as 16. Each archive opens the next conversation, whose own Archive
- * comes next once the reader shows it and the last one's hints and read mark have landed.
+ * The latency of each click on the reader's Archive, from the click to the next frame painted. Each
+ * archive opens the next conversation, whose own Archive comes next once the reader shows it and
+ * the last one's hints and read mark have landed.
  */
-async function archives(page: Page, watching: Watch): Promise<number[]> {
-  type Timed = { start: number; duration: number };
-  await page.evaluate(() => {
-    const timed: Timed[] = [];
-    (window as unknown as { timed: Timed[] }).timed = timed;
-    new PerformanceObserver((list) => {
-      for (const { startTime, duration } of list.getEntries()) {
-        timed.push({ start: startTime, duration });
-      }
-    }).observe({ type: 'event', durationThreshold: 16 } as PerformanceObserverInit);
-  });
-  const latencySince = (since: number) =>
-    page.evaluate(
-      (since) =>
-        Math.max(
-          16,
-          ...(window as unknown as { timed: Timed[] }).timed
-            .filter(({ start }) => start >= since)
-            .map(({ duration }) => duration),
-        ),
-      since,
-    );
+async function archives(page: Page, watching: Watch, latency: InputLatency): Promise<number[]> {
   const archive = page
     .getByRole('toolbar', { name: 'Conversation' })
     .getByRole('button', { name: 'Archive' });
   await page.getByRole('option').nth(2).click();
-  console.log(
-    'Opening a conversation by click, as Event Timing saw it:',
-    await latencySince(0),
-    'ms',
-  );
   const times: number[] = [];
   for (let press = 0; press < 20; press++) {
     await archive.waitFor();
@@ -236,11 +247,13 @@ async function archives(page: Page, watching: Watch): Promise<number[]> {
       return Boolean(title && row?.includes(title));
     });
     await watching.steady();
-    const since = await page.evaluate(() => performance.now());
+    const since = await latency.now();
     await watching.during(`Archive ${press + 1}`, () => archive.click());
-    // Event Timing reports an interaction once its frame has painted.
     await page.waitForTimeout(200);
-    times.push(await latencySince(since));
+    const [down, up, click] = await Promise.all(
+      ['pointerdown', 'pointerup', 'click'].map((name) => latency.of(name, since, 1)),
+    );
+    times.push(Math.max(...down!, ...up!, ...click!));
   }
   return times;
 }
