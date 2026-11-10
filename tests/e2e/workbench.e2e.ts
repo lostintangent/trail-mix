@@ -195,9 +195,7 @@ test('side panels resize by pointer and key, snap to a rail, and come back the s
   await page.waitForFunction(() =>
     document.getAnimations().every(({ playState }) => playState !== 'running'),
   );
-  // The list's edge moves with the sidebar's, so it's measured once the panes have settled. It
-  // takes a mouse in its gutter alone.
-  const listBox = await settledBox(list);
+  const listBox = (await list.boundingBox())!;
   await page.mouse.move(listBox.x + listBox.width / 2, listBox.y + 200);
   await page.mouse.down();
   await page.mouse.move(listBox.x - 400, listBox.y + 200, { steps: 6 });
@@ -652,17 +650,6 @@ async function searchFor(page: Page, text: string) {
   if (await inView(back)) await back.click();
   await page.getByRole('searchbox', { name: 'Search mail' }).fill(text);
   await page.locator('[role="option"] mark').first().waitFor();
-}
-
-/** Where an element sits once it has stopped moving, as the panes do for a moment after a resize. */
-async function settledBox(locator: Locator) {
-  let before = await locator.boundingBox();
-  for (;;) {
-    await locator.page().waitForTimeout(100);
-    const now = await locator.boundingBox();
-    if (now && before && now.x === before.x && now.width === before.width) return now;
-    before = now;
-  }
 }
 
 /** Whether a control is in a pane on screen. A pane off a phone's screen is inert. */
