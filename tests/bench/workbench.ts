@@ -3,14 +3,21 @@ import { chromium, type Page } from 'playwright';
 import { startPreview } from '../e2e/preview.ts';
 import { percentile, type BenchArea, type Measurement } from './budget.ts';
 import { phone, slowDown } from './phone.ts';
-import { watch } from './steady.ts';
+import { watch, type Watch } from './steady.ts';
 
 /**
  * The workbench's budgets, as AGENTS.md sets them: a cold load to the first Inbox rows, the
- * JavaScript that load needs, scrolling a 50,000-message folder, and moving through it by key. Each
+ * JavaScript that load needs, scrolling a 50,000-message folder, moving through it by key, and
+ * archiving the conversation open in the reader. Each
  * runs on the built app with a 50,000-message demo mailbox, at the CPU of the phone in `phone.ts`.
  */
-const BUDGET = { coldLoad: 1000, firstLoadJs: 250, scrollFrame: 1000 / 60, keyMove: 50 };
+const BUDGET = {
+  coldLoad: 1000,
+  firstLoadJs: 250,
+  scrollFrame: 1000 / 60,
+  keyMove: 50,
+  archive: 50,
+};
 
 /** The built app's 50,000-message demo mailbox, as `DEMO_MAILBOX` fills it. */
 const MESSAGES = '50000';
@@ -77,6 +84,7 @@ export const workbench: BenchArea = {
         await deskWatch.during('Moving by key', () => keyMoves(desk)),
         0.95,
       );
+      const archive = percentile(await archives(desk, deskWatch), 0.95);
       await desktop.close();
 
       return [
@@ -89,6 +97,7 @@ export const workbench: BenchArea = {
           'ms',
         ),
         measured('Moving through the list by key, p95', keyMove, BUDGET.keyMove, 'ms'),
+        measured('Archiving, p95', archive, BUDGET.archive, 'ms'),
       ];
     } finally {
       await browser.close();
@@ -176,6 +185,62 @@ async function keyMoves(page: Page): Promise<number[]> {
           }),
       ),
     );
+  }
+  return times;
+}
+
+/**
+ * Milliseconds from each click on the reader's Archive until the next frame painted, as the browser
+ * times it: the latency of that interaction in Event Timing, which only reports one of 16 ms or
+ * more, so a faster one counts as 16. Each archive opens the next conversation, whose own Archive
+ * comes next once the reader shows it and the last one's hints and read mark have landed.
+ */
+async function archives(page: Page, watching: Watch): Promise<number[]> {
+  type Timed = { start: number; duration: number };
+  await page.evaluate(() => {
+    const timed: Timed[] = [];
+    (window as unknown as { timed: Timed[] }).timed = timed;
+    new PerformanceObserver((list) => {
+      for (const { startTime, duration } of list.getEntries()) {
+        timed.push({ start: startTime, duration });
+      }
+    }).observe({ type: 'event', durationThreshold: 16 } as PerformanceObserverInit);
+  });
+  const latencySince = (since: number) =>
+    page.evaluate(
+      (since) =>
+        Math.max(
+          16,
+          ...(window as unknown as { timed: Timed[] }).timed
+            .filter(({ start }) => start >= since)
+            .map(({ duration }) => duration),
+        ),
+      since,
+    );
+  const archive = page
+    .getByRole('toolbar', { name: 'Conversation' })
+    .getByRole('button', { name: 'Archive' });
+  await page.getByRole('option').nth(2).click();
+  console.log(
+    'Opening a conversation by click, as Event Timing saw it:',
+    await latencySince(0),
+    'ms',
+  );
+  const times: number[] = [];
+  for (let press = 0; press < 20; press++) {
+    await archive.waitFor();
+    // The reader follows a selection once it rests, so wait until it shows the selected one.
+    await page.waitForFunction(() => {
+      const title = document.querySelector('section[aria-label="Reader"] h1')?.textContent;
+      const row = document.querySelector('[role="option"][aria-selected="true"]')?.textContent;
+      return Boolean(title && row?.includes(title));
+    });
+    await watching.steady();
+    const since = await page.evaluate(() => performance.now());
+    await watching.during(`Archive ${press + 1}`, () => archive.click());
+    // Event Timing reports an interaction once its frame has painted.
+    await page.waitForTimeout(200);
+    times.push(await latencySince(since));
   }
   return times;
 }

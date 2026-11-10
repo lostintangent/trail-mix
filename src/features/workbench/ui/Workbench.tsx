@@ -1,7 +1,10 @@
 import { colorVars, durationVars, spacingVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import {
+  startTransition,
+  Suspense,
   useCallback,
+  useEffect,
   useId,
   useLayoutEffect,
   useMemo,
@@ -22,7 +25,17 @@ import { ListPane } from './ListPane.tsx';
 import { PanelEdge } from './PanelEdge.tsx';
 import { PANELS } from './panels.ts';
 import { ReaderPane, type Reading } from './ReaderPane.tsx';
-import { rowChange, TriageActions, useTriage, type Action } from '../../conversations/index.ts';
+import {
+  NOTHING_SELECTED,
+  rowChange,
+  select,
+  TriageActions,
+  useTriage,
+  type Action,
+  type SelectBy,
+  type Selection,
+} from '../../conversations/index.ts';
+import { PickedActions, SelectionPane } from './SelectionPane.tsx';
 import { StatusLine } from './StatusLine.tsx';
 import { folderName, Sidebar, UNIFIED_VIEWS, type ViewCounts } from '../../folders/index.ts';
 import { useMediaQuery } from './useMediaQuery.ts';
@@ -59,7 +72,15 @@ export function Workbench({
   onListNearEnd: () => void;
   sidebarFooter: ReactNode;
 }) {
-  const [selected, setSelected] = useState<ConversationId>();
+  const [selection, setSelection] = useState<Selection>(NOTHING_SELECTED);
+  const [isPicking, setPicking] = useState(false);
+  // Picking ends with the last conversation picked.
+  useEffect(() => {
+    if (isPicking && selection.ids.length === 0) setPicking(false);
+  }, [isPicking, selection.ids.length]);
+  // One conversation selected is the one open in the reader. Several wait for an action together.
+  const selected = selection.ids.length === 1 ? selection.ids[0] : undefined;
+  const isMany = selection.ids.length > 1;
   const stamps = useMemo(() => new Map(accounts.map(({ id, stamp }) => [id, stamp])), [accounts]);
   const [phonePane, setPhonePane] = useState<Pane>('list');
   const [sidebar, setSidebar] = usePanel(PANELS.sidebar);
@@ -74,19 +95,31 @@ export function Workbench({
 
   const triage = useTriage(view, folders);
   // A conversation that leaves the list gives way to the one below it, or above it at the end. On a
-  // phone, where the reader fills the screen, the list comes back instead.
+  // phone, where the reader fills the screen, the list comes back instead. The list shows the
+  // conversation gone at once, and the reader turns to the next one just after, so the frame that
+  // shows the archive doesn't wait for the next conversation to render.
   const triageShown = (action: Action, id: ConversationId) => {
     if (rowChange(action, view) === 'gone') {
       const at = conversations?.findIndex((row) => row.id === id) ?? -1;
       const next = conversations?.[at + 1] ?? conversations?.[at - 1];
       if (isPhone) {
         setPhonePane('list');
-        setSelected(undefined);
-      } else {
-        setSelected(at < 0 ? selected : next?.id);
+        setSelection(NOTHING_SELECTED);
+      } else if (at >= 0) {
+        startTransition(() =>
+          setSelection(next ? { ids: [next.id], anchor: next.id } : NOTHING_SELECTED),
+        );
       }
     }
     triage(action, [id]);
+  };
+  // A selection that leaves the list is done with, and so is picking.
+  const triageSelection = (action: Action) => {
+    if (rowChange(action, view) === 'gone') {
+      setSelection(NOTHING_SELECTED);
+      setPicking(false);
+    }
+    triage(action, selection.ids);
   };
   const markRead = (id: ConversationId) => {
     if (conversations?.find((row) => row.id === id)?.unread) {
@@ -118,13 +151,49 @@ export function Workbench({
     (next: View) => {
       onViewChange(next);
       setPhonePane('list');
+      setSelection((current) => (current.ids.length > 1 ? NOTHING_SELECTED : current));
+      setPicking(false);
     },
     [onViewChange],
   );
-  const open = useCallback((id: ConversationId) => {
-    setSelected(id);
-    setPhonePane('reader');
+  const order = useRef<ConversationId[]>([]);
+  useLayoutEffect(() => {
+    order.current = conversations?.map(({ id }) => id) ?? [];
+  }, [conversations]);
+  const pick = useCallback((id: ConversationId, by: SelectBy) => {
+    setSelection((current) => select(current, id, by, order.current));
+    if (by === 'only') setPhonePane('reader');
   }, []);
+  const startPicking = useCallback((id: ConversationId) => {
+    setPicking(true);
+    setSelection({ ids: [id], anchor: id });
+  }, []);
+  // A swipe archives the row it moved, which leaves any selection that held it.
+  const swipe = useCallback(
+    (id: ConversationId) => {
+      setSelection((current) => (current.ids.includes(id) ? NOTHING_SELECTED : current));
+      triage({ do: 'archive' }, [id]);
+    },
+    [triage],
+  );
+  const stopPicking = () => {
+    setPicking(false);
+    setSelection(NOTHING_SELECTED);
+  };
+  const pickedRows = useMemo(
+    () => conversations?.filter(({ id }) => selection.ids.includes(id)) ?? [],
+    [conversations, selection.ids],
+  );
+  const selectionActions = (place: 'bar' | 'island') => (
+    <TriageActions
+      accounts={accounts.filter(({ id }) => pickedRows.some((row) => row.account === id))}
+      folders={folders}
+      isFlagged={pickedRows.length > 0 && pickedRows.every(({ flagged }) => flagged)}
+      isUnread={pickedRows.some(({ unread }) => unread > 0)}
+      isCompact={place === 'island'}
+      onTriage={triageSelection}
+    />
+  );
   const isSidebarRail = !isPhone && sidebar.isCollapsed;
   const footer = useMemo(
     () => (
@@ -182,8 +251,16 @@ export function Workbench({
             scope={scope}
             conversations={conversations}
             stamps={stamps}
-            selected={selected}
-            onSelect={open}
+            selection={selection}
+            isPicking={isPicking}
+            onSelect={pick}
+            onLongPress={startPicking}
+            onSwipe={swipe}
+            picked={
+              <PickedActions count={selection.ids.length} onCancel={stopPicking}>
+                <Suspense>{selectionActions('island')}</Suspense>
+              </PickedActions>
+            }
             onNearEnd={onListNearEnd}
             isCollapsed={!isPhone && list.isCollapsed}
             onExpand={() => setList({ ...list, isCollapsed: false })}
@@ -199,14 +276,20 @@ export function Workbench({
           />
         </div>
         <div inert={isOffscreen('reader')} {...stylex.props(styles.pane)}>
-          <ReaderPane
-            selected={selected}
-            accounts={accounts}
-            upcoming={neighbors(conversations, selected)}
-            onShown={markRead}
-            actions={readerActions}
-            onBack={() => setPhonePane('list')}
-          />
+          {isMany && !isPhone ? (
+            <SelectionPane count={selection.ids.length} onClear={stopPicking}>
+              <Suspense>{selectionActions('bar')}</Suspense>
+            </SelectionPane>
+          ) : (
+            <ReaderPane
+              selected={selected}
+              accounts={accounts}
+              upcoming={neighbors(conversations, selected)}
+              onShown={markRead}
+              actions={readerActions}
+              onBack={() => setPhonePane('list')}
+            />
+          )}
         </div>
       </div>
     </div>

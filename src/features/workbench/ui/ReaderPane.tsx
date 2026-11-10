@@ -11,6 +11,7 @@ import {
   useEffect,
   useEffectEvent,
   useLayoutEffect,
+  useDeferredValue,
   useMemo,
   useRef,
   useState,
@@ -89,6 +90,9 @@ export function ReaderPane({
     if (shown !== undefined && isShowing) announce(shown);
   }, [shown, isShowing]);
   usePreloadedReader(upcoming.length > 0);
+  // Preparing what comes next is never urgent, so a change to it, as when the open conversation
+  // leaves the list, doesn't make the open conversation render again in the change's own frame.
+  const preparing = useDeferredValue(upcoming);
 
   return (
     <section aria-label="Reader" {...stylex.props(styles.sheet)}>
@@ -111,7 +115,7 @@ export function ReaderPane({
             <Reader
               conversation={reading.conversation}
               account={reading.account}
-              upcoming={shown === selected ? upcoming : []}
+              upcoming={shown === selected ? preparing : []}
             />
           </Suspense>
         </div>

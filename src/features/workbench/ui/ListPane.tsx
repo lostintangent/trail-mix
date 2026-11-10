@@ -12,10 +12,10 @@ import {
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { ChevronRight, Inbox, Menu } from 'lucide-react';
-import { useId } from 'react';
+import { useId, type ReactNode } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { PhoneIsland } from './PhoneIsland.tsx';
-import { ConversationList } from '../../conversations/index.ts';
+import { ConversationList, type SelectBy, type Selection } from '../../conversations/index.ts';
 import type {
   Account,
   ConversationId,
@@ -37,8 +37,12 @@ export function ListPane({
   scope,
   conversations,
   stamps,
-  selected,
+  selection,
+  isPicking,
   onSelect,
+  onLongPress,
+  onSwipe,
+  picked,
   onNearEnd,
   isCollapsed,
   onExpand,
@@ -52,8 +56,13 @@ export function ListPane({
   /** Nothing until the view's first page arrives. */
   conversations: readonly ConversationSummary[] | undefined;
   stamps: ReadonlyMap<string, StampColor>;
-  selected: ConversationId | undefined;
-  onSelect: (id: ConversationId) => void;
+  selection: Selection;
+  isPicking: boolean;
+  onSelect: (id: ConversationId, by: SelectBy) => void;
+  onLongPress: (id: ConversationId) => void;
+  onSwipe: (id: ConversationId) => void;
+  /** While picking on a phone, what the island offers for the conversations picked. */
+  picked: ReactNode;
   onNearEnd: () => void;
   isCollapsed: boolean;
   onExpand: () => void;
@@ -103,20 +112,27 @@ export function ListPane({
             label={title}
             conversations={conversations}
             stamps={stamps}
-            selected={selected}
+            selection={selection}
+            isPicking={isPicking}
             onSelect={onSelect}
+            onLongPress={onLongPress}
+            onSwipe={onSwipe}
             onNearEnd={onNearEnd}
           />
         ) : null}
       </div>
-      <PhoneIsland label="Mailbox actions">
-        <IconButton
-          label="Folders"
-          icon={<Icon icon={Menu} />}
-          variant="ghost"
-          onClick={onShowFolders}
-        />
-      </PhoneIsland>
+      {isPicking ? (
+        <PhoneIsland label="Picked conversations">{picked}</PhoneIsland>
+      ) : (
+        <PhoneIsland label="Mailbox actions">
+          <IconButton
+            label="Folders"
+            icon={<Icon icon={Menu} />}
+            variant="ghost"
+            onClick={onShowFolders}
+          />
+        </PhoneIsland>
+      )}
     </section>
   );
 }

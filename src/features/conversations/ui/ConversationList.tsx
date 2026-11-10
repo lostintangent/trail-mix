@@ -1,6 +1,7 @@
 import { Icon } from '@astryxdesign/core/Icon';
 import {
   colorVars,
+  durationVars,
   fontWeightVars,
   radiusVars,
   spacingVars,
@@ -16,18 +17,21 @@ import {
 import { Paperclip, Star } from 'lucide-react';
 import {
   memo,
-  useCallback,
   useEffect,
   useId,
   useLayoutEffect,
   useRef,
   useState,
+  useMemo,
   type KeyboardEvent,
+  type MouseEvent,
+  type PointerEvent,
   type RefObject,
 } from 'react';
 import { stampStyles } from '../../../app/theme/stamps.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { ConversationId, ConversationSummary, StampColor } from '../../mail/core/index.ts';
+import type { SelectBy, Selection } from '../core/selection.ts';
 import { formatListDate } from './dates.ts';
 
 /** A row's height before one has been drawn: three lines of text and the row's padding. */
@@ -36,33 +40,53 @@ const FIRST_GUESS = 72;
 /** How many rows short of the end the list asks for more, so the next page arrives in time. */
 const AHEAD = 30;
 
+/** How long a finger rests on a row before it starts picking, and how far it may drift meanwhile. */
+const LONG_PRESS_MS = 500;
+const LONG_PRESS_SLOP = 10;
+
+/** How far left, as a share of its width, a finger swipes a row before letting go archives it. */
+const SWIPE_SHARE = 0.4;
+
 /**
- * The conversations of a view, newest first, drawn only where the list is scrolled to. The selected
- * conversation lifts from the sheet onto paper. The list takes focus as one control and moves its
- * selection with the arrow keys, Home, End and the page keys. The sheet it lies on draws its focus
- * ring, so the list carries StyleX's default marker for `stylex.when.descendant(':focus-visible')`.
+ * The conversations of a view, newest first, drawn only where the list is scrolled to. Selected
+ * conversations lift from the sheet onto paper. The list takes focus as one control and moves its
+ * selection with the arrow keys, Home, End and the page keys, and Shift extends it. A click selects
+ * one, Cmd or Ctrl adds or removes one, and Shift selects the range from the last pick. A finger held
+ * on a row starts picking, and while picking, a tap adds or removes. A finger that swipes a row far
+ * enough to the left archives it. The sheet the list lies on draws
+ * its focus ring, so the list carries StyleX's default marker for
+ * `stylex.when.descendant(':focus-visible')`.
  */
 export function ConversationList({
   label,
   conversations,
   stamps,
-  selected,
+  selection,
+  isPicking = false,
   onSelect,
+  onLongPress,
+  onSwipe,
   onNearEnd,
 }: {
   label: string;
   conversations: readonly ConversationSummary[];
   /** Each account's stamp color, by account id. */
   stamps: ReadonlyMap<string, StampColor>;
-  selected: ConversationId | undefined;
-  onSelect: (id: ConversationId) => void;
+  selection: Selection;
+  /** Whether a tap adds a row to the selection, as after a long press, instead of opening it. */
+  isPicking?: boolean;
+  onSelect: (id: ConversationId, by: SelectBy) => void;
+  onLongPress?: (id: ConversationId) => void;
+  onSwipe?: (id: ConversationId) => void;
   /** Called while the rows drawn come within reach of the end. */
   onNearEnd: () => void;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const listId = useId();
   const rowHeight = useRowHeight(scroller);
-  const selectedIndex = conversations.findIndex(({ id }) => id === selected);
+  // The row the keys move from and the list names as active: the last one picked.
+  const selectedIndex = conversations.findIndex(({ id }) => id === selection.anchor);
+  const selected = useMemo(() => new Set(selection.ids), [selection.ids]);
   const reportOffset = useRef<(offset: number, isScrolling: boolean) => void>(null);
   const virtualizer = useVirtualizer({
     count: conversations.length,
@@ -104,7 +128,7 @@ export function ConversationList({
     const target = to === undefined ? undefined : conversations[to];
     if (to === undefined || !target) return;
     event.preventDefault();
-    onSelect(target.id);
+    onSelect(target.id, event.shiftKey ? 'extend' : 'only');
     // A move that scrolls the list tells the virtualizer where it went at once, instead of in the
     // next frame's scroll event. So the rows it brings in render in the selection's own commit, and
     // that scroll event, finding the offset already known, renders nothing.
@@ -120,6 +144,7 @@ export function ConversationList({
       ref={scroller}
       role="listbox"
       aria-label={label}
+      aria-multiselectable
       aria-activedescendant={selectedIndex < 0 ? undefined : optionId(selectedIndex)}
       tabIndex={0}
       onKeyDown={move}
@@ -138,8 +163,11 @@ export function ConversationList({
               top={start}
               position={index + 1}
               size={conversations.length}
-              isSelected={conversation.id === selected}
+              isSelected={selected.has(conversation.id)}
+              isPicking={isPicking}
               onSelect={onSelect}
+              onLongPress={onLongPress}
+              onSwipe={onSwipe}
             />
           );
         })}
@@ -157,7 +185,10 @@ const Row = memo(function Row({
   position,
   size,
   isSelected,
+  isPicking,
   onSelect,
+  onLongPress,
+  onSwipe,
 }: {
   id: string;
   conversation: ConversationSummary;
@@ -166,11 +197,26 @@ const Row = memo(function Row({
   position: number;
   size: number;
   isSelected: boolean;
-  onSelect: (id: ConversationId) => void;
+  isPicking: boolean;
+  onSelect: (id: ConversationId, by: SelectBy) => void;
+  onLongPress: ((id: ConversationId) => void) | undefined;
+  onSwipe: ((id: ConversationId) => void) | undefined;
 }) {
   const { subject, senders, preview, date, unread, flagged, hasAttachments } = conversation;
   const isUnread = unread > 0;
-  const select = useCallback(() => onSelect(conversation.id), [onSelect, conversation.id]);
+  const touch = useTouch(
+    () => onLongPress?.(conversation.id),
+    onSwipe && (() => onSwipe(conversation.id)),
+  );
+  const select = (event: MouseEvent) => {
+    if (touch.tookClick()) return;
+    const by: SelectBy = event.shiftKey
+      ? 'extend'
+      : event.metaKey || event.ctrlKey || isPicking
+        ? 'toggle'
+        : 'only';
+    onSelect(conversation.id, by);
+  };
   return (
     <div
       id={id}
@@ -179,6 +225,7 @@ const Row = memo(function Row({
       aria-posinset={position}
       aria-setsize={size}
       onClick={select}
+      {...touch.handlers}
       {...stylex.props(
         styles.row,
         styles.placed(top),
@@ -210,6 +257,96 @@ const Row = memo(function Row({
     </div>
   );
 });
+
+/**
+ * What a finger does to a row. Held still for a moment, it starts picking. Moved sideways first, it
+ * swipes the row, which follows it left, and let go past `SWIPE_SHARE` of the row's width, archives
+ * it, or else slides back. Moved up or down first, it scrolls the list as usual. After a long press
+ * or a swipe, the click that ends it isn't a click, and a touch screen's context menu doesn't open.
+ */
+function useTouch(onLongPress: () => void, onSwipe: (() => void) | undefined) {
+  const gesture = useRef<{
+    x: number;
+    y: number;
+    timer: ReturnType<typeof setTimeout>;
+    row: HTMLElement;
+    isSwiping: boolean;
+  }>(null);
+  const isClickTaken = useRef(false);
+  const end = () => {
+    if (gesture.current) clearTimeout(gesture.current.timer);
+    gesture.current = null;
+  };
+  const letGo = (event: PointerEvent, canArchive: boolean) => {
+    const at = gesture.current;
+    end();
+    if (!at?.isSwiping) return;
+    isClickTaken.current = true;
+    if (canArchive && at.x - event.clientX > at.row.offsetWidth * SWIPE_SHARE) onSwipe?.();
+    slideBack(at.row);
+  };
+  return {
+    tookClick: () => {
+      const taken = isClickTaken.current;
+      isClickTaken.current = false;
+      return taken;
+    },
+    handlers: {
+      onPointerDown: (event: PointerEvent<HTMLElement>) => {
+        if (event.pointerType === 'mouse') return;
+        isClickTaken.current = false;
+        const timer = setTimeout(() => {
+          isClickTaken.current = true;
+          gesture.current = null;
+          onLongPress();
+        }, LONG_PRESS_MS);
+        gesture.current = {
+          x: event.clientX,
+          y: event.clientY,
+          timer,
+          row: event.currentTarget,
+          isSwiping: false,
+        };
+      },
+      onPointerMove: (event: PointerEvent<HTMLElement>) => {
+        const at = gesture.current;
+        if (!at) return;
+        const dx = event.clientX - at.x;
+        const dy = event.clientY - at.y;
+        if (!at.isSwiping) {
+          if (Math.hypot(dx, dy) <= LONG_PRESS_SLOP) return;
+          clearTimeout(at.timer);
+          if (!onSwipe || Math.abs(dx) <= Math.abs(dy) || dx > 0) return end();
+          at.isSwiping = true;
+          at.row.setPointerCapture(event.pointerId);
+          at.row.classList.add(...classesOf(swiping.lifted));
+        }
+        at.row.style.setProperty(SWIPE, `${Math.min(0, dx)}px`);
+      },
+      onPointerUp: (event: PointerEvent) => letGo(event, true),
+      onPointerCancel: (event: PointerEvent) => letGo(event, false),
+      onContextMenu: (event: MouseEvent) => {
+        if (isClickTaken.current || gesture.current) event.preventDefault();
+      },
+    },
+  };
+}
+
+/** The custom property a swipe moves its row by. */
+const SWIPE = '--tm-swipe';
+
+/** Slides a swiped row back into place, and lowers it onto the sheet again. */
+function slideBack(row: HTMLElement) {
+  const settling = classesOf(swiping.settling);
+  row.classList.add(...settling);
+  row.style.setProperty(SWIPE, '0px');
+  const done = () => row.classList.remove(...settling, ...classesOf(swiping.lifted));
+  row.addEventListener('transitionend', done, { once: true });
+  // Under reduced motion there is no transition to end.
+  setTimeout(done, 300);
+}
+
+const classesOf = (style: stylex.StyleXStyles) => stylex.props(style).className?.split(' ') ?? [];
 
 /**
  * Every row is the same height, three lines of text and the row's padding, so the list places rows
@@ -278,6 +415,12 @@ const styles = stylex.create({
     borderRadius: radiusVars['--radius-element'],
     overflow: 'hidden',
     cursor: 'pointer',
+    // A row is picked, not read: Shift extends the selection rather than selecting text, and a long
+    // press picks it rather than opening a phone's callout.
+    userSelect: 'none',
+    WebkitTouchCallout: 'none',
+    // Vertical moves scroll the list, and sideways ones reach the row as a swipe.
+    touchAction: 'pan-y',
     color: colorVars['--color-text-secondary'],
     fontSize: typeScaleVars['--text-body-size'],
     lineHeight: typeScaleVars['--text-body-leading'],
@@ -286,7 +429,7 @@ const styles = stylex.create({
       ':hover': { default: null, '@media (hover: hover)': colorVars['--color-overlay-hover'] },
     },
   },
-  placed: (top: number) => ({ transform: `translateY(${top}px)` }),
+  placed: (top: number) => ({ transform: `translate(var(${SWIPE}, 0px), ${top}px)` }),
   unread: {
     color: colorVars['--color-text-primary'],
   },
@@ -356,5 +499,17 @@ const styles = stylex.create({
   quiet: {
     flexShrink: 0,
     color: tm.textQuiet,
+  },
+});
+
+const swiping = stylex.create({
+  // A row being swiped rises off the sheet, as a selected one does.
+  lifted: {
+    backgroundColor: colorVars['--color-background-card'],
+    boxShadow: `0 0 0 1px ${colorVars['--color-border']}, 0 6px 16px -10px ${tm.shade}`,
+  },
+  settling: {
+    transitionProperty: 'transform',
+    transitionDuration: { default: durationVars['--duration-fast'], [media.reducedMotion]: '0s' },
   },
 });
