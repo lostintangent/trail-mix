@@ -3,7 +3,7 @@ import { signInFailure } from './signin.ts';
 
 const imap = { host: 'imap.example.com', port: 993, secure: true };
 const smtp = { host: 'smtp.example.com', port: 465, secure: true };
-const credentials = { user: 'me@example.com', password: 'hunter2' };
+const credentials = { user: 'me@example.com', by: 'password' as const, secrets: ['hunter2'] };
 
 test('a refused password is told in the host’s own words, without the IMAP tag and status', () => {
   expect(
@@ -62,9 +62,24 @@ test('the password never appears, even when a host repeats what it was sent', ()
       response: `NO LOGIN me@example.com ${password}, or ${utf8(password)}, or AUTH PLAIN ${plain}`,
     },
     imap,
-    { user: 'me@example.com', password },
+    { user: 'me@example.com', by: 'password', secrets: [password] },
   );
   expect(said).toBe(
     'imap.example.com refused the password: NO LOGIN me@example.com …, or …, or AUTH PLAIN …',
   );
+});
+
+test('a refused token is the sign-in refused, and no token appears, in XOAUTH2’s encoding either', () => {
+  const token = 'eyJ0b2tlbiI6InNlY3JldCJ9';
+  const xoauth2 = btoa(`user=me@example.com\x01auth=Bearer ${token}\x01\x01`);
+  expect(
+    signInFailure({ authenticationFailed: true, response: `NO ${xoauth2} and ${token}` }, imap, {
+      user: 'me@example.com',
+      by: 'token',
+      secrets: ['an-older-token', token],
+    }),
+  ).toBe('imap.example.com refused the sign-in: NO … and …');
+  expect(
+    signInFailure({ code: 'EAUTH' }, smtp, { user: 'me@example.com', by: 'token', secrets: [] }),
+  ).toBe('smtp.example.com refused the sign-in.');
 });

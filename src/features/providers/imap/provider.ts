@@ -27,13 +27,17 @@ import { flagsOf, planSync, type SyncPlan } from './core/sync.ts';
 import { subtree } from './core/folders.ts';
 import type { Endpoint } from './core/presets.ts';
 import { submitFailure } from './core/send.ts';
-import { signInFailure } from './core/signin.ts';
+import { signInFailure, type SentCredentials } from './core/signin.ts';
 
 export type ImapAccount = {
   account: AccountId;
   imap: Endpoint;
   smtp: Endpoint;
-  auth: { user: string; pass: string } | { user: string; accessToken: string };
+  /**
+   * How the account signs in: a password, or an access token, asked for again for each new
+   * connection, so a token that has run out costs only a reconnect.
+   */
+  auth: { user: string; pass: string } | { user: string; accessToken: () => Promise<string> };
   /** Whether the host files its own copy in Sent when it accepts a message, as Outlook does. */
   filesSent?: boolean;
 };
@@ -83,7 +87,7 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
    * The shared connection waits on a host gone quiet only as long as its patience. A watcher idles
    * as soon as it can, and starts IDLE again every few minutes.
    */
-  function open(watching = false): ImapFlow {
+  function open(watching = false): Promise<ImapFlow> {
     return imapConnection(
       account,
       network,
@@ -99,7 +103,7 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
     const current = client && (await client.catch(() => undefined));
     if (current?.usable) return current;
     client = (async () => {
-      const connection = open();
+      const connection = await open();
       await connection.connect();
       return connection;
     })();
@@ -265,7 +269,7 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
    */
   async function deliver(raw: Uint8Array, from: string, to: string[]) {
     let bodySent = false;
-    const transport = smtpTransport(account, network, {
+    const transport = await smtpTransport(account, network, {
       transactionLog: true,
       logger: {
         debug(entry: { tnx?: string } | undefined, line: unknown) {
@@ -517,9 +521,19 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
       const changed = () => {
         if (!stopped) onChange();
       };
-      const begin = (again: boolean) => {
+      const again = () => {
+        if (!stopped && !closed) retry = setTimeout(() => void begin(true), WATCH_RETRY_MS);
+      };
+      const begin = async (reconnecting: boolean) => {
         if (stopped || closed) return;
-        const watching = open(true);
+        let watching: ImapFlow;
+        try {
+          watching = await open(true);
+        } catch {
+          // No way to sign in just now. The watcher tries again, and the Mailroom polls meanwhile.
+          return again();
+        }
+        if (stopped || closed) return watching.close();
         connection = watching;
         watchers.add(watching);
         watching.on('exists', changed);
@@ -527,21 +541,19 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
         watching.on('flags', changed);
         watching.once('close', () => {
           watchers.delete(watching);
-          if (!stopped && !closed) retry = setTimeout(() => begin(true), WATCH_RETRY_MS);
+          again();
         });
-        void (async () => {
-          try {
-            await watching.connect();
-            await watching.mailboxOpen(path);
-            if (again) changed();
-            await watching.idle();
-          } catch {
-            // The connection closes, and the watcher tries again. The Mailroom polls meanwhile.
-            watching.close();
-          }
-        })();
+        try {
+          await watching.connect();
+          await watching.mailboxOpen(path);
+          if (reconnecting) changed();
+          await watching.idle();
+        } catch {
+          // The connection closes, and the watcher tries again. The Mailroom polls meanwhile.
+          watching.close();
+        }
       };
-      begin(false);
+      void begin(false);
       return () => {
         stopped = true;
         clearTimeout(retry);
@@ -622,15 +634,32 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
  * `SIGN_IN_PATIENCE_MS` to connect, greet and take the password, so a mistyped host is told soon.
  */
 export async function checkSignIn(account: ImapAccount, network: Network = {}): Promise<void> {
-  const credentials = {
-    user: account.auth.user,
-    password: 'pass' in account.auth ? account.auth.pass : account.auth.accessToken,
-  };
-  // Only the reason leaves, never the client's error, which may carry what was sent.
+  const { auth } = account;
+  // What was sent, so no part of it is in a reason a host gives.
+  const sent: SentCredentials =
+    'pass' in auth
+      ? { user: auth.user, by: 'password', secrets: [auth.pass] }
+      : { user: auth.user, by: 'token', secrets: [] };
+  const signingIn: ImapAccount =
+    'pass' in auth
+      ? account
+      : {
+          ...account,
+          auth: {
+            user: auth.user,
+            accessToken: async () => {
+              const token = await auth.accessToken();
+              sent.secrets.push(token);
+              return token;
+            },
+          },
+        };
+  // Only the reason leaves, never the client's error, which may carry what was sent. A token that
+  // can't be had is not a host's refusal, so it rejects as it was.
   const refusal = (endpoint: Endpoint) => (error: SignInError) =>
-    signInFailure(error, endpoint, credentials);
+    signInFailure(error, endpoint, sent);
 
-  const connection = imapConnection(account, network);
+  const connection = await imapConnection(signingIn, network);
   const imap = await inTime(connection.connect(), () => connection.close()).then(
     () => undefined,
     refusal(account.imap),
@@ -640,7 +669,7 @@ export async function checkSignIn(account: ImapAccount, network: Network = {}): 
 
   const sockets: Socket[] = [];
   const patient = { ...network, patience: SIGN_IN_PATIENCE_MS };
-  const transport = smtpTransport(account, patient, {}, (socket) => sockets.push(socket));
+  const transport = await smtpTransport(signingIn, patient, {}, (socket) => sockets.push(socket));
   const smtp = await inTime(transport.verify(), () => {
     for (const socket of sockets) socket.destroy();
   }).then(() => undefined, refusal(account.smtp));
@@ -676,17 +705,16 @@ type SignInError = Parameters<typeof signInFailure>[0];
  * A transport to the account's SMTP host, signed in as the account, that waits on a host gone
  * quiet only as long as the network's patience.
  */
-function smtpTransport(
+async function smtpTransport(
   account: ImapAccount,
   network: Network,
   log: Pick<SMTPTransport.Options, 'transactionLog' | 'logger'> = {},
   opened?: (socket: Socket) => void,
 ) {
   const patience = network.patience ?? SMTP_PATIENCE_MS;
+  const signedIn = await credentialsOf(account.auth);
   const auth =
-    'accessToken' in account.auth
-      ? { type: 'OAuth2' as const, user: account.auth.user, accessToken: account.auth.accessToken }
-      : { user: account.auth.user, pass: account.auth.pass };
+    'accessToken' in signedIn ? { type: 'OAuth2' as const, ...signedIn } : { ...signedIn };
   return nodemailer.createTransport({
     ...account.smtp,
     requireTLS: !account.smtp.secure,
@@ -730,20 +758,28 @@ function smtpSocket(
   };
 }
 
+/** What a connection signs in with: the password, or an access token asked for just now. */
+async function credentialsOf(
+  auth: ImapAccount['auth'],
+): Promise<{ user: string; pass: string } | { user: string; accessToken: string }> {
+  return 'pass' in auth ? auth : { user: auth.user, accessToken: await auth.accessToken() };
+}
+
 /** A connection to the account's IMAP host, which keeps what the host said when it refused. */
-function imapConnection(
+async function imapConnection(
   account: ImapAccount,
   network: Network,
   options: Pick<ImapFlowOptions, 'autoIdleDelay' | 'maxIdleTime' | 'socketTimeout'> = {},
-): ImapFlow {
+): Promise<ImapFlow> {
   const { host, port, secure } = account.imap;
+  const auth = await credentialsOf(account.auth);
   const quiet = () => {};
   const connection: ImapFlow = new ImapFlow({
     host,
     port,
     secure,
     doSTARTTLS: secure ? undefined : true,
-    auth: account.auth,
+    auth,
     // imapflow logs some refusals instead of throwing them. What the server said is kept. It
     // builds an entry only for a level the logger has, and debug entries, which spell out each
     // response, cost a sync batch half its CPU again. So there is no debug or info here, though

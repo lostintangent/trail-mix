@@ -7,12 +7,13 @@ import { createServer, connect, type AddressInfo, type Socket } from 'node:net';
 import { ImapFlow } from 'imapflow';
 import nodemailer from 'nodemailer';
 import { SendFailure } from '../../src/features/providers/index.ts';
-import { imapProvider } from '../../src/features/providers/imap/provider.ts';
+import { checkSignIn, imapProvider } from '../../src/features/providers/imap/provider.ts';
 import {
   DROP_AFTER_DATA_HEADER,
   caFile,
   count,
   empty,
+  identity,
   kick,
   ports,
   profiles,
@@ -276,6 +277,119 @@ describe('The IMAP provider', () => {
     expect(changes).toBeGreaterThan(0);
   }, 30_000);
 });
+
+describe('The IMAP provider, signed in with a token', () => {
+  const { bob } = users;
+  // As Outlook does: XOAUTH2 over IMAP, and over submission's STARTTLS on 587.
+  const outlook = (accessToken: () => Promise<string>, user = alice.email) => ({
+    account: 'test',
+    imap: { host: 'localhost', port: ports.imaps, secure: true },
+    smtp: { host: 'localhost', port: ports.submission, secure: false },
+    auth: { user, accessToken },
+    filesSent: true,
+  });
+  const network = () => ({ ca: readFileSync(caFile, 'utf8') });
+
+  test('asks for a token for each new connection, so one that ran out costs only a reconnect', async () => {
+    await start('outlook');
+    await empty(alice.email);
+    const tokens = await signedIn(alice.email, 2);
+    const asked: string[] = [];
+    const provider = imapProvider(
+      outlook(async () => {
+        asked.push(await tokens.fresh());
+        return asked.at(-1)!;
+      }),
+      network(),
+    );
+    try {
+      expect((await provider.folders()).length).toBeGreaterThan(0);
+      expect(asked).toHaveLength(1);
+      // The token runs out, and the server ends the session. The next command signs in again.
+      await Bun.sleep(2_500);
+      await kick(alice.email);
+      expect((await provider.folders()).length).toBeGreaterThan(0);
+      expect(asked).toHaveLength(2);
+
+      const raw = message({ id: 'token', subject: 'token', from: alice.email, to: alice.email });
+      const draft = await provider.saveDraft(new TextEncoder().encode(raw));
+      await provider.submit(draft, '<token@example.com>');
+      expect(asked).toHaveLength(3);
+      await settled();
+      expect(await count(alice.email, 'INBOX')).toBe(1);
+    } finally {
+      await provider.close();
+    }
+  }, 30_000);
+
+  test('checking the sign-in takes a good token, and refuses another person’s without repeating it', async () => {
+    await start('outlook');
+    const alices = await signedIn(alice.email);
+    await checkSignIn(outlook(alices.fresh), network());
+
+    const bobs = await signedIn(bob.email);
+    const given: string[] = [];
+    const refused = await checkSignIn(
+      outlook(async () => {
+        given.push(await bobs.fresh());
+        return given.at(-1)!;
+      }),
+      network(),
+    ).then(
+      () => 'kept',
+      (error: Error) => error.message,
+    );
+    expect(refused).toStartWith('localhost refused the sign-in');
+    expect(given).toHaveLength(1);
+    expect(refused).not.toContain(given[0]!);
+  }, 30_000);
+
+  test('a token that can’t be had fails the sign-in as it failed, not as the host refusing it', async () => {
+    await start('outlook');
+    const lapsed = new Error('The sign-in has lapsed.');
+    const failed = await checkSignIn(
+      outlook(() => Promise.reject(lapsed)),
+      network(),
+    ).catch((error: unknown) => error);
+    expect(failed).toBe(lapsed);
+  }, 30_000);
+});
+
+/**
+ * Signs `user` in at the stand-in for Microsoft, with each access token lasting `seconds` if
+ * given, and returns a way to get a fresh token by refreshing, as the Mailroom does.
+ */
+async function signedIn(user: string, seconds?: number) {
+  const post = async (path: string, form: Record<string, string>) => {
+    const response = await fetch(`${identity.authority}/oauth2/v2.0/${path}`, {
+      method: 'POST',
+      body: new URLSearchParams({ client_id: 'provider-test', ...form }),
+    });
+    return response.json<Record<string, string>>();
+  };
+  const code = await post('devicecode', { scope: 'imap smtp offline_access' });
+  await fetch(`${identity.origin}/devicelogin`, {
+    method: 'POST',
+    body: new URLSearchParams({
+      user_code: code.user_code ?? '',
+      login_hint: user,
+      ...(seconds ? { expires_in: String(seconds) } : {}),
+    }),
+  });
+  let { refresh_token: refresh } = await post('token', {
+    grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+    device_code: code.device_code ?? '',
+  });
+  const fresh = async () => {
+    const tokens = await post('token', {
+      grant_type: 'refresh_token',
+      refresh_token: refresh ?? '',
+    });
+    refresh = tokens.refresh_token;
+    return tokens.access_token ?? '';
+  };
+  return { fresh };
+}
 
 /**
  * A relay to `port` that can fall quiet: from then on, the connections open through it stay open
