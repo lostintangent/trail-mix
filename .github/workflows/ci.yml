@@ -92,7 +92,6 @@ jobs:
   # take minutes to install, so it runs beside the main job instead of inside it.
   webkit:
     runs-on: ubuntu-24.04
-    # WebKit's system packages come from apt on every run, and the mirror sometimes takes minutes.
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
@@ -109,8 +108,28 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-webkit-${{ hashFiles('bun.lock') }}
 
+      # WebKit needs about 180 system packages from apt, and the runner's mirror has stalled on
+      # them for more than 20 minutes. They are kept for each runner image and Playwright version.
+      - name: Name the runner image
+        id: image
+        run: echo "name=$ImageOS-$ImageVersion" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@v6
+        id: webkit-packages
+        with:
+          path: ~/webkit-packages
+          key: webkit-packages-${{ steps.image.outputs.name }}-${{ hashFiles('bun.lock') }}
+
       - name: Install WebKit
-        run: bunx playwright install --with-deps webkit
+        run: |
+          if [ "${{ steps.webkit-packages.outputs.cache-hit }}" = true ]; then
+            sudo dpkg --install ~/webkit-packages/*.deb
+            bunx playwright install webkit
+          else
+            bunx playwright install --with-deps webkit
+            mkdir -p ~/webkit-packages
+            cp /var/cache/apt/archives/*.deb ~/webkit-packages/
+          fi
 
       - name: Reader tests in WebKit
         run: bun test tests/reader
