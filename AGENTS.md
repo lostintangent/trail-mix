@@ -209,6 +209,22 @@ Tests concentrate where a defect spreads.
 - Exhaustive `bun test` coverage of the pure core.
 - One provider contract suite that runs against the demo provider and against the IMAP provider talking to the test mail server.
 - A Playwright smoke suite that drives the built app on the demo mailbox, at desktop and phone sizes in both themes, and attaches screenshots to the CI run.
+- A test earns its place by catching a defect someone can name. Tests that restate the implementation, check constants or defaults, or mock Trail Mix's own modules are removed in review. Fakes stand in only for things outside Trail Mix.
+
+### Performance budgets
+
+`bun run bench` measures each budget on the built app, fails when one is exceeded, and runs locally and in CI, which attaches the numbers. Budgets are measured against a demo mailbox that scales deterministically to 50,000 messages, and the browser ones use a phone profile of four times CPU slowdown.
+
+| What                                                      | Budget                                        |
+| --------------------------------------------------------- | --------------------------------------------- |
+| Cold load to the first Inbox rows                         | 1 second, with at most 250 KB of JS, gzip     |
+| Scrolling a 50,000-message folder                         | 60 frames a second                            |
+| Moving through the list by key, or archiving              | 50 milliseconds                               |
+| A page of the unified Inbox, or a 50-message conversation | 10 milliseconds in the Mailroom               |
+| Search as you type                                        | 100 milliseconds                              |
+| First sync of a 50,000-message folder                     | 2 minutes, with no batch over 1 second of CPU |
+| A cached conversation with 300 KB of HTML                 | 200 milliseconds to render                    |
+| Worker startup                                            | Checked by `wrangler check startup` in CI     |
 
 ### Mail safety
 
