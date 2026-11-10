@@ -432,6 +432,16 @@ export const trailMixTheme = {
       "base": {
         "padding": "var(--spacing-3)"
       }
+    },
+    "toast": {
+      "base": {
+        "backgroundColor": "light-dark(#ffffff, #222222)",
+        "boxShadow": "0 0 0 1px var(--color-border), var(--shadow-med)",
+        "outline": "1px solid transparent"
+      },
+      "type:error": {
+        "color": "var(--color-text-error)"
+      }
     }
   },
   __onDark: {

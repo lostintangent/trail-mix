@@ -23,6 +23,16 @@ import type {
   MessageRef,
 } from '../../mail/core/index.ts';
 import { accountsQuery, bodyQuery, conversationQuery } from '../../mailroom/client/index.ts';
+import {
+  Airmail,
+  formatAhead,
+  isOnItsWay,
+  leavingIn,
+  useLeavingStanding,
+  type Leaving,
+  type Shown,
+  type Standing,
+} from '../../outbox/index.ts';
 import { folderOf } from '../core/folder.ts';
 import { MessageKeys } from './MessageFrame.tsx';
 import { displayName, MessageSheet, when } from './MessageSheet.tsx';
@@ -48,6 +58,8 @@ export type ReaderProps = {
   onMessageKey?: (event: KeyboardEvent) => void;
   /** Drafts left out, such as the one being written below the conversation. */
   hidden?: readonly MessageRef[];
+  /** The sends this device follows, each a reply on its way at the end of its conversation. */
+  leaving?: readonly Leaving[];
   /** Opens a draft to go on writing it. Without it, a draft reads like any message. */
   onOpenDraft?: (draft: Message) => void;
   /**
@@ -70,13 +82,14 @@ export const Reader = memo(function Reader({
   onMessageKey,
   hidden = NONE_HIDDEN,
   folders = NONE_LISTED,
+  leaving = NONE_LEAVING,
   ...props
 }: ReaderProps) {
   usePrepared(upcoming);
   const id = props.conversation[0]?.conversation ?? '';
   return (
     <MessageKeys value={onMessageKey ?? IGNORE_KEY}>
-      <Conversation key={id} hidden={hidden} folders={folders} {...props} />
+      <Conversation key={id} hidden={hidden} folders={folders} leaving={leaving} {...props} />
     </MessageKeys>
   );
 }, isSameReading);
@@ -84,6 +97,7 @@ export const Reader = memo(function Reader({
 const IGNORE_KEY = () => {};
 const NONE_HIDDEN: readonly MessageRef[] = [];
 const NONE_LISTED: readonly Folder[] = [];
+const NONE_LEAVING: readonly Leaving[] = [];
 
 const keys = (refs: readonly MessageRef[] = NONE_HIDDEN) => refs.map(refKey).join('\u0001');
 
@@ -97,6 +111,7 @@ function isSameReading(before: ReaderProps, after: ReaderProps): boolean {
     before.onMessageKey === after.onMessageKey &&
     before.onOpenDraft === after.onOpenDraft &&
     before.isPassing === after.isPassing &&
+    before.leaving === after.leaving &&
     keys(before.hidden) === keys(after.hidden) &&
     ids(before) === ids(after)
   );
@@ -104,7 +119,8 @@ function isSameReading(before: ReaderProps, after: ReaderProps): boolean {
 
 /**
  * The conversation's messages, oldest first. A draft lies folded, and opening it goes on writing it
- * when the reader can, so the newest message that lies open is the newest one sent.
+ * when the reader can, so the newest message that lies open is the newest one sent. Replies on their
+ * way lie folded after them, as their copies will once the server has them.
  */
 // A conversation renders again only when it changes, not when what the reader prepares does.
 const Conversation = memo(function Conversation({
@@ -113,11 +129,13 @@ const Conversation = memo(function Conversation({
   folders,
   actionsFor,
   hidden,
+  leaving,
   onOpenDraft,
   isPassing = false,
-}: Omit<ReaderProps, 'hidden' | 'folders'> & {
+}: Omit<ReaderProps, 'hidden' | 'folders' | 'leaving'> & {
   hidden: readonly MessageRef[];
   folders: readonly Folder[];
+  leaving: readonly Leaving[];
 }) {
   const leftOut = new Set(hidden.map(refKey));
   const messages = conversation
@@ -188,9 +206,39 @@ const Conversation = memo(function Conversation({
           </button>
         ),
       )}
+      {leavingIn(leaving, newest.conversation, conversation).map((shown) => (
+        <OnItsWay key={refKey(shown.leaving.draft)} shown={shown} />
+      ))}
     </div>
   );
 });
+
+/** A reply on its way, folded where its copy will lie, under airmail while it leaves. */
+function OnItsWay({ shown: { leaving, preview } }: { shown: Shown }) {
+  const standing = useLeavingStanding(leaving);
+  return (
+    <div {...stylex.props(styles.folded, styles.onItsWay)}>
+      <Airmail isRunning={isOnItsWay(standing)} xstyle={styles.airmail} />
+      <strong {...stylex.props(styles.foldedFrom)}>You</strong>
+      <span {...stylex.props(styles.foldedPreview)}>{preview}</span>
+      <span>{saidOf(standing)}</span>
+    </div>
+  );
+}
+
+/** Where a reply on its way stands, in the place its copy's time will take. */
+function saidOf(standing: Standing): string {
+  switch (standing.is) {
+    case 'scheduled':
+      return formatAhead(standing.at);
+    case 'retrying':
+      return 'Not sent yet';
+    case 'sent':
+      return 'Sent';
+    default:
+      return 'Sending…';
+  }
+}
 
 const counted = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
@@ -314,6 +362,19 @@ const styles = stylex.create({
       ':focus-visible': FOCUS_RING,
     },
     outlineOffset: focusVars['--focus-outline-offset'],
+  },
+  // Nothing to open yet, so it neither lifts nor points.
+  onItsWay: {
+    position: 'relative',
+    overflow: 'hidden',
+    backgroundColor: 'transparent',
+    color: tm.textQuiet,
+    cursor: 'default',
+  },
+  airmail: {
+    position: 'absolute',
+    insetInline: 0,
+    top: 0,
   },
   foldedFrom: {
     color: colorVars['--color-text-secondary'],

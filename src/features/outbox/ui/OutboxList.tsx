@@ -18,8 +18,15 @@ import type { AccountId, ConversationId, Outgoing, StampColor } from '../../mail
 import { outboxQuery } from '../../mailroom/client/index.ts';
 import { formatAhead } from '../core/later.ts';
 import { UNDO_SECONDS } from '../core/outbox.ts';
-import { fully, isLeaving, isUndoable, standingOf, type Standing } from '../core/standing.ts';
-import { airmail } from './airmail.ts';
+import {
+  fully,
+  isLeaving,
+  isOnItsWay,
+  isUndoable,
+  standingOf,
+  type Standing,
+} from '../core/standing.ts';
+import { Airmail } from './Airmail.tsx';
 import { closesFor } from './closings.ts';
 import { outboxActions, type OutboxActions } from './sending.tsx';
 
@@ -28,7 +35,8 @@ import { outboxActions, type OutboxActions } from './sending.tsx';
  * whom it's to, its subject and when it goes, and opens its conversation. A send still inside its
  * window or waiting for its time offers Undo. A failed one shows the server's reason, with Retry
  * and Edit, which takes the send back and opens its draft. A send held because its account must be
- * signed in again offers that sign-in instead of Retry. Airmail runs along what is leaving.
+ * signed in again offers that sign-in instead of Retry. Airmail lies along what is leaving, and runs
+ * along what is on its way.
  */
 export function OutboxList({
   label,
@@ -113,7 +121,7 @@ function Row({
   const error = standing.is === 'failed' || standing.is === 'retrying' ? standing.error : undefined;
   return (
     <li {...stylex.props(styles.row, isSelected && styles.selected)}>
-      {isLeaving(standing) && <span {...stylex.props(airmail.stripe, styles.stripe)} />}
+      {isLeaving(standing) && <Airmail isRunning={isOnItsWay(standing)} xstyle={styles.stripe} />}
       <span {...stylex.props(styles.stamp, stampStyles[stamp])} />
       <button
         type="button"

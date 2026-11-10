@@ -71,15 +71,11 @@ export function newMessage(account: Account): Writing {
 
 /**
  * A reply to a message, from the account it reached. It goes where the parent's Reply-To says, or
- * to its sender, and a reply to all also to everyone else it went to.
+ * to its sender, and a reply to all also to everyone else it went to. Only the parent's body holds
+ * its Reply-To, so a reply begun before the body arrives goes to the sender until it does.
  */
 export function replyTo(parent: Message, body: Body | undefined, account: Account, all: boolean) {
-  const replyTo = header(body, 'Reply-To');
-  const { to, cc } = replyRecipients(
-    { ...parent, ...(replyTo ? { replyTo: addressesIn(replyTo) } : {}) },
-    [account.address],
-    all,
-  );
+  const { to, cc } = recipientsOf(parent, body, account, all);
   return {
     ...newMessage(account),
     to,
@@ -87,6 +83,21 @@ export function replyTo(parent: Message, body: Body | undefined, account: Accoun
     subject: replySubject(parent.subject),
     inReplyTo: refOf(parent),
   } satisfies Writing;
+}
+
+/** Whom a reply goes to: the parent's Reply-To when its body says, or else its sender. */
+export function recipientsOf(
+  parent: Message,
+  body: Body | undefined,
+  account: Account,
+  all: boolean,
+): Pick<Writing, 'to' | 'cc'> {
+  const replyTo = header(body, 'Reply-To');
+  return replyRecipients(
+    { ...parent, ...(replyTo ? { replyTo: addressesIn(replyTo) } : {}) },
+    [account.address],
+    all,
+  );
 }
 
 /**

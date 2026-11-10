@@ -21,6 +21,8 @@ export type SendOptions = {
   at?: string;
   /** Hands back the draft once Undo has taken the send back, as the composer reopens it. */
   onUndone?: (draft: MessageRef) => void;
+  /** When the member pressed Send, which the undo window counts from. Now, if not given. */
+  pressedAt?: number;
 };
 
 /** The toasts following sends, by send, so a send asked for again replaces its toast. */
@@ -33,9 +35,9 @@ const following = new Map<string, () => void>();
 export async function sendDraft(
   queryClient: QueryClient,
   draft: MessageRef,
-  { at, onUndone }: SendOptions = {},
+  { at, onUndone, pressedAt }: SendOptions = {},
 ): Promise<Outgoing | undefined> {
-  const pressed = Date.now();
+  const pressed = pressedAt ?? Date.now();
   let outgoing: Outgoing;
   try {
     outgoing = await mailroom.send(draft, at);

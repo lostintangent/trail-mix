@@ -2,5 +2,10 @@
 export * from './core/index.ts';
 export { useOutboxCommands } from './ui/commands.ts';
 export { sendCommands } from './ui/sendCommands.ts';
-export { OutboxList, SendActions } from './ui/lazy.ts';
+export { OutboxList, SendActions, preloadSendActions } from './ui/lazy.ts';
 export { useSend, type Send, type SendOptions } from './ui/useSend.ts';
+export { useLeaving, useLeavingStanding } from './ui/useLeaving.ts';
+export { Airmail } from './ui/Airmail.tsx';
+export { isAwaitingCopy, leavingIn, type Leaving, type Shown } from './core/leaving.ts';
+export { formatAhead } from './core/later.ts';
+export { isOnItsWay, type Standing } from './core/standing.ts';

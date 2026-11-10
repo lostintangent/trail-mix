@@ -9,6 +9,7 @@ import {
   followed,
   fully,
   isLeaving,
+  isOnItsWay,
   isUndoable,
   standingOf,
   standingOfFollowed,
@@ -83,6 +84,24 @@ test('a followed send seen gone before its window closed was undone, whenever it
   expect(standingOfFollowed(seen, closes, at(60), false)).toEqual({ is: 'undone' });
 });
 
+test('a send that failed after it began, and was then given up, is never claimed sent', () => {
+  const failed = submitted(begin(pressed), refused, iso(10.5));
+  let seen = follow(followed(pressed), begin(pressed), at(10.6));
+  seen = follow(seen, failed, at(11));
+  seen = follow(seen, undefined, at(30));
+  expect(standingOfFollowed(seen, closes, at(30), false)).toEqual({ is: 'undone' });
+});
+
+test('a send retrying after it began, then gone, is sending until Sent holds its copy', () => {
+  // Undone in its wait, or begun again and gone between snapshots: only its copy can say.
+  const offline = { error: 'Couldn’t reach smtp.example.com', passing: true };
+  let seen = follow(followed(pressed), begin(pressed), at(10.6));
+  seen = follow(seen, submitted(begin(pressed), offline, iso(11)), at(11));
+  seen = follow(seen, undefined, at(30));
+  expect(standingOfFollowed(seen, closes, at(30), false)).toEqual({ is: 'sending' });
+  expect(standingOfFollowed(seen, closes, at(31), true)).toEqual({ is: 'sent' });
+});
+
 test('a followed send seen gone only after its time is sending until Sent holds its copy', () => {
   // A snapshot can arrive late, after an undo elsewhere, so absence alone never says it went.
   const seen = follow(followed(pressed), undefined, at(12));
@@ -108,6 +127,17 @@ test('airmail marks what is leaving, and not what failed or was undone', () => {
   expect(isLeaving({ is: 'sent' })).toBe(true);
   expect(isLeaving(standingOf(failed, closes, at(11)))).toBe(false);
   expect(isLeaving({ is: 'undone' })).toBe(false);
+});
+
+test('airmail runs while a send is on its way, and stands still before and after', () => {
+  const failed = submitted(begin(pressed), refused, iso(10.5));
+  expect(isOnItsWay(standingOf(pressed, closes, at(1)))).toBe(true);
+  expect(isOnItsWay(standingOf(pressed, closes, at(11)))).toBe(true);
+  expect(isOnItsWay(standingOf(begin(pressed), closes, at(11)))).toBe(true);
+  expect(isOnItsWay({ is: 'scheduled', at: iso(3600) })).toBe(false);
+  expect(isOnItsWay(standingOf(failed, closes, at(11)))).toBe(false);
+  expect(isOnItsWay({ is: 'retrying', error: refused.error ?? '', at: iso(60) })).toBe(false);
+  expect(isOnItsWay({ is: 'sent' })).toBe(false);
 });
 
 test('a toast names recipients by first name, and a row names them in full', () => {

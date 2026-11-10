@@ -44,38 +44,47 @@ export function standingOf(held: Outgoing, closes: number, now: number): Standin
       return { is: 'sent' };
     case 'sending':
       return { is: 'sending' };
-    case 'waiting': {
+    case 'waiting':
       if (held.error !== undefined) return { is: 'retrying', error: held.error, at: held.sendAt };
-      const left = closes - now;
-      if (left > UNDO_SECONDS * 1000) return { is: 'scheduled', at: held.sendAt };
-      if (left > 0) return { is: 'counting', seconds: Math.ceil(left / 1000) };
-      return { is: 'sending' };
-    }
+      return standingOfWait(held.sendAt, closes, now);
   }
+}
+
+/** Where a send waiting to go at `sendAt`, its window closing at `closes` here, stands at `now`. */
+export function standingOfWait(sendAt: string, closes: number, now: number): Standing {
+  const left = closes - now;
+  if (left > UNDO_SECONDS * 1000) return { is: 'scheduled', at: sendAt };
+  if (left > 0) return { is: 'counting', seconds: Math.ceil(left / 1000) };
+  return { is: 'sending' };
 }
 
 /**
  * What a device has seen of a send it follows, snapshot by snapshot: the entry as last seen, whether
- * it was ever seen begun, and when it was first seen gone. A send leaves the Outbox when it has gone
- * or when someone undoes it, and a snapshot can arrive late or not at all, so its absence alone
- * never says it went.
+ * it was begun then, and when it was first seen gone. A send leaves the Outbox when it has gone or
+ * when someone undoes it or gives it up, and a snapshot can arrive late or not at all, so its
+ * absence alone never says it went. Only the last sighting counts: a send begun once may have
+ * failed since, and then been given up or retried and undone.
  */
 export type Followed = { last: Outgoing; hasBegun: boolean; goneAt?: number };
 
-export const followed = (outgoing: Outgoing): Followed => ({ last: outgoing, hasBegun: false });
+export const followed = (outgoing: Outgoing): Followed => ({
+  last: outgoing,
+  hasBegun: isBegun(outgoing),
+});
 
 /** What a device has seen once a snapshot, taken by `at`, holds `entry` or nothing for the send. */
 export function follow(seen: Followed, entry: Outgoing | undefined, at: number): Followed {
   if (!entry) return seen.goneAt === undefined ? { ...seen, goneAt: at } : seen;
-  const hasBegun = seen.hasBegun || entry.state === 'sending' || entry.state === 'accepted';
-  return { last: entry, hasBegun };
+  return followed(entry);
 }
+
+const isBegun = ({ state }: Outgoing) => state === 'sending' || state === 'accepted';
 
 /**
  * Where a followed send stands at `now`. It has gone once the host accepted it, once it left the
- * Outbox after it was seen begun, or once Sent holds its copy. It was undone if it was seen gone
- * before its window could close, since nothing sends before then. Gone with neither, it is still
- * sending as far as this device can say.
+ * Outbox while it was begun, or once Sent holds its copy. It was undone if it was seen gone before
+ * its window could close, since nothing sends before then, and given up if it left failed. Gone
+ * otherwise, it is still sending as far as this device can say.
  */
 export function standingOfFollowed(
   seen: Followed,
@@ -86,6 +95,7 @@ export function standingOfFollowed(
   if (isInSent) return { is: 'sent' };
   if (seen.goneAt === undefined) return standingOf(seen.last, closes, now);
   if (seen.hasBegun) return { is: 'sent' };
+  if (seen.last.state === 'failed') return { is: 'undone' };
   return seen.goneAt < closes ? { is: 'undone' } : { is: 'sending' };
 }
 
@@ -96,6 +106,13 @@ export const isUndoable = (standing: Standing) =>
 /** Whether a send that stands so is leaving, which the airmail stripe marks. */
 export const isLeaving = (standing: Standing) =>
   standing.is !== 'failed' && standing.is !== 'undone';
+
+/**
+ * Whether a send that stands so is on its way, which running airmail marks: its window is counting
+ * down, or it's sending. One scheduled for later, retrying later or sent is leaving, and still.
+ */
+export const isOnItsWay = (standing: Standing) =>
+  standing.is === 'counting' || standing.is === 'sending';
 
 /** Who a send is to, as a toast says it: "Mina", "Mina and Ada", or "Mina and 2 others". */
 export function briefly(to: readonly Address[]): string {

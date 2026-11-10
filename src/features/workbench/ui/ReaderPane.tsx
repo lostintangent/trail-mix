@@ -30,6 +30,7 @@ import type {
 import { conversationQuery } from '../../mailroom/client/index.ts';
 import { preloadTriageActions } from '../../conversations/index.ts';
 import { preloadComposer } from '../../composer/ui/index.ts';
+import { isAwaitingCopy, leavingIn, preloadSendActions, type Leaving } from '../../outbox/index.ts';
 import { preloadReader, Reader, REST_MS } from '../../reader/index.ts';
 import { PhoneIsland } from './PhoneIsland.tsx';
 
@@ -56,6 +57,7 @@ export function ReaderPane({
   onMessageKey,
   writing,
   hidden,
+  leaving,
   onOpenDraft,
   page,
   onBack,
@@ -89,6 +91,8 @@ export function ReaderPane({
   writing?: { composer: ReactNode; place: 'docked' | 'filled' | 'over' };
   /** Drafts the reader leaves out, such as the one being written. */
   hidden?: readonly MessageRef[];
+  /** The sends this device follows, each at the end of its conversation while it is on its way. */
+  leaving?: readonly Leaving[];
   /** Opens a draft in the conversation to go on writing it. */
   onOpenDraft?: (draft: Message, conversation: Message[]) => void;
   /** A page that lies on the sheet in place of a conversation, such as an account's. */
@@ -99,6 +103,11 @@ export function ReaderPane({
   const { data: conversation } = useQuery({
     ...conversationQuery(shown ?? ''),
     enabled: shown !== undefined,
+    // A reply gone from the Outbox waits for its copy, which a lost hint can't keep from showing.
+    refetchInterval: ({ state: { data } }) =>
+      shown && data && leavingIn(leaving ?? [], shown, data).some(isAwaitingCopy)
+        ? AWAITING_COPY_MS
+        : false,
   });
   const account = accounts.find(({ id }) => id === conversation?.[0]?.account);
   const reading = useMemo<Reading | undefined>(
@@ -174,6 +183,7 @@ export function ReaderPane({
               upcoming={isPassing ? [] : preparing}
               onMessageKey={onMessageKey}
               hidden={hidden}
+              leaving={leaving}
               onOpenDraft={openDraft}
               isPassing={isPassing}
             />
@@ -251,6 +261,9 @@ function useLastPress() {
   return pressedAt;
 }
 
+/** How often a conversation is fetched again while a reply that left it waits for its copy. */
+const AWAITING_COPY_MS = 2_000;
+
 /** How long after the list first shows something to open the reader starts loading. */
 const PRELOAD_AFTER_MS = 1_000;
 
@@ -267,9 +280,9 @@ function usePreloadedComposer(shown: ConversationId | undefined) {
     let idleId: number | undefined;
     const timer = setTimeout(() => {
       // Safari has no idle callback.
-      if ('requestIdleCallback' in window)
-        idleId = requestIdleCallback(() => void preloadComposer());
-      else void preloadComposer();
+      const preload = () => void Promise.all([preloadComposer(), preloadSendActions()]);
+      if ('requestIdleCallback' in window) idleId = requestIdleCallback(preload);
+      else preload();
     }, PRELOAD_COMPOSER_AFTER_MS);
     return () => {
       clearTimeout(timer);

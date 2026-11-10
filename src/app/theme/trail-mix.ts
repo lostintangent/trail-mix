@@ -2,6 +2,7 @@ import { defineTheme } from '@astryxdesign/core/theme';
 // The built neutral theme compiles to the same CSS as its source, and the generated module then
 // imports only the built one, without the runtime theme generator.
 import { neutralTheme } from '@astryxdesign/theme-neutral/built';
+import { hexOf, parseColor } from '../../shared/color.ts';
 import { DEFAULT_ACCENT, DESK, MUTED_ALPHA, PANE, PAPER, type Halves } from './palette.ts';
 
 /**
@@ -17,6 +18,13 @@ const paired = ({ light, dark }: Halves) => pair(light, dark);
 const desk = paired(DESK);
 const pane = paired(PANE);
 const paper = paired(PAPER);
+// Astryx picks the text on a toast by measuring what it lies on, and reads only hex and rgb.
+const hex = (color: string) => {
+  const rgb = parseColor(color);
+  if (!rgb) throw new Error(`${color} is not a color the theme can write in hex.`);
+  return hexOf(rgb);
+};
+const paperInHex = pair(hex(PAPER.light), hex(PAPER.dark));
 // The accent until the member picks another, which then replaces it before first paint.
 const accent = paired(DEFAULT_ACCENT);
 // Ink in three strengths: what is read, what supports it, and what is quiet.
@@ -67,6 +75,16 @@ export const trailMix = defineTheme({
   components: {
     // A quiet control, such as a toolbar's icon, is drawn in the supporting ink, not the ink read.
     button: { 'variant:ghost': { color: 'var(--color-text-secondary)' } },
+    // A toast is a sheet of paper laid over the desk, not an inverted card. An error says so in
+    // its ink. Forced colors draw the transparent outline, as shadows are gone there.
+    toast: {
+      base: {
+        backgroundColor: paperInHex,
+        boxShadow: '0 0 0 1px var(--color-border), var(--shadow-med)',
+        outline: '1px solid transparent',
+      },
+      'type:error': { color: 'var(--color-text-error)' },
+    },
   },
   adaptations: {
     // Pointer picks the size: under a finger, at any width, every control is at least 44px.

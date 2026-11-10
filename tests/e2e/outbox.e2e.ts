@@ -95,8 +95,8 @@ const hasAirmail = (page: Page, to: RegExp) =>
     .getByRole('listitem')
     .filter({ hasText: to })
     .evaluate((row) =>
-      [...row.children].some((child) =>
-        getComputedStyle(child).backgroundImage.includes('repeating-linear-gradient'),
+      [...row.querySelectorAll('*')].some((part) =>
+        getComputedStyle(part).backgroundImage.includes('repeating-linear-gradient'),
       ),
     );
 

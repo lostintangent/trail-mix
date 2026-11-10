@@ -523,6 +523,16 @@
     --astryx-section-padding: var(--spacing-3);
   }
 
+  .astryx-toast {
+    background-color: light-dark(#ffffff, #222222);
+    box-shadow: 0 0 0 1px var(--color-border), var(--shadow-med);
+    outline: 1px solid transparent;
+  }
+
+  .astryx-toast[data-type="error"] {
+    color: var(--color-text-error);
+  }
+
   .astryx-text[data-color="primary"] { color: var(--color-text-primary); }
 
   .astryx-heading[data-color="primary"] { color: var(--color-text-primary); }

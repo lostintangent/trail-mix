@@ -24,7 +24,15 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import {
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { createPortal } from 'react-dom';
 import { StampDot } from '../../../app/theme/StampDot.tsx';
 import { useMediaQuery } from '../../../shared/useMediaQuery.ts';
@@ -38,6 +46,7 @@ import {
   addressesOf,
   addressText,
   newMessage,
+  recipientsOf,
   reopened,
   replyTo,
   type Attached,
@@ -89,17 +98,29 @@ export type ComposerProps = {
 
 /**
  * Where the member writes a message, on a sheet of its own: under the conversation for a reply, and
- * filling the reader for a new message. It starts once what it needs has loaded: the parent's
- * headers for a reply, or the draft's words and files.
+ * filling the reader for a new message. A reply starts at once from what the conversation holds,
+ * and takes the parent's Reply-To when its body arrives, unless the member has chosen whom it's to
+ * by then. A draft opened again starts once its words and files have loaded.
  */
 export function Composer({ compose, ...props }: ComposerProps) {
+  // Keyed as the reader keys it, so a parent on screen is already at hand.
   const ref =
-    compose.as === 'reply' ? compose.to : compose.as === 'draft' ? compose.draft : undefined;
+    compose.as === 'reply'
+      ? refOf(compose.to)
+      : compose.as === 'draft'
+        ? refOf(compose.draft)
+        : undefined;
   const { data: body, isError } = useQuery({
     ...bodyQuery(ref ?? NO_REF),
     enabled: ref !== undefined,
   });
   const start = startOf(compose, props.accounts, body);
+  const answering = compose.as === 'reply' ? compose : undefined;
+  const account = answering && props.accounts.find(({ id }) => id === answering.to.account);
+  const recipients = useMemo(
+    () => answering && account && body && recipientsOf(answering.to, body, account, answering.all),
+    [answering, account, body],
+  );
   if (!start) {
     const opening = (
       <section
@@ -124,6 +145,7 @@ export function Composer({ compose, ...props }: ComposerProps) {
           : { markdown: start.markdown }
       }
       draft={compose.as === 'draft' || compose.as === 'resumed' ? refOf(compose.draft) : undefined}
+      recipients={recipients}
       isNew={compose.as === 'new' || !start.inReplyTo}
       // A draft that answers mail the index doesn't hold stands alone, but is a reply all the same.
       isReply={start.inReplyTo !== undefined || start.answers !== undefined}
@@ -144,7 +166,7 @@ function startOf(
       return newMessage(compose.account);
     case 'reply': {
       const account = accounts.find(({ id }) => id === compose.to.account);
-      return account && body ? replyTo(compose.to, body, account, compose.all) : undefined;
+      return account && replyTo(compose.to, body, account, compose.all);
     }
     case 'draft':
       return body ? reopened(compose.draft, body, compose.conversation) : undefined;
@@ -157,6 +179,7 @@ function Writer({
   start,
   from,
   draft,
+  recipients,
   isNew,
   isReply,
   accounts,
@@ -171,6 +194,8 @@ function Writer({
   start: Writing;
   from: EditorProps['start'];
   draft: MessageRef | undefined;
+  /** Whom a reply goes to once the parent's body says, which waits on the member's own choice. */
+  recipients?: Pick<Writing, 'to' | 'cc'> | undefined;
   /** Whether it stands alone, filling the reader with its Subject, rather than under its parent. */
   isNew: boolean;
   /** Whether it answers another message, which names it a reply. */
@@ -205,9 +230,23 @@ function Writer({
     setEdits((count) => count + 1);
   };
   const setAddresses = (field: 'to' | 'cc' | 'bcc', text: string) => {
+    hasChosen.current = true;
     setFields((was) => ({ ...was, [field]: text }));
     edit(() => ({ [field]: addressesOf(text) }));
   };
+  // The parent's Reply-To arrives with its body. Until the member has chosen whom it's to, the
+  // reply goes there instead, which is no change of theirs, so nothing saves for it.
+  const hasChosen = useRef(false);
+  useEffect(() => {
+    if (!recipients || hasChosen.current) return;
+    setFields((was) => ({
+      ...was,
+      to: addressText(recipients.to),
+      cc: addressText(recipients.cc),
+    }));
+    setWriting((was) => ({ ...was, ...recipients }));
+    if (recipients.cc.length > 0) setHasCopies(true);
+  }, [recipients]);
   const take = (files: File[], inline: boolean) => {
     const added: Attached[] = files.map((file) =>
       inline && file.type.startsWith('image/')
@@ -261,9 +300,10 @@ function Writer({
   const title = isReply ? 'Reply' : 'New message';
   // On a coarse pointer a tap is the only way in, and a tooltip it left would stay.
   const tip = (label: string) => (isCoarse ? undefined : label);
+  // Saving is said in a place of its own, the same size whatever it says, so nothing moves for it.
   const status = (
-    <span role="status" {...stylex.props(styles.status, !isSheet && styles.grow)}>
-      {SAVED[autosave.state]}
+    <span role="status" {...stylex.props(styles.status, isSheet ? styles.centered : styles.grow)}>
+      {SAVED[autosave.state] || '\u00a0'}
     </span>
   );
   const close = isSheet ? (
@@ -980,11 +1020,23 @@ const styles = stylex.create({
   },
   status: {
     margin: 0,
+    maxWidth: '100%',
+    overflow: 'hidden',
+    whiteSpace: 'nowrap',
+    textOverflow: 'ellipsis',
     color: tm.textQuiet,
     fontSize: typeScaleVars['--text-supporting-size'],
   },
+  // A line of its own under the sheet's title, as wide whatever it says.
+  centered: {
+    alignSelf: 'stretch',
+    textAlign: 'center',
+  },
+  // The room the toolbar has left, whatever is said in it, so its buttons stay where they are.
   grow: {
     flexGrow: 1,
+    flexBasis: 0,
+    minWidth: 0,
     textAlign: 'end',
     paddingInlineEnd: spacingVars['--spacing-2'],
   },

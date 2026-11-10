@@ -26,11 +26,12 @@ import {
   follow,
   followed,
   isLeaving,
+  isOnItsWay,
   isUndoable,
   standingOfFollowed,
   type Standing,
 } from '../core/standing.ts';
-import { airmail } from './airmail.ts';
+import { Airmail } from './Airmail.tsx';
 import { offerUndo, withdrawUndo } from './undoable.ts';
 
 /** How long a toast stays once there is nothing left to do in it. */
@@ -49,8 +50,8 @@ const TICK_MS = 250;
 /**
  * The toast that follows a send from the device that asked for it. Through the undo window it counts
  * down with Undo, and for a send later it says when. Then it says what the Mailroom has shown: that
- * it's sending, that it went, or why it didn't, with the way to the Outbox. Airmail runs along its
- * top while the message is leaving.
+ * it's sending, that it went, or why it didn't, with the way to the Outbox. Airmail lies along its
+ * top while the message is leaving, and runs while it's on its way.
  */
 export default function LeavingToast({
   outgoing,
@@ -160,7 +161,7 @@ export default function LeavingToast({
   const text = refused ? `${refused} ${status}` : status;
   return (
     <div {...stylex.props(styles.card)}>
-      {isLeaving(standing) && <div {...stylex.props(airmail.stripe)} />}
+      {isLeaving(standing) && <Airmail isRunning={isOnItsWay(standing)} />}
       <div {...stylex.props(styles.row)}>
         <Icon icon={icon} size="sm" color="inherit" />
         <span {...stylex.props(styles.text)}>{text}</span>

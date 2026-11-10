@@ -44,6 +44,8 @@ export const tm = stylex.defineVars({
   // default accent, written out because StyleX can't evaluate an import.
   airmail: `repeating-linear-gradient(-45deg, ${VERMILION} 0 7px, #0000 7px 11px, ${INK_BLUE} 11px 18px, #0000 18px 22px)`,
   airmailHeight: '3px',
+  airmailRepeat: '31.1127px', // the pattern's 22px across its stripes, measured along it: 22√2
+  airmailTurn: '1s', // how long running airmail takes to slide one repeat
   // A resize handle on hover or drag, as in Toy Box: a line of the accent that fades out toward
   // both ends.
   resizeAccent: 'linear-gradient(transparent, var(--color-accent) 20% 80%, transparent)',

@@ -31,6 +31,7 @@ import {
   OutboxList,
   SendActions,
   sendCommands,
+  useLeaving,
   useOutboxCommands,
   useSend,
 } from '../../outbox/index.ts';
@@ -191,13 +192,11 @@ export function Workbench({
   const isOffscreen = (pane: Pane) => isPhone && pane !== phonePane;
 
   const { triage, undoLast, canUndo } = useTriage(view, folders);
-  // Drafts on their way can't be written on until their send is undone.
+  // Drafts on their way can't be written on until their send is undone. Each lies at the end of its
+  // conversation as a reply on its way instead, until the server's copy takes its place.
   const { data: outgoing } = useQuery(outboxQuery);
-  const leaving = useMemo(
-    () => (outgoing ?? []).filter(({ state }) => state !== 'failed').map(({ draft }) => draft),
-    [outgoing],
-  );
-  const composing = useComposing(selected, leaving);
+  const leaving = useLeaving();
+  const composing = useComposing(selected, leaving.drafts);
   const { compose } = composing;
   // A new message is from the account the view holds, or else the first.
   const writeFrom = scope ?? accounts[0];
@@ -460,13 +459,26 @@ export function Workbench({
   useLayoutEffect(() => {
     shownNow.current = selected;
   });
+  // A reply is on its way at the end of its conversation in the frame its composer closes, and
+  // leaves it again if the Mailroom refuses it or Undo takes it back.
   const sendWritten = (draft: MessageRef, at: string | undefined, writing: Writing) => {
     const from = { conversation: selected, isDocked: compose !== undefined && isDocked(compose) };
+    const pressedAt = Date.now();
+    leaving.pressed(draft, {
+      in: from.isDocked ? from.conversation : undefined,
+      written: writing.markdown,
+      at,
+      pressedAt,
+    });
     void send(draft, {
       at,
+      pressedAt,
       onUndone: (back) => {
+        leaving.forgotten(back);
         composing.resume(writing, back, from.isDocked && shownNow.current === from.conversation);
       },
+    }).then((outgoing) => {
+      if (!outgoing) leaving.forgotten(draft);
     });
   };
   const writingCommands = compose
@@ -727,6 +739,7 @@ export function Workbench({
                   onMessageKey={runCommandKey}
                   writing={writing}
                   hidden={composing.hidden}
+                  leaving={leaving.all}
                   onOpenDraft={composing.openDraft}
                   page={
                     page?.as === 'members' ? (
