@@ -65,7 +65,9 @@ export async function startWorker(
         WRANGLER_SEND_METRICS: 'false',
         // Wrangler's local explorer, and the collector behind it that records a span for every SQL
         // statement and socket read in a database of its own, on the Worker's thread. A deployed
-        // Worker has neither, and with them on they cost as much CPU as the Mailroom itself.
+        // Worker has neither, and with them on they cost as much CPU as the Mailroom itself. Keep them
+        // off: a bench measures what production runs, and turning them on would charge Wrangler's
+        // work to the Mailroom's budgets.
         X_LOCAL_EXPLORER: 'false',
         X_LOCAL_OBSERVABILITY: 'false',
         ...env,
