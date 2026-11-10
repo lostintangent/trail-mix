@@ -77,7 +77,7 @@ These are invariants. Breaking one needs an amendment to this file, not a clever
 - **A pure core.** Conversation linking, the index fold, IMAP sync reconciliation, quote detection, Markdown-to-mail rendering and the Outbox state machine are pure functions. A `core` module never reaches React, Astryx, StyleX, Cloudflare or a mail library, directly or through another module.
 - **Providers per protocol, presets per vendor.** Zoho and Outlook are presets of the one IMAP and SMTP provider: hosts, ports, sign-in method, and quirks such as whether the server files its own copy in Sent. Folder roles come from the server's SPECIAL-USE flags, then imapflow's table of common folder names, and a preset adds hints only for a vendor that needs them.
 - **One writer.** Everything for a member runs inside that member's Mailroom. Nothing else opens a mail connection or touches storage.
-- **Snapshots and hints.** Queries return snapshots. Hints arrive at most once, in no guaranteed order, and may be lost, so a browser refetches what a hint names and refetches everything on screen after a reconnect. Nothing needs an ordered, replayable stream.
+- **Snapshots and hints.** Queries return snapshots. Hints arrive at most once, in no guaranteed order, and may be lost, so a browser refetches what a hint names and refetches everything on screen after a reconnect. Nothing needs an ordered, replayable stream. The installed app may show the snapshots it kept before its first fetch, and refetches each of them once it connects. It keeps them only for the Mailroom that `thisDevice` names: online it asks before showing any, and an erase, which hints `everything`, names the Mailroom anew, so every device drops what it kept.
 - **Secrets enter once.** A password or refresh token is sent to the server once and encrypted before it is stored, with a key derived for that member from a Worker secret. No query returns it. Outlook sign-in uses the device-code flow, so there is no public callback route.
 - **Mail is hostile.** Message HTML is sanitized once in the browser with DOMPurify, with every rewrite done inside its hooks and nothing changed afterwards. It is then rendered in an iframe sandboxed without scripts under a restrictive content security policy. Remote images load only through the Worker's proxy, after the member allows the sender. Every route that returns the bytes of a message or a remote image answers with a sandboxing content security policy and `nosniff`, so opening one directly runs nothing.
 - **Never lose a message being written.** A draft is saved before Send schedules it and is removed only after the mail server accepts the send. Exactly one copy lands in Sent. Sending is two provider steps, each safe to repeat, with the Outbox recording the host's acceptance between them: `submit` hands the draft to the host unless Sent already holds its Message-ID, and `file` leaves one copy in Sent, then removes the draft. While the Outbox waits for a host that files its own copy, `file` leaves Sent to the host until its copy shows, and once the wait is over appends one if none came. Sent is checked by Message-ID through the host's search and among its newest messages, since a host's search may not yet know a copy it just filed. `file` never submits, so nothing after acceptance can deliver twice. A missing draft is never counted as sent.
@@ -132,6 +132,7 @@ src/
     workbench.tsx      the route that shows the workbench
     prepaint.ts        the inline script that runs before first paint
     icons.ts           makes public/icons from favicon.svg, run by `bun run icons`
+    service-worker.ts  the one service worker, built to /sw.js, which keeps the build for offline
     theme/
       trail-mix.ts     the Astryx theme
       built/           the theme compiled by `bun run theme`, which the app loads
@@ -151,6 +152,7 @@ src/
     composer/          core/ renders Markdown to mail, ui/ is the editor
     outbox/            core/ is the state machine the Mailroom's alarm drives, ui/ lists what waits
     commands/          registry.ts and the palette
+    offline/           core/ decides what the worker answers and what is kept, ui/ keeps snapshots in IndexedDB
     accounts/          core/ reads the add-account form, ui/ is the first-run screen and each account's page
     members/           core/ reads and changes the Access policy, server/ edits it through Cloudflare's API, ui/ is the Members page
   server/
@@ -158,7 +160,7 @@ src/
     access.ts          the sign-in seam
     routes/            what is not a server function: hint socket, message bytes, image proxy
   shared/
-    build/             build configuration shared with tests, such as the StyleX options
+    build/             build configuration shared with tests, such as the StyleX options and the worker's build
     query-client.ts
 tests/
   contract/            the provider contract suite

@@ -10,6 +10,7 @@ export const keys = {
   signIns: ['accounts', 'sign-ins'],
   // How the deployment is set up, which no hint changes.
   signInPresets: ['sign-in-presets'],
+  thisDevice: ['this-device'],
   folders: ['folders'],
   outbox: ['outbox'],
   conversations: (view: View) => ['conversations', view] as const,
@@ -21,6 +22,7 @@ export type Key =
   | typeof keys.accounts
   | typeof keys.signIns
   | typeof keys.signInPresets
+  | typeof keys.thisDevice
   | typeof keys.folders
   | typeof keys.outbox
   | ReturnType<typeof keys.conversations>
@@ -31,7 +33,7 @@ export type Key =
  * Whether a hint leaves a snapshot out of date. A change to a folder's mail changes its counts and
  * its list, every view across accounts, which may hold its mail, any open conversation, which the
  * hint can't name, and the Outbox, which names the conversation each draft on its way is in. A body
- * never changes for its message, so no hint touches one.
+ * never changes for its message, so no hint but an erase touches one.
  */
 export function isStale(key: Key, hint: Hint): boolean {
   switch (hint.changed) {
@@ -41,6 +43,8 @@ export function isStale(key: Key, hint: Hint): boolean {
       return key[0] === 'folders';
     case 'outbox':
       return key[0] === 'outbox';
+    case 'everything':
+      return true;
     case 'conversations':
       return (
         key[0] === 'folders' ||
@@ -76,6 +80,12 @@ export const signInsQuery = queryOptions({
 export const signInPresetsQuery = queryOptions({
   queryKey: keys.signInPresets,
   queryFn: () => mailroom.signInPresets(),
+});
+
+/** What this device keeps of the Mailroom, which changes only when the Mailroom is made anew. */
+export const thisDeviceQuery = queryOptions({
+  queryKey: keys.thisDevice,
+  queryFn: () => mailroom.thisDevice(),
 });
 
 export const foldersQuery = queryOptions({

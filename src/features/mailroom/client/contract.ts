@@ -36,7 +36,15 @@ export interface Queries {
   signIns(): Promise<SignIn[]>;
   /** The presets this deployment can sign in at, which is how it's set up, not what's under way. */
   signInPresets(): Promise<SignInPreset[]>;
+  /** What this device keeps, and whether the device at `endpoint` is notified. */
+  thisDevice(endpoint?: string): Promise<ThisDevice>;
 }
+
+/**
+ * `cache` names what an installed app keeps of this Mailroom. A new Mailroom, as an erase leaves,
+ * has a new one, so a device that kept the old one's drops what it kept.
+ */
+export type ThisDevice = { cache: string; pushKey?: string; notified: boolean };
 
 export interface Commands {
   /** The only call that carries a secret. */
@@ -216,6 +224,7 @@ export const QUERIES = [
   'outbox',
   'signIns',
   'signInPresets',
+  'thisDevice',
 ] as const satisfies readonly (keyof Queries)[];
 
 export const COMMANDS = [

@@ -10,6 +10,7 @@ export type {
   SignIn,
   SignInPreset,
   SignInSetup,
+  ThisDevice,
 } from './contract.ts';
 export { useHints } from './hints.ts';
 export {
@@ -21,6 +22,7 @@ export {
   outboxQuery,
   signInPresetsQuery,
   signInsQuery,
+  thisDeviceQuery,
 } from './queries.ts';
 export { mailroom } from './rpc.ts';
 export { imageUrl, messageUrl, partUrl, readMessagePath } from './urls.ts';

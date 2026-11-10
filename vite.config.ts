@@ -8,6 +8,7 @@ import { defineConfig } from 'vite';
 import { astryxIcons } from './src/shared/build/astryxIcons.ts';
 import { astryxMessages } from './src/shared/build/astryxMessages.ts';
 import { astryxUseTheme } from './src/shared/build/astryxUseTheme.ts';
+import { serviceWorker } from './src/shared/build/serviceWorker.ts';
 import { stylexDefinitionsFirst } from './src/shared/build/stylexDefinitionsFirst.ts';
 import { stylexOptions } from './src/shared/build/stylexOptions.ts';
 
@@ -37,6 +38,8 @@ export default defineConfig(({ isPreview }) => ({
     astryxMessages(),
     astryxIcons(),
     astryxUseTheme(),
+    // The installed app's service worker, `/sw.js`, which keeps this build for offline.
+    serviceWorker({ entry: 'src/app/service-worker.ts' }),
     stylexDefinitionsFirst(),
     stylex(stylexOptions),
     react(),

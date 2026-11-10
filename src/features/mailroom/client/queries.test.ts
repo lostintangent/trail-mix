@@ -56,7 +56,7 @@ test('accounts, folders and the Outbox each refetch only what shows them', () =>
   expect(staleAfter({ changed: 'outbox' })).toEqual(['outbox']);
 });
 
-test('a body never changes, so no hint refetches one', () => {
+test('a body never changes, so no hint but an erase refetches one', () => {
   const hints: Hint[] = [
     { changed: 'accounts' },
     { changed: 'folders', account: 'personal' },
@@ -65,4 +65,8 @@ test('a body never changes, so no hint refetches one', () => {
   ];
 
   for (const hint of hints) expect(staleAfter(hint)).not.toContain('body');
+});
+
+test('after an erase, every snapshot refetches', () => {
+  expect(staleAfter({ changed: 'everything' })).toEqual(snapshots.map(([name]) => name));
 });

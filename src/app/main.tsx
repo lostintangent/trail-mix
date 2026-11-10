@@ -1,6 +1,7 @@
 import { StartClient } from '@tanstack/react-start/client';
 import { StrictMode, startTransition } from 'react';
 import { hydrateRoot } from 'react-dom/client';
+import { keepForOffline } from '../features/offline/index.ts';
 
 // The browser entry. The document is the prerendered shell, so React adopts it and the router
 // renders the app into it.
@@ -12,3 +13,6 @@ startTransition(() => {
     </StrictMode>,
   );
 });
+
+// The installed app keeps what it needs to open with no network.
+keepForOffline();

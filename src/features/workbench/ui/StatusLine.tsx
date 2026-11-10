@@ -4,6 +4,7 @@ import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
 import * as stylex from '@stylexjs/stylex';
 import { tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account } from '../../mail/core/index.ts';
+import { useReach } from '../../offline/index.ts';
 import { mailStatus } from './status.ts';
 
 /**
@@ -17,7 +18,7 @@ export function StatusLine({
   accounts: readonly Account[];
   isCollapsed: boolean;
 }) {
-  const status = mailStatus(accounts);
+  const status = mailStatus(accounts, useReach());
   if (!status) return null;
   const line = (
     <p role="status" {...stylex.props(styles.line)}>

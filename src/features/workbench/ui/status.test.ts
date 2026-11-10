@@ -44,3 +44,13 @@ test('several accounts in trouble are counted, so none is left out', () => {
 
   expect(mailStatus(accounts)).toEqual({ tone: 'trouble', label: '3 accounts need attention' });
 });
+
+test('offline, the line says so above all else, and whether it shows what the device kept', () => {
+  const accounts = [account('Personal', 'needs-sign-in'), account('Work', 'syncing')];
+  expect(mailStatus(accounts, 'offline')).toEqual({ tone: 'busy', label: 'Offline' });
+  expect(mailStatus(accounts, 'offline-kept')).toEqual({
+    tone: 'busy',
+    label: 'Offline. Showing what this device kept',
+  });
+  expect(mailStatus([], 'offline')).toBeUndefined();
+});

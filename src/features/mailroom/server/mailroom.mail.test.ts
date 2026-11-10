@@ -17,7 +17,7 @@ import type {
 import { RESTARTED, UNDO_SECONDS } from '../../outbox/core/index.ts';
 import { SIGN_IN_PATIENCE_MS } from '../../providers/index.ts';
 import PostalMime from 'postal-mime';
-import type { AccountSetup, Page } from '../client/contract.ts';
+import type { AccountSetup, Page, ThisDevice } from '../client/contract.ts';
 import {
   caFile,
   empty,
@@ -740,6 +740,20 @@ describe('The Mailroom with the demo mailbox', () => {
         ([name, rows]) => name !== 'schema' && !name.startsWith('search_') && rows.length,
       ),
     ).toEqual([]);
+  }, 60_000);
+
+  test('what devices keep has one name until an erase, which every open device hears', async () => {
+    const eve = member('eve', () => worker);
+    const device = eve.device();
+    await device.opened;
+    const { cache, notified } = await eve.call<ThisDevice>('thisDevice');
+    expect(notified).toBe(false);
+    expect((await eve.call<ThisDevice>('thisDevice')).cache).toBe(cache);
+
+    const erased = device.next((hint) => hint.changed === 'everything');
+    await eve.call('eraseEverything');
+    await erased;
+    expect((await eve.call<ThisDevice>('thisDevice')).cache).not.toBe(cache);
   }, 60_000);
 
   test('starts with Personal and Work, and fills each Inbox first and newest first', async () => {

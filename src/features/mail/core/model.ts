@@ -128,7 +128,9 @@ export type Hint =
   | { changed: 'accounts' }
   | { changed: 'folders'; account: AccountId }
   | { changed: 'conversations'; folder: FolderRef }
-  | { changed: 'outbox' };
+  | { changed: 'outbox' }
+  // After an erase: nothing a device has, or kept, is the member's any more.
+  | { changed: 'everything' };
 
 /**
  * An Outbox entry. A draft is a message in a folder whose role is `drafts`, and the Outbox is a

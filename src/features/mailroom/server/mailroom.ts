@@ -64,6 +64,7 @@ import type {
   SignIn,
   SignInPreset,
   SignInSetup,
+  ThisDevice,
 } from '../client/contract.ts';
 import {
   accountBook,
@@ -117,6 +118,8 @@ const WINDOW_DAYS = 365;
 const WATCHING_MS = 60_000;
 /** Every account is checked this often, whether or not a device is open. */
 const CHECKING_MS = 5 * 60_000;
+/** Where the id that names what an installed app keeps is stored. */
+const CACHE_KEY = 'cache';
 
 /**
  * The Mailroom: one Durable Object per member, and the only writer of anything Trail Mix stores
@@ -257,6 +260,19 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     return Promise.resolve(presets.filter((preset) => this.vendor(preset)));
   }
 
+  /**
+   * Names what an installed app keeps of this Mailroom with an id made the first time it's asked.
+   * An erase deletes it with everything else, so the Mailroom it leaves has a new one.
+   */
+  async thisDevice(): Promise<ThisDevice> {
+    let cache = await this.ctx.storage.get<string>(CACHE_KEY);
+    if (cache === undefined) {
+      cache = crypto.randomUUID();
+      await this.ctx.storage.put(CACHE_KEY, cache);
+    }
+    return { cache, notified: false };
+  }
+
   // Commands
 
   async addAccount(setup: AccountSetup): Promise<Account> {
@@ -388,8 +404,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
     upgrade(this.sql);
-    this.hint({ changed: 'accounts' });
-    for (const { id } of accounts) this.hint({ changed: 'folders', account: id });
+    this.hint({ changed: 'everything' });
     await this.forgetBodies(`${this.member}/`);
   }
 

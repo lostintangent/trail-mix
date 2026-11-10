@@ -1,13 +1,22 @@
 import type { Account } from '../../mail/core/index.ts';
+import type { Reach } from '../../offline/index.ts';
 
 /** How the member's mail stands across every account, in one line at the foot of the sidebar. */
 export type MailStatus = { tone: 'ready' | 'busy' | 'trouble'; label: string };
 
 /**
- * An account in trouble outranks one still syncing, so a sign-in that ran out is never hidden
+ * With no network, that is all there is to say, since nothing about the accounts is current. Then
+ * an account in trouble outranks one still syncing, so a sign-in that ran out is never hidden
  * behind a sync that will finish on its own. With no accounts there is nothing to say.
  */
-export function mailStatus(accounts: readonly Account[]): MailStatus | undefined {
+export function mailStatus(
+  accounts: readonly Account[],
+  reach: Reach = 'online',
+): MailStatus | undefined {
+  if (reach !== 'online' && accounts.length > 0) {
+    const label = reach === 'offline-kept' ? 'Offline. Showing what this device kept' : 'Offline';
+    return { tone: 'busy', label };
+  }
   const [first, ...others] = accounts.filter(
     ({ status }) => status === 'needs-sign-in' || status === 'error',
   );
