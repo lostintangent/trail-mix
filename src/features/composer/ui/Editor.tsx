@@ -95,9 +95,11 @@ export function Editor({
         role: 'textbox',
         class: css(styles.prose),
       },
-      // ⌘↵ is the registry's Send, so the editor leaves it alone rather than breaking the line.
+      // ⌘↵ is the registry's Send and Esc its Back, which closes the composer, so the editor leaves
+      // both alone rather than breaking the line or swallowing Esc.
       handleDOMEvents: {
-        keydown: (_view, event) => event.key === 'Enter' && (event.metaKey || event.ctrlKey),
+        keydown: (_view, event) =>
+          event.key === 'Escape' || (event.key === 'Enter' && (event.metaKey || event.ctrlKey)),
       },
       handlePaste: (_view, event) => place(event.clipboardData?.files),
       handleDrop: (_view, event) => place(event.dataTransfer?.files),

@@ -81,7 +81,14 @@ test('every screen renders cleanly, with readable text, at both sizes in both th
           await page.getByRole('textbox', { name: 'Reply' }).waitFor();
         },
       ]);
-      screens.push(['newsletter', (page) => openConversation(page, /Kernel Weekly/)]);
+      // Escape closes the composer, which on a phone lies over everything.
+      screens.push([
+        'newsletter',
+        async (page) => {
+          await page.keyboard.press('Escape');
+          await openConversation(page, /Kernel Weekly/);
+        },
+      ]);
       // A search, whose matches the highlighter marks.
       screens.push(['search', (page) => searchFor(page, 'lunch thu')]);
       for (const [screen, reach] of screens) {

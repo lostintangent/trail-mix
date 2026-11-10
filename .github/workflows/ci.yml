@@ -136,6 +136,21 @@ jobs:
         env:
           READER_BROWSERS: webkit
 
+      # The composer at a phone's size, where it rises as a sheet, since Safari on an iPhone is
+      # where contenteditable misbehaves most. The preview it drives runs on Node.
+      - name: Build
+        run: bun run build
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Composer in WebKit at a phone's size
+        run: bun test tests/e2e/composer.e2e.ts
+        env:
+          E2E_ENGINE: webkit
+          E2E_SIZE: phone
+
   # Mail I/O against the native test mail server: the server's own tests, and the mail check
   # running in a Durable Object on workerd.
   mail:

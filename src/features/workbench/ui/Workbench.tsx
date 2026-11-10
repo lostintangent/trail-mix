@@ -76,7 +76,7 @@ import {
   viewCommands,
   type ViewCounts,
 } from '../../folders/index.ts';
-import { useMediaQuery } from './useMediaQuery.ts';
+import { useMediaQuery } from '../../../shared/useMediaQuery.ts';
 import { usePanel } from './usePanel.ts';
 
 type Pane = 'sidebar' | 'list' | 'reader';
@@ -158,16 +158,11 @@ export function Workbench({
   const { compose } = composing;
   // A new message is from the account the view holds, or else the first.
   const writeFrom = scope ?? accounts[0];
-  // On a phone, a new message closed with nothing open goes back to the list it was begun from.
-  const closeComposer = () => {
-    composing.close();
-    if (selected === undefined) setPhonePane('list');
-  };
+  const closeComposer = composing.close;
   const write =
     writeFrom &&
     (() => {
       composing.write(writeFrom);
-      setPhonePane('reader');
     });
   const [isSheetOpen, setSheetOpen] = useState(false);
   // A conversation that leaves the list gives way to the one below it, or above it at the end. On a
@@ -328,7 +323,6 @@ export function Workbench({
       at,
       onUndone: (back) => {
         composing.resume(writing, back, from.isDocked && shownNow.current === from.conversation);
-        setPhonePane('reader');
       },
     });
   };
@@ -389,32 +383,36 @@ export function Workbench({
   );
 
   const newMessage = commands.find(({ id }) => id === 'message.new');
-  const writing = compose && {
-    composer: (
-      <Suspense>
-        <Composer
-          key={composing.session}
-          compose={compose}
-          accounts={accounts}
-          onDraft={(saved, older) => composing.noteDraft(compose, saved, older)}
-          onSend={sendWritten}
-          sender={sender}
-          onSendable={setSendable}
-          sendActions={
-            <Suspense>
-              <SendActions
-                commands={writingCommands}
-                onPick={(at) => sender.current?.(at)}
-                isCompact={isPhone}
-              />
-            </Suspense>
-          }
-          onClose={closeComposer}
-        />
-      </Suspense>
-    ),
-    isDocked: isDocked(compose),
-  };
+  const writing =
+    compose &&
+    ({
+      composer: (
+        <Suspense>
+          <Composer
+            key={composing.session}
+            compose={compose}
+            accounts={accounts}
+            onDraft={(saved, older) => composing.noteDraft(compose, saved, older)}
+            onSend={sendWritten}
+            sender={sender}
+            onSendable={setSendable}
+            sendActions={
+              <Suspense>
+                <SendActions
+                  commands={writingCommands}
+                  onPick={(at) => sender.current?.(at)}
+                  isCompact={isPhone}
+                />
+              </Suspense>
+            }
+            isSheet={isPhone}
+            onClose={closeComposer}
+          />
+        </Suspense>
+      ),
+      // On a phone the composer rises over everything, wherever it was begun.
+      place: isPhone ? 'over' : isDocked(compose) ? 'docked' : 'filled',
+    } as const);
 
   return (
     <Commands value={commands}>

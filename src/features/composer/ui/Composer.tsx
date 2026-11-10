@@ -1,3 +1,4 @@
+import { Button } from '@astryxdesign/core/Button';
 import { Icon } from '@astryxdesign/core/Icon';
 import { IconButton } from '@astryxdesign/core/IconButton';
 import {
@@ -7,13 +8,16 @@ import {
   spacingVars,
   typeScaleVars,
   typographyVars,
+  shadowVars,
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { useQuery } from '@tanstack/react-query';
 import { useEditorState, type Editor as TiptapEditor } from '@tiptap/react';
 import { Bold, Code, ImagePlus, Italic, Paperclip, Trash2, X } from 'lucide-react';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { StampDot } from '../../../app/theme/StampDot.tsx';
+import { useMediaQuery } from '../../../shared/useMediaQuery.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, Message, MessageRef } from '../../mail/core/index.ts';
 import { bodyQuery, partUrl } from '../../mailroom/client/index.ts';
@@ -62,6 +66,11 @@ export type ComposerProps = {
   onSendable: (isSendable: boolean) => void;
   /** The Send and Send later buttons, drawn from the registry's commands. */
   sendActions: ReactNode;
+  /**
+   * How the composer lies: on the page, under a conversation or filling the reader, or, on a
+   * phone, as a sheet that rises over everything.
+   */
+  isSheet: boolean;
   /** Closes the composer, which saves what is still unsaved as it goes. */
   onClose: () => void;
 };
@@ -80,13 +89,18 @@ export function Composer({ compose, ...props }: ComposerProps) {
   });
   const start = startOf(compose, props.accounts, body);
   if (!start) {
-    return (
-      <section aria-label="Message" aria-busy={!isError} {...stylex.props(styles.sheet)}>
+    const opening = (
+      <section
+        aria-label="Message"
+        aria-busy={!isError}
+        {...stylex.props(styles.sheet, props.isSheet && styles.risen)}
+      >
         <p {...stylex.props(styles.status)}>
           {isError ? 'This message couldn’t be loaded to write from.' : 'Opening…'}
         </p>
       </section>
     );
+    return props.isSheet ? <Over onClose={props.onClose}>{opening}</Over> : opening;
   }
   return (
     <Writer
@@ -136,6 +150,7 @@ function Writer({
   sender,
   onSendable,
   sendActions,
+  isSheet,
   onClose,
 }: {
   start: Writing;
@@ -221,122 +236,167 @@ function Writer({
   };
   const account = accounts.find((each) => each.id === writing.account);
   const files = writing.attachments.filter((attached) => attached.contentId === undefined);
+  const isCoarse = useMediaQuery(media.coarse);
 
-  return (
+  const title = isNew ? 'New message' : 'Reply';
+  // On a coarse pointer a tap is the only way in, and a tooltip it left would stay.
+  const tip = (label: string) => (isCoarse ? undefined : label);
+  const status = (
+    <span role="status" {...stylex.props(styles.status, !isSheet && styles.grow)}>
+      {SAVED[autosave.state]}
+    </span>
+  );
+  const close = isSheet ? (
+    <Button label="Close" variant="ghost" onClick={onClose} />
+  ) : (
+    <IconButton
+      label="Close"
+      tooltip={tip('Close, keeping the draft')}
+      icon={<Icon icon={X} />}
+      variant="ghost"
+      onClick={onClose}
+    />
+  );
+
+  const writer = (
     <section
-      aria-label={isNew ? 'New message' : 'Reply'}
-      {...stylex.props(styles.sheet, isNew && styles.full)}
+      aria-label={title}
+      {...(isSheet ? { role: 'dialog', 'aria-modal': true } : {})}
+      {...stylex.props(styles.sheet, isNew && styles.full, isSheet && styles.risen)}
     >
-      <div {...stylex.props(styles.fields)}>
-        <div {...stylex.props(styles.row)}>
-          <label {...stylex.props(styles.from)}>
-            {account && <StampDot stamp={account.stamp} />}
-            <span {...stylex.props(styles.hidden)}>From</span>
-            <select
-              value={writing.account}
-              onChange={(event) => {
-                const next = event.target.value;
-                const chosen = accounts.find((each) => each.id === next);
-                edit(() => ({ account: next, signature: chosen?.signature?.trim() || undefined }));
-              }}
-              {...stylex.props(styles.select)}
-            >
-              {accounts.map((each) => (
-                <option key={each.id} value={each.id}>
-                  {each.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <Field
-            label="To"
-            value={fields.to}
-            onChange={(text) => setAddresses('to', text)}
-            isFocused={start.to.length === 0}
-          />
-          {!hasCopies && (
-            <button
-              type="button"
-              onClick={() => setHasCopies(true)}
-              {...stylex.props(styles.copies)}
-            >
-              Cc Bcc
-            </button>
-          )}
-        </div>
-        {hasCopies && (
-          <>
-            <div {...stylex.props(styles.row)}>
-              <Field label="Cc" value={fields.cc} onChange={(text) => setAddresses('cc', text)} />
+      {isSheet && (
+        <header {...stylex.props(styles.sheetHeader)}>
+          {close}
+          <div {...stylex.props(styles.sheetTitle)}>
+            <h2 {...stylex.props(styles.title)}>{title}</h2>
+            {status}
+          </div>
+          {sendActions}
+        </header>
+      )}
+      <div {...stylex.props(isSheet && styles.sheetBody)}>
+        <div {...stylex.props(styles.fields)}>
+          <div {...stylex.props(styles.row, styles.fromRow)}>
+            <div {...stylex.props(styles.fromBox)}>
+              <span {...stylex.props(styles.fromLabel)}>From</span>
+              <label {...stylex.props(styles.from)}>
+                {account && <StampDot stamp={account.stamp} />}
+                <span {...stylex.props(styles.hidden)}>From</span>
+                <select
+                  value={writing.account}
+                  onChange={(event) => {
+                    const next = event.target.value;
+                    const chosen = accounts.find((each) => each.id === next);
+                    edit(() => ({
+                      account: next,
+                      signature: chosen?.signature?.trim() || undefined,
+                    }));
+                  }}
+                  {...stylex.props(styles.select)}
+                >
+                  {accounts.map((each) => (
+                    <option key={each.id} value={each.id}>
+                      {each.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
             </div>
+            <Field
+              label="To"
+              value={fields.to}
+              onChange={(text) => setAddresses('to', text)}
+              isFocused={start.to.length === 0}
+            />
+            {!hasCopies && (
+              <button
+                type="button"
+                onClick={() => setHasCopies(true)}
+                {...stylex.props(styles.copies)}
+              >
+                Cc Bcc
+              </button>
+            )}
+          </div>
+          {hasCopies && (
+            <>
+              <div {...stylex.props(styles.row)}>
+                <Field label="Cc" value={fields.cc} onChange={(text) => setAddresses('cc', text)} />
+              </div>
+              <div {...stylex.props(styles.row)}>
+                <Field
+                  label="Bcc"
+                  value={fields.bcc}
+                  onChange={(text) => setAddresses('bcc', text)}
+                />
+              </div>
+            </>
+          )}
+          {isNew && (
             <div {...stylex.props(styles.row)}>
               <Field
-                label="Bcc"
-                value={fields.bcc}
-                onChange={(text) => setAddresses('bcc', text)}
+                label="Subject"
+                value={writing.subject}
+                onChange={(subject) => edit(() => ({ subject }))}
               />
             </div>
-          </>
+          )}
+        </div>
+
+        <Editor
+          start={from}
+          onChange={(markdown, isEdit) => {
+            if (isEdit) edit(() => ({ markdown }));
+            else setWriting((was) => ({ ...was, markdown }));
+          }}
+          imageUrl={imageUrl}
+          onFiles={(dropped) => take(dropped, true)}
+          onEditor={setEditor}
+          label={isNew ? 'Message' : 'Reply'}
+          isFocused={start.to.length > 0}
+        />
+        {writing.signature && (
+          <pre aria-label="Signature" {...stylex.props(styles.signature)}>
+            {`-- \n${writing.signature}`}
+          </pre>
         )}
-        {isNew && (
-          <div {...stylex.props(styles.row)}>
-            <Field
-              label="Subject"
-              value={writing.subject}
-              onChange={(subject) => edit(() => ({ subject }))}
-            />
-          </div>
+
+        {files.length > 0 && (
+          <ul aria-label="Attachments" {...stylex.props(styles.files)}>
+            {files.map((attached, at) => {
+              const { name, size } = 'file' in attached ? attached.file : attached;
+              return (
+                <li key={`${name}-${at}`} {...stylex.props(styles.file)}>
+                  <span {...stylex.props(styles.fileName)}>{name}</span>
+                  <span {...stylex.props(styles.fileSize)}>{sizeOf(size)}</span>
+                  <IconButton
+                    label={`Remove ${name}`}
+                    icon={<Icon icon={X} />}
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      edit((was) => ({
+                        attachments: was.attachments.filter((each) => each !== attached),
+                      }))
+                    }
+                  />
+                </li>
+              );
+            })}
+          </ul>
         )}
       </div>
 
-      <Editor
-        start={from}
-        onChange={(markdown, isEdit) => {
-          if (isEdit) edit(() => ({ markdown }));
-          else setWriting((was) => ({ ...was, markdown }));
-        }}
-        imageUrl={imageUrl}
-        onFiles={(dropped) => take(dropped, true)}
-        onEditor={setEditor}
-        label={isNew ? 'Message' : 'Reply'}
-        isFocused={start.to.length > 0}
-      />
-      {writing.signature && (
-        <pre aria-label="Signature" {...stylex.props(styles.signature)}>
-          {`-- \n${writing.signature}`}
-        </pre>
-      )}
-
-      {files.length > 0 && (
-        <ul aria-label="Attachments" {...stylex.props(styles.files)}>
-          {files.map((attached, at) => {
-            const { name, size } = 'file' in attached ? attached.file : attached;
-            return (
-              <li key={`${name}-${at}`} {...stylex.props(styles.file)}>
-                <span {...stylex.props(styles.fileName)}>{name}</span>
-                <span {...stylex.props(styles.fileSize)}>{sizeOf(size)}</span>
-                <IconButton
-                  label={`Remove ${name}`}
-                  icon={<Icon icon={X} />}
-                  variant="ghost"
-                  size="sm"
-                  onClick={() =>
-                    edit((was) => ({
-                      attachments: was.attachments.filter((each) => each !== attached),
-                    }))
-                  }
-                />
-              </li>
-            );
-          })}
-        </ul>
-      )}
-
-      <div role="toolbar" aria-label="Formatting and files" {...stylex.props(styles.toolbar)}>
-        {editor && <Formatting editor={editor} />}
+      <div
+        role="toolbar"
+        aria-label="Formatting and files"
+        {...stylex.props(styles.toolbar, isSheet && styles.sheetToolbar)}
+      >
+        {editor && <Formatting editor={editor} tip={tip} />}
         <FilePicker
           id={`${id}-image`}
           label="Insert an image"
+          tip={tip}
           icon={ImagePlus}
           accept="image/*"
           onFiles={(picked) => {
@@ -353,29 +413,37 @@ function Writer({
         <FilePicker
           id={`${id}-file`}
           label="Attach files"
+          tip={tip}
           icon={Paperclip}
           onFiles={(picked) => take(picked, false)}
         />
-        <span role="status" {...stylex.props(styles.status, styles.grow)}>
-          {SAVED[autosave.state]}
-        </span>
+        {isSheet ? <span {...stylex.props(styles.grow)} /> : status}
         <IconButton
           label="Discard draft"
-          tooltip="Discard draft"
+          tooltip={tip('Discard draft')}
           icon={<Icon icon={Trash2} />}
           variant="ghost"
           onClick={discard}
         />
-        <IconButton
-          label="Close"
-          tooltip="Close, keeping the draft"
-          icon={<Icon icon={X} />}
-          variant="ghost"
-          onClick={onClose}
-        />
-        {sendActions}
+        {!isSheet && close}
+        {!isSheet && sendActions}
       </div>
     </section>
+  );
+  return isSheet ? <Over onClose={onClose}>{writer}</Over> : writer;
+}
+
+/**
+ * On a phone the sheet lies over the whole app, outside the sliding panes, with the app dimmed
+ * behind it. A tap on what's dimmed closes it, keeping the draft.
+ */
+function Over({ children, onClose }: { children: ReactNode; onClose: () => void }) {
+  return createPortal(
+    <>
+      <div aria-hidden onClick={onClose} {...stylex.props(styles.scrim)} />
+      {children}
+    </>,
+    document.body,
   );
 }
 
@@ -387,7 +455,13 @@ const SAVED: Record<SaveState, string> = {
 };
 
 /** Bold, italic and code, each pressed while the text at the cursor has it. */
-function Formatting({ editor }: { editor: TiptapEditor }) {
+function Formatting({
+  editor,
+  tip,
+}: {
+  editor: TiptapEditor;
+  tip: (label: string) => string | undefined;
+}) {
   const active = useEditorState({
     editor,
     selector: ({ editor: current }) => ({
@@ -405,7 +479,7 @@ function Formatting({ editor }: { editor: TiptapEditor }) {
     <IconButton
       key={label}
       label={label}
-      tooltip={label}
+      tooltip={tip(label)}
       icon={<Icon icon={icon} />}
       variant="ghost"
       aria-pressed={active[key]}
@@ -418,12 +492,14 @@ function Formatting({ editor }: { editor: TiptapEditor }) {
 function FilePicker({
   id,
   label,
+  tip,
   icon,
   accept,
   onFiles,
 }: {
   id: string;
   label: string;
+  tip: (label: string) => string | undefined;
   icon: typeof Bold;
   accept?: string;
   onFiles: (files: File[]) => void;
@@ -433,7 +509,7 @@ function FilePicker({
     <>
       <IconButton
         label={label}
-        tooltip={label}
+        tooltip={tip(label)}
         icon={<Icon icon={icon} />}
         variant="ghost"
         onClick={() => input.current?.click()}
@@ -512,6 +588,12 @@ function refOf({ account, path, uidValidity, uid }: MessageRef): MessageRef {
   return { account, path, uidValidity, uid };
 }
 
+/** A phone's sheet rises from the bottom of the screen. */
+const rise = stylex.keyframes({
+  from: { transform: 'translateY(100%)' },
+  to: { transform: 'translateY(0)' },
+});
+
 const styles = stylex.create({
   sheet: {
     display: 'flex',
@@ -528,6 +610,84 @@ const styles = stylex.create({
   },
   full: {
     flexGrow: 1,
+  },
+  // On a phone: over everything, from just below the top of the screen to its bottom edge, with
+  // its header and toolbar fixed and what's written scrolling between them.
+  risen: {
+    position: 'fixed',
+    insetInline: 0,
+    bottom: 0,
+    top: `calc(${tm.safeTop} + ${spacingVars['--spacing-6']})`,
+    zIndex: 2,
+    gap: 0,
+    padding: 0,
+    paddingBottom: tm.safeBottom,
+    borderEndStartRadius: 0,
+    borderEndEndRadius: 0,
+    boxShadow: shadowVars['--shadow-high'],
+    animationName: { default: rise, [media.reducedMotion]: 'none' },
+    animationDuration: '300ms',
+    animationTimingFunction: tm.easeLayout,
+  },
+  scrim: {
+    position: 'fixed',
+    inset: 0,
+    zIndex: 2,
+    backgroundColor: colorVars['--color-overlay'],
+  },
+  sheetHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: spacingVars['--spacing-2'],
+    padding: spacingVars['--spacing-2'],
+    borderBottomWidth: borderVars['--border-width'],
+    borderBottomStyle: 'solid',
+    borderBottomColor: colorVars['--color-border'],
+  },
+  sheetTitle: {
+    flexGrow: 1,
+    minWidth: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+  },
+  title: {
+    margin: 0,
+    fontSize: typeScaleVars['--text-body-size'],
+    fontWeight: 600,
+  },
+  sheetBody: {
+    flexGrow: 1,
+    minHeight: 0,
+    overflowY: 'auto',
+    overscrollBehavior: 'contain',
+    display: 'flex',
+    flexDirection: 'column',
+    gap: spacingVars['--spacing-2'],
+    paddingInline: spacingVars['--spacing-4'],
+  },
+  sheetToolbar: {
+    flexWrap: 'nowrap',
+    paddingInline: spacingVars['--spacing-2'],
+    borderTopWidth: borderVars['--border-width'],
+    borderTopStyle: 'solid',
+    borderTopColor: colorVars['--color-border'],
+  },
+  // On a phone the From chip has a line of its own, named as the prototype names it.
+  fromRow: {
+    flexWrap: { default: 'nowrap', [media.phone]: 'wrap' },
+  },
+  fromBox: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: spacingVars['--spacing-2'],
+    flexBasis: { default: 'auto', [media.phone]: '100%' },
+    minHeight: tm.target,
+  },
+  fromLabel: {
+    display: { default: 'none', [media.phone]: 'inline' },
+    color: tm.textQuiet,
+    fontSize: typeScaleVars['--text-body-size'],
   },
   fields: {
     display: 'flex',

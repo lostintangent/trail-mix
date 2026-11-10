@@ -71,7 +71,7 @@ export function ReaderPane({
    * The composer, while the member writes: docked under the conversation it answers, or filling
    * the sheet for a message of its own.
    */
-  writing?: { composer: ReactNode; isDocked: boolean };
+  writing?: { composer: ReactNode; place: 'docked' | 'filled' | 'over' };
   /** Drafts the reader leaves out, such as the one being written. */
   hidden?: readonly MessageRef[];
   /** Opens a draft in the conversation to go on writing it. */
@@ -97,7 +97,8 @@ export function ReaderPane({
     () => reading && onOpenDraft && ((draft: Message) => onOpenDraft(draft, reading.conversation)),
     [reading, onOpenDraft],
   );
-  const isDocked = writing?.isDocked === true;
+  const isDocked = writing?.place === 'docked';
+  const isFilled = writing?.place === 'filled';
   const announce = useEffectEvent((id: ConversationId) => onShown?.(id));
   useEffect(() => {
     if (shown !== undefined && isShowing) announce(shown);
@@ -118,17 +119,19 @@ export function ReaderPane({
           onClick={onBack}
         />
       </header>
-      {writing && !isDocked ? (
+      {isFilled ? (
         <div {...stylex.props(styles.scroll, styles.filled)}>
           <div {...stylex.props(styles.writing, styles.filled)}>{writing.composer}</div>
         </div>
       ) : null}
-      {bar && !(writing && !isDocked) ? (
+      {/* A composer over everything lies outside the panes, wherever it is drawn. */}
+      {writing?.place === 'over' && writing.composer}
+      {bar && !isFilled ? (
         <div role="toolbar" aria-label="Conversation" {...stylex.props(styles.bar)}>
           <Suspense>{bar}</Suspense>
         </div>
       ) : null}
-      {writing && !isDocked ? null : reading ? (
+      {isFilled ? null : reading ? (
         <div {...stylex.props(styles.scroll, actions && styles.underBar)}>
           <Suspense>
             <Reader
