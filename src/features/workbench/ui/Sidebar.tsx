@@ -116,7 +116,7 @@ export function Sidebar({
             </section>
           ))}
       </div>
-      {!isCollapsed && <div {...stylex.props(styles.footer)}>{footer}</div>}
+      <div {...stylex.props(styles.footer, isCollapsed && styles.railFooter)}>{footer}</div>
     </nav>
   );
 }
@@ -283,6 +283,10 @@ const styles = stylex.create({
     color: colorVars['--color-text-accent'],
   },
   footer: {
+    display: 'flex',
     paddingTop: spacingVars['--spacing-2'],
+  },
+  railFooter: {
+    justifyContent: 'center',
   },
 });
