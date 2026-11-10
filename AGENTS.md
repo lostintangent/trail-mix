@@ -203,7 +203,7 @@ Great code pursues simplicity by placing a rich domain model at the center, deco
 - **Bun canary 1.4.4 or newer** owns install, format, lint, type-check, test and the production build, which Vite runs. Install it with `bun upgrade --canary`. `bun fmt`, `bun lint` and `bun check` are built in, so there is no Prettier, ESLint or `typescript` package to install.
 - **Node 22 or newer** runs two things: `wrangler deploy`, and whatever starts the local Workers runtime, which is the Vite dev server, `vite preview`, and tests that drive a Worker on workerd. Miniflare cannot reach workerd under Bun, because Bun's built-in `undici` ignores the dispatcher it routes requests through. They move back to Bun once oven-sh/bun#39247 is fixed.
 - **Scripts name their runtime.** `bun run build` runs `bun --bun vite build`. `bun run dev` and `bun run preview` run Vite's JS entry under `node`. `bunfig.toml` does not set `[run] bun = true`, because that would make `node` inside every script mean Bun.
-- **Setup.** `bun install`, then `bun run dev`.
+- **Setup.** `bun install`, copy `.dev.vars.example` to `.dev.vars`, then `bun run dev`.
 - **Dependencies are exact versions.** `bun add` pins what it installs, and CI installs from the frozen lockfile. An upgrade is a deliberate edit.
 - **Lint is strict.** Type-aware rules are on and a warning fails the run. To relax a rule, change `bunfig.toml` or add an `eslint-disable-next-line` comment, and say why in either place.
 

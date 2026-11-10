@@ -1,0 +1,6 @@
+# The Worker's variables for `bun run dev` and `bun run preview`. Copy this file to `.dev.vars`,
+# which stays on your machine.
+
+# The one development member. It signs in only for requests addressed to localhost, and only while
+# Cloudflare Access isn't configured.
+DEV_MEMBER=dev@trailmix.test
