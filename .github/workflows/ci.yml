@@ -76,10 +76,10 @@ jobs:
       - name: Smoke test
         run: bun run e2e
 
-      # Measures the workbench's budgets in AGENTS.md, and fails when one is over. The Mailroom's
-      # are measured in the mail job, which has the test mail server.
-      - name: Benchmark the workbench
-        run: bun run bench workbench
+      # Measures the workbench's and the reader's budgets in AGENTS.md, and fails when one is over.
+      # The Mailroom's are measured in the mail job, which has the test mail server.
+      - name: Benchmark the workbench and the reader
+        run: bun run bench workbench reader
 
       - name: Upload the screenshots and benchmark numbers
         if: ${{ !cancelled() }}

@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BenchArea, Measurement } from './budget.ts';
 import { mailroom } from './mailroom.ts';
+import { reader } from './reader.ts';
 import { workbench } from './workbench.ts';
 
 /**
@@ -12,7 +13,7 @@ import { workbench } from './workbench.ts';
  * `bun run bench mailroom` measures only the areas named, as CI does in the job that has what an
  * area needs. A name that is no area fails the run, so a typo cannot pass by measuring nothing.
  */
-const AREAS: BenchArea[] = [workbench, mailroom];
+const AREAS: BenchArea[] = [workbench, reader, mailroom];
 
 const named = process.argv.slice(2);
 const unknown = named.filter((name) => !AREAS.some((area) => area.name === name));
