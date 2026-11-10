@@ -18,7 +18,8 @@ export async function startPreview(vars: Record<string, string> = {}): Promise<P
   const restoreVars = writeVars({ ...exampleVars(), ...vars });
   const server = Bun.spawn(
     ['node', 'node_modules/vite/bin/vite.js', 'preview', '--port', '0', '--strictPort'],
-    { cwd: ROOT, stdout: 'pipe', stderr: 'inherit' },
+    // Vite colors its output whenever `CI` is set, which would break the address up with escapes.
+    { cwd: ROOT, stdout: 'pipe', stderr: 'inherit', env: { ...process.env, NO_COLOR: '1' } },
   );
   const url = await listeningUrl(server.stdout);
   return {
