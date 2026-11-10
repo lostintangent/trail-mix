@@ -142,6 +142,30 @@ test('every folder and account has its menu without a hover, for itself rather t
   await readable(page, 'desktop-light-account-menu');
 }, 60_000);
 
+test('the sidebar works from the keyboard alone, its fold first and each menu as its own', async () => {
+  const page = await open({ ...DESKTOP, colorScheme: 'light' });
+  const focused = () =>
+    page.evaluate(() => {
+      const element = document.activeElement!;
+      return `${element.getAttribute('role') ?? element.tagName}: ${element.getAttribute('aria-label') ?? element.textContent}`;
+    });
+  await page.keyboard.press('Tab');
+  await expect(focused()).resolves.toBe('BUTTON: Fold the sidebar');
+
+  // A row's menu loads as it's first opened, and still opens as a menu does from the keyboard.
+  const more = page
+    .getByRole('region', { name: 'Work' })
+    .getByRole('button', { name: 'More for Receipts' });
+  await more.focus();
+  await page.keyboard.press('Enter');
+  await page.getByRole('menuitem').first().waitFor();
+  await expect(focused()).resolves.toBe('menuitem: New folder in Receipts');
+  await page.keyboard.press('ArrowDown');
+  await expect(focused()).resolves.toBe('menuitem: Rename Receipts');
+  await page.keyboard.press('Escape');
+  await expect(focused()).resolves.toBe('BUTTON: More for Receipts');
+}, 60_000);
+
 test('accounts and folders fold by click and by key, count what’s unread inside, and stay folded', async () => {
   const page = await open({ ...DESKTOP, colorScheme: 'dark' });
   const count = async (name: string) =>

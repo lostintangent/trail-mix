@@ -93,6 +93,10 @@ export const Sidebar = memo(function Sidebar({
   const { isDrawn: isRailDrawn, isShown: isRailShown } = useRail(isRail);
   return (
     <nav id={id} aria-label="Mailboxes" {...stylex.props(styles.sidebar)}>
+      {/* First, as it reads: it heads both layouts. */}
+      {rail && (
+        <div {...stylex.props(styles.pinned, styles.width(`${rail.width}px`))}>{rail.fold}</div>
+      )}
       <div
         aria-hidden={isRail || undefined}
         inert={isRail}
@@ -183,7 +187,6 @@ export const Sidebar = memo(function Sidebar({
               />
             </div>
           )}
-          <div {...stylex.props(styles.pinned, styles.width(`${rail.width}px`))}>{rail.fold}</div>
         </>
       )}
     </nav>

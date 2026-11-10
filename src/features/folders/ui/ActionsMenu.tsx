@@ -1,12 +1,12 @@
 import { DropdownMenu, type DropdownMenuOption } from '@astryxdesign/core/DropdownMenu';
 import { Icon } from '@astryxdesign/core/Icon';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { isApple, shortcutLabel, type Command } from '../../commands/index.ts';
 import { MoreButton } from './MoreButton.tsx';
 
 /**
- * A sidebar row's menu, which loads apart from the first screen and mounts open, once the row's
- * `…` is first pressed. It asks for the row's actions only while open, so a closed menu costs the
+ * A sidebar row's menu, which loads apart from the first screen and opens as it mounts, once the
+ * row's `…` is first pressed. It asks for the row's actions only while open, so a closed menu costs the
  * sidebar nothing as it renders.
  */
 export function ActionsMenu({
@@ -16,10 +16,26 @@ export function ActionsMenu({
   label: string;
   actions: () => readonly Command[];
 }) {
-  const [isOpen, setOpen] = useState(true);
+  const [isOpen, setOpen] = useState(false);
+  const button = useRef<HTMLElement>(null);
+  // It takes the place of the button that was pressed, so it takes that button's focus too, then
+  // opens, as the menu would from its own button: arrows move into it, and Escape comes back.
+  useEffect(() => {
+    button.current?.focus();
+    setOpen(true);
+  }, []);
   return (
     <DropdownMenu
-      renderTrigger={(trigger) => <MoreButton label={label} {...trigger} />}
+      renderTrigger={({ ref, ...trigger }) => (
+        <MoreButton
+          label={label}
+          ref={(element) => {
+            ref(element);
+            button.current = element;
+          }}
+          {...trigger}
+        />
+      )}
       items={isOpen ? menuItems(actions()) : CLOSED}
       isMenuOpen={isOpen}
       onOpenChange={setOpen}
