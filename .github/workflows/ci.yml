@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# This workflow only reads the repository. It uses no secret, so it is safe on forks.
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      # `bun fmt`, `bun lint` and `bun check` ship in canary builds only.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: canary
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Format
+        run: bun fmt --check
+
+      - name: Lint
+        run: bun lint
+
+      - name: Type-check
+        run: bun check
+
+      - name: Test
+        run: bun test
+
+      - name: Build
+        run: bun run build

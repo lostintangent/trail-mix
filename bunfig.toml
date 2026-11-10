@@ -1,0 +1,18 @@
+[run]
+# Package scripts run under Bun even when a tool's own launcher asks for Node,
+# so a script behaves the same on a laptop and on a GitHub runner.
+bun = true
+
+[install]
+# `bun add` records the exact version it installed. Upgrades are deliberate edits.
+exact = true
+
+[fmt]
+printWidth = 100
+singleQuote = true
+
+[lint]
+# Also run the rules that need types, such as a promise nobody awaits.
+typeAware = true
+# A warning fails the run, so `bun lint` either passes or it does not.
+maxWarnings = 0
