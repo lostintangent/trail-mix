@@ -87,19 +87,24 @@ export function replySubject(subject: string): string {
 }
 
 /**
- * Who a reply goes to. A reply goes to the sender, and a reply to all also goes to everyone else the
- * parent was sent to, its Cc staying Cc. The member's own addresses are left out, unless the parent
- * is the member's own message, when a reply goes where that message went. Each address appears
- * once, in the first place it would.
+ * Who a reply goes to. A reply goes to the parent's Reply-To, which mailing lists and help desks
+ * set, or else to its sender. A reply to all also goes to everyone else the parent was sent to,
+ * its Cc staying Cc. The member's own addresses are left out, and a Reply-To that names only them
+ * is passed over for the sender. A reply to the member's own message goes where that message went.
+ * Each address appears once, in the first place it would.
  */
 export function replyRecipients(
-  parent: Pick<Envelope, 'from' | 'to' | 'cc'>,
+  parent: Pick<Envelope, 'from' | 'to' | 'cc'> & { replyTo?: Address[] },
   own: readonly string[],
   all: boolean,
 ): { to: Address[]; cc: Address[] } {
   const mine = new Set(own.map((email) => email.toLowerCase()));
-  const fromMe = mine.has(parent.from.email.toLowerCase());
-  const to = fromMe ? parent.to : [parent.from, ...(all ? parent.to : [])];
+  const isMine = ({ email }: Address) => mine.has(email.toLowerCase());
+  const fromMe = isMine(parent.from);
+  const answer = (parent.replyTo ?? []).filter((address) => !isMine(address));
+  const to = fromMe
+    ? parent.to
+    : [...(answer.length ? answer : [parent.from]), ...(all ? parent.to : [])];
   const cc = all ? parent.cc : [];
   const seen = new Set(fromMe ? [] : mine);
   const once = (addresses: readonly Address[]) =>

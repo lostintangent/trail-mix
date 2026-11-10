@@ -1,6 +1,11 @@
 import { expect, test } from 'bun:test';
 import PostalMime from 'postal-mime';
-import { writeMime, type Address, type MimeAttachment } from '../../mail/core/index.ts';
+import {
+  addressesIn,
+  writeMime,
+  type Address,
+  type MimeAttachment,
+} from '../../mail/core/index.ts';
 import {
   contentIdFor,
   messageOf,
@@ -214,6 +219,34 @@ test('a reply to all names each address once, in the first place it would appear
     cc: [{ name: 'Alan', email: 'alan@EXAMPLE.org' }, edsger],
   };
   expect(replyRecipients(parent, [me.email], true)).toEqual({ to: [grace, alan], cc: [edsger] });
+});
+
+test('a reply to a list goes to its Reply-To, and a reply to all keeps To and Cc', () => {
+  const list: Address = { name: 'Engines', email: 'engines@lists.example.org' };
+  const parent = {
+    from: grace,
+    replyTo: addressesIn('Engines <engines@lists.example.org>'),
+    to: [list],
+    cc: [alan],
+  };
+  expect(replyRecipients(parent, [me.email], false)).toEqual({ to: [list], cc: [] });
+  expect(replyRecipients(parent, [me.email], true)).toEqual({ to: [list], cc: [alan] });
+});
+
+test('a Reply-To that names me is passed over, for the rest of it or else the sender', () => {
+  const parent = { from: grace, to: [me], cc: [edsger] };
+  expect(replyRecipients({ ...parent, replyTo: [me] }, [me.email], false)).toEqual({
+    to: [grace],
+    cc: [],
+  });
+  expect(replyRecipients({ ...parent, replyTo: [me, alan] }, [me.email], false)).toEqual({
+    to: [alan],
+    cc: [],
+  });
+  expect(replyRecipients({ ...parent, replyTo: [me] }, [me.email], true)).toEqual({
+    to: [grace],
+    cc: [edsger],
+  });
 });
 
 test('a reply to my own message goes where it went', () => {
