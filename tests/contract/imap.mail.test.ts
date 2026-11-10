@@ -13,6 +13,7 @@ import {
   caFile,
   count,
   empty,
+  fileSentCopies,
   identity,
   kick,
   ports,
@@ -67,7 +68,14 @@ async function harness(profile: Profile): Promise<Harness> {
     address: alice.email,
     filesSent: profiles[profile].filesSent,
     settle: () => (profiles[profile].filesSent ? settled() : Promise.resolve()),
-    reset: () => empty(alice.email),
+    stopFilingSent: () => Promise.resolve(fileSentCopies(alice.email, 'never')),
+    async reset() {
+      // A copy still held from the last case is filed before the mailbox is emptied.
+      await settled();
+      await empty(alice.email);
+      // The host files its own copies only when the case lets a moment pass.
+      fileSentCopies(alice.email, profiles[profile].filesSent ? 'held' : undefined);
+    },
     async deliver(raw, folder = 'INBOX') {
       await (await elsewhere()).append(folder, raw);
     },

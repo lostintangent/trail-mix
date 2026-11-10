@@ -21,6 +21,7 @@ import type { AccountSetup, Page } from '../client/contract.ts';
 import {
   caFile,
   empty,
+  fileSentCopies,
   pauseSending,
   ports,
   refuseSubmissionSignIn,
@@ -875,29 +876,7 @@ for (const profile of ['full', 'outlook'] as const satisfies Profile[]) {
       await stop();
     });
 
-    /** A draft from Alice to Bob, as the composer saves it. */
-    const draftOf = (subject: string) => ({
-      account: account.id,
-      to: [{ name: 'Bob', email: bob.email }],
-      cc: [],
-      bcc: [],
-      subject,
-      markdown: `About ${subject}.\n`,
-      attachments: [],
-    });
-    const drafted = (subject: string) => cal.call<MessageRef>('saveDraft', draftOf(subject));
-    const outbox = () => cal.call<Outgoing[]>('outbox');
-    /** How many times a subject is in Bob's Inbox, Alice's Sent and Alice's Drafts. */
-    async function whereIs(subject: string) {
-      await settled();
-      const count = async (user: { email: string; password: string }, path: string) =>
-        (await subjectsIn(user, path)).filter((held) => held === subject).length;
-      return {
-        delivered: await count(bob, 'INBOX'),
-        sent: await count(alice, 'Sent'),
-        drafts: await count(alice, 'Drafts'),
-      };
-    }
+    const { draftOf, drafted, outbox, whereIs } = sendingAs(cal, () => account);
 
     test('an undo inside the window delivers nothing and leaves the draft as it was', async () => {
       const saved = await drafted('Undone');
@@ -1003,6 +982,113 @@ for (const profile of ['full', 'outlook'] as const satisfies Profile[]) {
       expect(await whereIs('Interrupted')).toEqual({ delivered: 1, sent: 1, drafts: 0 });
     }, 90_000);
   });
+}
+
+describe('The Outbox, on Zoho, which files its own copy in Sent when it likes', () => {
+  let worker: LocalWorker;
+  let account: Account;
+  const dee = member('dee', () => worker);
+  const { drafted, outbox, copiesOf, whereIs } = sendingAs(dee, () => account);
+
+  beforeAll(async () => {
+    await start('zoho');
+    ca = readFileSync(caFile, 'utf8');
+    await Promise.all([empty(alice.email), empty(bob.email)]);
+    worker = await mailrooms();
+    account = await dee.call<Account>('addAccount', { ...setup, preset: 'zoho' });
+    await dee.until(async () => (await dee.call<Account[]>('accounts'))[0]?.status === 'ready');
+  }, 120_000);
+
+  afterAll(async () => {
+    worker?.stop();
+    await stop();
+  });
+
+  /** Sends a draft, and comes back once the host has accepted it and the Outbox waits on filing. */
+  async function accepted(subject: string) {
+    await dee.call<Outgoing>('send', await drafted(subject));
+    await dee.until(async () => (await outbox())[0]?.state === 'accepted', 60_000);
+  }
+  const gone = () => dee.until(async () => (await outbox()).length === 0, 60_000);
+
+  test('a copy Zoho files before it replies is the only one in Sent', async () => {
+    fileSentCopies(alice.email, 'at-once');
+    await dee.call<Outgoing>('send', await drafted('At once'));
+    await gone();
+    expect(await whereIs('At once')).toEqual({ delivered: 1, sent: 1, drafts: 0 });
+  }, 60_000);
+
+  test('the Outbox waits for a copy Zoho files late, and adds none of its own', async () => {
+    fileSentCopies(alice.email, 'held');
+    await accepted('Late');
+    // It has looked in Sent at 0, 2 and 4 seconds, and left the draft and Sent as they were.
+    await Bun.sleep(5000);
+    expect(await outbox()).toMatchObject([{ state: 'accepted' }]);
+    expect(await copiesOf('Late')).toEqual({ delivered: 1, sent: 0, drafts: 1 });
+    await settled();
+    await gone();
+    expect(await whereIs('Late')).toEqual({ delivered: 1, sent: 1, drafts: 0 });
+  }, 90_000);
+
+  test('once its wait is over, the Outbox files the copy Zoho never did', async () => {
+    fileSentCopies(alice.email, 'never');
+    await accepted('Never');
+    await Bun.sleep(3000);
+    expect(await copiesOf('Never')).toEqual({ delivered: 1, sent: 0, drafts: 1 });
+    await dee.call('hostFilingOverdue');
+    await gone();
+    expect(await whereIs('Never')).toEqual({ delivered: 1, sent: 1, drafts: 0 });
+  }, 90_000);
+
+  test('a restart while the Outbox waits for Zoho’s copy still leaves exactly one', async () => {
+    fileSentCopies(alice.email, 'held');
+    await accepted('Restarted');
+    await dee.call('restart').catch(() => {});
+    // The Mailroom that starts next goes on waiting, from when the host accepted the message.
+    await Bun.sleep(3000);
+    const [waiting] = await outbox();
+    expect(waiting).toMatchObject({ state: 'accepted' });
+    expect(Date.now() - Date.parse(waiting!.acceptedAt!)).toBeGreaterThanOrEqual(3000);
+    expect(await copiesOf('Restarted')).toEqual({ delivered: 1, sent: 0, drafts: 1 });
+    await settled();
+    await gone();
+    expect(await whereIs('Restarted')).toEqual({ delivered: 1, sent: 1, drafts: 0 });
+  }, 90_000);
+});
+
+/** Sending as a member with Alice's account: drafts to Bob, the Outbox, and where a subject is. */
+function sendingAs(person: ReturnType<typeof member>, account: () => Account) {
+  /** A draft from Alice to Bob, as the composer saves it. */
+  const draftOf = (subject: string) => ({
+    account: account().id,
+    to: [{ name: 'Bob', email: bob.email }],
+    cc: [],
+    bcc: [],
+    subject,
+    markdown: `About ${subject}.\n`,
+    attachments: [],
+  });
+  /** How many times a subject is in Bob's Inbox, Alice's Sent and Alice's Drafts, as of now. */
+  async function copiesOf(subject: string) {
+    const count = async (user: { email: string; password: string }, path: string) =>
+      (await subjectsIn(user, path)).filter((held) => held === subject).length;
+    return {
+      delivered: await count(bob, 'INBOX'),
+      sent: await count(alice, 'Sent'),
+      drafts: await count(alice, 'Drafts'),
+    };
+  }
+  return {
+    draftOf,
+    drafted: (subject: string) => person.call<MessageRef>('saveDraft', draftOf(subject)),
+    outbox: () => person.call<Outgoing[]>('outbox'),
+    copiesOf,
+    /** The same, once the host has filed every copy of its own it owes. */
+    whereIs: async (subject: string) => {
+      await settled();
+      return copiesOf(subject);
+    },
+  };
 }
 
 /** Each message in one of Alice's folders on the server, by Message-ID, with its flags. */

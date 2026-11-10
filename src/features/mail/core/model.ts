@@ -150,6 +150,8 @@ export type Outgoing = {
   sendAt: string;
   /** `accepted`: the host took it, and only filing its copy in Sent remains. */
   state: 'waiting' | 'sending' | 'accepted' | 'failed';
+  /** When the host accepted it, so filing can tell how long it has waited for the host's copy. */
+  acceptedAt?: string;
   /** The attempts at the current step that failed. */
   attempts: number;
   /** Why the last attempt failed. */

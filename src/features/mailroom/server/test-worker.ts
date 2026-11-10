@@ -1,4 +1,5 @@
 import { COMMANDS, receivedCall } from '../client/contract.ts';
+import { HOST_FILING_SECONDS } from '../../outbox/core/index.ts';
 import type { MailProvider, Preset, PresetName } from '../../providers/index.ts';
 import { Mailroom, type MailroomEnv } from './mailroom.ts';
 
@@ -55,8 +56,8 @@ export class TestMailroom extends Mailroom {
   }
 
   /**
-   * Has an account's provider leave Sent to the host, as Outlook's preset does, and restarts so the
-   * provider is made again. Setup can't say so for a host it names itself.
+   * Has an account's provider leave Sent to the host, as Zoho's and Outlook's presets do, and
+   * restarts so the provider is made again. Setup can't say so for a host it names itself.
    */
   async hostFilesSent(account: string): Promise<void> {
     this.sql.run(
@@ -66,6 +67,21 @@ export class TestMailroom extends Mailroom {
     // A restart drops writes not yet on disk.
     await this.ctx.storage.sync();
     await this.restart();
+  }
+
+  /**
+   * Has every send that waits for its host's copy in Sent wait no longer, as two minutes passing
+   * would, and wakes the Mailroom to file it.
+   */
+  async hostFilingOverdue(): Promise<void> {
+    const now = Date.now();
+    this.sql.run(
+      `UPDATE outbox SET outgoing = json_set(outgoing, '$.acceptedAt', ?, '$.sendAt', ?)
+        WHERE json_extract(outgoing, '$.state') = 'accepted'`,
+      new Date(now - HOST_FILING_SECONDS * 1000).toISOString(),
+      new Date(now).toISOString(),
+    );
+    await this.ctx.storage.setAlarm(now);
   }
 
   private readonly synced: Synced[] = [];

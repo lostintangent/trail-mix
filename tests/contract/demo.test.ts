@@ -20,12 +20,16 @@ for (const filesSent of [false, true]) {
       filesSent,
       provider: server.provider,
       address: DEMO_ACCOUNTS.personal.me.email,
-      reset: () => server.empty(),
+      async reset() {
+        await server.empty();
+        server.fileSentCopies(filesSent);
+      },
       deliver: async (raw, folder) => void (await server.deliver(bytes(raw), folder)),
       expunge: (folder, messageId) => server.expunge(folder, messageId),
       resetUidValidity: (folder) => server.resetUidValidity(folder),
       submit: (raw) => server.submit(bytes(raw)),
       settle: () => server.settle(),
+      stopFilingSent: () => Promise.resolve(server.fileSentCopies(false)),
       close: () => server.provider.close(),
     });
   });

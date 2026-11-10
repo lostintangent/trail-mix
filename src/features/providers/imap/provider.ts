@@ -11,7 +11,14 @@ import nodemailer from 'nodemailer';
 import type SMTPTransport from 'nodemailer/lib/smtp-transport';
 import type { SMTPTransportGetSocket } from 'nodemailer/lib/smtp-transport';
 import PostalMime from 'postal-mime';
-import type { AccountId, Flags, Folder, FolderRole, MessageRef } from '../../mail/core/index.ts';
+import {
+  messageIdOf,
+  type AccountId,
+  type Flags,
+  type Folder,
+  type FolderRole,
+  type MessageRef,
+} from '../../mail/core/index.ts';
 import {
   SEARCH_LIMIT,
   SendFailure,
@@ -38,7 +45,10 @@ export type ImapAccount = {
    * connection, so a token that has run out costs only a reconnect.
    */
   auth: { user: string; pass: string } | { user: string; accessToken: () => Promise<string> };
-  /** Whether the host files its own copy in Sent when it accepts a message, as Outlook does. */
+  /**
+   * Whether the host files its own copy in Sent of a message it accepts, as Zoho and Outlook do,
+   * perhaps a while after. Filing then leaves Sent to the host while the Outbox waits for it.
+   */
   filesSent?: boolean;
 };
 
@@ -74,6 +84,12 @@ const PREVIEW_BYTES = { text: 1024, html: 4096 };
 
 /** How long a watcher waits to connect again after the server drops it. */
 const WATCH_RETRY_MS = 2000;
+
+/**
+ * How many of Sent's newest messages are read when looking for a copy by its Message-ID. A host's
+ * search may not yet know a copy it just filed, but the copy is among the newest.
+ */
+const NEWEST_IN_SENT = 50;
 
 /** The IMAP and SMTP provider. Vendors differ only in the account's hosts, sign-in and quirks. */
 export function imapProvider(account: ImapAccount, network: Network = {}): MailProvider {
@@ -301,11 +317,17 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
     });
   }
 
-  /** Whether Sent holds a message with this Message-ID. */
+  /** Whether Sent holds a message with this Message-ID, by search or among its newest. */
   async function inSent(messageId: string) {
     if (!messageId) return false;
-    return inFresh(await folderFor('sent'), async (connection) => {
-      return (await uidOf(connection, messageId)) !== undefined;
+    return inFresh(await folderFor('sent'), async (connection, mailbox) => {
+      if ((await uidOf(connection, messageId)) !== undefined) return true;
+      if (!mailbox.exists) return false;
+      const newest = `${Math.max(1, mailbox.exists - NEWEST_IN_SENT + 1)}:*`;
+      for await (const message of connection.fetch(newest, { envelope: true })) {
+        if (messageIdOf(message.envelope?.messageId) === messageId) return true;
+      }
+      return false;
     });
   }
 
@@ -486,16 +508,18 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
       return 'sent';
     },
 
-    async file(draft: MessageRef, messageId: string) {
-      await beforeSending(async () => {
+    async file(draft: MessageRef, messageId: string, waitForHost: boolean) {
+      return beforeSending(async () => {
         const source = await draftSource(draft);
-        if (!source) return;
-        if (!account.filesSent && !(await inSent(messageId))) {
+        if (!source) return 'filed' as const;
+        if (!(await inSent(messageId))) {
+          if (account.filesSent && waitForHost) return 'unfiled' as const;
           const sent = await folderFor('sent');
           const copy = Buffer.from(withoutHeader(source, 'bcc'));
           await connected((connection) => connection.append(sent, copy, ['\\Seen']));
         }
         await remove(draft);
+        return 'filed' as const;
       });
     },
 

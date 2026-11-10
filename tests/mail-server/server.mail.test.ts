@@ -5,7 +5,19 @@ import { readFileSync } from 'node:fs';
 import { connect as tcp } from 'node:net';
 import { ImapFlow } from 'imapflow';
 import nodemailer from 'nodemailer';
-import { caFile, identity, ports, resetUidValidity, start, stop, users } from './server.ts';
+import {
+  caFile,
+  count,
+  emptyFolder,
+  fileSentCopies,
+  identity,
+  ports,
+  resetUidValidity,
+  settled,
+  start,
+  stop,
+  users,
+} from './server.ts';
 
 setDefaultTimeout(30_000);
 afterAll(stop);
@@ -181,6 +193,31 @@ describe('submission', () => {
     await expect(submit(ports.submissions, { from: bob.email, to: bob.email })).rejects.toThrow(
       /553/,
     );
+  });
+});
+
+describe('the host’s own copy in Sent', () => {
+  const sent = () => count(alice.email, 'Sent');
+  const send = () => submit(ports.submissions, { from: alice.email, to: alice.email });
+
+  test('a test chooses whether it is filed at once, held until settled, or never', async () => {
+    await start('zoho');
+    await emptyFolder(alice.email, 'Sent');
+    fileSentCopies(alice.email, 'at-once');
+    await send();
+    expect(await sent()).toBe(1);
+
+    fileSentCopies(alice.email, 'held');
+    await send();
+    await Bun.sleep(1000);
+    expect(await sent()).toBe(1);
+    await settled();
+    expect(await sent()).toBe(2);
+
+    fileSentCopies(alice.email, 'never');
+    await send();
+    await settled();
+    expect(await sent()).toBe(2);
   });
 });
 

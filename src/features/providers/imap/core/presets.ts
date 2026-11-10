@@ -12,7 +12,10 @@ export type Preset = {
   smtp: Endpoint;
   /** How a member signs in at the vendor with a device code, where that replaces a password. */
   device?: DeviceSignIn;
-  /** Whether the host files its own copy in Sent when it accepts a message. */
+  /**
+   * Whether the host files its own copy in Sent of a message it accepts, perhaps a while after, so
+   * the Outbox waits for it before filing one itself.
+   */
   filesSent: boolean;
 };
 
@@ -20,11 +23,13 @@ export const PRESETS = {
   // Zoho's server names depend on the account's plan and data center: imappro and smtppro for a paid
   // organization, imap and smtp for a personal or free one, and other domains outside the US. These
   // are only filled in, and an account uses the names its own Zoho settings list.
-  // Whether Zoho files submitted mail in Sent is measured when the operator's account connects.
+  // Zoho files its own copy of what it accepts in Sent, a moment after it accepts, which the
+  // operator's first send showed. A member can turn that off in Zoho's settings, and then the
+  // Outbox files the copy once its wait for Zoho's is over.
   zoho: {
     imap: { host: 'imappro.zoho.com', port: 993, secure: true },
     smtp: { host: 'smtppro.zoho.com', port: 465, secure: true },
-    filesSent: false,
+    filesSent: true,
   },
   outlook: {
     imap: { host: 'outlook.office365.com', port: 993, secure: true },

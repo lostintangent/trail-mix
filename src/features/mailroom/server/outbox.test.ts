@@ -26,7 +26,7 @@ test('once a host fails for now, its account’s other sends wait for the next w
           ? Promise.reject(new SendFailure('Couldn’t reach smtp.down.example', true))
           : Promise.resolve('sent' as const);
       },
-      file: () => Promise.resolve(),
+      file: () => Promise.resolve('filed' as const),
     } as unknown as MailProvider);
   const queue = outboxQueue({ sql: testSql(), provider, hint: () => {}, sent: () => {} });
   for (const [account, uid] of [

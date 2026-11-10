@@ -42,7 +42,12 @@ export type DemoServer = {
   submit(raw: Uint8Array): Promise<void>;
   /** Lets a moment pass, in which a host that files its own copy in Sent files what it accepted. */
   settle(): Promise<void>;
-  /** Removes every message, and every folder the mailbox did not start with. */
+  /**
+   * Turns the host's own copies in Sent off, as a Zoho member can, or on again. The provider still
+   * waits for them, as it does for a host whose member turned them off.
+   */
+  fileSentCopies(on: boolean): void;
+  /** Removes every message, and every folder the mailbox did not start with, and every copy owed. */
   empty(): Promise<void>;
 };
 
@@ -50,8 +55,9 @@ export { DEMO_ACCOUNTS, type DemoKind };
 export { demoMailbox, type DemoMailbox } from './mailbox.ts';
 
 /**
- * `filesSent` makes the host file its own copy of what it accepts in Sent, as Outlook's does, so the
- * provider leaves Sent to it.
+ * `filesSent` makes the host file its own copy of what it accepts in Sent, as Zoho's and Outlook's
+ * do, once `settle` lets a moment pass, so the provider leaves Sent to it while it waits for the
+ * host.
  */
 export function demoServer(
   account: AccountId,
@@ -63,6 +69,7 @@ export function demoServer(
   const watchers = new Map<string, Set<() => void>>();
   /** What a host that files its own copy in Sent has accepted and not yet filed. */
   const unfiled: server.Written[] = [];
+  let hostFiles = filesSent;
 
   /** Makes the next mailbox the current one, keeps it, and tells whoever watches what changed. */
   async function commit(next: server.DemoMailbox, changed: readonly string[]) {
@@ -231,22 +238,21 @@ export function demoServer(
         return 'sent' as const;
       }),
 
-    file: (draft, messageId) =>
+    file: (draft, messageId, waitForHost) =>
       beforeSending(async () => {
         const found = find(draft);
-        if (!found) return;
-        const copy = filesSent
-          ? undefined
-          : await written(withoutBcc(bytesOf(found.message.raw())));
+        if (!found) return 'filed' as const;
+        const sent = roleFolder('sent');
+        const inSent = () => messageIdIn(sent, messageId) !== undefined;
+        if (!inSent() && filesSent && waitForHost) return 'unfiled' as const;
+        const copy = inSent() ? undefined : await written(withoutBcc(bytesOf(found.message.raw())));
         // The draft may have changed while its copy was read, so it is found again.
         const still = find(draft);
-        if (!still) return;
-        const sent = roleFolder('sent');
+        if (!still) return 'filed' as const;
         let next = mailbox;
-        if (copy && messageIdIn(sent, messageId) === undefined) {
-          [next] = server.append(next, sent, copy, SENT);
-        }
+        if (copy && !inSent()) [next] = server.append(next, sent, copy, SENT);
         await commit(server.expunge(next, still.path, [still.uid]), [still.path, sent]);
+        return 'filed' as const;
       }),
 
     search: (path, text) =>
@@ -305,7 +311,7 @@ export function demoServer(
     message: server.Written,
     recipients: readonly string[],
   ): server.DemoMailbox {
-    if (filesSent) unfiled.push(message);
+    if (hostFiles) unfiled.push(message);
     const me = DEMO_ACCOUNTS[current.kind].me.email;
     return recipients.includes(me) ? server.append(current, 'INBOX', message, NEW)[0] : current;
   }
@@ -336,7 +342,11 @@ export function demoServer(
       }
       await commit(next, sent ? [sent.path] : []);
     },
+    fileSentCopies(on) {
+      hostFiles = on;
+    },
     async empty() {
+      unfiled.length = 0;
       await commit(server.emptied(mailbox), [...watchers.keys()]);
     },
   };

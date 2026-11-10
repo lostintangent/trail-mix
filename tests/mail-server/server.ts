@@ -55,8 +55,8 @@ export const identity = {
 /**
  * Capabilities each profile withholds, so code cannot lean on what Zoho and Outlook lack. Zoho also
  * marks no folder with a role, so roles must be found some other way. `plain` is any IMAP server,
- * with IDLE and none of the extensions Trail Mix can do without. Outlook files its own copy of what
- * it accepts in Sent, so its submission does too.
+ * with IDLE and none of the extensions Trail Mix can do without. Zoho and Outlook file their own copy
+ * of what they accept in Sent, so their submission does too, unless a test says otherwise.
  */
 export const profiles = {
   full: { withhold: [], roleFlags: true, filesSent: false },
@@ -71,7 +71,7 @@ export const profiles = {
       'THREAD=ORDEREDSUBJECT',
     ],
     roleFlags: false,
-    filesSent: false,
+    filesSent: true,
   },
   outlook: { withhold: ['CONDSTORE', 'QRESYNC'], roleFlags: true, filesSent: true },
   plain: {
@@ -130,6 +130,7 @@ async function launch(binaries: Dovecot, profile: Profile) {
   rmSync(join(state, 'serve.ready'), { force: true });
   rmSync(join(state, 'paused'), { recursive: true, force: true });
   rmSync(join(state, 'no-submission'), { recursive: true, force: true });
+  rmSync(join(state, 'filing'), { recursive: true, force: true });
   // Started by a shell that exits at once, so that, as Dovecot does, the server runs on its own and
   // records its own pid. When a test times out, Bun ends the processes its tests and hooks
   // started, and a server started from a harness's hook would go with them.
@@ -565,12 +566,34 @@ export function refuseSubmissionSignIn(user: string, refused: boolean) {
 
 const noSubmissionFile = (user: string) => join(state, 'no-submission', user.toLowerCase());
 
-/** How long a host that files its own copy in Sent takes to file it. */
+/**
+ * When submission files its own copy in Sent of what a user sends: `later`, a moment after it
+ * replies, as Zoho and Outlook do; `at-once`, before it replies; `held`, only once `settled` lets
+ * it, as a host running late would; or `never`, as Zoho does once its copies are turned off.
+ */
+export type Filing = 'later' | 'at-once' | 'held' | 'never';
+
+/**
+ * Chooses when submission files a user's copies in Sent, from the next message on. Without a
+ * choice, the profile decides: `later` where the host files its own, and `never` elsewhere.
+ */
+export function fileSentCopies(user: string, filing: Filing | undefined) {
+  mkdirSync(join(state, 'filing'), { recursive: true });
+  if (filing) writeFileSync(filingFile(user), filing);
+  else rmSync(filingFile(user), { force: true });
+}
+
+const filingFile = (user: string) => join(state, 'filing', user.toLowerCase());
+
+/** How long a host that files its own copy in Sent `later` takes to file it. */
 const FILING_DELAY_MS = 250;
 
-/** Waits until a host that files its own copy in Sent has filed every message it accepted. */
+/**
+ * Waits until the host has filed every copy in Sent it owes, letting it file those it was holding.
+ */
 export async function settled() {
   const deadline = Date.now() + 10_000;
+  await fetch(`http://127.0.0.1:${ports.identity}/filing`, { method: 'POST' });
   for (;;) {
     const response = await fetch(`http://127.0.0.1:${ports.identity}/filing`);
     // Read as unknown, since the browser's Response, which a browser test reaching this sees, takes
@@ -592,8 +615,27 @@ async function serve() {
   writeFileSync(join(state, 'serve.pid'), String(process.pid));
   const { filesSent } = profiles[readFileSync(join(state, 'profile'), 'utf8').trim() as Profile];
   const { doveadm } = await dovecot();
-  /** The copies a host that files its own has accepted and not yet filed in Sent. */
+  const filingOf = (user: string): Filing =>
+    existsSync(filingFile(user))
+      ? (readFileSync(filingFile(user), 'utf8') as Filing)
+      : filesSent
+        ? 'later'
+        : 'never';
+  /** Files a copy in a user's Sent, read, as a host files what its member sent. */
+  const save = async (user: string, raw: Buffer) => {
+    await Bun.spawn([doveadm, '-c', conf, 'save', '-u', user, '-m', 'Sent'], { stdin: raw }).exited;
+    const seen = ['flags', 'add', '-u', user, '\\Seen', 'mailbox', 'Sent', 'unseen'];
+    await Bun.spawn([doveadm, '-c', conf, ...seen]).exited;
+  };
+  /** How many copies the host owes Sent: accepted and not yet filed. */
   let filing = 0;
+  /** Owes a copy, which the returned function files. */
+  const owe = (user: string, raw: Buffer) => {
+    filing++;
+    return () => void save(user, raw).finally(() => filing--);
+  };
+  /** The copies it holds until a test lets it file them. */
+  const held: (() => void)[] = [];
   const { SMTPServer } = await import('smtp-server');
   const nodemailer = (await import('nodemailer')).default;
   const lmtp = nodemailer.createTransport({
@@ -658,27 +700,26 @@ async function serve() {
           const from = session.envelope.mailFrom ? session.envelope.mailFrom.address : '';
           const to = session.envelope.rcptTo.map((r) => r.address);
           const raw = Buffer.concat(chunks);
-          lmtp.sendMail({ envelope: { from, to }, raw }).then(
-            () => {
-              // Outlook files its copy a moment after it accepts, so it isn't in Sent at once.
-              if (filesSent) {
-                filing++;
-                setTimeout(() => {
-                  const save = Bun.spawn([doveadm, '-c', conf, 'save', '-u', from, '-m', 'Sent'], {
-                    stdin: raw,
-                  });
-                  void save.exited.finally(() => filing--);
-                }, FILING_DELAY_MS);
-              }
-              // A test can have the connection drop after the message was taken, before the reply.
-              if (!DROP_AFTER_DATA.test(raw.toString('latin1'))) return callback();
-              for (const connection of (server as unknown as { connections: Set<Dropping> })
-                .connections) {
-                if (connection.id === session.id) connection.close();
-              }
-            },
-            (error: Error) => callback(error),
-          );
+          lmtp
+            .sendMail({ envelope: { from, to }, raw })
+            .then(async () => {
+              const when = filingOf(from);
+              if (when === 'at-once') await save(from, raw);
+              if (when === 'held') held.push(owe(from, raw));
+              // Zoho and Outlook file their copy a moment after they accept, not at once.
+              if (when === 'later') setTimeout(owe(from, raw), FILING_DELAY_MS);
+            })
+            .then(
+              () => {
+                // A test can have the connection drop after the message was taken, before the reply.
+                if (!DROP_AFTER_DATA.test(raw.toString('latin1'))) return callback();
+                for (const connection of (server as unknown as { connections: Set<Dropping> })
+                  .connections) {
+                  if (connection.id === session.id) connection.close();
+                }
+              },
+              (error: Error) => callback(error),
+            );
         });
       },
     });
@@ -693,10 +734,12 @@ async function serve() {
   const http = Bun.serve({
     hostname: '127.0.0.1',
     port: ports.identity,
-    fetch: (request) =>
-      new URL(request.url).pathname === '/filing'
-        ? Response.json({ filing })
-        : signIn.fetch(request),
+    fetch: (request) => {
+      if (new URL(request.url).pathname !== '/filing') return signIn.fetch(request);
+      // A POST lets the host file what it was holding.
+      if (request.method === 'POST') for (const file of held.splice(0)) file();
+      return Response.json({ filing });
+    },
   });
   process.on('SIGTERM', () => {
     for (const server of servers) server.close();

@@ -52,12 +52,14 @@ export interface MailProvider {
   submit(draft: MessageRef, messageId: string): Promise<'sent' | 'missing'>;
 
   /**
-   * Leaves exactly one copy of a submitted draft in Sent, appending one unless the host files its
-   * own or Sent already holds `messageId`, then removes the draft. It never submits, so repeating
-   * it cannot deliver twice. With the draft already gone there is nothing left to do. It rejects
-   * with a `SendFailure`.
+   * Leaves exactly one copy of a submitted draft in Sent, then removes the draft, and resolves
+   * `filed`. It appends a copy unless Sent already holds `messageId`. A host that files its own copy
+   * may do so a while after it accepted the message, so while `waitForHost` such a host is left to
+   * it: until Sent holds its copy, the draft stays and filing resolves `unfiled`. It never submits,
+   * so repeating it cannot deliver twice. With the draft already gone there is nothing left to do.
+   * It rejects with a `SendFailure`.
    */
-  file(draft: MessageRef, messageId: string): Promise<void>;
+  file(draft: MessageRef, messageId: string, waitForHost: boolean): Promise<'filed' | 'unfiled'>;
 
   /**
    * A folder's messages whose headers or body contain `text`, searched by the server across the

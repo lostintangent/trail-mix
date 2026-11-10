@@ -158,6 +158,14 @@ export const versions: readonly (readonly string[])[] = [
     // code sealed beside it until it stops. Each goes minutes after its code expires.
     `CREATE TABLE sign_ins (address TEXT PRIMARY KEY, pending TEXT NOT NULL, sealed BLOB)`,
   ],
+  [
+    // Zoho files its own copy in Sent, which its preset didn't say before, so an account on
+    // Zoho's hosts, whatever its plan or data center, waits for that copy rather than adding one.
+    `UPDATE accounts SET connection = json_set(connection, '$.filesSent', json('true'))
+      WHERE json_extract(connection, '$.provider') = 'imap'
+        AND (json_extract(connection, '$.imap.host') LIKE '%.zoho.%'
+          OR json_extract(connection, '$.imap.host') LIKE '%.zohocloud.%')`,
+  ],
 ];
 
 /**

@@ -25,10 +25,15 @@ export type Harness = {
   resetUidValidity(folder: string): Promise<void>;
   /** Has the host accept a message for delivery without the provider, as a send cut short would. */
   submit(raw: string): Promise<void>;
-  /** Whether the host files its own copy of what it accepts in Sent, a moment later, as Outlook does. */
+  /**
+   * Whether the host files its own copy of what it accepts in Sent, as Zoho and Outlook do, and
+   * the provider knows it. The host files it only once `settle` lets a moment pass.
+   */
   filesSent: boolean;
-  /** Waits until a host that files its own copy in Sent has filed everything it accepted. */
+  /** Lets a moment pass, in which a host that files its own copy in Sent files what it accepted. */
   settle(): Promise<void>;
+  /** Turns the host's own copies in Sent off until the next reset, as a Zoho member can. */
+  stopFilingSent(): Promise<void>;
   close(): Promise<void>;
 };
 
@@ -300,13 +305,22 @@ export function describeContract(
         drafts: await count(await role('drafts'), id),
       };
     }
+    /**
+     * Files a submitted draft as the Outbox does: while it waits for a host that files its own
+     * copy, a moment passes, and then the wait is over.
+     */
+    async function fileCopy(draft: MessageRef, id: string) {
+      if ((await provider.file(draft, id, true)) === 'filed') return;
+      await world().settle();
+      expect(await provider.file(draft, id, false)).toBe('filed');
+    }
 
     it('submits a draft and files one copy, and once it is filed neither step delivers again', async () => {
       const { id, draft } = await drafted('send-me');
       expect(await provider.submit(draft, id)).toBe('sent');
-      await provider.file(draft, id);
+      await fileCopy(draft, id);
       expect(await whereIs(id)).toEqual({ delivered: 1, sent: 1, drafts: 0 });
-      await provider.file(draft, id);
+      expect(await provider.file(draft, id, true)).toBe('filed');
       expect(await provider.submit(draft, id)).toBe('sent');
       expect(await whereIs(id)).toEqual({ delivered: 1, sent: 1, drafts: 0 });
     });
@@ -316,7 +330,7 @@ export function describeContract(
       await provider.submit(draft, id);
       // A failed APPEND stores nothing, so filing that failed leaves what a restart before it does.
       expect(await whereIs(id)).toMatchObject({ delivered: 1, drafts: 1 });
-      await provider.file(draft, id);
+      await fileCopy(draft, id);
       expect(await whereIs(id)).toEqual({ delivered: 1, sent: 1, drafts: 0 });
     });
 
@@ -325,7 +339,7 @@ export function describeContract(
       await provider.submit(draft, id);
       // Filing had appended its copy, unless the host files its own, when the restart came.
       if (!world().filesSent) await world().deliver(raw, await role('sent'));
-      await provider.file(draft, id);
+      await fileCopy(draft, id);
       expect(await whereIs(id)).toEqual({ delivered: 1, sent: 1, drafts: 0 });
     });
 
@@ -336,7 +350,7 @@ export function describeContract(
       await world().submit(raw);
       await world().settle();
       expect(await provider.submit(draft, id)).toBe('sent');
-      await provider.file(draft, id);
+      await fileCopy(draft, id);
       const { filesSent } = world();
       expect(await whereIs(id)).toEqual({ delivered: filesSent ? 1 : 2, sent: 1, drafts: 0 });
     });
@@ -345,7 +359,7 @@ export function describeContract(
       const { id, draft } = await drafted('withdrawn');
       await world().expunge(await role('drafts'), id);
       expect(await provider.submit(draft, id)).toBe('missing');
-      await provider.file(draft, id);
+      expect(await provider.file(draft, id, true)).toBe('filed');
       expect(await whereIs(id)).toEqual({ delivered: 0, sent: 0, drafts: 0 });
     });
 
@@ -365,7 +379,42 @@ export function describeContract(
       // The host files its copy while the provider still has Sent open from that read.
       await world().deliver(raw, sent);
       expect(await provider.submit(draft, id)).toBe('sent');
-      await provider.file(draft, id);
+      expect(await provider.file(draft, id, true)).toBe('filed');
+      expect(await whereIs(id)).toEqual({ delivered: 0, sent: 1, drafts: 0 });
+    });
+
+    it('waits for a host that files its own copy in Sent, and files none of its own once it has', async () => {
+      const { id, draft } = await drafted('waited-for');
+      await provider.submit(draft, id);
+      const { filesSent } = world();
+      expect(await provider.file(draft, id, true)).toBe(filesSent ? 'unfiled' : 'filed');
+      if (filesSent) {
+        // While it waits, the draft stays, and nothing of Trail Mix's is in Sent.
+        expect(await count(await role('drafts'), id)).toBe(1);
+        expect(await count(await role('sent'), id)).toBe(0);
+        await world().settle();
+        expect(await provider.file(draft, id, true)).toBe('filed');
+      }
+      expect(await whereIs(id)).toEqual({ delivered: 1, sent: 1, drafts: 0 });
+    });
+
+    it('files a copy itself once the wait is over, when the host’s own copies are off', async () => {
+      await world().stopFilingSent();
+      const { id, draft } = await drafted('never-filed');
+      await provider.submit(draft, id);
+      await world().settle();
+      expect(await provider.file(draft, id, true)).toBe(world().filesSent ? 'unfiled' : 'filed');
+      expect(await provider.file(draft, id, false)).toBe('filed');
+      expect(await whereIs(id)).toEqual({ delivered: 1, sent: 1, drafts: 0 });
+    });
+
+    it('finds a copy in Sent among its newest that the host’s search cannot match', async () => {
+      const { raw, id, draft } = await drafted('unsearchable');
+      // The copy names itself without angle brackets, so a search for the Message-ID misses it.
+      const copy = raw.replace(`Message-ID: ${id}`, `Message-ID: ${id.slice(1, -1)}`);
+      await world().deliver(copy, await role('sent'));
+      expect(await provider.submit(draft, id)).toBe('sent');
+      expect(await provider.file(draft, id, true)).toBe('filed');
       expect(await whereIs(id)).toEqual({ delivered: 0, sent: 1, drafts: 0 });
     });
 
@@ -373,7 +422,7 @@ export function describeContract(
       const { address } = world();
       const { id, draft } = await drafted('blind', { bcc: address });
       await provider.submit(draft, id);
-      await provider.file(draft, id);
+      await fileCopy(draft, id);
       await world().settle();
       for (const folder of ['INBOX', await role('sent')]) {
         const text = await new Response(

@@ -161,7 +161,7 @@ test('the seeded draft to an unreachable host is refused once, with the reason, 
   // The refusal is remembered with the mailbox, so a Mailroom that restarts sends it on Retry.
   const reopened = demoServer('personal', saved!, () => {});
   expect(await reopened.provider.submit(ref, draft.messageId)).toBe('sent');
-  await reopened.provider.file(ref, draft.messageId);
+  await reopened.provider.file(ref, draft.messageId, true);
   const after = (await everything(reopened)).messages;
   expect(
     after.filter(({ messageId }) => messageId === draft.messageId).map(({ path }) => path),
@@ -223,7 +223,7 @@ test('whatever happens to the mailbox, syncing keeps up, and reopening what was 
         const draft = await provider.saveDraft(message(subject, pick(held)), pick(drafts));
         if (random() < 0.5) {
           await provider.submit(draft, messageIdOf(subject));
-          await provider.file(draft, messageIdOf(subject));
+          await provider.file(draft, messageIdOf(subject), true);
         }
       } else if (roll < 0.55) await server.resetUidValidity(pick(paths) ?? 'INBOX');
       else if (roll < 0.6) await provider.createFolder(`Folder ${Math.floor(random() * 3)}`);

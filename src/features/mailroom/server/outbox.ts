@@ -59,13 +59,13 @@ export function outboxQueue(sending: Sending) {
    * Runs one step of a send, and stores what it came to, unless the send went while it ran. Says
    * whether the step failed for a passing reason, such as a host it couldn't reach.
    */
-  async function step({ step: next, outgoing }: outbox.Due, now: () => string): Promise<boolean> {
-    const { id, draft, messageId } = outgoing;
+  async function step(due: outbox.Due, now: () => string): Promise<boolean> {
+    const { id, draft, messageId } = due.outgoing;
     const provider = () => sending.provider(draft.account);
     const outcome =
-      next === 'submit'
+      due.step === 'submit'
         ? await (async () => {
-            put(outbox.begin(outgoing));
+            put(outbox.begin(due.outgoing));
             changed();
             const submitted = await attempt(async () =>
               (await provider()).submit(draft, messageId),
@@ -73,19 +73,16 @@ export function outboxQueue(sending: Sending) {
             if (submitted === 'sent') sending.accepted?.();
             return submitted;
           })()
-        : await attempt(async () => {
-            await (await provider()).file(draft, messageId);
-            return 'filed' as const;
-          });
+        : await attempt(async () => (await provider()).file(draft, messageId, due.waitForHost));
     const held = get(id);
     if (!held) return false;
-    if (next === 'submit') {
+    if (due.step === 'submit') {
       put(outbox.submitted(held, outcome as outbox.Submitted, now()));
     } else {
       const result = outbox.filed(held, outcome as outbox.Filed, now());
       if (result === 'done') {
         sql.run(`DELETE FROM outbox WHERE id = ?`, id);
-        sending.sent(outgoing);
+        sending.sent(due.outgoing);
       } else {
         put(result);
       }

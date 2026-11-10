@@ -89,6 +89,22 @@ test('a demo account from before From names writes as its demo person, and IMAP 
   ]);
 });
 
+test('an account on Zoho’s hosts from before Zoho was known to file in Sent waits for its copy', () => {
+  // Version 9 learned that Zoho files its own copy, so this Mailroom stops at the version before it.
+  const sql = testSql(8);
+  const book = accountBook(sql);
+  const on = (host: string) => ({ ...imap, imap: { ...imap.imap, host } });
+  const hosts = ['imappro.zoho.com', 'imap.zoho.eu', 'imap.zohocloud.ca', 'imap.example.com'];
+  for (const host of hosts) book.add(named(host), on(host), sealed);
+  upgrade(sql);
+  expect(book.connections().map(({ connection }) => connection)).toEqual([
+    { ...on('imappro.zoho.com'), filesSent: true },
+    { ...on('imap.zoho.eu'), filesSent: true },
+    { ...on('imap.zohocloud.ca'), filesSent: true },
+    on('imap.example.com'),
+  ]);
+});
+
 test('an account is reached through the hosts it was given, or else its preset’s, with the preset’s quirks', () => {
   const address = 'me@example.com';
   const imap = { host: 'imap.example.com', port: 993, secure: true };
