@@ -5,7 +5,15 @@ import { borderVars, colorVars, spacingVars } from '@astryxdesign/core/theme/tok
 import * as stylex from '@stylexjs/stylex';
 import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, MailOpen } from 'lucide-react';
-import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useEffectEvent,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, ConversationId } from '../../mail/core/index.ts';
 import { conversationQuery } from '../../mailroom/client/index.ts';
@@ -34,12 +42,18 @@ export function ReaderPane({
   selected,
   accounts,
   upcoming,
+  onShown,
   onBack,
 }: {
   selected: ConversationId | undefined;
   accounts: readonly Account[];
   /** The conversations the member may open next, which the reader prepares while idle. */
   upcoming: ConversationId[];
+  /**
+   * Called each time the reader starts showing a conversation, which is what opening it means. A
+   * conversation the selection passes on its way elsewhere is never shown.
+   */
+  onShown?: (conversation: ConversationId) => void;
   onBack: () => void;
 }) {
   const shown = useRestingSelection(selected);
@@ -48,6 +62,12 @@ export function ReaderPane({
     enabled: shown !== undefined,
   });
   const account = accounts.find(({ id }) => id === conversation?.[0]?.account);
+  const reading = shown && conversation?.length && account ? { conversation, account } : undefined;
+  const isShowing = reading !== undefined;
+  const announce = useEffectEvent((id: ConversationId) => onShown?.(id));
+  useEffect(() => {
+    if (shown !== undefined && isShowing) announce(shown);
+  }, [shown, isShowing]);
   usePreloadedReader(upcoming.length > 0);
 
   return (
@@ -60,12 +80,12 @@ export function ReaderPane({
           onClick={onBack}
         />
       </header>
-      {shown && conversation?.length && account ? (
+      {reading ? (
         <div {...stylex.props(styles.scroll)}>
           <Suspense>
             <Reader
-              conversation={conversation}
-              account={account}
+              conversation={reading.conversation}
+              account={reading.account}
               upcoming={shown === selected ? upcoming : []}
             />
           </Suspense>

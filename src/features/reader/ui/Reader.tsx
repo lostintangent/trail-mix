@@ -10,7 +10,7 @@ import {
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { memo, useEffect, useState } from 'react';
 import { stampStyles } from '../../../app/theme/stamps.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, ConversationId, Message } from '../../mail/core/index.ts';
@@ -30,11 +30,23 @@ export type ReaderProps = {
  * A conversation, read as a stack of sheets: its subject set like a letter's, then each message
  * oldest first. Older messages are folded to one line and the newest lies open. Opening one keeps
  * it open while the conversation is on screen.
+ *
+ * It renders again only when what it shows or prepares changes, so moving through the list while
+ * the reader waits costs it nothing.
  */
-export function Reader({ upcoming = [], ...props }: ReaderProps) {
+export const Reader = memo(function Reader({ upcoming = [], ...props }: ReaderProps) {
   usePrepared(upcoming);
   const id = props.conversation[0]?.conversation ?? '';
   return <Conversation key={id} {...props} />;
+}, isSameReading);
+
+function isSameReading(before: ReaderProps, after: ReaderProps): boolean {
+  const ids = (props: ReaderProps) => (props.upcoming ?? []).join('\u0000');
+  return (
+    before.conversation === after.conversation &&
+    before.account === after.account &&
+    ids(before) === ids(after)
+  );
 }
 
 function Conversation({ conversation, account }: ReaderProps) {
