@@ -17,7 +17,8 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # The smoke suite waits through real undo windows, and the benches follow it.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 

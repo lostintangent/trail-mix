@@ -165,37 +165,26 @@ for (const [size, options] of Object.entries(SIZES)) {
       await page.keyboard.press('ControlOrMeta+Enter');
     }
 
-    for (const colorScheme of ['light', 'dark'] as const) {
-      test(`a reply sent lies at the end of its conversation at once, and becomes the server’s copy when the index has it, ${colorScheme}`, async () => {
-        const page = await inbox(colorScheme);
-        await open(page);
-        await slowIndex(page);
-        const text = `Thursday works for the cutover, ${colorScheme}.`;
-        await watch(page, text);
-        await sendReply(page, text);
-        const onItsWay = reader(page).locator('div:has(> [data-airmail])', { hasText: text });
-        await onItsWay.waitFor({ timeout: 2000 });
-        expect(await onItsWay.locator('[data-airmail]').getAttribute('data-airmail')).toBe(
-          'running',
-        );
-        // The toast lies on paper, as the conversation's sheets do.
-        const toastCard = page.locator('.astryx-toast').first();
-        await toastCard.waitFor();
-        expect(await toastCard.evaluate(onPaper)).toBe(true);
-        await readable(page, size, `${colorScheme}-sent`);
-        // The copy in Sent takes its place.
-        const copy = reader(page).locator('button', { hasText: text });
-        await copy.waitFor({ timeout: 60_000 });
-        await page.waitForTimeout(500);
-        const sent = afterSend(await shown(page));
-        expect(sent[0]).toEqual({ composer: false, leaving: 1, running: 1, copies: 0, drafts: 0 });
-        expect(
-          sent.filter((frame) => frame.leaving + frame.copies !== 1 || frame.drafts > 0),
-        ).toEqual([]);
-        expect(sent.at(-1)).toMatchObject({ leaving: 0, copies: 1 });
-        expect(await copy.locator('time').count()).toBe(1);
-      }, 90_000);
-    }
+    test('a reply sent lies at the end of its conversation at once, and becomes the server’s copy when the index has it', async () => {
+      const page = await inbox('light');
+      await open(page);
+      await slowIndex(page);
+      const text = 'Thursday works for the cutover.';
+      await watch(page, text);
+      await sendReply(page, text);
+      await sentShows(page, text, 'light-sent');
+      // The copy in Sent takes its place.
+      const copy = reader(page).locator('button', { hasText: text });
+      await copy.waitFor({ timeout: 60_000 });
+      await page.waitForTimeout(500);
+      const sent = afterSend(await shown(page));
+      expect(sent[0]).toEqual({ composer: false, leaving: 1, running: 1, copies: 0, drafts: 0 });
+      expect(
+        sent.filter((frame) => frame.leaving + frame.copies !== 1 || frame.drafts > 0),
+      ).toEqual([]);
+      expect(sent.at(-1)).toMatchObject({ leaving: 0, copies: 1 });
+      expect(await copy.locator('time').count()).toBe(1);
+    }, 90_000);
 
     test('Undo brings the composer back as it was, and takes the reply from its conversation', async () => {
       const page = await inbox('dark');
@@ -203,8 +192,7 @@ for (const [size, options] of Object.entries(SIZES)) {
       const text = 'On second thought, Friday.';
       await watch(page, text);
       await sendReply(page, text);
-      const onItsWay = reader(page).locator('div:has(> [data-airmail])', { hasText: text });
-      await onItsWay.waitFor({ timeout: 2000 });
+      await sentShows(page, text, 'dark-sent');
       await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
       const editor = composer(page).getByRole('textbox', { name: 'Reply' });
       await editor.waitFor();
@@ -248,6 +236,24 @@ for (const [size, options] of Object.entries(SIZES)) {
     }, 90_000);
   });
 }
+
+/**
+ * Waits for a reply just sent to lie at the end of its conversation under running airmail, with its
+ * toast on paper, and checks both read.
+ */
+async function sentShows(page: Page, text: string, screen: string) {
+  const onItsWay = page
+    .getByRole('region', { name: 'Reader' })
+    .locator('div:has(> [data-airmail])', { hasText: text });
+  await onItsWay.waitFor({ timeout: 2000 });
+  expect(await onItsWay.locator('[data-airmail]').getAttribute('data-airmail')).toBe('running');
+  const toastCard = page.locator('.astryx-toast').first();
+  await toastCard.waitFor();
+  expect(await toastCard.evaluate(onPaper)).toBe(true);
+  await readable(page, sizeOf(page), screen);
+}
+
+const sizeOf = (page: Page) => ((page.viewportSize()?.width ?? 0) < 768 ? 'phone' : 'desktop');
 
 /** One painted frame of a reply sent, as the reader shows it. */
 type Frame = {
