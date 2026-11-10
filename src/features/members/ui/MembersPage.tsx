@@ -197,7 +197,7 @@ function Invite({ onInvited }: { onInvited: () => void }) {
           <p {...stylex.props(styles.message)}>{message}</p>
           <Button
             label="Copy"
-            variant="ghost"
+            variant="secondary"
             onClick={() => void navigator.clipboard.writeText(message)}
           />
         </div>
@@ -317,6 +317,7 @@ const styles = stylex.create({
     alignItems: 'end',
     gap: spacingVars['--spacing-2'],
   },
+  // A sheet like the list's, because on a phone the page lies on the desk, where a muted box vanishes.
   sent: {
     display: 'flex',
     flexDirection: 'column',
@@ -324,7 +325,8 @@ const styles = stylex.create({
     gap: spacingVars['--spacing-2'],
     padding: spacingVars['--spacing-3'],
     borderRadius: tm.sheetRadius,
-    backgroundColor: colorVars['--color-background-muted'],
+    boxShadow: tm.sheetEdge,
+    backgroundColor: colorVars['--color-background-card'],
   },
   message: {
     margin: 0,
@@ -382,6 +384,7 @@ const styles = stylex.create({
   },
   plain: {
     margin: 0,
-    paddingInlineStart: spacingVars['--spacing-4'],
+    padding: 0,
+    listStyle: 'none',
   },
 });
