@@ -70,6 +70,8 @@ test('every screen renders cleanly, with readable text, at both sizes in both th
       // The newest conversation, a thread, then the newsletter, which sets its own colors.
       screens.push(['reader', (page) => openConversation(page, 0)]);
       screens.push(['newsletter', (page) => openConversation(page, /Kernel Weekly/)]);
+      // A search, whose matches the highlighter marks.
+      screens.push(['search', (page) => searchFor(page, 'lunch thu')]);
       for (const [screen, reach] of screens) {
         await reach(page);
         await page.waitForTimeout(400);
@@ -267,14 +269,40 @@ test('quick presses never rest, however long a slow phone takes to draw each mov
   await context.close();
 }, 30_000);
 
+test('search finds mail as it is typed, marks what matched, and reads bodies only when asked', async () => {
+  const { context, page, problems } = await open(SIZES.desktop);
+  const field = page.getByRole('searchbox', { name: 'Search mail' });
+  const marks = page.locator('[role="option"] mark');
+
+  await field.fill('lunch thu');
+  await page.getByRole('heading', { name: 'Search', level: 2 }).waitFor();
+  await marks.first().waitFor();
+  const marked = new Set((await marks.allTextContents()).map((text) => text.toLowerCase()));
+  expect([...marked].sort()).toEqual(['lunch', 'thu']);
+
+  // A word only a newsletter's body holds, which the index can't see.
+  await field.fill('pacing');
+  await page.getByText('No matches', { exact: true }).waitFor();
+  await page.getByRole('button', { name: 'Search message bodies too' }).click();
+  const hit = page.getByRole('option').filter({ hasText: 'Kernel Weekly' }).first();
+  await hit.waitFor({ timeout: 15_000 });
+  await hit.click();
+  await page.locator('section[aria-label="Reader"] h1', { hasText: /^Issue \d+/ }).waitFor();
+
+  // Editing the search reads the index again, and clearing it goes back where it began.
+  await field.fill('pacin');
+  await page.getByRole('button', { name: 'Search message bodies too' }).waitFor();
+  await field.fill('');
+  await page.getByRole('heading', { name: 'Inbox', level: 2 }).waitFor();
+  expect(problems).toEqual([]);
+  await context.close();
+}, 30_000);
+
 /**
  * Opens a conversation from the unified Inbox and waits for its mail. On a phone it first goes back
  * to the list, from the reader or the folders.
  */
 async function openConversation(page: Page, which: number | RegExp) {
-  // A pane off a phone's screen is inert, so only the pane in view can be used.
-  const inView = async (locator: Locator) =>
-    (await locator.count()) > 0 && locator.evaluate((element) => !element.closest('[inert]'));
   const back = page.getByRole('button', { name: 'Back', exact: true });
   if (await inView(back)) await back.click();
   const inbox = page.getByRole('button', { name: /^Inbox/ }).first();
@@ -289,6 +317,19 @@ async function openConversation(page: Page, which: number | RegExp) {
     ];
     return frames.length > 0 && frames.every((frame) => frame.style.visibility === 'visible');
   });
+}
+
+/** Types a search into the field and waits for the rows it marks. On a phone, from the list. */
+async function searchFor(page: Page, text: string) {
+  const back = page.getByRole('button', { name: 'Back', exact: true });
+  if (await inView(back)) await back.click();
+  await page.getByRole('searchbox', { name: 'Search mail' }).fill(text);
+  await page.locator('[role="option"] mark').first().waitFor();
+}
+
+/** Whether a control is in a pane on screen. A pane off a phone's screen is inert. */
+async function inView(locator: Locator): Promise<boolean> {
+  return (await locator.count()) > 0 && locator.evaluate((element) => !element.closest('[inert]'));
 }
 
 /** Every visible text node whose contrast against what lies behind it falls under 4.5:1. */

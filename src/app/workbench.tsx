@@ -51,9 +51,13 @@ function Desk({ sidebarFooter }: { sidebarFooter: ReactNode }) {
   const folders = useQuery(foldersQuery).data ?? NONE;
   const outbox = useQuery(outboxQuery).data ?? NONE;
   const counts = useMemo(() => viewCounts(folders, outbox), [folders, outbox]);
-  const { data, hasNextPage, isFetchingNextPage, fetchNextPage } = useInfiniteQuery(
-    conversationsQuery(view),
-  );
+  const { data, hasNextPage, isFetching, isFetchingNextPage, fetchNextPage } = useInfiniteQuery({
+    ...conversationsQuery(view),
+    // While a search is typed, the results so far stay until the next arrive, so the list doesn't
+    // blink between keystrokes.
+    placeholderData: (previous, previousQuery) =>
+      view.in === 'search' && previousQuery?.queryKey[1].in === 'search' ? previous : undefined,
+  });
   const listed = useMemo(() => data?.pages.flatMap(({ items }) => items), [data]);
   const conversations = useTriagedList(view, listed);
   const onListNearEnd = useCallback(() => {
@@ -68,6 +72,7 @@ function Desk({ sidebarFooter }: { sidebarFooter: ReactNode }) {
       folders={folders}
       counts={counts}
       conversations={conversations}
+      isFetching={isFetching}
       onListNearEnd={onListNearEnd}
       sidebarFooter={sidebarFooter}
     />

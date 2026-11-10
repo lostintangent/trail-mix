@@ -1,5 +1,6 @@
 import { colorVars, durationVars, spacingVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   startTransition,
   Suspense,
@@ -14,13 +15,15 @@ import {
 } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { Toasts } from '../../../shared/toasts.tsx';
-import type {
-  Account,
-  ConversationId,
-  ConversationSummary,
-  Folder,
-  View,
+import {
+  marksOf,
+  type Account,
+  type ConversationId,
+  type ConversationSummary,
+  type Folder,
+  type View,
 } from '../../mail/core/index.ts';
+import { conversationsQuery } from '../../mailroom/client/index.ts';
 import { ListPane } from './ListPane.tsx';
 import { PanelEdge } from './PanelEdge.tsx';
 import { PANELS } from './panels.ts';
@@ -28,6 +31,9 @@ import { ReaderPane, type Reading } from './ReaderPane.tsx';
 import {
   NOTHING_SELECTED,
   rowChange,
+  SearchContext,
+  SearchField,
+  SearchScope,
   select,
   TriageActions,
   useTriage,
@@ -42,6 +48,12 @@ import { useMediaQuery } from './useMediaQuery.ts';
 import { usePanel } from './usePanel.ts';
 
 type Pane = 'sidebar' | 'list' | 'reader';
+
+/** The one search field, wherever it sits. It reads the search from `SearchContext`. */
+const SEARCH_FIELD = <SearchField />;
+
+/** What the sidebar is shown while a search is typed: no mailbox open, the same at every key. */
+const SEARCHING: View = { in: 'search', text: '' };
 
 /** The desktop columns: each side panel at the size on its custom property, then the reader. */
 const COLUMNS = `var(${PANELS.sidebar.variable}) var(${PANELS.list.variable}) minmax(0, 1fr)`;
@@ -58,6 +70,7 @@ export function Workbench({
   folders,
   counts,
   conversations,
+  isFetching,
   onListNearEnd,
   sidebarFooter,
 }: {
@@ -68,6 +81,8 @@ export function Workbench({
   counts: ViewCounts;
   /** Nothing until the view's first page arrives. */
   conversations: readonly ConversationSummary[] | undefined;
+  /** Whether the view's rows are on their way. */
+  isFetching: boolean;
   /** Asks for the view's next page, if it has one. */
   onListNearEnd: () => void;
   sidebarFooter: ReactNode;
@@ -90,6 +105,10 @@ export function Workbench({
   const sidebarId = useId();
   const listId = useId();
   const { title, unread, scope } = describeView(view, accounts, folders, counts);
+  const { search, marks, searchBodies } = useSearch(view, onViewChange);
+  // On a desktop the sidebar's box is the search field. On a phone, or while the sidebar is a rail,
+  // the field sits above the list instead.
+  const isFieldInSidebar = !isPhone && !sidebar.isCollapsed;
   // Panes off a phone's screen are inert, so focus and assistive tech stay on the one in view.
   const isOffscreen = (pane: Pane) => isPhone && pane !== phonePane;
 
@@ -206,94 +225,144 @@ export function Workbench({
   );
 
   return (
-    <div {...stylex.props(styles.desk)}>
-      {/* On a phone, toasts rise above the island, where the pane's actions float. */}
-      <Toasts
-        layerInset={
-          isPhone
-            ? { blockEnd: `calc(${tm.target} + ${spacingVars['--spacing-1']} * 2)` }
-            : undefined
-        }
-      />
-      <div
-        {...stylex.props(
-          styles.track,
-          styles.columns(COLUMNS),
-          trackAt[phonePane],
-          isResizing && styles.resizing,
-        )}
-      >
-        <div inert={isOffscreen('sidebar')} {...stylex.props(styles.pane)}>
-          <Sidebar
-            id={sidebarId}
-            view={view}
-            onSelect={openView}
-            accounts={accounts}
-            folders={folders}
-            counts={counts}
-            isCollapsed={isSidebarRail}
-            footer={footer}
-          />
-          <PanelEdge
-            spec={PANELS.sidebar}
-            state={sidebar}
-            label="Resize the sidebar"
-            controls={sidebarId}
-            onChange={setSidebar}
-            onResizingChange={setIsResizing}
-          />
-        </div>
-        <div inert={isOffscreen('list')} {...stylex.props(styles.pane)}>
-          <ListPane
-            id={listId}
-            title={title}
-            unread={unread}
-            scope={scope}
-            conversations={conversations}
-            stamps={stamps}
-            selection={selection}
-            isPicking={isPicking}
-            onSelect={pick}
-            onLongPress={startPicking}
-            onSwipe={swipe}
-            picked={
-              <PickedActions count={selection.ids.length} onCancel={stopPicking}>
-                <Suspense>{selectionActions('island')}</Suspense>
-              </PickedActions>
-            }
-            onNearEnd={onListNearEnd}
-            isCollapsed={!isPhone && list.isCollapsed}
-            onExpand={() => setList({ ...list, isCollapsed: false })}
-            onShowFolders={() => setPhonePane('sidebar')}
-          />
-          <PanelEdge
-            spec={PANELS.list}
-            state={list}
-            label="Resize the conversation list"
-            controls={listId}
-            onChange={setList}
-            onResizingChange={setIsResizing}
-          />
-        </div>
-        <div inert={isOffscreen('reader')} {...stylex.props(styles.pane)}>
-          {isMany && !isPhone ? (
-            <SelectionPane count={selection.ids.length} onClear={stopPicking}>
-              <Suspense>{selectionActions('bar')}</Suspense>
-            </SelectionPane>
-          ) : (
-            <ReaderPane
-              selected={selected}
-              accounts={accounts}
-              upcoming={neighbors(conversations, selected)}
-              onShown={markRead}
-              actions={readerActions}
-              onBack={() => setPhonePane('list')}
-            />
+    <SearchContext value={search}>
+      <div {...stylex.props(styles.desk)}>
+        {/* On a phone, toasts rise above the island, where the pane's actions float. */}
+        <Toasts
+          layerInset={
+            isPhone
+              ? { blockEnd: `calc(${tm.target} + ${spacingVars['--spacing-1']} * 2)` }
+              : undefined
+          }
+        />
+        <div
+          {...stylex.props(
+            styles.track,
+            styles.columns(COLUMNS),
+            trackAt[phonePane],
+            isResizing && styles.resizing,
           )}
+        >
+          <div inert={isOffscreen('sidebar')} {...stylex.props(styles.pane)}>
+            <Sidebar
+              id={sidebarId}
+              view={view.in === 'search' ? SEARCHING : view}
+              onSelect={openView}
+              accounts={accounts}
+              folders={folders}
+              counts={counts}
+              isCollapsed={isSidebarRail}
+              header={isFieldInSidebar ? SEARCH_FIELD : undefined}
+              footer={footer}
+            />
+            <PanelEdge
+              spec={PANELS.sidebar}
+              state={sidebar}
+              label="Resize the sidebar"
+              controls={sidebarId}
+              onChange={setSidebar}
+              onResizingChange={setIsResizing}
+            />
+          </div>
+          <div inert={isOffscreen('list')} {...stylex.props(styles.pane)}>
+            <ListPane
+              id={listId}
+              title={title}
+              unread={unread}
+              scope={scope}
+              below={
+                <>
+                  {!isFieldInSidebar && SEARCH_FIELD}
+                  {view.in === 'search' && (
+                    <SearchScope
+                      isFullText={view.fullText === true}
+                      isSearching={isFetching}
+                      onSearchBodies={searchBodies}
+                    />
+                  )}
+                </>
+              }
+              isSearch={view.in === 'search'}
+              conversations={conversations}
+              isUpdating={isFetching}
+              marks={marks}
+              stamps={stamps}
+              selection={selection}
+              isPicking={isPicking}
+              onSelect={pick}
+              onLongPress={startPicking}
+              onSwipe={swipe}
+              picked={
+                <PickedActions count={selection.ids.length} onCancel={stopPicking}>
+                  <Suspense>{selectionActions('island')}</Suspense>
+                </PickedActions>
+              }
+              onNearEnd={onListNearEnd}
+              isCollapsed={!isPhone && list.isCollapsed}
+              onExpand={() => setList({ ...list, isCollapsed: false })}
+              onShowFolders={() => setPhonePane('sidebar')}
+            />
+            <PanelEdge
+              spec={PANELS.list}
+              state={list}
+              label="Resize the conversation list"
+              controls={listId}
+              onChange={setList}
+              onResizingChange={setIsResizing}
+            />
+          </div>
+          <div inert={isOffscreen('reader')} {...stylex.props(styles.pane)}>
+            {isMany && !isPhone ? (
+              <SelectionPane count={selection.ids.length} onClear={stopPicking}>
+                <Suspense>{selectionActions('bar')}</Suspense>
+              </SelectionPane>
+            ) : (
+              <ReaderPane
+                selected={selected}
+                accounts={accounts}
+                upcoming={neighbors(conversations, selected)}
+                onShown={markRead}
+                actions={readerActions}
+                onBack={() => setPhonePane('list')}
+              />
+            )}
+          </div>
         </div>
       </div>
-    </div>
+    </SearchContext>
   );
+}
+
+/**
+ * What the member searches for, as the view holds it, and how typing changes the view. Typing turns
+ * the list into the search's results, clearing the field goes back to the view the search began
+ * from, and asking for message bodies keeps the text and searches the servers too.
+ */
+function useSearch(view: View, onViewChange: (view: View) => void) {
+  const queryClient = useQueryClient();
+  const text = view.in === 'search' ? view.text : '';
+  const latest = useRef(view);
+  useLayoutEffect(() => {
+    latest.current = view;
+  });
+  const returnTo = useRef<View>(view.in === 'search' ? { in: 'inbox' } : view);
+  const onSearch = useCallback(
+    (next: string) => {
+      if (latest.current.in !== 'search') returnTo.current = latest.current;
+      const searched: View = next === '' ? returnTo.current : { in: 'search', text: next };
+      // The matches are asked for as the key goes down, not once the keystroke has been drawn.
+      void queryClient.prefetchInfiniteQuery(conversationsQuery(searched));
+      onViewChange(searched);
+    },
+    [onViewChange, queryClient],
+  );
+  const search = useMemo(() => ({ text, onSearch }), [text, onSearch]);
+  const marks = useMemo(() => marksOf(text), [text]);
+  const searchBodies = useCallback(
+    () => onViewChange({ in: 'search', text, fullText: true }),
+    [onViewChange, text],
+  );
+  return { search, marks, searchBodies };
 }
 
 /**

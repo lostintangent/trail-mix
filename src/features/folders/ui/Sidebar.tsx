@@ -42,6 +42,7 @@ export const Sidebar = memo(function Sidebar({
   folders,
   counts,
   isCollapsed,
+  header,
   footer,
 }: {
   id: string;
@@ -51,10 +52,13 @@ export const Sidebar = memo(function Sidebar({
   folders: readonly Folder[];
   counts: ViewCounts;
   isCollapsed: boolean;
+  /** What sits above the mailboxes, such as the search field on a desktop. */
+  header?: ReactNode;
   footer: ReactNode;
 }) {
   return (
     <nav id={id} aria-label="Mailboxes" {...stylex.props(styles.sidebar)}>
+      {header && <div {...stylex.props(styles.header)}>{header}</div>}
       <div {...stylex.props(styles.scroll)}>
         <ul {...stylex.props(styles.rows)}>
           {UNIFIED_VIEWS.map(({ in: unified, label, icon }) => (
@@ -195,6 +199,11 @@ const styles = stylex.create({
       default: spacingVars['--spacing-1'],
       [media.phone]: spacingVars['--spacing-2'],
     },
+  },
+  header: {
+    flexShrink: 0,
+    padding: '1px',
+    paddingBottom: spacingVars['--spacing-2'],
   },
   scroll: {
     flexGrow: 1,

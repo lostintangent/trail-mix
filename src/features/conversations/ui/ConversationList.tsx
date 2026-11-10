@@ -30,9 +30,18 @@ import {
 } from 'react';
 import { stampStyles } from '../../../app/theme/stamps.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
-import type { ConversationId, ConversationSummary, StampColor } from '../../mail/core/index.ts';
+import type {
+  ConversationId,
+  ConversationSummary,
+  Marks,
+  StampColor,
+} from '../../mail/core/index.ts';
 import type { SelectBy, Selection } from '../core/selection.ts';
 import { formatListDate } from './dates.ts';
+import { Marked } from './search.tsx';
+
+/** A list that shows no search. */
+const NO_MARKS: Marks = [];
 
 /** A row's height before one has been drawn: three lines of text and the row's padding. */
 const FIRST_GUESS = 72;
@@ -60,6 +69,8 @@ const SWIPE_SHARE = 0.4;
 export function ConversationList({
   label,
   conversations,
+  marks = NO_MARKS,
+  isUpdating = false,
   stamps,
   selection,
   isPicking = false,
@@ -70,6 +81,10 @@ export function ConversationList({
 }: {
   label: string;
   conversations: readonly ConversationSummary[];
+  /** What a search matched, marked in each row. The same while the search stays the same. */
+  marks?: Marks;
+  /** Whether newer rows are on their way, as while a search is typed. */
+  isUpdating?: boolean;
   /** Each account's stamp color, by account id. */
   stamps: ReadonlyMap<string, StampColor>;
   selection: Selection;
@@ -146,6 +161,7 @@ export function ConversationList({
       aria-label={label}
       aria-multiselectable
       aria-activedescendant={selectedIndex < 0 ? undefined : optionId(selectedIndex)}
+      aria-busy={isUpdating}
       tabIndex={0}
       onKeyDown={move}
       {...stylex.props(styles.scroller, stylex.defaultMarker())}
@@ -159,6 +175,7 @@ export function ConversationList({
               key={conversation.id}
               id={optionId(index)}
               conversation={conversation}
+              marks={marks}
               stamp={stamps.get(conversation.account) ?? 'slate'}
               top={start}
               position={index + 1}
@@ -180,6 +197,7 @@ export function ConversationList({
 const Row = memo(function Row({
   id,
   conversation,
+  marks,
   stamp,
   top,
   position,
@@ -192,6 +210,7 @@ const Row = memo(function Row({
 }: {
   id: string;
   conversation: ConversationSummary;
+  marks: Marks;
   stamp: StampColor;
   top: number;
   position: number;
@@ -238,7 +257,7 @@ const Row = memo(function Row({
         <span {...stylex.props(styles.top)}>
           {isUnread && <span {...stylex.props(styles.dot)} />}
           <span {...stylex.props(styles.sender, isUnread && styles.senderUnread, styles.clip)}>
-            {senderNames(senders)}
+            <Marked text={senderNames(senders)} marks={marks} />
           </span>
           {isUnread && <VisuallyHidden>Unread</VisuallyHidden>}
           {flagged && <Icon icon={Star} size="xsm" label="Flagged" xstyle={styles.flag} />}
@@ -250,9 +269,11 @@ const Row = memo(function Row({
           </time>
         </span>
         <span {...stylex.props(isUnread && styles.subjectUnread, styles.clip)}>
-          {subject || '(no subject)'}
+          {subject ? <Marked text={subject} marks={marks} /> : '(no subject)'}
         </span>
-        <span {...stylex.props(styles.preview, styles.clip)}>{preview}</span>
+        <span {...stylex.props(styles.preview, styles.clip)}>
+          <Marked text={preview} marks={marks} />
+        </span>
       </span>
     </div>
   );

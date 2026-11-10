@@ -11,7 +11,7 @@ import {
   typeScaleVars,
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { ChevronRight, Inbox, Menu } from 'lucide-react';
+import { ChevronRight, Inbox, Menu, SearchX } from 'lucide-react';
 import { useId, type ReactNode } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { PhoneIsland } from './PhoneIsland.tsx';
@@ -20,6 +20,7 @@ import type {
   Account,
   ConversationId,
   ConversationSummary,
+  Marks,
   StampColor,
 } from '../../mail/core/index.ts';
 import { StampDot } from '../../../app/theme/StampDot.tsx';
@@ -35,7 +36,11 @@ export function ListPane({
   title,
   unread,
   scope,
+  below,
+  isSearch,
   conversations,
+  isUpdating,
+  marks,
   stamps,
   selection,
   isPicking,
@@ -53,8 +58,16 @@ export function ListPane({
   unread: number | undefined;
   /** The one account the view holds, or nothing when it gathers every account. */
   scope: Account | undefined;
+  /** What sits under the title, such as the search field on a phone and what a search covers. */
+  below?: ReactNode;
+  /** Whether the list holds a search's results. */
+  isSearch: boolean;
   /** Nothing until the view's first page arrives. */
   conversations: readonly ConversationSummary[] | undefined;
+  /** Whether newer rows are on their way. */
+  isUpdating: boolean;
+  /** What a search matched, marked in each row. */
+  marks: Marks;
   stamps: ReadonlyMap<string, StampColor>;
   selection: Selection;
   isPicking: boolean;
@@ -100,17 +113,28 @@ export function ListPane({
           )}
         </span>
       </header>
+      {below && <div {...stylex.props(styles.below)}>{below}</div>}
       <div {...stylex.props(styles.sheet, conversations?.length === 0 && styles.empty)}>
         {conversations?.length === 0 ? (
-          <EmptyState
-            icon={<Icon icon={Inbox} size="lg" color="secondary" />}
-            title="No mail yet"
-            description="Mail from the accounts you connect will gather here, newest first."
-          />
+          isSearch ? (
+            <EmptyState
+              icon={<Icon icon={SearchX} size="lg" color="secondary" />}
+              title="No matches"
+              description="Nothing in any account matches every word you typed."
+            />
+          ) : (
+            <EmptyState
+              icon={<Icon icon={Inbox} size="lg" color="secondary" />}
+              title="No mail yet"
+              description="Mail from the accounts you connect will gather here, newest first."
+            />
+          )
         ) : conversations ? (
           <ConversationList
             label={title}
             conversations={conversations}
+            isUpdating={isUpdating}
+            marks={marks}
             stamps={stamps}
             selection={selection}
             isPicking={isPicking}
@@ -188,6 +212,14 @@ const styles = stylex.create({
       [media.phone]: spacingVars['--spacing-3'],
     },
     paddingInline: spacingVars['--spacing-4'],
+  },
+  below: {
+    flexShrink: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: spacingVars['--spacing-2'],
+    paddingInline: spacingVars['--spacing-4'],
+    paddingBottom: spacingVars['--spacing-2'],
   },
   // The view's name stays modest beside the list on a desktop, and leads the screen on a phone.
   title: {

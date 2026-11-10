@@ -9,8 +9,9 @@ import { watch, type Watch } from './steady.ts';
 /**
  * The workbench's budgets, as AGENTS.md sets them: a cold load to the first Inbox rows, the
  * JavaScript that load needs, scrolling a 50,000-message folder, moving through it by key, and
- * archiving the conversation open in the reader. Each
- * runs on the built app with a 50,000-message demo mailbox, at the CPU of the phone in `phone.ts`.
+ * archiving the conversation open in the reader, and search showing its matches as it is typed.
+ * Each runs on the built app with a 50,000-message demo mailbox, at the CPU of the phone in
+ * `phone.ts`.
  */
 const BUDGET = {
   coldLoad: 1000,
@@ -18,7 +19,14 @@ const BUDGET = {
   scrollFrame: 1000 / 60,
   keyMove: 50,
   archive: 50,
+  search: 100,
 };
+
+/**
+ * What a member types into search, a keystroke at a time, as the Mailroom's bench types it: a
+ * sender's name, a newsletter's, and a word nearly every message holds.
+ */
+const TYPED = ['mina okafor', 'kernel weekly', 'are'];
 
 /** The built app's 50,000-message demo mailbox, as `DEMO_MAILBOX` fills it. */
 const MESSAGES = '50000';
@@ -68,6 +76,11 @@ export const workbench: BenchArea = {
         await phoneWatch.during('Scrolling', () => scrollFrames(page)),
         0.95,
       );
+      await phoneWatch.steady();
+      const search = percentile(
+        await phoneWatch.during('Searching as it is typed', () => searchKeystrokes(page)),
+        0.95,
+      );
       await context.close();
 
       // Keys move through the list on a desktop, where the list stays in view as its selection opens.
@@ -100,6 +113,7 @@ export const workbench: BenchArea = {
         ),
         measured('Moving through the list by key, p95', keyMove, BUDGET.keyMove, 'ms'),
         measured('Archiving, p95', archive, BUDGET.archive, 'ms'),
+        measured('Search showing matches as it is typed, p95', search, BUDGET.search, 'ms'),
       ];
     } finally {
       await browser.close();
@@ -110,6 +124,54 @@ export const workbench: BenchArea = {
 
 function measured(name: string, value: number, budget: number, unit: Measurement['unit']) {
   return { area: 'workbench', name, value, budget, unit };
+}
+
+/**
+ * Each keystroke of the typed searches, timed from the key going down until the list holding the
+ * matches for everything typed so far has painted.
+ */
+async function searchKeystrokes(page: Page): Promise<number[]> {
+  const field = page.getByRole('searchbox', { name: 'Search mail' });
+  const times: number[] = [];
+  for (const text of TYPED) {
+    await field.fill('');
+    await page.getByRole('heading', { name: 'Inbox', level: 2 }).waitFor();
+    await field.focus();
+    for (let typed = 1; typed <= text.length; typed++) {
+      await page.evaluate(() => {
+        document.addEventListener(
+          'keydown',
+          (event) => {
+            (window as unknown as { pressedAt: number }).pressedAt = event.timeStamp;
+          },
+          { capture: true, once: true },
+        );
+      });
+      await page.keyboard.type(text.charAt(typed - 1));
+      times.push(await page.evaluate(matched, text.slice(0, typed)));
+    }
+  }
+  return times;
+}
+
+/**
+ * In the page: milliseconds from the key going down until the frame that draws the list holding
+ * `text`'s matches has painted. The list is checked as each frame begins, and a task queued then
+ * runs once that frame has painted.
+ */
+function matched(text: string): Promise<number> {
+  return new Promise((resolve) => {
+    const check = () => {
+      const field = document.querySelector<HTMLInputElement>('input[type="search"]');
+      const list = document.querySelector('[role="listbox"]');
+      if (field?.value === text && list?.getAttribute('aria-busy') === 'false') {
+        setTimeout(() =>
+          resolve(performance.now() - (window as unknown as { pressedAt: number }).pressedAt),
+        );
+      } else requestAnimationFrame(check);
+    };
+    requestAnimationFrame(check);
+  });
 }
 
 /** Milliseconds from navigation until the first conversation row is on screen. */
