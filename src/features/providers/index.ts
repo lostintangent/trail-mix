@@ -8,5 +8,11 @@ export {
   type DemoMailbox,
   type DemoServer,
 } from './demo/provider.ts';
-export { checkSignIn, imapProvider, type ImapAccount, type Network } from './imap/provider.ts';
+export {
+  checkSignIn,
+  imapProvider,
+  SIGN_IN_PATIENCE_MS,
+  type ImapAccount,
+  type Network,
+} from './imap/provider.ts';
 export { PRESETS, type Endpoint, type Preset, type PresetName } from './imap/core/index.ts';

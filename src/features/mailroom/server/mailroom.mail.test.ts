@@ -14,6 +14,7 @@ import type {
   Outgoing,
 } from '../../mail/core/index.ts';
 import { RESTARTED, UNDO_SECONDS } from '../../outbox/core/index.ts';
+import { SIGN_IN_PATIENCE_MS } from '../../providers/index.ts';
 import PostalMime from 'postal-mime';
 import type { AccountSetup, Page } from '../client/contract.ts';
 import {
@@ -98,6 +99,35 @@ describe('The Mailroom', () => {
     expect(await ada.call('accounts')).toEqual([]);
     const stored = await ada.call<{ tables: Record<string, unknown[]> }>('stored');
     expect(stored.tables.credentials).toEqual([]);
+  }, 60_000);
+
+  test('gives up on a host that never greets after fifteen seconds, and says it couldn’t reach it', async () => {
+    // It takes the connection and says nothing, as a mistyped host can: no TLS handshake for IMAP,
+    // which imapflow would wait 90 s on, and no greeting for SMTP, which sending waits 60 s on.
+    const silent = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data() {} } });
+    const quiet = { host: '127.0.0.1', port: silent.port };
+    const attempt = async (hosts: Pick<typeof setup, 'imap' | 'smtp'>) => {
+      const started = performance.now();
+      const said = await ada.call('addAccount', { ...setup, ...hosts }).then(
+        () => 'kept',
+        (error: Error) => error.message,
+      );
+      return { said, after: performance.now() - started };
+    };
+    try {
+      const [imap, smtp] = await Promise.all([
+        attempt({ imap: { ...quiet, secure: true } }),
+        attempt({ smtp: { ...quiet, secure: false } }),
+      ]);
+      for (const { said, after } of [imap, smtp]) {
+        expect(said).toBe(`Trail Mix couldn’t reach 127.0.0.1 on port ${silent.port}.`);
+        expect(after).toBeGreaterThan(SIGN_IN_PATIENCE_MS - 500);
+        expect(after).toBeLessThan(SIGN_IN_PATIENCE_MS + 3_000);
+      }
+    } finally {
+      silent.stop(true);
+    }
+    expect(await ada.call('accounts')).toEqual([]);
   }, 60_000);
 
   test('connects an account once both its hosts take the password, and keeps it only sealed', async () => {
