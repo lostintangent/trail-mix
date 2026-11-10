@@ -53,7 +53,7 @@ export function Workbench({
   const isPhone = useMediaQuery(media.phone);
   const sidebarId = useId();
   const listId = useId();
-  const title = viewTitle(view, folders);
+  const { title, unread } = describeView(view, folders, counts);
   // Panes off a phone's screen are inert, so focus and assistive tech stay on the one in view.
   const isOffscreen = (pane: Pane) => isPhone && pane !== phonePane;
 
@@ -94,6 +94,7 @@ export function Workbench({
           <ListPane
             id={listId}
             title={title}
+            unread={unread}
             conversations={conversations}
             stamps={stamps}
             selected={selected}
@@ -115,25 +116,32 @@ export function Workbench({
           />
         </div>
         <div inert={isOffscreen('reader')} {...stylex.props(styles.pane)}>
-          <ReaderPane />
+          <ReaderPane onBack={() => setPhonePane('list')} />
         </div>
       </div>
     </div>
   );
 }
 
-function viewTitle(view: View, folders: readonly Folder[]): string {
+/** A view's title, and the unread count its header shows: Inbox's across accounts, or a folder's. */
+function describeView(
+  view: View,
+  folders: readonly Folder[],
+  counts: ViewCounts,
+): { title: string; unread?: number } {
   switch (view.in) {
-    case 'folder':
-      return (
-        folders.find(
-          ({ account, path }) => account === view.folder.account && path === view.folder.path,
-        )?.name ?? view.folder.path
-      );
+    case 'folder': {
+      const { account, path } = view.folder;
+      const folder = folders.find((each) => each.account === account && each.path === path);
+      return { title: folder?.name ?? path, unread: folder?.unread };
+    }
     case 'search':
-      return 'Search';
+      return { title: 'Search' };
     default:
-      return UNIFIED_VIEWS.find((unified) => unified.in === view.in)?.label ?? '';
+      return {
+        title: UNIFIED_VIEWS.find((unified) => unified.in === view.in)?.label ?? '',
+        unread: view.in === 'inbox' ? counts.inbox : undefined,
+      };
   }
 }
 
