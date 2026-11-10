@@ -272,6 +272,18 @@ const GITHUB = {
   unsubscribe: '<https://github.com/notifications/unsubscribe/demo>',
 };
 
+/** The newest cycle's review request. Its checks run on a PR three numbers before it. */
+const NEWEST_PULL = 40_412;
+
+/**
+ * A cycle's pull request numbers, as GitHub's: one number is one pull request, so no two stories or
+ * cycles share one, and newer cycles have higher ones. Each cycle takes four numbers, leaving room
+ * for other people's pull requests between its two. They stay positive for ten thousand cycles,
+ * twice the bench's mailbox.
+ */
+const pullNumber = (cycle: number, story: 'review' | 'checks') =>
+  NEWEST_PULL - 4 * cycle - (story === 'checks' ? 3 : 0);
+
 const STORIES: Record<string, (cycle: number) => Thread> = {
   plan: (c) => ({
     subject: rotate(['Workers migration plan', 'Sync service rewrite', 'Storage move plan'], c),
@@ -309,7 +321,7 @@ const STORIES: Record<string, (cycle: number) => Thread> = {
   }),
 
   pr412: (c) => {
-    const number = 412 - (c % 400);
+    const number = pullNumber(c, 'review');
     const title = rotate(
       [
         'Replayable stream cursors',
@@ -346,7 +358,7 @@ const STORIES: Record<string, (cycle: number) => Thread> = {
   },
 
   pr409: (c) => {
-    const number = 409 - (c % 400);
+    const number = pullNumber(c, 'checks');
     return {
       subject: `[trailmix-demo/toy-box] Fix the flaky watch test (PR #${number})`,
       cast: [person(3, c)],
