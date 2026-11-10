@@ -28,11 +28,15 @@ test('a flag change names only the four flags, each on or off', () => {
   expect(() => flagsOf({ deleted: true })).toThrow(TypeError);
 });
 
-test('an account change keeps only a name, a stamp and a signature', () => {
+test('an account change keeps only a name, a From name, a stamp and a signature', () => {
   expect(accountChangeOf({ name: ' Work ', status: 'ready', allowImagesFrom: ['x'] })).toEqual({
     name: 'Work',
   });
   expect(accountChangeOf({ signature: '' })).toEqual({ signature: '' });
+  expect(accountChangeOf({ fromName: ' Ada Lovelace ' })).toEqual({ fromName: 'Ada Lovelace' });
+  // Empty, it says to remove the name.
+  expect(accountChangeOf({ fromName: '' })).toEqual({ fromName: '' });
+  expect(() => accountChangeOf({ fromName: 'Ada\r\nBcc: eve@example.com' })).toThrow(TypeError);
   expect(() => accountChangeOf({ stamp: 'pink' })).toThrow(TypeError);
   expect(() => accountChangeOf({ name: '  ' })).toThrow(TypeError);
 });
@@ -54,6 +58,21 @@ test('an IMAP account needs both hosts unless a preset supplies them, and keeps 
     ...account,
     preset: 'outlook',
   });
+});
+
+test('an account’s From name is one line, and an empty one is no name', () => {
+  const account = {
+    provider: 'imap' as const,
+    name: 'Me',
+    address: 'me@example.com',
+    preset: 'outlook' as const,
+  };
+  expect(setupOf({ ...account, fromName: ' Ada Lovelace ' })).toEqual({
+    ...account,
+    fromName: 'Ada Lovelace',
+  });
+  expect(setupOf({ ...account, fromName: '' })).toEqual(account);
+  expect(() => setupOf({ ...account, fromName: 'Ada\nBcc: eve@example.com' })).toThrow(TypeError);
 });
 
 const ref = { account: 'a', path: 'Drafts', uidValidity: 7, uid: 3 };

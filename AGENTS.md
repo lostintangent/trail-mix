@@ -44,7 +44,7 @@ Every layer uses the same nouns, with the same names in the index, the contracts
 
 | Noun         | Meaning                                                                                                       |
 | ------------ | ------------------------------------------------------------------------------------------------------------- |
-| Account      | One mailbox a member has connected, with a name, a stamp color, an optional signature and a status.           |
+| Account      | One mailbox a member has connected: a name, a stamp color, an optional From name and signature, and a status. |
 | Folder       | A folder on the mail server, named by a `FolderRef` (account and path), with an optional role and its counts. |
 | Folder role  | `inbox`, `sent`, `drafts`, `archive`, `trash` or `junk`. Folders are recognized by role, never by name.       |
 | Message      | What the index holds for one message: its `Envelope` and the conversation it belongs to.                      |

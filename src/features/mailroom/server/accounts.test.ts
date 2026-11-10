@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
-import { demoMailbox } from '../../providers/index.ts';
+import { DEMO_ACCOUNTS, demoMailbox } from '../../providers/index.ts';
 import { accountBook, demoSettings, type Connection } from './accounts.ts';
+import { upgrade, versions } from './schema.ts';
 import { testSql } from './test-sql.ts';
 
 const imap: Connection = {
@@ -68,4 +69,21 @@ test('the demo is a size and an optional instant, and anything else is refused',
     expect(() => demoSettings('2000', at)).toThrow('DEMO_MAILBOX_AT');
   }
   expect(() => demoSettings(undefined, '2026-11-09T12:00:00Z')).toThrow('DEMO_MAILBOX_AT');
+});
+
+test('a demo account from before From names writes as its demo person, and IMAP ones wait for one', () => {
+  const sql = testSql(versions.length - 1);
+  const book = accountBook(sql);
+  book.add(named('mail'), imap, sealed);
+  const demo = demoMailbox('personal', 10, '2026-11-09T12:00:00.000Z');
+  book.add(
+    { id: 'demo', name: 'Personal', address: 'sam@trailmix.test', provider: 'demo' },
+    { provider: 'demo', kind: 'personal' },
+    { demo },
+  );
+  upgrade(sql);
+  expect(book.all().map(({ id, fromName }) => [id, fromName])).toEqual([
+    ['mail', undefined],
+    ['demo', DEMO_ACCOUNTS.personal.me.name],
+  ]);
 });

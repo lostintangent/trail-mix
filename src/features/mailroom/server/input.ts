@@ -110,10 +110,11 @@ export function flagsOf(value: unknown): Partial<Flags> {
 
 export function accountChangeOf(
   value: unknown,
-): Partial<Pick<Account, 'name' | 'stamp' | 'signature'>> {
-  const { name, stamp, signature } = record(value, 'an account change');
+): Partial<Pick<Account, 'name' | 'fromName' | 'stamp' | 'signature'>> {
+  const { name, fromName, stamp, signature } = record(value, 'an account change');
   return {
     ...(name === undefined ? {} : { name: textOf(name, 'A name') }),
+    ...(fromName === undefined ? {} : { fromName: lineOf(fromName, 'A name', 200) }),
     ...(stamp === undefined ? {} : { stamp: stampOf(stamp) }),
     ...(signature === undefined
       ? {}
@@ -128,14 +129,14 @@ export function setupOf(value: unknown): AccountSetup {
     throw new TypeError('That isn’t an account Trail Mix can connect.');
   const name = textOf(setup.name, 'A name');
   const address = addressOf(setup.address);
-  if (setup.preset === 'outlook') return { provider: 'imap', name, address, preset: 'outlook' };
+  const fromName = setup.fromName === undefined ? '' : lineOf(setup.fromName, 'A name', 200);
+  const named = { provider: 'imap', name, address, ...(fromName ? { fromName } : {}) } as const;
+  if (setup.preset === 'outlook') return { ...named, preset: 'outlook' };
   const password = textOf(setup.password, 'A password', 1000, false, false);
-  if (setup.preset === 'zoho') return { provider: 'imap', name, address, preset: 'zoho', password };
+  if (setup.preset === 'zoho') return { ...named, preset: 'zoho', password };
   if (setup.preset !== undefined) throw new TypeError('That isn’t a preset.');
   return {
-    provider: 'imap',
-    name,
-    address,
+    ...named,
     imap: endpointOf(setup.imap),
     smtp: endpointOf(setup.smtp),
     password,

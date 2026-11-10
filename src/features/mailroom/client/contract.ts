@@ -36,9 +36,10 @@ export interface Queries {
 export interface Commands {
   /** The only call that carries a secret. */
   addAccount(setup: AccountSetup): Promise<Account>;
+  /** An empty `fromName` removes it, and mail is from the address alone. */
   updateAccount(
     id: AccountId,
-    change: Partial<Pick<Account, 'name' | 'stamp' | 'signature'>>,
+    change: Partial<Pick<Account, 'name' | 'fromName' | 'stamp' | 'signature'>>,
   ): Promise<void>;
   removeAccount(id: AccountId): Promise<void>;
   /** From now on, this sender's remote images load. */
@@ -77,6 +78,7 @@ export type AccountSetup =
       provider: 'imap';
       name: string;
       address: string;
+      fromName?: string;
       /** Supplies hosts, ports and quirks. Without one, both endpoints are required. */
       preset?: 'zoho';
       imap?: Endpoint;
@@ -84,7 +86,7 @@ export type AccountSetup =
       /** The only secret. The Mailroom encrypts it before anything is stored. */
       password: string;
     }
-  | { provider: 'imap'; name: string; address: string; preset: 'outlook' };
+  | { provider: 'imap'; name: string; address: string; fromName?: string; preset: 'outlook' };
 
 export type Endpoint = { host: string; port: number; secure: boolean };
 

@@ -28,6 +28,7 @@ const setup: AccountSetup = {
   provider: 'imap',
   name: 'Alice',
   address: alice.email,
+  fromName: 'Alice Liddell',
   imap: { host: 'localhost', port: ports.imaps, secure: true },
   smtp: { host: 'localhost', port: ports.submissions, secure: true },
   password: alice.password,
@@ -311,7 +312,7 @@ describe('The Mailroom', () => {
       expect(flags).toContain('\\Draft');
       const written = await PostalMime.parse(source);
       expect(written).toMatchObject({
-        from: { address: alice.email },
+        from: { name: 'Alice Liddell', address: alice.email },
         to: [{ name: 'Bob', address: bob.email }],
         subject: 'Re: Lunch',
         inReplyTo: '<lunch-reply@trailmix.test>',
@@ -397,6 +398,24 @@ describe('The Mailroom', () => {
       const [message] = await ada.call<Message[]>('conversation', row!.id);
       expect(refOf(message!)).toEqual(second);
       await ada.call('move', [second], 'trash');
+    }, 30_000);
+
+    test('writes From with the name the account was last given, or the address alone', async () => {
+      const from = async () => {
+        const saved = await ada.call<MessageRef>('saveDraft', draft({}));
+        const written = await PostalMime.parse((await draftOnServer(saved)).source);
+        await ada.call('move', [saved], 'trash');
+        return written.from;
+      };
+      await ada.call('updateAccount', account.id, { fromName: 'Liddell, Alice' });
+      expect(await from()).toEqual({ name: 'Liddell, Alice', address: alice.email });
+      await ada.call('updateAccount', account.id, { name: 'Alice at home' });
+      expect(await from()).toEqual({ name: 'Liddell, Alice', address: alice.email });
+
+      await ada.call('updateAccount', account.id, { fromName: '' });
+      expect(await from()).toEqual({ name: '', address: alice.email });
+      expect((await ada.call<Account[]>('accounts'))[0]).not.toContainKey('fromName');
+      await ada.call('updateAccount', account.id, { name: 'Alice', fromName: 'Alice Liddell' });
     }, 30_000);
 
     test('a draft replaces only a draft of its own account', async () => {
@@ -535,9 +554,11 @@ describe('The Mailroom with the demo mailbox', () => {
     await cy.until(async () =>
       (await cy.page({ in: 'drafts' })).some((row) => row.subject === 'Quarterly numbers'),
     );
-    expect((await cy.call<Body>('body', saved)).attachments).toMatchObject([
-      { name: 'numbers.csv', type: 'text/csv', size: 5 },
-    ]);
+    const body = await cy.call<Body>('body', saved);
+    expect(body.attachments).toMatchObject([{ name: 'numbers.csv', type: 'text/csv', size: 5 }]);
+    expect(body.headers.find(([name]) => name === 'From')?.[1]).toBe(
+      'Sam Rivera <sam@work.trailmix.test>',
+    );
   }, 30_000);
 });
 

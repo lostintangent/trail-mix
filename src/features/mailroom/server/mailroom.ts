@@ -207,6 +207,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
         id,
         name: checked.name,
         address: checked.address,
+        ...(checked.fromName ? { fromName: checked.fromName } : {}),
         provider: 'imap',
         ...(checked.preset ? { preset: checked.preset } : {}),
       },
@@ -220,12 +221,14 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 
   updateAccount(
     id: AccountId,
-    change: Partial<Pick<Account, 'name' | 'stamp' | 'signature'>>,
+    change: Partial<Pick<Account, 'name' | 'fromName' | 'stamp' | 'signature'>>,
   ): Promise<void> {
-    const checked = input.accountChangeOf(change);
-    if (!this.book.update(input.accountOf(id), (account) => ({ ...account, ...checked }))) {
-      throw new Error('There is no such account.');
-    }
+    const { fromName, ...checked } = input.accountChangeOf(change);
+    const updated = this.book.update(input.accountOf(id), ({ fromName: held, ...account }) => {
+      const name = fromName ?? held;
+      return { ...account, ...checked, ...(name ? { fromName: name } : {}) };
+    });
+    if (!updated) throw new Error('There is no such account.');
     this.hint({ changed: 'accounts' });
     return Promise.resolve();
   }
@@ -329,7 +332,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     }
     const message = messageOf(
       {
-        from: { email: account.address },
+        from: { ...(account.fromName ? { name: account.fromName } : {}), email: account.address },
         to: checked.to,
         cc: checked.cc,
         bcc: checked.bcc,
@@ -593,7 +596,13 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     const { name, me } = DEMO_ACCOUNTS[kind];
     const inbox = kind === 'personal' ? size : Math.ceil(size / 10);
     return this.book.add(
-      { id: crypto.randomUUID(), name, address: me.email, provider: 'demo' },
+      {
+        id: crypto.randomUUID(),
+        name,
+        address: me.email,
+        ...(me.name ? { fromName: me.name } : {}),
+        provider: 'demo',
+      },
       { provider: 'demo', kind },
       { demo: demoMailbox(kind, inbox, createdAt) },
     );

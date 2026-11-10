@@ -111,17 +111,24 @@ export const versions: readonly (readonly string[])[] = [
     `DELETE FROM placements`,
     `UPDATE folders SET cursor = NULL`,
   ],
+  [
+    // Accounts gained the name their mail is from. A demo account's mail has always been from
+    // Sam Rivera, so one made before now says so. An IMAP account has none until the member sets it.
+    `UPDATE accounts SET account = json_set(account, '$.fromName', 'Sam Rivera')
+      WHERE json_extract(connection, '$.provider') = 'demo'`,
+  ],
 ];
 
 /**
- * Applies every version newer than the one recorded, in order, each with its record. Returns the
- * version it found, which is 0 for a new Mailroom.
+ * Applies every version newer than the one recorded, in order, each with its record, up to `to`,
+ * which a test sets to hold a Mailroom as an earlier release left it. Returns the version it found,
+ * which is 0 for a new Mailroom.
  */
-export function upgrade(sql: Sql): number {
+export function upgrade(sql: Sql, to = versions.length): number {
   sql.run(`CREATE TABLE IF NOT EXISTS schema (version INTEGER NOT NULL)`);
   const [row] = sql.all<{ version: number }>(`SELECT version FROM schema`);
   const current = row?.version ?? 0;
-  for (let version = current + 1; version <= versions.length; version++) {
+  for (let version = current + 1; version <= to; version++) {
     sql.transaction(() => {
       for (const statement of versions[version - 1] ?? []) sql.run(statement);
       sql.run(`DELETE FROM schema`);

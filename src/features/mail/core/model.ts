@@ -29,6 +29,8 @@ export type Account = {
   /** Shown in the sidebar, for example "Personal". */
   name: string;
   address: string;
+  /** The name recipients see beside the address, for example "Ada Lovelace". */
+  fromName?: string;
   provider: 'imap' | 'demo';
   /** Hosts, ports, sign-in method and quirks. */
   preset?: 'zoho' | 'outlook';
