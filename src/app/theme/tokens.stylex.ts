@@ -21,9 +21,6 @@ export const tm = stylex.defineVars({
   deskGap: '6px', // desk showing between panes
   paneRadius: '14px',
   sheetRadius: '12px', // a message, the composer
-  sidebarWidth: '240px', // drag 200 to 360; below the midpoint it snaps to railWidth
-  railWidth: '52px',
-  listWidth: '380px', // drag 300 to 560
   target: { default: '32px', [COARSE]: '44px' },
   rowPad: { default: '8px', [COARSE]: '11px' },
   measure: '72ch', // longest line of message text
