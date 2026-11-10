@@ -3,11 +3,15 @@ import stylex from '@stylexjs/unplugin/vite';
 import { tanstackStart } from '@tanstack/react-start/plugin/vite';
 import { index, rootRoute } from '@tanstack/virtual-file-routes';
 import react from '@vitejs/plugin-react';
+import { Features } from 'lightningcss';
 import { defineConfig } from 'vite';
 import { stylexDefinitionsFirst } from './src/shared/build/stylexDefinitionsFirst.ts';
 import { stylexOptions } from './src/shared/build/stylexOptions.ts';
 
 export default defineConfig(({ isPreview }) => ({
+  // The build's CSS minifier would lower light-dark() into variables only <html> switches, so a
+  // sheet that sets its own color-scheme, such as mail on light paper, couldn't flip a token.
+  css: { lightningcss: { exclude: Features.LightDark } },
   plugins: [
     cloudflare({
       // The Worker, `src/server/entry.ts`, runs on workerd in development, preview and production.

@@ -132,6 +132,23 @@ test('a saved theme paints the desk before any of the app runs', async () => {
   }
 });
 
+test('a sheet that sets its own color scheme takes the theme’s colors for that scheme', async () => {
+  const { context, page } = await open({ ...SIZES.desktop, colorScheme: 'dark' });
+  const inkIn = (scheme: string) =>
+    page.evaluate((scheme) => {
+      const sheet = document.createElement('div');
+      sheet.style.colorScheme = scheme;
+      sheet.style.color = 'var(--color-text-primary)';
+      document.body.appendChild(sheet);
+      const ink = getComputedStyle(sheet).color;
+      sheet.remove();
+      return ink;
+    }, scheme);
+
+  expect(await inkIn('light')).not.toBe(await inkIn('dark'));
+  await context.close();
+});
+
 /** Every visible text node whose contrast against what lies behind it falls under 4.5:1. */
 function unreadableText(page: Page): Promise<string[]> {
   return page.evaluate(() => {
