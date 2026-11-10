@@ -127,7 +127,8 @@ for (const [size, options] of Object.entries(SIZES)) {
       await imap.fill('imap.zoho.com');
       await page.getByRole('textbox', { name: 'SMTP server' }).fill('smtp.zoho.com');
       await page.getByRole('button', { name: 'Add account' }).click();
-      await page.getByRole('alert').waitFor();
+      // The form's own alert. Toasts keep an empty one of their own once they load.
+      await page.getByRole('alert').filter({ hasText: 'The account wasn’t added.' }).waitFor();
       // The call as the page sent it, with the typed names, Zoho's ports and TLS, and no other host.
       const setup = asked.find((body) => body.includes('addAccount')) ?? '';
       expect(setup).toContain('"s":"zoho"');
