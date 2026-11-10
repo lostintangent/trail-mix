@@ -21,3 +21,6 @@ worker-startup.cpuprofile
 *.tsbuildinfo
 
 .DS_Store
+
+# What the smoke suite and the bench record
+test-results

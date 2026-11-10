@@ -56,6 +56,17 @@ jobs:
       - name: Check the Worker starts
         run: node node_modules/wrangler/bin/wrangler.js check startup
 
+      # Measures every performance budget in AGENTS.md, and fails when one is over.
+      - name: Benchmark
+        run: bun run bench
+
+      - name: Upload the benchmark numbers
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: results
+          path: test-results/
+
   # Mail I/O against the native test mail server: the server's own tests, and the mail check
   # running in a Durable Object on workerd.
   mail:
