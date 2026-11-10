@@ -1,0 +1,204 @@
+import { expect, test } from 'bun:test';
+import type { Folder, FolderRole, Message, View } from '../../mail/core/index.ts';
+import {
+  changeMessages,
+  changeRows,
+  commandFor,
+  rowChange,
+  undoOf,
+  type Command,
+} from './triage.ts';
+
+const ROLES: Partial<Record<string, FolderRole>> = {
+  INBOX: 'inbox',
+  Archive: 'archive',
+  Sent: 'sent',
+  Drafts: 'drafts',
+  Trash: 'trash',
+};
+
+const folders: Folder[] = [
+  ...(['INBOX', 'Archive', 'Sent', 'Drafts', 'Trash', 'Projects'] as const).map((path) => ({
+    account: 'personal',
+    path,
+    name: path,
+    ...(ROLES[path] && { role: ROLES[path] }),
+    unread: 0,
+    total: 0,
+  })),
+  { account: 'work', path: 'Inbox', name: 'Inbox', role: 'inbox', unread: 0, total: 0 },
+  { account: 'work', path: 'Archive', name: 'Archive', role: 'archive', unread: 0, total: 0 },
+];
+
+let uid = 0;
+/** A message of conversation `c1`, read and unflagged unless said otherwise. */
+function message(
+  path: string,
+  extra: Partial<Message> & { seen?: boolean; flagged?: boolean } = {},
+) {
+  const { seen = true, flagged = false, ...rest } = extra;
+  return {
+    account: 'personal',
+    path,
+    uidValidity: 1,
+    uid: ++uid,
+    messageId: `<m${uid}@example.com>`,
+    references: [],
+    from: { email: 'ada@example.com' },
+    to: [],
+    cc: [],
+    subject: 'Lunch',
+    date: `2026-11-0${uid % 9}T12:00:00Z`,
+    preview: '',
+    flags: { seen, flagged, answered: false, draft: false },
+    hasAttachments: false,
+    conversation: 'c1',
+    ...rest,
+  } satisfies Message;
+}
+
+const inbox: View = { in: 'inbox' };
+const paths = (command: Command | undefined) =>
+  command && 'move' in command ? command.move.map(({ path }) => path) : [];
+
+test('archiving from a unified view moves the conversation’s Inbox messages, and nothing it sent', () => {
+  const conversation = [message('INBOX'), message('Sent'), message('INBOX'), message('Archive')];
+
+  const command = commandFor({ do: 'archive' }, inbox, [conversation], folders);
+
+  expect(command).toMatchObject({ to: 'archive' });
+  expect(paths(command)).toEqual(['INBOX', 'INBOX']);
+});
+
+test('in a folder, an action moves that folder’s messages only', () => {
+  const conversation = [message('Projects'), message('INBOX'), message('Projects')];
+  const projects: View = { in: 'folder', folder: { account: 'personal', path: 'Projects' } };
+
+  expect(paths(commandFor({ do: 'delete' }, projects, [conversation], folders))).toEqual([
+    'Projects',
+    'Projects',
+  ]);
+});
+
+test('a search finds mail anywhere, so a conversation found only in Archive can be deleted and moved', () => {
+  const conversation = [message('Archive'), message('Sent'), message('Drafts')];
+  const search: View = { in: 'search', text: 'lunch' };
+  const projects = { account: 'personal', path: 'Projects' };
+
+  expect(commandFor({ do: 'delete' }, search, [conversation], folders)).toMatchObject({
+    to: 'trash',
+  });
+  expect(paths(commandFor({ do: 'delete' }, search, [conversation], folders))).toEqual(['Archive']);
+  expect(paths(commandFor({ do: 'move', to: projects }, search, [conversation], folders))).toEqual([
+    'Archive',
+  ]);
+  expect(commandFor({ do: 'archive' }, search, [conversation], folders)).toBeUndefined();
+});
+
+test('Drafts deletes the drafts, not the conversation they answer', () => {
+  const conversation = [message('INBOX'), message('Drafts', { seen: true })];
+
+  expect(paths(commandFor({ do: 'delete' }, { in: 'drafts' }, [conversation], folders))).toEqual([
+    'Drafts',
+  ]);
+});
+
+test('a move to a folder takes only that folder’s account, since mail can’t cross accounts', () => {
+  const personal = [message('INBOX')];
+  const work = [message('Inbox', { account: 'work' })];
+  const projects = { account: 'personal', path: 'Projects' };
+
+  const command = commandFor({ do: 'move', to: projects }, inbox, [personal, work], folders);
+
+  expect(command && 'move' in command && command.move.map(({ account }) => account)).toEqual([
+    'personal',
+  ]);
+});
+
+test('flags and read marks change only the messages that aren’t already as asked', () => {
+  const conversation = [
+    message('INBOX', { seen: false, date: '2026-11-01T09:00:00Z' }),
+    message('INBOX', { seen: true, flagged: true, date: '2026-11-02T09:00:00Z' }),
+    message('INBOX', { seen: false, date: '2026-11-03T09:00:00Z' }),
+  ];
+  const uids = (command: Command | undefined) =>
+    command && 'setFlags' in command ? command.setFlags.map(({ uid }) => uid) : [];
+  const [first, second, newest] = conversation.map(({ uid }) => uid) as [number, number, number];
+
+  expect(uids(commandFor({ do: 'read' }, inbox, [conversation], folders))).toEqual([first, newest]);
+  expect(uids(commandFor({ do: 'unflag' }, inbox, [conversation], folders))).toEqual([second]);
+  expect(uids(commandFor({ do: 'flag' }, inbox, [conversation], folders))).toEqual([newest]);
+  expect(commandFor({ do: 'unread' }, inbox, [conversation], folders)).toBeUndefined();
+});
+
+test('an action that would change nothing sends nothing', () => {
+  const read = [message('INBOX'), message('Archive')];
+
+  expect(commandFor({ do: 'read' }, inbox, [read], folders)).toBeUndefined();
+  expect(commandFor({ do: 'archive' }, inbox, [[message('Archive')]], folders)).toBeUndefined();
+});
+
+test('Undo puts each moved message back in the folder it left', () => {
+  const ref = (path: string, uid: number) => ({ account: 'personal', path, uidValidity: 1, uid });
+  const command: Command = {
+    move: [ref('INBOX', 1), ref('Projects', 2), ref('INBOX', 3)],
+    to: 'trash',
+  };
+  const moved = [
+    { from: ref('INBOX', 1), to: ref('Trash', 41) },
+    { from: ref('Projects', 2), to: ref('Trash', 42) },
+    { from: ref('INBOX', 3), to: ref('Trash', 43) },
+  ];
+
+  expect(undoOf(command, moved)).toEqual([
+    { move: [ref('Trash', 41), ref('Trash', 43)], to: { account: 'personal', path: 'INBOX' } },
+    { move: [ref('Trash', 42)], to: { account: 'personal', path: 'Projects' } },
+  ]);
+});
+
+test('Undo of a read mark makes unread again only the messages it marked', () => {
+  const conversation = [
+    message('INBOX', { seen: false }),
+    message('INBOX'),
+    message('INBOX', { seen: false }),
+  ];
+  const command = commandFor({ do: 'read' }, inbox, [conversation], folders)!;
+
+  expect(undoOf(command)).toEqual([
+    { setFlags: 'setFlags' in command ? command.setFlags : [], change: { seen: false } },
+  ]);
+  expect(changeMessages(conversation, command).map(({ flags }) => flags.seen)).toEqual([
+    true,
+    true,
+    true,
+  ]);
+});
+
+test('a moved conversation leaves its list, except Flagged and a search, which still hold it', () => {
+  const views: [View, unknown][] = [
+    [inbox, 'gone'],
+    [{ in: 'folder', folder: { account: 'personal', path: 'Projects' } }, 'gone'],
+    [{ in: 'flagged' }, undefined],
+    [{ in: 'search', text: 'lunch' }, undefined],
+  ];
+
+  for (const [view, change] of views)
+    expect(rowChange({ do: 'archive' }, view)).toBe(change as never);
+  expect(rowChange({ do: 'unflag' }, { in: 'flagged' })).toBe('gone');
+  expect(rowChange({ do: 'unflag' }, inbox)).toEqual({ flagged: false });
+});
+
+test('a row change reaches the triaged conversations and no others', () => {
+  const rows = [
+    { id: 'a', unread: 2, flagged: false },
+    { id: 'b', unread: 1, flagged: false },
+    { id: 'c', unread: 0, flagged: true },
+  ];
+
+  expect(changeRows(rows, new Set(['a', 'c']), 'gone').map(({ id }) => id)).toEqual(['b']);
+  expect(changeRows(rows, new Set(['a']), { unread: 0 })).toEqual([
+    { id: 'a', unread: 0, flagged: false },
+    { id: 'b', unread: 1, flagged: false },
+    { id: 'c', unread: 0, flagged: true },
+  ]);
+});
