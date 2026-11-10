@@ -1,7 +1,13 @@
+import { Button } from '@astryxdesign/core/Button';
+import { EmptyState } from '@astryxdesign/core/EmptyState';
+import { Icon } from '@astryxdesign/core/Icon';
+import { colorVars, spacingVars } from '@astryxdesign/core/theme/tokens.stylex';
+import * as stylex from '@stylexjs/stylex';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
-import { Suspense, useCallback, useMemo, useState, type ReactNode } from 'react';
-import { FirstRun } from '../features/accounts/index.ts';
+import { CloudOff } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { FirstRun, preloadFirstRun } from '../features/accounts/index.ts';
 import type { Command } from '../features/commands/index.ts';
 import { useTriagedList } from '../features/conversations/index.ts';
 import { useChangedFolders, viewCounts } from '../features/folders/index.ts';
@@ -35,28 +41,83 @@ export const Route = createFileRoute('/')({
   component: App,
 });
 
+/**
+ * The member's mail, or, for a member with no accounts, the first-run screen, where they add one.
+ * Until the Mailroom says which, the desk stays bare, so neither screen shows only to give way to
+ * the other. The first-run screen shows once its code has loaded too.
+ */
 function App() {
   const [mode, setMode] = useThemeMode();
   // The hint socket is open on the first-run screen too, so an account added on another device
   // shows here.
   useHints();
-  // A member with no accounts has no mail to show, and starts by adding one.
-  const isFirstRun = useQuery(accountsQuery).data?.length === 0;
+  const accounts = useQuery(accountsQuery);
+  const isFirstRun = accounts.data?.length === 0;
+  const welcome = useLoaded(preloadFirstRun, isFirstRun);
+  const screen =
+    accounts.data === undefined ? (
+      accounts.isError && <Unreachable />
+    ) : !isFirstRun ? (
+      <Desk
+        sidebarFooter={<ThemeChoice mode={mode} onChange={setMode} />}
+        extraCommands={themeCommands(mode, setMode)}
+      />
+    ) : welcome === 'failed' ? (
+      <Unreachable />
+    ) : (
+      welcome === 'loaded' && <FirstRun />
+    );
   return (
     <AppTheme theme={trailMixTheme} mode={mode}>
-      {isFirstRun ? (
-        <Suspense>
-          <FirstRun />
-        </Suspense>
-      ) : (
-        <Desk
-          sidebarFooter={<ThemeChoice mode={mode} onChange={setMode} />}
-          extraCommands={themeCommands(mode, setMode)}
-        />
-      )}
+      {screen}
     </AppTheme>
   );
 }
+
+/** Whether code `load` brings in has arrived, once it is wanted. */
+function useLoaded(load: () => Promise<unknown>, isWanted: boolean) {
+  const [state, setState] = useState<'loading' | 'loaded' | 'failed'>('loading');
+  useEffect(() => {
+    if (!isWanted) return;
+    let isCurrent = true;
+    load().then(
+      () => isCurrent && setState('loaded'),
+      () => isCurrent && setState('failed'),
+    );
+    return () => {
+      isCurrent = false;
+    };
+  }, [load, isWanted]);
+  return state;
+}
+
+/**
+ * The Mailroom couldn't be asked, as when the network is down or the sign-in has run out. Loading
+ * the page again signs in anew where it has.
+ */
+function Unreachable() {
+  return (
+    <main {...stylex.props(styles.desk)}>
+      <EmptyState
+        headingLevel={1}
+        icon={<Icon icon={CloudOff} size="lg" color="secondary" />}
+        title="Trail Mix can’t reach your mail"
+        description="The connection or your sign-in may have lapsed."
+        actions={<Button label="Try again" variant="primary" onClick={() => location.reload()} />}
+      />
+    </main>
+  );
+}
+
+const styles = stylex.create({
+  desk: {
+    minHeight: '100dvh',
+    display: 'grid',
+    placeItems: 'center',
+    padding: spacingVars['--spacing-6'],
+    backgroundColor: colorVars['--color-background-body'],
+  },
+});
 
 const NONE = [] as const;
 

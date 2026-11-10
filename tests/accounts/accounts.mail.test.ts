@@ -78,14 +78,9 @@ for (const [size, options] of Object.entries(SIZES)) {
     const cabinKeys = (page: Page) =>
       page.getByRole('option').filter({ hasText: 'The cabin keys' });
 
-    test('a member with no accounts is told who can read their mail, and a refused password keeps nothing', async () => {
+    test('a member with no accounts is welcomed, and a refused password keeps nothing', async () => {
       const page = await open({ colorScheme: 'light' });
       await firstRun(page).waitFor();
-      await page
-        .getByText('Whoever controls that Cloudflare account can read everything stored there', {
-          exact: false,
-        })
-        .waitFor();
 
       await fillAlice(page, WRONG);
       if (size === 'phone') {

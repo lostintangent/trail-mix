@@ -2,4 +2,4 @@
 // screen loads apart from it.
 export type { AccountPageOf } from './ui/AccountPage.tsx';
 export { accountCommands } from './ui/commands.ts';
-export { AccountPage, FirstRun, RemoveQuestion } from './ui/lazy.ts';
+export { AccountPage, FirstRun, preloadFirstRun, RemoveQuestion } from './ui/lazy.ts';

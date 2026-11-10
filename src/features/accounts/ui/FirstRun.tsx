@@ -4,8 +4,9 @@ import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { AddAccount } from './AddAccount.tsx';
 
 /**
- * What a member with no accounts sees: who can read what Trail Mix stores, said before anything is
- * stored, and the form that adds their first account. Adding it opens the workbench on its mail.
+ * What a member with no accounts sees: a welcome, and the form that adds their first account.
+ * Adding it opens the workbench on its mail. On a desktop the sheet sits in the middle of the desk,
+ * and a form taller than the window scrolls from its top. On a phone it is the whole screen.
  */
 export function FirstRun() {
   return (
@@ -18,18 +19,6 @@ export function FirstRun() {
           Add a mailbox to read and send its mail here. Your mail stays on its server, and Trail Mix
           keeps an index of it and the messages you open.
         </p>
-        <section aria-labelledby="first-run-trust" {...stylex.props(styles.notice)}>
-          <h2 id="first-run-trust" {...stylex.props(styles.heading)}>
-            Who can read your mail
-          </h2>
-          <p {...stylex.props(styles.text)}>
-            Trail Mix stores your account settings, your encrypted credentials and the messages
-            waiting to be sent, all in the Cloudflare account it is deployed to. Whoever controls
-            that Cloudflare account can read everything stored there, encryption included, because
-            the key is theirs. If someone else runs Trail Mix for you, you are trusting them with
-            your mail.
-          </p>
-        </section>
         <h2 {...stylex.props(styles.heading)}>Add an account</h2>
         <AddAccount accounts={[]} />
       </article>
@@ -53,6 +42,8 @@ const styles = stylex.create({
     gap: spacingVars['--spacing-4'],
     width: '100%',
     maxWidth: tm.measure,
+    // In the desk's middle while it fits, and from its top once it doesn't.
+    marginBlock: { default: 'auto', [media.phone]: 0 },
     paddingBlock: {
       default: spacingVars['--spacing-6'],
       [media.phone]: `max(${tm.safeTop}, ${spacingVars['--spacing-6']})`,
@@ -81,14 +72,5 @@ const styles = stylex.create({
   },
   text: {
     margin: 0,
-  },
-  // The one thing to read before anything is stored, set apart on the desk's own shade.
-  notice: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: spacingVars['--spacing-2'],
-    padding: spacingVars['--spacing-4'],
-    borderRadius: tm.sheetRadius,
-    backgroundColor: colorVars['--color-background-muted'],
   },
 });
