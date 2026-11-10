@@ -10,14 +10,9 @@ on:
   # A pull request's preview goes when the pull request closes.
   pull_request:
     types: [closed]
-  # Exercises the rollback for real: a deploy of main whose /health reports another commit, the
-  # app otherwise unchanged. It goes once the rollback has been seen to work.
+  # Deploys main again. A run reads the repository's secrets and variables when it is queued, so
+  # one changed after that reaches production only through a run started later, such as this one.
   workflow_dispatch:
-    inputs:
-      rollback_drill:
-        description: Deploy main with /health reporting another commit, so the deploy rolls back
-        type: boolean
-        default: false
 
 permissions:
   contents: read
@@ -187,9 +182,8 @@ jobs:
           OPERATOR_EMAIL: ${{ vars.OPERATOR_EMAIL }}
           ACCESS_API_TOKEN: ${{ secrets.ACCESS_API_TOKEN }}
           KEY: ${{ steps.account.outputs.key }}
-          REPORTED: ${{ inputs.rollback_drill && 'a version that is not this commit' || github.sha }}
         run: |
-          args=(--var "VERSION:$REPORTED" --var "CLOUDFLARE_ACCOUNT_ID:$CLOUDFLARE_ACCOUNT_ID")
+          args=(--var "VERSION:$COMMIT" --var "CLOUDFLARE_ACCOUNT_ID:$CLOUDFLARE_ACCOUNT_ID")
           args+=(--message "Commit $COMMIT")
           if [ -n "$ACCESS_TEAM_DOMAIN" ]; then
             args+=(--var "ACCESS_TEAM_DOMAIN:$ACCESS_TEAM_DOMAIN" --var "ACCESS_AUD:$ACCESS_AUD")
