@@ -1,10 +1,16 @@
-import { createRootRoute, HeadContent, ScriptOnce, Scripts } from '@tanstack/react-router';
+import {
+  createRootRouteWithContext,
+  HeadContent,
+  ScriptOnce,
+  Scripts,
+} from '@tanstack/react-router';
 import type { ReactNode } from 'react';
 import { prepaintScript } from './prepaint.ts';
+import type { RouterContext } from './router.tsx';
 // Start links the root route's stylesheet in the shell's head, so it loads before first paint.
 import './global.css';
 
-export const Route = createRootRoute({
+export const Route = createRootRouteWithContext<RouterContext>()({
   // No route renders on the server. The Worker answers a page request with this shell alone, and
   // the app renders into it in the browser.
   ssr: false,
