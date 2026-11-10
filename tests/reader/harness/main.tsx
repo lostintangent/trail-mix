@@ -1,10 +1,14 @@
+import { QueryClientProvider, useQuery } from '@tanstack/react-query';
 import { StrictMode } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import '../../../src/app/global.css';
 import { sanitizeMail, type SafeMail } from '../../../src/features/reader/core/sanitize.ts';
-import { Reader, type MessageUrls } from '../../../src/features/reader/index.ts';
+import type { ConversationId } from '../../../src/features/mail/core/index.ts';
+import { accountsQuery, bodyQuery } from '../../../src/features/mailroom/client/index.ts';
+import { Reader } from '../../../src/features/reader/index.ts';
 import { MessageFrame } from '../../../src/features/reader/ui/MessageFrame.tsx';
+import { createQueryClient } from '../../../src/shared/query-client.ts';
 import { bodyKey, lunchThread, newsletter, type Fixture } from './fixtures.ts';
 
 /**
@@ -34,9 +38,11 @@ declare global {
   interface Window {
     show: (mails: Shown[]) => Result[];
     /** Shows a fixture conversation in the reader, as its pane would. */
-    showConversation: (fixture: 'lunch' | 'newsletter', html?: string) => void;
-    /** The senders the reader was asked to always show images from. */
-    allowed: string[];
+    showConversation: (
+      fixture: 'lunch' | 'newsletter',
+      html?: string,
+      upcoming?: ConversationId[],
+    ) => void;
     setTheme: (mode: 'light' | 'dark') => void;
     /** What hostile mail calls if any of its script ever runs. */
     __pwned: (id: string) => void;
@@ -46,7 +52,6 @@ declare global {
 
 window.pwned = [];
 window.__pwned = (id) => window.pwned.push(id);
-window.allowed = [];
 window.setTheme = (mode) => {
   document.documentElement.dataset['theme'] = mode;
 };
@@ -88,33 +93,40 @@ window.show = (mails) => {
   }));
 };
 
-const message = (ref: Parameters<MessageUrls['source']>[0]) =>
-  `/messages/${[ref.account, ref.path, ref.uidValidity, ref.uid].map((part) => encodeURIComponent(part)).join('/')}`;
-
-const URLS: MessageUrls = {
-  source: message,
-  part: (ref, attachment) => `${message(ref)}/${encodeURIComponent(attachment)}`,
-  image: (url) => `/images?url=${encodeURIComponent(url)}`,
-};
-
-window.showConversation = (name, html) => {
+/**
+ * Shows a fixture as the reader pane would: its snapshots seeded as if the Mailroom had answered,
+ * and the account read from the accounts snapshot, so allowing a sender shows at once.
+ */
+window.showConversation = (name, html, upcoming) => {
   const fixture: Fixture = name === 'lunch' ? lunchThread() : newsletter(html ?? '');
+  const queryClient = createQueryClient();
+  queryClient.setQueryData(accountsQuery.queryKey, [fixture.account]);
+  for (const message of fixture.conversation) {
+    const body = fixture.bodies[bodyKey(message)];
+    const { account, path, uidValidity, uid } = message;
+    if (body)
+      queryClient.setQueryData(bodyQuery({ account, path, uidValidity, uid }).queryKey, body);
+  }
   flushSync(() =>
     root.render(
       <StrictMode>
-        <section className="pane">
-          <Reader
-            conversation={fixture.conversation}
-            account={fixture.account}
-            bodyOf={(message) => fixture.bodies[bodyKey(message)]}
-            urls={URLS}
-            onAllowImages={(sender) => window.allowed.push(sender)}
-          />
-        </section>
+        <QueryClientProvider client={queryClient}>
+          <Pane fixture={fixture} upcoming={upcoming} />
+        </QueryClientProvider>
       </StrictMode>,
     ),
   );
 };
+
+function Pane({ fixture, upcoming }: { fixture: Fixture; upcoming?: ConversationId[] }) {
+  const { data: accounts } = useQuery(accountsQuery);
+  const account = accounts?.find(({ id }) => id === fixture.account.id) ?? fixture.account;
+  return (
+    <section className="pane">
+      <Reader conversation={fixture.conversation} account={account} upcoming={upcoming} />
+    </section>
+  );
+}
 
 function sanitize({ html, images, parts = {} }: Shown): SafeMail {
   return sanitizeMail(html, {

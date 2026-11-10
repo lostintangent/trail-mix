@@ -12,42 +12,36 @@ import {
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { Code, Ellipsis, FileText, ImageIcon, ImageOff } from 'lucide-react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
-import type { Account, Address, Body, Message, MessageRef } from '../../mail/core/index.ts';
+import type { Account, Address, Message } from '../../mail/core/index.ts';
+import {
+  accountsQuery,
+  bodyQuery,
+  mailroom,
+  messageUrl,
+  partUrl,
+} from '../../mailroom/client/index.ts';
 import { foldQuote } from '../core/quotes.ts';
-import { sanitizeMail, type SafeMail } from '../core/sanitize.ts';
 import { MessageFrame } from './MessageFrame.tsx';
 import { PlainText } from './PlainText.tsx';
+import { imagesAllowed, refOf, safeMail } from './safeMail.ts';
 import { SourceDialog } from './SourceDialog.tsx';
 
-/** Where a message's bytes are served: its source, its parts, and remote images through the proxy. */
-export type MessageUrls = {
-  source: (ref: MessageRef) => string;
-  part: (ref: MessageRef, attachmentId: string) => string;
-  image: (url: string) => string;
-};
-
-export type MessageSheetProps = {
-  message: Message;
-  /** Undefined until the body is fetched. */
-  body: Body | undefined;
-  account: Account;
-  urls: MessageUrls;
-  /** From now on, this sender's remote images load. */
-  onAllowImages: (sender: string) => void;
-};
+export type MessageSheetProps = { message: Message; account: Account };
 
 /** One open message, on its own sheet of paper: who sent it, what it says, and what it carries. */
-export function MessageSheet({ message, body, account, urls, onAllowImages }: MessageSheetProps) {
-  const sender = message.from.email.toLowerCase();
+export function MessageSheet({ message, account }: MessageSheetProps) {
+  const ref = refOf(message);
+  const { data: body } = useQuery(bodyQuery(ref));
   const [showOnce, setShowOnce] = useState(false);
-  const allowed =
-    showOnce || account.allowImagesFrom.some((email) => email.toLowerCase() === sender);
+  const allowed = showOnce || imagesAllowed(message, account.allowImagesFrom);
+  const allowImages = useAllowImages(account);
   const [quotes, setQuotes] = useState<'folded' | 'shown'>('folded');
   const [viewingSource, setViewingSource] = useState(false);
 
-  const mail = useSafeMail(message, body, allowed, urls);
+  const mail = useMemo(() => body && safeMail(message, body, allowed), [message, body, allowed]);
   const text = useMemo(
     () => (body && !body.html && body.text !== undefined ? foldQuote(body.text) : undefined),
     [body],
@@ -95,7 +89,10 @@ export function MessageSheet({ message, body, account, urls, onAllowImages }: Me
               tooltip={`Always show images from ${message.from.email}`}
               variant="ghost"
               size="sm"
-              onClick={() => onAllowImages(sender)}
+              onClick={() => {
+                setShowOnce(true);
+                allowImages(message.from.email.toLowerCase());
+              }}
             />
           </span>
         </div>
@@ -131,7 +128,7 @@ export function MessageSheet({ message, body, account, urls, onAllowImages }: Me
           {attachments.map((attachment) => (
             <li key={attachment.id}>
               <a
-                href={urls.part(message, attachment.id)}
+                href={partUrl(ref, attachment.id)}
                 target="_blank"
                 rel="noopener noreferrer"
                 download={attachment.name}
@@ -154,7 +151,7 @@ export function MessageSheet({ message, body, account, urls, onAllowImages }: Me
         <SourceDialog
           message={message}
           headers={body.headers}
-          url={urls.source(message)}
+          url={messageUrl(ref)}
           onClose={() => setViewingSource(false)}
         />
       )}
@@ -163,45 +160,24 @@ export function MessageSheet({ message, body, account, urls, onAllowImages }: Me
 }
 
 /**
- * The message's HTML, sanitized once for each choice about its images. Bodies never change for a
- * ref, so a conversation opened again shows what was already sanitized.
+ * Allows a sender's remote images on an account. The account shows it at once, and the accounts
+ * snapshot is refetched if the Mailroom refuses, so the change visibly undoes itself.
  */
-function useSafeMail(
-  message: Message,
-  body: Body | undefined,
-  allowed: boolean,
-  urls: MessageUrls,
-): SafeMail | undefined {
-  return useMemo(() => {
-    const html = body?.html;
-    if (html === undefined) return undefined;
-    const key = `${refKey(message)}\u0000${allowed}`;
-    const cached = sanitized.get(key);
-    if (cached) return cached;
-    const parts = new Map(
-      body?.attachments.flatMap(({ id, contentId }) =>
-        contentId ? [[contentId, absolute(urls.part(message, id))] as const] : [],
+function useAllowImages(account: Account) {
+  const queryClient = useQueryClient();
+  return (sender: string) => {
+    queryClient.setQueryData(accountsQuery.queryKey, (accounts) =>
+      accounts?.map((each) =>
+        each.id === account.id
+          ? { ...each, allowImagesFrom: [...new Set([...each.allowImagesFrom, sender])] }
+          : each,
       ),
     );
-    const mail = sanitizeMail(html, {
-      part: (contentId) => parts.get(contentId),
-      remote: allowed ? (url) => absolute(urls.image(url)) : undefined,
+    mailroom.allowImages(account.id, sender).catch(() => {
+      void queryClient.invalidateQueries({ queryKey: accountsQuery.queryKey });
     });
-    sanitized.set(key, mail);
-    if (sanitized.size > SANITIZED_KEPT) sanitized.delete(sanitized.keys().next().value ?? '');
-    return mail;
-  }, [message, body, allowed, urls]);
+  };
 }
-
-/** How many sanitized messages stay ready, oldest dropped first. */
-const SANITIZED_KEPT = 64;
-const sanitized = new Map<string, SafeMail>();
-
-export const refKey = ({ account, path, uidValidity, uid }: MessageRef) =>
-  [account, path, uidValidity, uid].join('\u0000');
-
-/** The frame's policy names exact URLs, so the ones it loads are absolute. */
-const absolute = (url: string) => new URL(url, location.origin).href;
 
 export function displayName({ name, email }: Address): string {
   return name?.trim() || email;

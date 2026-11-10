@@ -1,6 +1,8 @@
 import start from '@tanstack/react-start/server-entry';
-import type { Mailroom } from '../features/mailroom/client/index.ts';
+import { readMessagePath, type Mailroom } from '../features/mailroom/client/index.ts';
 import { signInFor, type SignInConfig } from './access.ts';
+import { proxyImage } from './routes/images.ts';
+import { serveMessageBytes, type MessageBytes } from './routes/messages.ts';
 import { updates } from './routes/updates.ts';
 
 export { Mailroom } from '../features/mailroom/server/index.ts';
@@ -16,7 +18,7 @@ declare module '@tanstack/react-start' {
 
 export type Env = SignInConfig & {
   /** One Mailroom per member, named by their verified email address. */
-  MAILROOM: { idFromName(name: string): unknown; get(id: unknown): Mailroom };
+  MAILROOM: { idFromName(name: string): unknown; get(id: unknown): Mailroom & MessageBytes };
   /** The commit this deployment runs. */
   VERSION?: string;
 };
@@ -39,6 +41,9 @@ export default {
 
     const mailroom = env.MAILROOM.get(env.MAILROOM.idFromName(member));
     if (url.pathname === '/updates') return updates(request, mailroom);
+    const message = readMessagePath(url.pathname);
+    if (message) return serveMessageBytes(message, mailroom);
+    if (url.pathname === '/images') return proxyImage(request);
     return start.fetch(request, { context: { mailroom } });
   },
 };

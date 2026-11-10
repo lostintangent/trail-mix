@@ -8,21 +8,21 @@ import {
   typographyVars,
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { useState } from 'react';
+import { useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
 import { stampStyles } from '../../../app/theme/stamps.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
-import type { Account, Body, Message } from '../../mail/core/index.ts';
-import { displayName, MessageSheet, refKey, when, type MessageUrls } from './MessageSheet.tsx';
+import type { Account, ConversationId, Message } from '../../mail/core/index.ts';
+import { accountsQuery, bodyQuery, conversationQuery } from '../../mailroom/client/index.ts';
+import { displayName, MessageSheet, when } from './MessageSheet.tsx';
+import { imagesAllowed, refKey, refOf, safeMail } from './safeMail.ts';
 
 export type ReaderProps = {
   /** One conversation's messages, in any order. */
   conversation: Message[];
   account: Account;
-  /** A message's body, or undefined until it is fetched. */
-  bodyOf: (message: Message) => Body | undefined;
-  urls: MessageUrls;
-  /** From now on, this sender's remote images load. */
-  onAllowImages: (sender: string) => void;
+  /** The conversations the member is likely to open next, prepared while the browser is idle. */
+  upcoming?: ConversationId[];
 };
 
 /**
@@ -30,12 +30,13 @@ export type ReaderProps = {
  * oldest first. Older messages are folded to one line and the newest lies open. Opening one keeps
  * it open while the conversation is on screen.
  */
-export function Reader(props: ReaderProps) {
+export function Reader({ upcoming = [], ...props }: ReaderProps) {
+  usePrepared(upcoming);
   const id = props.conversation[0]?.conversation ?? '';
   return <Conversation key={id} {...props} />;
 }
 
-function Conversation({ conversation, account, bodyOf, urls, onAllowImages }: ReaderProps) {
+function Conversation({ conversation, account }: ReaderProps) {
   const messages = conversation.toSorted((a, b) => a.date.localeCompare(b.date));
   const newest = messages.at(-1);
   const [opened, setOpened] = useState(() => new Set(newest ? [refKey(newest)] : []));
@@ -50,14 +51,7 @@ function Conversation({ conversation, account, bodyOf, urls, onAllowImages }: Re
       </p>
       {messages.map((message) =>
         opened.has(refKey(message)) ? (
-          <MessageSheet
-            key={refKey(message)}
-            message={message}
-            body={bodyOf(message)}
-            account={account}
-            urls={urls}
-            onAllowImages={onAllowImages}
-          />
+          <MessageSheet key={refKey(message)} message={message} account={account} />
         ) : (
           <button
             key={refKey(message)}
@@ -77,6 +71,48 @@ function Conversation({ conversation, account, bodyOf, urls, onAllowImages }: Re
       )}
     </div>
   );
+}
+
+/**
+ * Fetches the newest body of each conversation the member may open next, and sanitizes it, one at
+ * a time while the browser is idle, so moving to one shows prepared mail.
+ */
+function usePrepared(upcoming: ConversationId[]) {
+  const queryClient = useQueryClient();
+  const key = upcoming.join('\u0000');
+  useEffect(() => {
+    let cancelled = false;
+    const prepare = async () => {
+      for (const id of key ? key.split('\u0000') : []) {
+        await idle();
+        if (cancelled) return;
+        await prepareConversation(queryClient, id).catch(() => {});
+      }
+    };
+    void prepare();
+    return () => {
+      cancelled = true;
+    };
+  }, [queryClient, key]);
+}
+
+async function prepareConversation(queryClient: QueryClient, id: ConversationId) {
+  const messages = await queryClient.ensureQueryData(conversationQuery(id));
+  const newest = messages.toSorted((a, b) => a.date.localeCompare(b.date)).at(-1);
+  if (!newest) return;
+  const body = await queryClient.ensureQueryData(bodyQuery(refOf(newest)));
+  const accounts = queryClient.getQueryData(accountsQuery.queryKey) ?? [];
+  const account = accounts.find(({ id: accountId }) => accountId === newest.account);
+  await idle();
+  safeMail(newest, body, imagesAllowed(newest, account?.allowImagesFrom ?? []));
+}
+
+/** Resolves when the browser has nothing more pressing to do. Safari has no idle callback. */
+function idle(): Promise<void> {
+  return new Promise((resolve) => {
+    if ('requestIdleCallback' in window) requestIdleCallback(() => resolve(), { timeout: 1000 });
+    else setTimeout(resolve, 50);
+  });
 }
 
 /** The conversation's subject, as its first message gave it. */

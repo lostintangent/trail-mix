@@ -17,6 +17,11 @@ export async function proxyImage(
   request: Request,
   fetchRemote: typeof fetch = fetch,
 ): Promise<Response> {
+  // Only Trail Mix's own pages, or the member opening an image directly, may use the proxy, so
+  // another site can't use the member's sign-in to fetch the internet for it.
+  const site = request.headers.get('sec-fetch-site');
+  if (site && site !== 'same-origin' && site !== 'none') return refuse(403, 'Not from Trail Mix.');
+
   let target = remoteUrl(new URL(request.url).searchParams.get('url') ?? '');
   if (!target) return refuse(400, 'Not a remote image address.');
 

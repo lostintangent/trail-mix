@@ -168,6 +168,14 @@ describe('the image proxy', () => {
     }
   });
 
+  test('serves only Trail Mix’s own pages, so another site cannot borrow it', async () => {
+    const url = `${app.url.origin}/images?url=${encodeURIComponent('http://images.example.com/photo.png')}`;
+    for (const site of ['cross-site', 'same-site']) {
+      const request = new Request(url, { headers: { 'sec-fetch-site': site } });
+      expect((await proxyImage(request, internet)).status).toBe(403);
+    }
+  });
+
   test('checks every redirect as it checks the first address', async () => {
     expect((await proxied('http://images.example.com/to-this-machine')).status).toBe(400);
     expect((await proxied('http://images.example.com/to-a-photo')).status).toBe(200);

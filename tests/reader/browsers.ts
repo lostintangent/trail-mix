@@ -20,6 +20,8 @@ export type Harness = {
   proxied: string[];
   /** The paths of message parts that were requested. */
   parts: string[];
+  /** The queries and commands the page sent its Mailroom. */
+  calls: Call[];
   stop: () => void;
 };
 
@@ -49,23 +51,44 @@ export const SOURCE = [
   '<p>Perfect.</p><script>parent.__pwned("source")</script><img src=x onerror=parent.__pwned("source-img")>',
 ].join('\r\n');
 
-export async function serveHarness(): Promise<Harness> {
+/** A query or command the page sent its Mailroom. */
+export type Call = { name: string; args: unknown[] };
+
+/**
+ * Builds the harness and serves it. `answer` plays the Mailroom for the page's queries and
+ * commands, which otherwise get nothing back.
+ */
+export async function serveHarness(answer: (call: Call) => unknown = () => null): Promise<Harness> {
   const dir = mkdtempSync(join(tmpdir(), 'trail-mix-reader-'));
   await build({
     root: join(import.meta.dir, 'harness'),
     configFile: false,
     logLevel: 'silent',
     plugins: [stylex(stylexOptions), react()],
+    resolve: {
+      alias: [
+        {
+          find: /^@tanstack\/react-start$/,
+          replacement: join(import.meta.dir, 'harness/start.ts'),
+        },
+      ],
+    },
     build: { outDir: dir, emptyOutDir: true },
     css: { lightningcss: { exclude: Features.LightDark } },
   });
   const proxied: string[] = [];
   const parts: string[] = [];
+  const calls: Call[] = [];
   const server = Bun.serve({
     port: 0,
     hostname: '127.0.0.1',
-    fetch(request) {
+    async fetch(request) {
       const url = new URL(request.url);
+      if (url.pathname === '/_serverFn') {
+        const call = (await request.json()) as Call;
+        calls.push(call);
+        return Response.json(answer(call) ?? null);
+      }
       if (url.pathname === '/images') {
         proxied.push(url.searchParams.get('url') ?? '');
         return new Response(PIXEL, { headers: { 'content-type': 'image/png' } });
@@ -88,6 +111,7 @@ export async function serveHarness(): Promise<Harness> {
     origin: server.url.origin,
     proxied,
     parts,
+    calls,
     stop: () => {
       void server.stop(true);
       rmSync(dir, { recursive: true, force: true });

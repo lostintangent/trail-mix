@@ -5,9 +5,11 @@ import {
   launch,
   serveCanary,
   serveHarness,
+  type Call,
   type Canary,
   type Harness,
 } from './browsers.ts';
+import { bodyKey, newsletter as newsletterFixture } from './harness/fixtures.ts';
 
 /**
  * The reader around the frame, on fixture conversations in real browsers, at a desktop's width and
@@ -21,9 +23,9 @@ let newsletter: string;
 
 beforeAll(async () => {
   canary = serveCanary();
-  harness = await serveHarness();
   const real = await corpus('real', canary);
   newsletter = real.find(({ name }) => name === 'newsletter.html')?.html ?? '';
+  harness = await serveHarness(mailroom);
 }, 60_000);
 
 afterAll(() => {
@@ -44,16 +46,17 @@ for (const type of BROWSERS) {
       }, 30_000);
       afterAll(() => browser.close());
 
-      async function open(fixture: 'lunch' | 'newsletter') {
+      async function open(fixture: 'lunch' | 'newsletter', upcoming: string[] = []) {
         page = await browser.newPage({ viewport });
         harness.parts.length = 0;
         harness.proxied.length = 0;
         canary.hits.length = 0;
         await page.goto(harness.origin);
-        await page.evaluate(
-          ([name, html]) => window.showConversation(name as 'lunch' | 'newsletter', html ?? ''),
-          [fixture, fixture === 'lunch' ? '' : newsletter],
-        );
+        await page.evaluate(([name, html, next]) => window.showConversation(name, html, next), [
+          fixture,
+          fixture === 'lunch' ? '' : newsletter,
+          upcoming,
+        ] as const);
         await framesFitted(page);
       }
 
@@ -116,10 +119,30 @@ for (const type of BROWSERS) {
         await page.close();
       });
 
-      test('asks to allow a sender’s images from now on', async () => {
+      test('allows a sender’s images from now on, and shows them at once', async () => {
         await open('newsletter');
+        harness.calls.length = 0;
         await page.getByRole('button', { name: 'Always show' }).click();
-        expect(await page.evaluate(() => window.allowed)).toEqual(['news@trailhead.example.com']);
+        await until(() => harness.calls.length > 0);
+        expect(harness.calls).toEqual([
+          { name: 'allowImages', args: ['personal', 'news@trailhead.example.com'] },
+        ]);
+        await framesFitted(page);
+        await page.waitForTimeout(300);
+        expect(harness.proxied.map((url) => new URL(url).pathname)).toContain(
+          '/newsletter/logo.png',
+        );
+        await page.close();
+      });
+
+      test('fetches the newest body of each conversation that may open next', async () => {
+        harness.calls.length = 0;
+        await open('lunch', ['trailhead']);
+        await until(() => harness.calls.some(({ name }) => name === 'body'));
+        expect(harness.calls.map(({ name, args }) => [name, args[0]])).toEqual([
+          ['conversation', 'trailhead'],
+          ['body', { account: 'personal', path: 'INBOX', uidValidity: 1, uid: 9 }],
+        ]);
         await page.close();
       });
 
@@ -133,6 +156,20 @@ for (const type of BROWSERS) {
         await page.close();
       });
     });
+  }
+}
+
+/** The Mailroom's answers for the newsletter, the conversation prepared ahead. */
+function mailroom({ name, args }: Call): unknown {
+  const fixture = newsletterFixture(newsletter);
+  if (name === 'conversation' && args[0] === 'trailhead') return fixture.conversation;
+  if (name === 'body') return fixture.bodies[bodyKey(args[0] as Parameters<typeof bodyKey>[0])];
+  return null;
+}
+
+async function until(condition: () => boolean, timeout = 2_000) {
+  for (const start = Date.now(); !condition() && Date.now() - start < timeout;) {
+    await Bun.sleep(20);
   }
 }
 

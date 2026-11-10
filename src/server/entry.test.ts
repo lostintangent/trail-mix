@@ -1,6 +1,7 @@
 import { expect, mock, spyOn, test } from 'bun:test';
 import { generateKeyPair, SignJWT } from 'jose';
 import type { Mailroom } from '../features/mailroom/client/index.ts';
+import type { MessageBytes } from './routes/messages.ts';
 
 /**
  * The Worker's gate, with Start standing in as a handler that records what reached the app. The
@@ -24,6 +25,7 @@ const { default: worker } = await import('./entry.ts');
 function mailrooms() {
   const opened: string[] = [];
   const sockets: Request[] = [];
+  const sources: string[] = [];
   const MAILROOM = {
     idFromName: (name: string) => ({ name }),
     get({ name }: { name: string }) {
@@ -34,10 +36,14 @@ function mailrooms() {
           sockets.push(request);
           return Promise.resolve(new Response(null, { status: 200 }));
         },
-      } as unknown as Mailroom;
+        source: () => {
+          sources.push(name);
+          return Promise.resolve(new Response(`the source of ${name}'s message`).body);
+        },
+      } as unknown as Mailroom & MessageBytes;
     },
   };
-  return { MAILROOM, opened, sockets };
+  return { MAILROOM, opened, sockets, sources };
 }
 
 const LOCAL = 'http://localhost:5173';
@@ -164,4 +170,18 @@ test('the hint socket reaches the member’s Mailroom carrying nothing the brows
   expect(opened).toEqual(['ada@example.com']);
   expect(sockets.map(({ url }) => url)).toEqual([`${LOCAL}/updates`]);
   expect([...sockets[0]!.headers.keys()]).toEqual(['upgrade']);
+});
+
+test('a message’s bytes come only from the signed-in member’s Mailroom, whoever the request names', async () => {
+  const { env, opened, sources } = developer();
+  const response = await worker.fetch(
+    new Request(`${LOCAL}/messages/personal/INBOX/1/7?member=eve@example.com`, {
+      headers: SOMEONE_ELSE,
+    }),
+    env,
+  );
+
+  expect(await response.text()).toBe("the source of ada@example.com's message");
+  expect(opened).toEqual(['ada@example.com']);
+  expect(sources).toEqual(['ada@example.com']);
 });
