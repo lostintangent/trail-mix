@@ -334,12 +334,15 @@ jobs:
           ACCESS_TEAM_DOMAIN: ${{ vars.ACCESS_TEAM_DOMAIN }}
           ACCESS_AUD: ${{ vars.ACCESS_AUD }}
         run: |
-          args=(--name "$PREVIEW" --var "VERSION:$COMMIT" --message "Commit $COMMIT" --json)
+          args=(--name "$PREVIEW" --var "VERSION:$COMMIT" --message "Commit $COMMIT")
           if [ -n "$ACCESS_TEAM_DOMAIN" ]; then
             args+=(--var "ACCESS_TEAM_DOMAIN:$ACCESS_TEAM_DOMAIN" --var "ACCESS_AUD:$ACCESS_AUD")
           fi
-          deployed=$($WRANGLER preview "${args[@]}")
-          address=$(jq -er '.preview.urls[0]' <<< "$deployed")
+          # Wrangler prints its progress for the log, and writes what it made, the preview's
+          # addresses among it, as one JSON line per command to this file.
+          export WRANGLER_OUTPUT_FILE_PATH="$RUNNER_TEMP/wrangler-output.jsonl"
+          $WRANGLER preview "${args[@]}"
+          address=$(jq -ers 'map(select(.type == "preview")) | last | .preview_urls[0]' "$WRANGLER_OUTPUT_FILE_PATH")
           [[ "$address" == https://* ]] || address="https://$address"
           echo "address=${address%/}" >> "$GITHUB_OUTPUT"
 
