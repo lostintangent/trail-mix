@@ -145,7 +145,7 @@ src/
     workbench/ui/      the panes, the side panels and the phone track
     folders/           core/ places folders and names the rules a change must meet, ui/ is the sidebar
     conversations/ui/
-    reader/            core/ sanitizes and folds quotes, ui/ renders the sandboxed frame
+    reader/            core/ sanitizes, folds quotes and finds a conversation's folder, ui/ renders the sandboxed frame
     composer/          core/ renders Markdown to mail, ui/ is the editor
     outbox/            core/ is the state machine the Mailroom's alarm drives, ui/ lists what waits
     commands/          registry.ts and the palette

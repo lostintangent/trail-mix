@@ -13,8 +13,17 @@ import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { memo, useEffect, useState } from 'react';
 import { stampStyles } from '../../../app/theme/stamps.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
-import type { Account, ConversationId, Message, MessageRef } from '../../mail/core/index.ts';
+import type { Command } from '../../commands/index.ts';
+import { folderName } from '../../folders/index.ts';
+import type {
+  Account,
+  ConversationId,
+  Folder,
+  Message,
+  MessageRef,
+} from '../../mail/core/index.ts';
 import { accountsQuery, bodyQuery, conversationQuery } from '../../mailroom/client/index.ts';
+import { folderOf } from '../core/folder.ts';
 import { MessageKeys } from './MessageFrame.tsx';
 import { displayName, MessageSheet, when } from './MessageSheet.tsx';
 import { imagesAllowed, refKey, refOf, safeMail } from './safeMail.ts';
@@ -23,6 +32,13 @@ export type ReaderProps = {
   /** One conversation's messages, in any order. */
   conversation: Message[];
   account: Account;
+  /** The member's folders, to name the one the conversation lies in. */
+  folders?: readonly Folder[];
+  /**
+   * What can be done with one message, such as replying to it. The same function each render. The
+   * keys of the registry's commands answer the newest message, so only its own name them.
+   */
+  actionsFor?: (message: Message) => readonly Command[];
   /** The conversations the member is likely to open next, prepared while the browser is idle. */
   upcoming?: ConversationId[];
   /**
@@ -48,19 +64,21 @@ export const Reader = memo(function Reader({
   upcoming = [],
   onMessageKey,
   hidden = NONE_HIDDEN,
+  folders = NONE_LISTED,
   ...props
 }: ReaderProps) {
   usePrepared(upcoming);
   const id = props.conversation[0]?.conversation ?? '';
   return (
     <MessageKeys value={onMessageKey ?? IGNORE_KEY}>
-      <Conversation key={id} hidden={hidden} {...props} />
+      <Conversation key={id} hidden={hidden} folders={folders} {...props} />
     </MessageKeys>
   );
 }, isSameReading);
 
 const IGNORE_KEY = () => {};
 const NONE_HIDDEN: readonly MessageRef[] = [];
+const NONE_LISTED: readonly Folder[] = [];
 
 const keys = (refs: readonly MessageRef[] = NONE_HIDDEN) => refs.map(refKey).join('\u0001');
 
@@ -69,6 +87,8 @@ function isSameReading(before: ReaderProps, after: ReaderProps): boolean {
   return (
     before.conversation === after.conversation &&
     before.account === after.account &&
+    before.folders === after.folders &&
+    before.actionsFor === after.actionsFor &&
     before.onMessageKey === after.onMessageKey &&
     before.onOpenDraft === after.onOpenDraft &&
     keys(before.hidden) === keys(after.hidden) &&
@@ -83,9 +103,14 @@ function isSameReading(before: ReaderProps, after: ReaderProps): boolean {
 function Conversation({
   conversation,
   account,
+  folders,
+  actionsFor,
   hidden,
   onOpenDraft,
-}: Omit<ReaderProps, 'hidden'> & { hidden: readonly MessageRef[] }) {
+}: Omit<ReaderProps, 'hidden' | 'folders'> & {
+  hidden: readonly MessageRef[];
+  folders: readonly Folder[];
+}) {
   const leftOut = new Set(hidden.map(refKey));
   const messages = conversation
     .filter((message) => !leftOut.has(refKey(message)))
@@ -96,13 +121,22 @@ function Conversation({
   // undone archive's moves do, so an opened one is known by what it keeps: its Message-ID.
   const [opened, setOpened] = useState(() => new Set(newest ? [openedKey(newest)] : []));
   if (!newest) return null;
+  const folder = folderOf(messages, folders);
+  const actionsOf = (message: Message) =>
+    message === newest
+      ? actionsFor?.(message)
+      : actionsFor?.(message).map((action) => ({ ...action, shortcut: undefined }));
 
   return (
     <div {...stylex.props(styles.thread)}>
       <h1 {...stylex.props(styles.subject)}>{subjectOf(messages)}</h1>
       <p {...stylex.props(styles.meta)}>
         <span aria-hidden {...stylex.props(styles.stamp, stampStyles[account.stamp])} />
-        {account.name} · {messages.length === 1 ? '1 message' : `${messages.length} messages`}
+        {[
+          account.name,
+          ...(folder ? [folderName(folder)] : []),
+          messages.length === 1 ? '1 message' : `${messages.length} messages`,
+        ].join(' · ')}
       </p>
       {messages.map((message) =>
         isDraft(message) ? (
@@ -117,7 +151,12 @@ function Conversation({
             <span>Go on writing</span>
           </button>
         ) : opened.has(openedKey(message)) ? (
-          <MessageSheet key={refKey(message)} message={message} account={account} />
+          <MessageSheet
+            key={refKey(message)}
+            message={message}
+            account={account}
+            actions={actionsOf(message)}
+          />
         ) : (
           <button
             key={refKey(message)}

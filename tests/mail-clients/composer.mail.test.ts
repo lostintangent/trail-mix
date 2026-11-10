@@ -91,6 +91,8 @@ describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix
       await page
         .getByRole('region', { name: 'Reader' })
         .getByRole('button', { name: 'Reply', exact: true })
+        // The newest message's own.
+        .last()
         .click();
       const reply = page.getByRole('region', { name: 'Reply' });
       const text = reply.getByRole('textbox', { name: 'Reply' });

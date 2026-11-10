@@ -172,7 +172,8 @@ for (const type of BROWSERS) {
 
       test('shows the raw source and headers as text, never as markup', async () => {
         await open('lunch');
-        await page.getByRole('button', { name: 'View source' }).click();
+        await page.getByRole('button', { name: 'More for this message' }).click();
+        await page.getByRole('menuitem', { name: 'View source' }).click();
         const dialog = page.getByRole('dialog');
         await dialog
           .getByText('<script>parent.__pwned', { exact: false })

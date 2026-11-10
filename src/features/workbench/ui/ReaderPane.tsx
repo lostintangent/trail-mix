@@ -17,35 +17,40 @@ import {
   type ReactNode,
 } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
-import type { Account, ConversationId, Message, MessageRef } from '../../mail/core/index.ts';
+import type { Command } from '../../commands/index.ts';
+import type {
+  Account,
+  ConversationId,
+  Folder,
+  Message,
+  MessageRef,
+} from '../../mail/core/index.ts';
 import { conversationQuery } from '../../mailroom/client/index.ts';
 import { preloadTriageActions } from '../../conversations/index.ts';
 import { preloadComposer } from '../../composer/ui/index.ts';
-import { preloadable } from '../../../shared/preloadable.ts';
+import { preloadReader, Reader } from '../../reader/index.ts';
 import { PhoneIsland } from './PhoneIsland.tsx';
 
 /** The conversation the reader shows, with its messages and the account they belong to. */
 export type Reading = { id: ConversationId; conversation: Message[]; account: Account };
 
-/**
- * The reader, with its sanitizer, loads apart from the first rows, which don't need it. Soon after
- * the list shows a conversation to open, it loads while the browser is idle, ready for the click.
- */
-const { Component: Reader, preload: loadReader } = preloadable(
-  async () => (await import('../../reader/index.ts')).Reader,
-);
+/** Where a conversation's actions are drawn: a desktop's bar, or a phone's top bar and island. */
+export type ActionsPlace = 'bar' | 'top' | 'island';
 
 /**
  * The reader's sheet, where an open conversation lies. On a phone it fills the screen, with a way
- * back to the list at its top.
+ * back to the list at its top. The reader itself loads soon after the list shows a conversation to
+ * open, while the browser is idle, ready for the click.
  */
 export function ReaderPane({
   selected,
   accounts,
+  folders,
   upcoming,
   onShown,
   actions,
   place,
+  actionsFor,
   onMessageKey,
   writing,
   hidden,
@@ -54,6 +59,8 @@ export function ReaderPane({
 }: {
   selected: ConversationId | undefined;
   accounts: readonly Account[];
+  /** The member's folders, to name the one the conversation lies in. */
+  folders: readonly Folder[];
   /** The conversations the member may open next, which the reader prepares while idle. */
   upcoming: ConversationId[];
   /**
@@ -62,12 +69,14 @@ export function ReaderPane({
    */
   onShown?: (conversation: ConversationId) => void;
   /**
-   * What can be done to the conversation shown: in a bar above it on a desktop, and on a phone in
-   * the island at the bottom of the screen, which has room for fewer.
+   * What can be done to the conversation shown: in a bar above it on a desktop, and on a phone
+   * split between the bar at the top of the screen and the island at the bottom.
    */
-  actions?: (reading: Reading, place: 'bar' | 'island') => ReactNode;
+  actions?: (reading: Reading, place: ActionsPlace) => ReactNode;
   /** Where the conversation shown sits in the list, at the end of a desktop's bar. */
   place?: (shown: ConversationId) => ReactNode;
+  /** What can be done with one of its messages, as the reader's own. The same function each render. */
+  actionsFor?: (message: Message) => readonly Command[];
   /** Keys pressed inside a message, which the window never hears. The same function each render. */
   onMessageKey?: (event: KeyboardEvent) => void;
   /**
@@ -94,6 +103,7 @@ export function ReaderPane({
   );
   // Made once for each conversation shown, so the moves of a held key pass them by.
   const bar = useMemo(() => reading && actions?.(reading, 'bar'), [reading, actions]);
+  const top = useMemo(() => reading && actions?.(reading, 'top'), [reading, actions]);
   const island = useMemo(() => reading && actions?.(reading, 'island'), [reading, actions]);
   const placed = useMemo(() => reading && place?.(reading.id), [reading, place]);
   const isShowing = reading !== undefined;
@@ -122,6 +132,11 @@ export function ReaderPane({
           variant="ghost"
           onClick={onBack}
         />
+        {top && !writing ? (
+          <div role="toolbar" aria-label="Marks" {...stylex.props(styles.top)}>
+            <Suspense>{top}</Suspense>
+          </div>
+        ) : null}
       </header>
       {isFilled ? (
         <div {...stylex.props(styles.scroll, styles.filled)}>
@@ -142,6 +157,8 @@ export function ReaderPane({
             <Reader
               conversation={reading.conversation}
               account={reading.account}
+              folders={folders}
+              actionsFor={actionsFor}
               upcoming={shown === selected ? preparing : []}
               onMessageKey={onMessageKey}
               hidden={hidden}
@@ -248,7 +265,7 @@ function usePreloadedReader(isWanted: boolean) {
     const timer = setTimeout(() => {
       // Safari has no idle callback.
       const load = () => {
-        void loadReader();
+        void preloadReader();
         preloadTriageActions();
       };
       if ('requestIdleCallback' in window) requestIdleCallback(load);
@@ -277,10 +294,17 @@ const styles = stylex.create({
       },
     },
   },
+  // On a phone, back to the list on the left, and the conversation's marks on the right.
   phoneHeader: {
     display: { default: 'none', [media.phone]: 'flex' },
+    alignItems: 'center',
     paddingTop: tm.safeTop,
     paddingInline: spacingVars['--spacing-2'],
+  },
+  top: {
+    display: 'flex',
+    alignItems: 'center',
+    marginInlineStart: 'auto',
   },
   // On a desktop the conversation's actions sit in a bar along the top of its sheet.
   bar: {

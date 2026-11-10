@@ -7,26 +7,26 @@ import {
   typographyVars,
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
+import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Message } from '../../mail/core/index.ts';
+import { bodyQuery, messageUrl } from '../../mailroom/client/index.ts';
+import { refOf } from './safeMail.ts';
 
 /** The most of a message's source shown here. The whole of it stays a download away. */
 const SHOWN = 512 * 1024;
 
-export type SourceDialogProps = {
-  message: Message;
-  headers: [name: string, value: string][];
-  /** Where the raw message is served. */
-  url: string;
-  onClose: () => void;
-};
+export type SourceDialogProps = { message: Message; onClose: () => void };
 
 /**
  * A message's headers and raw source, as text. Both come from the message as received, and React
  * writes them as text, so nothing in them is ever read as markup.
  */
-export function SourceDialog({ message, headers, url, onClose }: SourceDialogProps) {
+export function SourceDialog({ message, onClose }: SourceDialogProps) {
+  const ref = refOf(message);
+  const headers = useQuery(bodyQuery(ref)).data?.headers ?? [];
+  const url = messageUrl(ref);
   const source = useSource(url);
   return (
     <Dialog

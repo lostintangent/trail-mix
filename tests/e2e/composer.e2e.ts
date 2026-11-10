@@ -50,9 +50,9 @@ const saved = (page: Page) => page.getByRole('status').filter({ hasText: 'Saved 
 const composerNamed = (page: Page, name: 'Reply' | 'New message') =>
   page.locator(`section[aria-label="${name}"]`);
 
-/** The reader's Reply: in its bar on a desktop, in its island on a phone. */
+/** The reader's Reply to the newest message: on its own sheet on a desktop, in the island on a phone. */
 const replyButton = (page: Page) =>
-  reader(page).getByRole('button', { name: 'Reply', exact: true }).filter({ visible: true });
+  reader(page).getByRole('button', { name: 'Reply', exact: true }).filter({ visible: true }).last();
 
 /** Goes to the unified Drafts, through the folders on a phone. */
 async function goToDrafts(page: Page) {

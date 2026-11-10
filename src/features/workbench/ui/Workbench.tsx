@@ -21,10 +21,11 @@ import {
   type ConversationId,
   type ConversationSummary,
   type Folder,
+  type Message,
   type MessageRef,
   type View,
 } from '../../mail/core/index.ts';
-import { conversationsQuery, outboxQuery } from '../../mailroom/client/index.ts';
+import { conversationQuery, conversationsQuery, outboxQuery } from '../../mailroom/client/index.ts';
 import {
   OutboxList,
   SendActions,
@@ -35,8 +36,9 @@ import {
 import { ListPane } from './ListPane.tsx';
 import { PanelEdge } from './PanelEdge.tsx';
 import { PANELS } from './panels.ts';
-import { ReaderPane, type Reading } from './ReaderPane.tsx';
+import { ReaderPane, type ActionsPlace, type Reading } from './ReaderPane.tsx';
 import { ReaderPlace } from './ReaderPlace.tsx';
+import { sourceCommand, SourceDialog } from '../../reader/index.ts';
 import {
   NOTHING_SELECTED,
   rowChange,
@@ -64,7 +66,7 @@ import {
   type Command,
 } from '../../commands/index.ts';
 import { Composer, composerCommands, type Sender, type Writing } from '../../composer/ui/index.ts';
-import { isDocked, useComposing } from './useComposing.ts';
+import { isDocked, newestOf, useComposing } from './useComposing.ts';
 
 const NO_COMMANDS: readonly Command[] = [];
 import { StatusLine } from './StatusLine.tsx';
@@ -138,6 +140,7 @@ export function Workbench({
   /** Commands from outside the workbench, such as the theme's, for the registry. */
   extraCommands?: readonly Command[];
 }) {
+  const queryClient = useQueryClient();
   const [selection, setSelection] = useState<Selection>(NOTHING_SELECTED);
   const [isPicking, setPicking] = useState(false);
   // Picking ends with the last conversation picked.
@@ -218,29 +221,33 @@ export function Workbench({
   useLayoutEffect(() => {
     latestTriageShown.current = triageShown;
   });
-  const { replyIn } = composing;
+  const { replyIn, replyTo } = composing;
+  // A desktop's bar files and marks the conversation, and each of its messages holds its own Reply.
+  // On a phone the marks sit at the top of the screen, and the island files it beside a Reply.
   const readerActions = useCallback(
-    ({ id, conversation, account }: Reading, place: 'bar' | 'island') => {
-      const [, reply, replyAll] = composerCommands({
+    ({ id, conversation, account }: Reading, place: ActionsPlace) => {
+      const triage = (
+        <TriageActions
+          commands={triageCommands({
+            accounts: [account],
+            folders,
+            isFlagged: conversation.some(({ flags }) => flags.flagged),
+            isUnread: conversation.some(({ flags }) => !flags.seen),
+            onTriage: (action) => latestTriageShown.current(action, id),
+          })}
+          part={place === 'bar' ? 'all' : place === 'top' ? 'marking' : 'filing'}
+        />
+      );
+      if (place !== 'island') return triage;
+      const [, reply] = composerCommands({
         write: undefined,
         reply: (all) => replyIn(conversation, all),
       });
       return (
         <>
-          {reply && place === 'bar' && <CommandButton command={reply} />}
-          {replyAll && place === 'bar' && <CommandButton command={replyAll} />}
-          <TriageActions
-            commands={triageCommands({
-              accounts: [account],
-              folders,
-              isFlagged: conversation.some(({ flags }) => flags.flagged),
-              isUnread: conversation.some(({ flags }) => !flags.seen),
-              onTriage: (action) => latestTriageShown.current(action, id),
-            })}
-            isCompact={place === 'island'}
-          />
+          {triage}
           {/* On a phone, Reply is the island's main action, at its far end. */}
-          {reply && place === 'island' && <CommandButton command={reply} primary="Reply" />}
+          {reply && <CommandButton command={reply} primary="Reply" />}
         </>
       );
     },
@@ -256,6 +263,17 @@ export function Workbench({
       />
     ),
     [conversations, hasMore],
+  );
+  // A message's source shows over everything, whichever message it is.
+  const [source, setSource] = useState<Message>();
+  const messageActions = useCallback(
+    (message: Message) => [
+      ...composerCommands({ write: undefined, reply: (all) => replyTo(message, all) }).filter(
+        ({ id }) => id !== 'message.new',
+      ),
+      sourceCommand(() => setSource(message)),
+    ],
+    [replyTo],
   );
 
   // Moving the selection re-renders only what shows it: the list, its two changed rows, and the
@@ -393,6 +411,14 @@ export function Workbench({
       write,
       reply: selected !== undefined && !isMany ? (all) => void composing.reply(all) : undefined,
     }),
+    sourceCommand(
+      selected !== undefined && !isMany
+        ? () =>
+            void queryClient
+              .ensureQueryData(conversationQuery(selected))
+              .then((conversation) => setSource(newestOf(conversation)))
+        : undefined,
+    ),
     ...viewCommands(accounts, folders, openView),
     ...outbox.commands,
     ...folderEditing.commands,
@@ -571,10 +597,12 @@ export function Workbench({
                 <ReaderPane
                   selected={selected}
                   accounts={accounts}
+                  folders={folders}
                   upcoming={neighbors(conversations, selected)}
                   onShown={markRead}
                   actions={readerActions}
                   place={readerPlace}
+                  actionsFor={messageActions}
                   onMessageKey={runCommandKey}
                   writing={writing}
                   hidden={composing.hidden}
@@ -594,6 +622,11 @@ export function Workbench({
             onDelete={folderEditing.confirmDelete}
             onClose={folderEditing.closeDelete}
           />
+        </Suspense>
+      )}
+      {source && (
+        <Suspense>
+          <SourceDialog message={source} onClose={() => setSource(undefined)} />
         </Suspense>
       )}
       {isSheetOpen && (

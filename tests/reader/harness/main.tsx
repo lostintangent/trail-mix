@@ -1,12 +1,14 @@
 import { QueryClientProvider, useQuery } from '@tanstack/react-query';
-import { StrictMode } from 'react';
+import { StrictMode, useCallback, useState } from 'react';
 import { flushSync } from 'react-dom';
 import { createRoot } from 'react-dom/client';
 import '../../../src/app/global.css';
 import { sanitizeMail, type SafeMail } from '../../../src/features/reader/core/sanitize.ts';
-import type { ConversationId } from '../../../src/features/mail/core/index.ts';
+import type { ConversationId, Message } from '../../../src/features/mail/core/index.ts';
 import { accountsQuery, bodyQuery } from '../../../src/features/mailroom/client/index.ts';
-import { Reader } from '../../../src/features/reader/index.ts';
+import { sourceCommand } from '../../../src/features/reader/ui/commands.ts';
+import { Reader } from '../../../src/features/reader/ui/Reader.tsx';
+import { SourceDialog } from '../../../src/features/reader/ui/SourceDialog.tsx';
 import { MessageFrame } from '../../../src/features/reader/ui/MessageFrame.tsx';
 import { createQueryClient } from '../../../src/shared/query-client.ts';
 import { bodyKey, lunchThread, newsletter, type Fixture } from './fixtures.ts';
@@ -129,6 +131,12 @@ window.showConversation = (name, html, upcoming) => {
 function Pane({ fixture, upcoming }: { fixture: Fixture; upcoming?: ConversationId[] }) {
   const { data: accounts } = useQuery(accountsQuery);
   const account = accounts?.find(({ id }) => id === fixture.account.id) ?? fixture.account;
+  // Each message's source, as the workbench offers it.
+  const [source, setSource] = useState<Message>();
+  const actionsFor = useCallback(
+    (message: Message) => [sourceCommand(() => setSource(message))],
+    [],
+  );
   return (
     <section className="pane">
       <Reader
@@ -136,7 +144,9 @@ function Pane({ fixture, upcoming }: { fixture: Fixture; upcoming?: Conversation
         account={account}
         upcoming={upcoming}
         onMessageKey={recordKey}
+        actionsFor={actionsFor}
       />
+      {source && <SourceDialog message={source} onClose={() => setSource(undefined)} />}
     </section>
   );
 }

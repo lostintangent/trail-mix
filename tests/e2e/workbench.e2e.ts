@@ -56,9 +56,11 @@ test('every screen renders cleanly, with readable text, at both sizes in both th
       screens.push([
         'reply',
         async (page) => {
+          // The last Reply answers the newest message: its own on a desktop, the island's on a phone.
           await page
             .getByRole('button', { name: 'Reply', exact: true })
             .locator('visible=true')
+            .last()
             .click();
           await page.getByRole('textbox', { name: 'Reply' }).waitFor();
         },

@@ -7,16 +7,19 @@ import { CommandButton, type Command } from '../../commands/index.ts';
 import { MOVE } from './commands.ts';
 
 /**
- * The triage controls, drawn from the triage commands: archive and delete, a menu of folders to
- * move to, flag, and a menu of more, which marks read or unread. A flagged conversation's star is
- * marked with the highlighter. Where room is short, as in a phone's island, flagging joins the menu
- * of more.
+ * The triage controls, drawn from the triage commands: filing, which is archive and delete and a
+ * menu of folders to move to, then marking, which is flag and a menu of more that marks read or
+ * unread. A flagged conversation's star is marked with the highlighter. Where room is short, as in
+ * a phone's island, flagging joins the menu of more. A phone's reader splits the two parts between
+ * the top of the screen and the island.
  */
 export function TriageActions({
   commands,
+  part = 'all',
   isCompact = false,
 }: {
   commands: readonly Command[];
+  part?: 'all' | 'filing' | 'marking';
   isCompact?: boolean;
 }) {
   const command = (id: string) => commands.find((each) => each.id === id);
@@ -36,35 +39,42 @@ export function TriageActions({
     .filter(({ isEnabled }) => isEnabled !== false)
     .map(asItem);
 
+  const isFiling = part !== 'marking';
+  const isMarking = part !== 'filing';
+
   return (
     <>
-      {archive && <CommandButton command={archive} />}
-      {remove && <CommandButton command={remove} />}
-      <DropdownMenu
-        button={{
-          label: 'Move to',
-          tooltip: 'Move to',
-          icon: <Icon icon={FolderInput} />,
-          isIconOnly: true,
-          variant: 'ghost',
-        }}
-        hasChevron={false}
-        items={moves}
-      />
-      {flag && !isCompact && (
+      {isFiling && archive && <CommandButton command={archive} />}
+      {isFiling && remove && <CommandButton command={remove} />}
+      {isFiling && (
+        <DropdownMenu
+          button={{
+            label: 'Move to',
+            tooltip: 'Move to',
+            icon: <Icon icon={FolderInput} />,
+            isIconOnly: true,
+            variant: 'ghost',
+          }}
+          hasChevron={false}
+          items={moves}
+        />
+      )}
+      {isMarking && flag && !isCompact && (
         <CommandButton command={flag} iconStyle={flag.isChecked && styles.flagged} />
       )}
-      <DropdownMenu
-        button={{
-          label: 'More',
-          tooltip: 'More',
-          icon: <Icon icon={Ellipsis} />,
-          isIconOnly: true,
-          variant: 'ghost',
-        }}
-        hasChevron={false}
-        items={more}
-      />
+      {isMarking && (
+        <DropdownMenu
+          button={{
+            label: 'More',
+            tooltip: 'More',
+            icon: <Icon icon={Ellipsis} />,
+            isIconOnly: true,
+            variant: 'ghost',
+          }}
+          hasChevron={false}
+          items={more}
+        />
+      )}
     </>
   );
 }

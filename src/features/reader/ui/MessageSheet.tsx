@@ -1,6 +1,6 @@
 import { Button } from '@astryxdesign/core/Button';
+import { DropdownMenu } from '@astryxdesign/core/DropdownMenu';
 import { Icon } from '@astryxdesign/core/Icon';
-import { IconButton } from '@astryxdesign/core/IconButton';
 import {
   borderVars,
   colorVars,
@@ -12,35 +12,35 @@ import {
   typographyVars,
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { Code, Ellipsis, FileText, ImageIcon, ImageOff } from 'lucide-react';
+import { Ellipsis, FileText, ImageIcon, ImageOff } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
+import { CommandButton, type Command } from '../../commands/index.ts';
 import type { Account, Address, Message } from '../../mail/core/index.ts';
-import {
-  accountsQuery,
-  bodyQuery,
-  mailroom,
-  messageUrl,
-  partUrl,
-} from '../../mailroom/client/index.ts';
+import { accountsQuery, bodyQuery, mailroom, partUrl } from '../../mailroom/client/index.ts';
 import { foldQuote } from '../core/quotes.ts';
 import { MessageFrame } from './MessageFrame.tsx';
 import { PlainText } from './PlainText.tsx';
 import { imagesAllowed, refOf, safeMail } from './safeMail.ts';
-import { SourceDialog } from './SourceDialog.tsx';
 
-export type MessageSheetProps = { message: Message; account: Account };
+export type MessageSheetProps = {
+  message: Message;
+  account: Account;
+  /** What can be done with this message: a reply, beside its sender, and the rest in a menu. */
+  actions?: readonly Command[];
+};
 
 /** One open message, on its own sheet of paper: who sent it, what it says, and what it carries. */
-export function MessageSheet({ message, account }: MessageSheetProps) {
+export function MessageSheet({ message, account, actions = [] }: MessageSheetProps) {
   const ref = refOf(message);
   const { data: body, isError, refetch } = useQuery(bodyQuery(ref));
   const [showOnce, setShowOnce] = useState(false);
   const allowed = showOnce || imagesAllowed(message, account.allowImagesFrom);
   const allowImages = useAllowImages(account);
   const [quotes, setQuotes] = useState<'folded' | 'shown'>('folded');
-  const [viewingSource, setViewingSource] = useState(false);
+  const reply = actions.find(({ id }) => id === 'message.reply');
+  const more = actions.filter((action) => action !== reply && action.isEnabled !== false);
 
   const mail = useMemo(() => body && safeMail(message, body, allowed), [message, body, allowed]);
   const text = useMemo(
@@ -69,12 +69,24 @@ export function MessageSheet({ message, account }: MessageSheetProps) {
             <time dateTime={message.date}>{when(message.date)}</time>
           </small>
         </div>
-        <IconButton
-          label="View source"
-          icon={<Icon icon={Code} />}
-          variant="ghost"
-          onClick={() => setViewingSource(true)}
-        />
+        {reply && <CommandButton command={reply} />}
+        {more.length > 0 && (
+          <DropdownMenu
+            button={{
+              label: 'More for this message',
+              tooltip: 'More',
+              icon: <Icon icon={Ellipsis} />,
+              isIconOnly: true,
+              variant: 'ghost',
+            }}
+            hasChevron={false}
+            items={more.map(({ id, title, run }) => ({
+              id,
+              label: title,
+              onClick: () => void run(),
+            }))}
+          />
+        )}
       </header>
 
       {mail?.blockedImages && (
@@ -151,15 +163,6 @@ export function MessageSheet({ message, account }: MessageSheetProps) {
             </li>
           ))}
         </ul>
-      )}
-
-      {viewingSource && body && (
-        <SourceDialog
-          message={message}
-          headers={body.headers}
-          url={messageUrl(ref)}
-          onClose={() => setViewingSource(false)}
-        />
       )}
     </article>
   );

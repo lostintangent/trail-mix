@@ -43,16 +43,18 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
   }, [compose]);
 
   const write = useCallback((account: Account) => start({ as: 'new', account }), [start]);
+  /** Answers one message, its sender or everyone on it. */
+  const replyTo = useCallback(
+    (message: Message, all: boolean) => start({ as: 'reply', to: message, all }),
+    [start],
+  );
   /** Answers a conversation's newest message that isn't a draft. */
   const replyIn = useCallback(
     (conversation: readonly Message[], all: boolean) => {
-      const parent = conversation
-        .filter(({ flags }) => !flags.draft)
-        .toSorted((a, b) => a.date.localeCompare(b.date))
-        .at(-1);
-      if (parent) start({ as: 'reply', to: parent, all });
+      const parent = newestOf(conversation);
+      if (parent) replyTo(parent, all);
     },
-    [start],
+    [replyTo],
   );
   /** Answers the selected conversation, once its messages are at hand. */
   const reply = useCallback(
@@ -92,6 +94,7 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
     session: started?.session ?? 0,
     write,
     reply,
+    replyTo,
     replyIn,
     openDraft,
     resume,
@@ -99,6 +102,14 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
     noteDraft,
     hidden,
   };
+}
+
+/** A conversation's newest message that isn't a draft, which its keys answer and show. */
+export function newestOf(conversation: readonly Message[]): Message | undefined {
+  return conversation
+    .filter(({ flags }) => !flags.draft)
+    .toSorted((a, b) => a.date.localeCompare(b.date))
+    .at(-1);
 }
 
 /** Whether a composer lies under the conversation it answers, rather than filling the reader. */
