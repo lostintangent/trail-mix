@@ -1,7 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 import { connect } from 'cloudflare:sockets';
 import { createSocketsTransport } from 'imapflow';
-import PostalMime from 'postal-mime';
+import PostalMime, { type Address as PostalAddress } from 'postal-mime';
 import { messageOf } from '../../composer/index.ts';
 import {
   messageIdOf,
@@ -149,8 +149,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   async conversations(view: View, after?: string): Promise<Page> {
     const checked = input.viewOf(view);
     const cursor = input.cursorOf(after);
-    // The Outbox arrives with its own step, and is empty until then.
-    if (checked.in === 'outbox') return { items: [] };
+    if (checked.in === 'outbox') throw new TypeError('The Outbox is listed by outbox().');
     if (checked.in !== 'search') return this.store.page(checked, cursor);
     if (!checked.fullText) return this.store.search(checked.text, cursor);
     // A first page asks the servers again. Later pages read what that one found.
@@ -183,7 +182,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   }
 
   outbox(): Promise<Outgoing[]> {
-    return Promise.resolve(this.sending.list());
+    return Promise.resolve(this.sending.list().map((outgoing) => this.placed(outgoing)));
   }
 
   // Commands
@@ -390,10 +389,13 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     const when = at === undefined ? undefined : input.instantOf(at);
     if (!this.book.get(ref.account)) throw new Error('There is no such account.');
     if (this.store.reads.role(ref) !== 'drafts') throw new Error('Only a draft can be sent.');
-    const messageId = await this.messageIdOf(ref);
-    const outgoing = this.sending.send(ref, messageId, new Date().toISOString(), when);
+    const outgoing = this.sending.send(
+      { draft: ref, ...(await this.addressing(ref)) },
+      new Date().toISOString(),
+      when,
+    );
     await this.wakeBy(Date.parse(outgoing.sendAt));
-    return outgoing;
+    return this.placed(outgoing);
   }
 
   cancelSend(id: string): Promise<MessageRef> {
@@ -403,7 +405,13 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   async retrySend(id: string): Promise<Outgoing> {
     const retried = this.sending.retry(input.sendOf(id), new Date().toISOString());
     await this.wakeBy(Date.parse(retried.sendAt));
-    return retried;
+    return this.placed(retried);
+  }
+
+  /** A send with the conversation its draft is in, as the index knows it now. */
+  private placed(outgoing: Outgoing): Outgoing {
+    const conversation = this.store.reads.message(outgoing.draft)?.conversation;
+    return conversation === undefined ? outgoing : { ...outgoing, conversation };
   }
 
   async createFolder(folder: FolderRef): Promise<void> {
@@ -694,14 +702,36 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     return `${this.member}/${ref.account}/${encodeURIComponent(ref.path)}/${ref.uidValidity}/${ref.uid}`;
   }
 
-  /** A draft's Message-ID, which a send needs to find its copy in Sent. */
-  private async messageIdOf(draft: MessageRef): Promise<string> {
-    const held = this.store.reads.message(draft)?.messageId;
-    const bytes = held ? undefined : await this.bytes(draft);
-    if (!held && !bytes) throw new Error('That draft is gone.');
-    const id = held || messageIdOf((await PostalMime.parse(bytes!)).messageId);
-    if (!id) throw new Error('That draft has no Message-ID, so it can’t be sent safely.');
-    return id;
+  /**
+   * Who a draft is to and what it's about, as its send keeps them, and its Message-ID, which the
+   * send needs to find its copy in Sent. From the index, or from the draft itself before sync has it.
+   */
+  private async addressing(
+    draft: MessageRef,
+  ): Promise<Pick<Outgoing, 'messageId' | 'to' | 'subject'>> {
+    const held = this.store.reads.message(draft);
+    const found = held ?? (await this.parsedDraft(draft));
+    if (!found.messageId)
+      throw new Error('That draft has no Message-ID, so it can’t be sent safely.');
+    return { messageId: found.messageId, to: [...found.to, ...found.cc], subject: found.subject };
+  }
+
+  private async parsedDraft(draft: MessageRef) {
+    const bytes = await this.bytes(draft);
+    if (!bytes) throw new Error('That draft is gone.');
+    const parsed = await PostalMime.parse(bytes);
+    const addresses = (list: PostalAddress[] | undefined) =>
+      (list ?? [])
+        .flatMap((entry) => entry.group ?? [entry])
+        .flatMap(({ name, address }) =>
+          address ? [{ ...(name ? { name } : {}), email: address }] : [],
+        );
+    return {
+      messageId: messageIdOf(parsed.messageId),
+      to: addresses(parsed.to),
+      cc: addresses(parsed.cc),
+      subject: parsed.subject ?? '',
+    };
   }
 
   /** A message the index holds, or the last full-text search found. */

@@ -49,25 +49,34 @@ export function outboxQueue(sending: Sending) {
     return held;
   };
 
-  /** Runs one step of a send, and stores what it came to, unless the send went while it ran. */
-  async function step({ step: next, outgoing }: outbox.Due, now: () => string) {
+  /**
+   * Runs one step of a send, and stores what it came to, unless the send went while it ran. Says
+   * whether the step failed for a passing reason, such as a host it couldn't reach.
+   */
+  async function step({ step: next, outgoing }: outbox.Due, now: () => string): Promise<boolean> {
     const { id, draft, messageId } = outgoing;
     const provider = () => sending.provider(draft.account);
+    const outcome =
+      next === 'submit'
+        ? await (async () => {
+            put(outbox.begin(outgoing));
+            changed();
+            const submitted = await attempt(async () =>
+              (await provider()).submit(draft, messageId),
+            );
+            if (submitted === 'sent') sending.accepted?.();
+            return submitted;
+          })()
+        : await attempt(async () => {
+            await (await provider()).file(draft, messageId);
+            return 'filed' as const;
+          });
+    const held = get(id);
+    if (!held) return false;
     if (next === 'submit') {
-      const begun = outbox.begin(outgoing);
-      put(begun);
-      changed();
-      const outcome = await attempt(async () => (await provider()).submit(draft, messageId));
-      if (outcome === 'sent') sending.accepted?.();
-      if (!get(id)) return;
-      put(outbox.submitted(begun, outcome, now()));
+      put(outbox.submitted(held, outcome as outbox.Submitted, now()));
     } else {
-      const outcome = await attempt(async () => {
-        await (await provider()).file(draft, messageId);
-        return 'filed' as const;
-      });
-      if (!get(id)) return;
-      const result = outbox.filed(outgoing, outcome, now());
+      const result = outbox.filed(held, outcome as outbox.Filed, now());
       if (result === 'done') {
         sql.run(`DELETE FROM outbox WHERE id = ?`, id);
         sending.sent(outgoing);
@@ -76,6 +85,7 @@ export function outboxQueue(sending: Sending) {
       }
     }
     changed();
+    return typeof outcome === 'object' && outcome.passing;
   }
 
   return {
@@ -88,14 +98,14 @@ export function outboxQueue(sending: Sending) {
      * Schedules a draft, to go when the undo window that opens `now` closes, or at `at` if later.
      * Sending a draft that is already on its way returns that send. A failed one starts over.
      */
-    send(draft: MessageRef, messageId: string, now: string, at?: string): Outgoing {
-      const held = all().find((entry) => sameRef(entry.draft, draft));
+    send(
+      draft: Pick<Outgoing, 'draft' | 'messageId' | 'to' | 'subject'>,
+      now: string,
+      at?: string,
+    ): Outgoing {
+      const held = all().find((entry) => sameRef(entry.draft, draft.draft));
       if (held && held.state !== 'failed') return held;
-      const scheduled = outbox.schedule(
-        { id: held?.id ?? crypto.randomUUID(), draft, messageId },
-        now,
-        at,
-      );
+      const scheduled = outbox.schedule({ id: held?.id ?? crypto.randomUUID(), ...draft }, now, at);
       put(scheduled);
       changed();
       return scheduled;
@@ -157,18 +167,23 @@ export function outboxQueue(sending: Sending) {
 
     /**
      * Runs the steps due now, soonest first, up to a wake's budget, reading the Outbox again
-     * before each, since a command may have undone or retried a send meanwhile. Returns how many
-     * steps it ran. One run at a time.
+     * before each, since a command may have undone or retried a send meanwhile. Once an account's
+     * host fails for a passing reason, the account's other sends wait for the next wake, which
+     * comes after sync, rather than each waiting out the same host. Returns how many steps it ran.
+     * One run at a time.
      */
     async run(now: () => string, budget = WAKE.steps): Promise<number> {
       if (running) return 0;
       running = true;
       let steps = 0;
+      const resting = new Set<AccountId>();
       try {
         for (; steps < budget; steps++) {
-          const [next] = outbox.due(all(), now());
+          const [next] = outbox
+            .due(all(), now())
+            .filter(({ outgoing }) => !resting.has(outgoing.draft.account));
           if (!next) break;
-          await step(next, now);
+          if (await step(next, now)) resting.add(next.outgoing.draft.account);
         }
       } finally {
         running = false;

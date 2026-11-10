@@ -130,6 +130,12 @@ export type Outgoing = {
   id: string;
   /** Stays in Drafts until the mail server accepts the send. */
   draft: MessageRef;
+  /** The draft's To then Cc, taken when it is scheduled. A draft on its way can't change. */
+  to: Address[];
+  /** The draft's subject, taken when it is scheduled. */
+  subject: string;
+  /** The conversation the draft is in, read from the index each time, and absent until it's there. */
+  conversation?: ConversationId;
   /** The draft's, so a missing draft counts as sent only if Sent holds it. */
   messageId: string;
   /** When the next attempt is due: the member's chosen time, then each automatic retry's. */

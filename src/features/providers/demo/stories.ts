@@ -14,8 +14,9 @@ import { seededRandom } from '../../../shared/random.ts';
  * What the demo mailbox says. Two accounts, Personal and Work, each a cycle of stories laid out
  * newest first and repeated back in time until the Inbox holds as many messages as asked. The
  * newest cycle is the one the prototypes show: unread mail, a flagged message, attachments, a
- * GitHub thread, a newsletter, long threads, Sent replies and a draft. Older cycles vary their
- * people and subjects, and most of their mail is read.
+ * GitHub thread, a newsletter, long threads, Sent replies and drafts, one of them to a host that
+ * turns its first try away. Older cycles vary their people and subjects, and most of their mail is
+ * read.
  *
  * A message is a pure function of its account, the mailbox's size, its creation time and its UID,
  * so no message exists until it is read, and the same inputs always give the same bytes.
@@ -243,6 +244,9 @@ type Step = {
   draft?: boolean;
 };
 
+/** The domain the demo's mail server can't reach on a message's first try. */
+export const UNREACHABLE = 'unreachable.example';
+
 const PEOPLE: Address[] = [
   { name: 'Ada Park', email: 'ada@example.com' },
   { name: 'Mina Okafor', email: 'mina@example.org' },
@@ -461,6 +465,21 @@ const STORIES: Record<string, (cycle: number) => Thread> = {
     ],
   }),
 
+  // A draft to a host the demo's mail server can't reach on the first try, so sending it shows how
+  // the Outbox holds a refused message and sends it on Retry.
+  cabin: (c) => ({
+    subject: rotate(['Cabin for the long weekend', 'Booking the cabin', 'Cabin dates'], c),
+    cast: [{ name: 'Rae Holm', email: `bookings@${UNREACHABLE}` }],
+    steps: [
+      {
+        from: 'me',
+        draft: true,
+        plain: true,
+        text: 'Hi Rae, is the cabin free from the 21st to the 23rd? Two adults and a dog.\n\nSam',
+      },
+    ],
+  }),
+
   parcel: () => ({
     subject: 'Your parcel is waiting',
     cast: [{ name: 'Parcel Service', email: 'notice@parcel-delivery.example.net' }],
@@ -620,6 +639,7 @@ const LAYOUT: Record<DemoKind, [story: string, step: number][]> = {
     ['trip', 0],
     ['plan', 0],
     ['shipped', 0],
+    ['cabin', 0],
   ],
   work: [
     ['q4', 5],

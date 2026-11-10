@@ -21,7 +21,13 @@ const T0 = Date.parse('2026-11-10T09:00:00.000Z');
 const at = (minutes: number) => new Date(T0 + minutes * 60_000).toISOString();
 
 const draft: MessageRef = { account: 'personal', path: 'Drafts', uidValidity: 7, uid: 42 };
-const entry = (id: string) => ({ id, draft, messageId: `<${id}@trailmix.invalid>` });
+const entry = (id: string) => ({
+  id,
+  draft,
+  messageId: `<${id}@trailmix.invalid>`,
+  to: [{ name: 'Mina Okafor', email: 'mina@example.com' }],
+  subject: `About ${id}`,
+});
 /** A send scheduled ahead, to go at `sendAt`. */
 const send = (id = 'one', sendAt = at(0)) => schedule(entry(id), at(-24 * 60), sendAt);
 

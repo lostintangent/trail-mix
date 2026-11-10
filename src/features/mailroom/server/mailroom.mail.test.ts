@@ -628,9 +628,23 @@ for (const profile of ['full', 'outlook'] as const satisfies Profile[]) {
       const before = (await draftOnServer(saved)).source;
       const pressed = Date.now();
       const sending = await cal.call<Outgoing>('send', saved);
-      expect(sending).toMatchObject({ draft: saved, state: 'waiting', attempts: 0 });
+      expect(sending).toMatchObject({
+        draft: saved,
+        to: [{ name: 'Bob', email: bob.email }],
+        subject: 'Undone',
+        state: 'waiting',
+        attempts: 0,
+      });
       expect(Date.parse(sending.sendAt) - pressed).toBeGreaterThanOrEqual(UNDO_SECONDS * 1000 - 50);
-      expect(await outbox()).toEqual([sending]);
+      // A row opens the conversation its draft is in, once the index holds the draft.
+      await cal.until(async () => (await outbox())[0]?.conversation !== undefined);
+      const [row] = await outbox();
+      expect(row).toEqual({ ...sending, conversation: row!.conversation });
+      const thread = await cal.call<Message[]>('conversation', row!.conversation);
+      expect(thread.map(({ subject }) => subject)).toEqual(['Undone']);
+      await expect(cal.call('conversations', { in: 'outbox' })).rejects.toThrow(
+        'The Outbox is listed by outbox().',
+      );
 
       expect(await cal.call<MessageRef>('cancelSend', sending.id)).toEqual(saved);
       expect(await outbox()).toEqual([]);

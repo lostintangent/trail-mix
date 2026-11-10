@@ -32,6 +32,8 @@ export type DemoMailbox = {
   moved: number[];
   /** Every message that is not where the seed put it. */
   stored: Stored[];
+  /** The Message-IDs the host has turned away once, so their next try goes. */
+  refused?: string[];
 };
 
 export type DemoFolder = {

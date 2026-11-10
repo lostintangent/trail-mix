@@ -59,7 +59,7 @@ export const UNDO_SECONDS = 10;
  * later, for a send scheduled ahead.
  */
 export function schedule(
-  entry: Pick<Outgoing, 'id' | 'draft' | 'messageId'>,
+  entry: Pick<Outgoing, 'id' | 'draft' | 'messageId' | 'to' | 'subject'>,
   now: string,
   at?: string,
 ): Outgoing {

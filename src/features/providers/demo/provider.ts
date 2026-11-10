@@ -11,9 +11,15 @@ import {
 } from '../../mail/core/index.ts';
 import { previewOf } from '../imap/core/envelope.ts';
 import { planSync } from '../imap/core/sync.ts';
-import { SEARCH_LIMIT, beforeSending, type MailProvider, type Moved } from '../provider.ts';
+import {
+  SEARCH_LIMIT,
+  SendFailure,
+  beforeSending,
+  type MailProvider,
+  type Moved,
+} from '../provider.ts';
 import * as server from './mailbox.ts';
-import { DEMO_ACCOUNTS, type DemoKind } from './stories.ts';
+import { DEMO_ACCOUNTS, UNREACHABLE, type DemoKind } from './stories.ts';
 
 /**
  * The demo provider: a MailProvider over the demo mailbox, for tests, agents, previews and the
@@ -208,6 +214,18 @@ export function demoServer(
         const raw = bytesOf(found.message.raw());
         const outgoing = await written(withoutBcc(raw));
         const recipients = await recipientsOf(raw);
+        // The host turns a message to the unreachable domain away once, and takes its next try.
+        const refused = mailbox.refused ?? [];
+        if (
+          recipients.some((email) => email.endsWith(`@${UNREACHABLE}`)) &&
+          !refused.includes(messageId)
+        ) {
+          await commit({ ...mailbox, refused: [...refused, messageId] }, []);
+          throw new SendFailure(
+            `The mail server refused it: 554 5.4.4 ${UNREACHABLE} can’t be reached right now`,
+            false,
+          );
+        }
         await commit(accepted(mailbox, outgoing, recipients), ['INBOX']);
         return 'sent' as const;
       }),

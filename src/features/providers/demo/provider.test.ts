@@ -11,7 +11,7 @@ import {
   type MessageRef,
 } from '../../mail/core/index.ts';
 import { seededRandom } from '../../../shared/random.ts';
-import type { MailProvider } from '../provider.ts';
+import { SendFailure, type MailProvider } from '../provider.ts';
 import {
   DEMO_ACCOUNTS,
   demoMailbox,
@@ -129,6 +129,43 @@ test('saving the same draft again, as a retry does, files it once', async () => 
   expect(again).toEqual(saved);
   const { messages } = await everything({ provider });
   expect(messages.filter(({ subject }) => subject === 'Note to self')).toHaveLength(1);
+});
+
+test('the seeded draft to an unreachable host is refused once, with the reason, and its next try goes', async () => {
+  let saved: DemoMailbox | undefined;
+  const server = demoServer('personal', demoMailbox('personal', 20, CREATED), (mailbox) => {
+    saved = mailbox;
+  });
+  const { messages } = await everything(server);
+  const draft = messages.find(
+    ({ path, to }) =>
+      path === 'Drafts' && to.some(({ email }) => email.endsWith('@unreachable.example')),
+  )!;
+  const ref = {
+    account: draft.account,
+    path: draft.path,
+    uidValidity: draft.uidValidity,
+    uid: draft.uid,
+  };
+
+  const refused = await server.provider
+    .submit(ref, draft.messageId)
+    .catch((error: unknown) => error);
+  expect(refused).toBeInstanceOf(SendFailure);
+  expect(refused).toMatchObject({
+    passing: false,
+    message: 'The mail server refused it: 554 5.4.4 unreachable.example can’t be reached right now',
+  });
+  expect((await everything(server)).messages).toEqual(messages);
+
+  // The refusal is remembered with the mailbox, so a Mailroom that restarts sends it on Retry.
+  const reopened = demoServer('personal', saved!, () => {});
+  expect(await reopened.provider.submit(ref, draft.messageId)).toBe('sent');
+  await reopened.provider.file(ref, draft.messageId);
+  const after = (await everything(reopened)).messages;
+  expect(
+    after.filter(({ messageId }) => messageId === draft.messageId).map(({ path }) => path),
+  ).toEqual(['Sent']);
 });
 
 test('whatever happens to the mailbox, syncing keeps up, and reopening what was saved gives the same server', async () => {
