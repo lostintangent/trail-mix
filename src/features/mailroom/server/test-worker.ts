@@ -1,3 +1,4 @@
+import { COMMANDS, receivedCall } from '../client/contract.ts';
 import { Mailroom, type MailroomEnv } from './mailroom.ts';
 
 /**
@@ -84,7 +85,10 @@ export default {
       return mailroom.fetch(new Request(url, { headers: { Upgrade: 'websocket' } }));
     }
     if (action === 'call' && request.method === 'POST') {
-      const { name, args } = await request.json<{ name: string; args: unknown[] }>();
+      // A call carrying files crosses as it does from a browser, its files read into bytes.
+      const { name, args } = request.headers.get('Content-Type')?.startsWith('multipart/form-data')
+        ? await receivedCall(COMMANDS, await request.formData())
+        : await request.json<{ name: string; args: unknown[] }>();
       const methods = mailroom as unknown as Record<
         string,
         (...args: unknown[]) => Promise<unknown>

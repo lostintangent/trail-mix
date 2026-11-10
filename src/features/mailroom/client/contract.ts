@@ -101,16 +101,32 @@ export type DraftInput = {
   /** Joins the draft to that message's conversation. */
   inReplyTo?: MessageRef;
   /**
-   * New bytes travel once. After that, an attachment is named by the message that holds it: the
-   * draft this one replaces, or the message being forwarded. A pasted image carries the Content-ID
+   * New bytes travel once. After that, an attachment is named by the message that holds it, the
+   * draft this one replaces or the message being forwarded, and by its `id` in that message's
+   * `Body`, which a just-saved draft answers too. A pasted image carries the Content-ID
    * the Markdown shows it by as `cid:`, which the browser mints with `contentIdFor`, and stored
    * bytes keep theirs.
    */
   attachments: ({ file: File; contentId?: string } | { in: MessageRef; id: string })[];
 };
 
+/**
+ * A browser's file as it reaches the Mailroom. A Durable Object takes no `File`, so the Worker reads
+ * each one into bytes on the way.
+ */
+export type FileBytes = { name: string; type: string; content: Uint8Array };
+
+/** A `DraftInput` as it reaches the Mailroom, with its new files read into bytes. */
+export type DraftUpload = Omit<DraftInput, 'attachments'> & {
+  attachments: ({ file: FileBytes; contentId?: string } | { in: MessageRef; id: string })[];
+};
+
 /** The Mailroom as the Worker reaches it: its queries and commands, and the hint socket by `fetch`. */
-export type Mailroom = Queries & Commands & { fetch(request: Request): Promise<Response> };
+export type Mailroom = Queries &
+  Omit<Commands, 'saveDraft'> & {
+    saveDraft(draft: DraftUpload, replaces?: MessageRef): Promise<MessageRef>;
+    fetch(request: Request): Promise<Response>;
+  };
 
 declare module '@tanstack/react-start' {
   interface Register {
@@ -170,6 +186,64 @@ export function readCall<Name extends string>(names: readonly Name[], input: unk
     if (isOneOf(names, name) && Array.isArray(args)) return { name, args };
   }
   throw new TypeError('That isn’t something a browser can ask its Mailroom.');
+}
+
+/**
+ * How a call travels from a browser. A call that carries files goes as form data, each file as a
+ * part of its own and named in the call by `{ $file: n }`, so its bytes travel as they are. Any
+ * other call goes as JSON.
+ */
+export function sendable(call: Call<string>): Call<string> | FormData {
+  const files: File[] = [];
+  const args = JSON.parse(
+    JSON.stringify(call.args, (_key, value: unknown) =>
+      value instanceof File ? { $file: files.push(value) - 1 } : value,
+    ),
+  ) as unknown[];
+  if (files.length === 0) return call;
+  const form = new FormData();
+  form.set('call', JSON.stringify({ name: call.name, args }));
+  files.forEach((file, n) => form.set(`file${n}`, file));
+  return form;
+}
+
+/** The most bytes one call may carry in files: what a Durable Object call can hold, with room. */
+export const MAX_FILE_BYTES = 25 * 1024 * 1024;
+
+/**
+ * The call a browser sent, as `sendable` sent it, with each file read into bytes. As with
+ * `readCall`, nothing off the list gets through.
+ */
+export async function receivedCall<Name extends string>(
+  names: readonly Name[],
+  input: unknown,
+): Promise<Call<Name>> {
+  if (!(input instanceof FormData)) return readCall(names, input);
+  const sent = input.get('call');
+  const call = readCall(names, typeof sent === 'string' ? (JSON.parse(sent) as unknown) : null);
+  const files = new Map<number, FileBytes>();
+  let total = 0;
+  for (const [key, value] of input) {
+    const n = /^file(\d{1,3})$/.exec(key)?.[1];
+    if (n === undefined || !(value instanceof File)) continue;
+    total += value.size;
+    if (total > MAX_FILE_BYTES) {
+      throw new TypeError(`Files on one draft can add up to ${MAX_FILE_BYTES / 1024 / 1024} MB.`);
+    }
+    const content = new Uint8Array(await value.arrayBuffer());
+    files.set(Number(n), { name: value.name, type: value.type, content });
+  }
+  const filled = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(filled);
+    if (typeof value !== 'object' || value === null) return value;
+    if ('$file' in value) {
+      const file = files.get(Number(value.$file));
+      if (!file) throw new TypeError('That call names a file it didn’t send.');
+      return file;
+    }
+    return Object.fromEntries(Object.entries(value).map(([key, inner]) => [key, filled(inner)]));
+  };
+  return { name: call.name, args: call.args.map(filled) };
 }
 
 const isOneOf = <Name extends string>(names: readonly Name[], value: unknown): value is Name =>

@@ -264,6 +264,13 @@ export function describeContract(
       expect(arrived((await syncAll(drafts)).events)).toHaveLength(2);
     });
 
+    it('replaces only a draft, so a wrong ref costs no message', async () => {
+      await world().deliver(message({ id: 'kept', subject: 'Kept' }));
+      const kept = refOf(await only('INBOX', 'Kept'));
+      await provider.saveDraft(bytes(message({ id: 'draft', subject: 'Draft' })), kept);
+      expect((await only('INBOX', 'Kept')).messageId).toBe('<kept@example.com>');
+    });
+
     // Sending is two steps, and the Outbox records the host's acceptance between them. A restart can
     // land before either step, inside either, or after both, so each case below is one of those
     // points: the steps that ran before it, then the steps that run again.

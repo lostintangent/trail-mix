@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { accountChangeOf, flagsOf, refOf, setupOf, viewOf } from './input.ts';
+import { accountChangeOf, draftOf, flagsOf, refOf, setupOf, viewOf } from './input.ts';
 
 // What a browser sends reaches the Mailroom only through these checks.
 
@@ -54,4 +54,57 @@ test('an IMAP account needs both hosts unless a preset supplies them, and keeps 
     ...account,
     preset: 'outlook',
   });
+});
+
+const ref = { account: 'a', path: 'Drafts', uidValidity: 7, uid: 3 };
+const chart = { name: 'chart.png', type: 'image/png', content: new Uint8Array([137, 80]) };
+const draft = {
+  account: 'a',
+  to: [{ name: 'Sam Rivera', email: 'sam@example.com' }],
+  cc: [],
+  bcc: [],
+  subject: 'Lunch',
+  markdown: '  Thursday?\n\n![chart](cid:chart@trailmix.invalid)\n',
+  attachments: [
+    { file: chart, contentId: 'chart@trailmix.invalid' },
+    { in: ref, id: '2' },
+  ],
+};
+
+test('a draft keeps what its message needs, and its Markdown as typed', () => {
+  expect(draftOf({ ...draft, from: 'boss@example.com', messageId: '<x@y>' })).toEqual(draft);
+  expect(draftOf({ ...draft, inReplyTo: ref }).inReplyTo).toEqual(ref);
+});
+
+test('a file’s type is its essence, and one the browser didn’t know is plain bytes', () => {
+  const typed = (type: string) =>
+    draftOf({ ...draft, attachments: [{ file: { ...chart, type } }] }).attachments[0];
+  expect(typed('text/plain;charset=utf-8')).toEqual({ file: { ...chart, type: 'text/plain' } });
+  expect(typed('')).toEqual({ file: { ...chart, type: 'application/octet-stream' } });
+  expect(typed('Image/PNG')).toEqual({ file: chart });
+});
+
+test('every header a draft fills is one line', () => {
+  const headerSplitting = [
+    { subject: 'Lunch\r\nBcc: eve@example.com' },
+    { to: [{ name: 'Sam\nBcc: eve@example.com', email: 'sam@example.com' }] },
+    { attachments: [{ file: { ...chart, name: 'chart.png\r\nX: y' } }] },
+  ];
+  for (const change of headerSplitting) {
+    expect(() => draftOf({ ...draft, ...change })).toThrow(TypeError);
+  }
+});
+
+test('an attachment is a typed file with its bytes, or one held by a message', () => {
+  const refused = [
+    { file: { ...chart, content: 'iVBORw0KGgo=' } },
+    { file: { ...chart, content: [137, 80] } },
+    { file: { ...chart, type: 'png' } },
+    { file: chart, contentId: '<chart@trailmix.invalid>' },
+    { in: ref, id: '../2' },
+    { in: { ...ref, uid: 0 }, id: '2' },
+  ];
+  for (const attachment of refused) {
+    expect(() => draftOf({ ...draft, attachments: [attachment] })).toThrow(TypeError);
+  }
 });

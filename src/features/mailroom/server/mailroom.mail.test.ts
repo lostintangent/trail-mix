@@ -7,6 +7,7 @@ import { ImapFlow } from 'imapflow';
 import nodemailer from 'nodemailer';
 import type {
   Account,
+  Body,
   ConversationSummary,
   Folder,
   Hint,
@@ -14,7 +15,8 @@ import type {
   MessageRef,
   View,
 } from '../../mail/core/index.ts';
-import type { AccountSetup, Page } from '../client/contract.ts';
+import PostalMime from 'postal-mime';
+import { sendable, type AccountSetup, type Page } from '../client/contract.ts';
 import { caFile, empty, ports, start, stop, users } from '../../../../tests/mail-server/server.ts';
 import { startWorker, type LocalWorker } from '../../../../tests/workerd.ts';
 import { WAKE } from './sync.ts';
@@ -173,15 +175,16 @@ describe('The Mailroom', () => {
     expect(await ada.call('conversation', rows[0]!.id)).toEqual([]);
   }, 30_000);
 
+  /** The message with this subject, as the index holds it. */
+  const held = async (subject: string) => {
+    const row = (await ada.page({ in: 'search', text: subject })).find(
+      (found) => found.subject === subject,
+    );
+    const messages = await ada.call<Message[]>('conversation', row!.id);
+    return refOf(messages.find((message) => message.subject === subject)!);
+  };
+
   describe('triage, as the browser sends it, on the server', () => {
-    /** The message with this subject, as the index holds it. */
-    const held = async (subject: string) => {
-      const row = (await ada.page({ in: 'search', text: subject })).find(
-        (found) => found.subject === subject,
-      );
-      const messages = await ada.call<Message[]>('conversation', row!.id);
-      return refOf(messages.find((message) => message.subject === subject)!);
-    };
     type Moved = { from: MessageRef; to: MessageRef };
     /** Undoes moves as the browser does, each back to its folder. Returns where each landed. */
     const undo = async (moved: Moved[]) =>
@@ -267,6 +270,130 @@ describe('The Mailroom', () => {
       await expect(refused).rejects.toThrow(/doesn't exist/i);
       expect(await onServer('INBOX')).toContainKey('<garden@trailmix.test>');
     });
+  });
+
+  describe('drafts, as the composer saves them, on the server', () => {
+    const png = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+    const draft = (change: Record<string, unknown>) => ({
+      account: account.id,
+      to: [{ name: 'Bob', email: bob.email }],
+      cc: [],
+      bcc: [],
+      subject: 'Plans',
+      markdown: 'Thursday works.\n',
+      attachments: [],
+      ...change,
+    });
+    const notes = () => new File(['Bring a jacket.'], 'notes.txt', { type: 'text/plain' });
+
+    test('writes the Markdown, a pasted image and a file as one message in Drafts, joined to its reply', async () => {
+      const lunch = await held('Re: Lunch');
+      const saved = await ada.call<MessageRef>(
+        'saveDraft',
+        draft({
+          subject: 'Re: Lunch',
+          markdown: 'Thursday works.\n\n![chart](cid:chart@trailmix.invalid)\n',
+          inReplyTo: lunch,
+          attachments: [
+            {
+              file: new File([png], 'chart.png', { type: 'image/png' }),
+              contentId: 'chart@trailmix.invalid',
+            },
+            { file: notes() },
+          ],
+        }),
+      );
+      expect(saved).toMatchObject({ account: account.id, path: 'Drafts' });
+
+      const { flags, source } = await draftOnServer(saved);
+      expect(flags).toContain('\\Draft');
+      const written = await PostalMime.parse(source);
+      expect(written).toMatchObject({
+        from: { address: alice.email },
+        to: [{ name: 'Bob', address: bob.email }],
+        subject: 'Re: Lunch',
+        inReplyTo: '<lunch-reply@trailmix.test>',
+        references: '<lunch@trailmix.test> <lunch-reply@trailmix.test>',
+      });
+      expect(written.messageId).toMatch(/^<[\w-]+@trailmix\.test>$/);
+      expect(written.html).toContain('src="cid:chart@trailmix.invalid"');
+      expect(written.text).toContain('Thursday works.');
+      expect(
+        written.attachments.map((part) => ({
+          name: part.filename,
+          type: part.mimeType,
+          disposition: part.disposition,
+          contentId: part.contentId,
+          content: [...new Uint8Array(part.content as ArrayBuffer)],
+        })),
+      ).toEqual([
+        {
+          name: 'chart.png',
+          type: 'image/png',
+          disposition: 'inline',
+          contentId: '<chart@trailmix.invalid>',
+          content: [...png],
+        },
+        {
+          name: 'notes.txt',
+          type: 'text/plain',
+          disposition: 'attachment',
+          contentId: undefined,
+          content: [...new TextEncoder().encode('Bring a jacket.')],
+        },
+      ]);
+      await ada.call('move', [saved], 'trash');
+    }, 30_000);
+
+    test('each save replaces the last and carries its attachments over without their bytes', async () => {
+      const first = await ada.call<MessageRef>(
+        'saveDraft',
+        draft({ attachments: [{ file: notes() }] }),
+      );
+      // Saved a moment ago and not yet in the index, it answers what it holds all the same.
+      const [held] = (await ada.call<Body>('body', first)).attachments;
+      expect(held).toMatchObject({ name: 'notes.txt' });
+
+      const second = await ada.call<MessageRef>(
+        'saveDraft',
+        draft({
+          markdown: 'Thursday works, see the notes.\n',
+          attachments: [{ in: first, id: held!.id }],
+        }),
+        first,
+      );
+      await expect(draftOnServer(first)).rejects.toThrow(/isn’t in Drafts/);
+      const written = await PostalMime.parse((await draftOnServer(second)).source);
+      expect(written.text).toContain('see the notes.');
+      expect(
+        written.attachments.map((part) => [
+          part.filename,
+          new TextDecoder().decode(part.content as ArrayBuffer),
+        ]),
+      ).toEqual([['notes.txt', 'Bring a jacket.']]);
+      // The replaced draft's bytes leave the body cache with it.
+      const { bodies } = await ada.call<{ bodies: string[] }>('stored');
+      expect(bodies.filter((key) => key.includes('/Drafts/'))).toEqual([]);
+
+      await ada.until(async () => {
+        const rows = await ada.page({ in: 'drafts' });
+        return rows.length === 1 && rows[0]!.subject === 'Plans';
+      });
+      const [row] = await ada.page({ in: 'drafts' });
+      const [message] = await ada.call<Message[]>('conversation', row!.id);
+      expect(refOf(message!)).toEqual(second);
+      await ada.call('move', [second], 'trash');
+    }, 30_000);
+
+    test('a draft replaces only a draft of its own account', async () => {
+      const lunch = await held('Re: Lunch');
+      await expect(
+        ada.call('saveDraft', draft({}), { ...lunch, account: 'elsewhere' }),
+      ).rejects.toThrow(/only a draft of the account/);
+      const saved = await ada.call<MessageRef>('saveDraft', draft({}), lunch);
+      expect(await onServer('INBOX')).toContainKey('<lunch-reply@trailmix.test>');
+      await ada.call('move', [saved], 'trash');
+    }, 30_000);
   });
 
   test('another member reaches none of it', async () => {
@@ -378,14 +505,36 @@ describe('The Mailroom with the demo mailbox', () => {
     );
     device.close();
   }, 180_000);
+
+  test('saves a draft with its files in a demo account, where the composer finds it', async () => {
+    const cy = member('cy', () => worker);
+    const [, work] = await cy.call<Account[]>('accounts');
+    const saved = await cy.call<MessageRef>('saveDraft', {
+      account: work!.id,
+      to: [{ email: 'sam@example.com' }],
+      cc: [],
+      bcc: [],
+      subject: 'Quarterly numbers',
+      markdown: 'Attached.\n',
+      attachments: [{ file: new File(['1,2,3'], 'numbers.csv', { type: 'text/csv' }) }],
+    });
+    await cy.until(async () =>
+      (await cy.page({ in: 'drafts' })).some((row) => row.subject === 'Quarterly numbers'),
+    );
+    expect((await cy.call<Body>('body', saved)).attachments).toMatchObject([
+      { name: 'numbers.csv', type: 'text/csv', size: 5 },
+    ]);
+  }, 30_000);
 });
 
 /** A member's Mailroom, reached as the test worker names it. */
 function member(name: string, worker: () => LocalWorker) {
   const call = async <T = unknown>(method: string, ...args: unknown[]): Promise<T> => {
+    // As a browser sends it: a call carrying files goes as form data.
+    const sent = sendable({ name: method, args });
     const response = await fetch(`${worker().url}/${name}/call`, {
       method: 'POST',
-      body: JSON.stringify({ name: method, args }),
+      body: sent instanceof FormData ? sent : JSON.stringify(sent),
     });
     const result = await response.json<{ value?: T; error?: string }>();
     if (result.error !== undefined) throw new Error(result.error);
@@ -476,6 +625,24 @@ async function onServer(path: string): Promise<Record<string, string[]>> {
         found[message.envelope?.messageId ?? ''] = [...(message.flags ?? [])];
       }
       return found;
+    } finally {
+      lock.release();
+    }
+  });
+}
+
+/** A message of Alice's on the server, as its raw source and its flags. */
+async function draftOnServer(ref: MessageRef): Promise<{ source: Uint8Array; flags: string[] }> {
+  return asAlice(async (client) => {
+    const lock = await client.getMailboxLock(ref.path);
+    try {
+      const found = await client.fetchOne(
+        String(ref.uid),
+        { source: true, flags: true },
+        { uid: true },
+      );
+      if (!found || !found.source) throw new Error(`UID ${ref.uid} isn’t in ${ref.path}.`);
+      return { source: new Uint8Array(found.source), flags: [...(found.flags ?? [])] };
     } finally {
       lock.release();
     }

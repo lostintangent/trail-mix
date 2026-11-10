@@ -1,6 +1,7 @@
 import type {
   Account,
   AccountId,
+  Address,
   ConversationId,
   Flags,
   FolderRef,
@@ -9,7 +10,7 @@ import type {
   View,
 } from '../../mail/core/index.ts';
 import type { Endpoint } from '../../providers/index.ts';
-import type { AccountSetup, PageCursor } from '../client/contract.ts';
+import type { AccountSetup, DraftUpload, FileBytes, PageCursor } from '../client/contract.ts';
 import { STAMPS } from './accounts.ts';
 
 /**
@@ -141,8 +142,76 @@ export function setupOf(value: unknown): AccountSetup {
   };
 }
 
+/** A draft as the composer saved it, with its new files' bytes. */
+export function draftOf(value: unknown): DraftUpload {
+  const draft = record(value, 'a draft');
+  if (!Array.isArray(draft.attachments) || draft.attachments.length > 100) {
+    throw new TypeError('A draft’s attachments are a list.');
+  }
+  return {
+    account: accountOf(draft.account),
+    to: addressesOf(draft.to),
+    cc: addressesOf(draft.cc),
+    bcc: addressesOf(draft.bcc),
+    subject: lineOf(draft.subject, 'A subject', 1000),
+    markdown: textOf(draft.markdown, 'A draft', 1_000_000, true, false),
+    ...(draft.inReplyTo === undefined ? {} : { inReplyTo: refOf(draft.inReplyTo) }),
+    attachments: draft.attachments.map((attachment: unknown) => {
+      const held = record(attachment, 'an attachment');
+      if ('in' in held) {
+        if (typeof held.id !== 'string' || !/^\d{1,4}$/.test(held.id)) {
+          throw new TypeError('That isn’t an attachment of a message.');
+        }
+        return { in: refOf(held.in), id: held.id };
+      }
+      return {
+        file: fileOf(held.file),
+        ...(held.contentId === undefined ? {} : { contentId: contentIdOf(held.contentId) }),
+      };
+    }),
+  };
+}
+
 export function senderOf(value: unknown): string {
   return addressOf(value).toLowerCase();
+}
+
+function addressesOf(value: unknown): Address[] {
+  if (!Array.isArray(value) || value.length > 500) throw new TypeError('Recipients are a list.');
+  return value.map((entry: unknown) => {
+    const { name, email } = record(entry, 'an address');
+    return {
+      ...(name === undefined || name === '' ? {} : { name: lineOf(name, 'A name', 200) }),
+      email: addressOf(email),
+    };
+  });
+}
+
+function fileOf(value: unknown): FileBytes {
+  const { name, type, content } = record(value, 'a file');
+  if (!(content instanceof Uint8Array)) throw new TypeError('A file’s bytes didn’t arrive.');
+  // A browser names a type it doesn’t know as '', and a form may add parameters such as a charset.
+  const essence =
+    (typeof type === 'string' ? type.split(';')[0]!.trim() : '') || 'application/octet-stream';
+  if (typeof type !== 'string' || !/^[\w.+-]{1,100}\/[\w.+-]{1,100}$/.test(essence)) {
+    throw new TypeError('That isn’t a file’s type.');
+  }
+  return { name: lineOf(name, 'A file’s name', 255), type: essence.toLowerCase(), content };
+}
+
+/** A Content-ID as the Markdown names it after `cid:`, without its angle brackets. */
+function contentIdOf(value: unknown): string {
+  if (typeof value !== 'string' || !/^[\x21-\x3b\x3d\x3f-\x7e]{1,250}$/.test(value)) {
+    throw new TypeError('That isn’t a Content-ID.');
+  }
+  return value;
+}
+
+/** Text on one line, as a header holds it. */
+function lineOf(value: unknown, what: string, max: number): string {
+  const line = textOf(value, what, max, true);
+  if (/[\r\n\0]/.test(line)) throw new TypeError(`${what} is one line.`);
+  return line;
 }
 
 function endpointOf(value: unknown): Endpoint {

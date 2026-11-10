@@ -476,7 +476,8 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
               return uid === undefined ? undefined : refIn(drafts, mailbox.uidValidity, uid);
             });
       if (!filed) throw new Error('The server did not say where it filed the draft');
-      if (replaces) await remove(replaces);
+      // Only a draft is ever replaced, so a wrong ref can never cost a message.
+      if (replaces && replaces.path === drafts) await remove(replaces);
       return filed;
     },
 

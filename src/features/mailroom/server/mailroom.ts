@@ -2,21 +2,24 @@ import { DurableObject } from 'cloudflare:workers';
 import { connect } from 'cloudflare:sockets';
 import { createSocketsTransport } from 'imapflow';
 import PostalMime from 'postal-mime';
-import type {
-  Account,
-  AccountId,
-  Body,
-  ConversationId,
-  Envelope,
-  Flags,
-  Folder,
-  FolderRef,
-  FolderRole,
-  Hint,
-  Message,
-  MessageRef,
-  Outgoing,
-  View,
+import { messageOf } from '../../composer/index.ts';
+import {
+  writeMime,
+  type Account,
+  type AccountId,
+  type Body,
+  type ConversationId,
+  type Envelope,
+  type Flags,
+  type Folder,
+  type FolderRef,
+  type FolderRole,
+  type Hint,
+  type Message,
+  type MessageRef,
+  type MimeAttachment,
+  type Outgoing,
+  type View,
 } from '../../mail/core/index.ts';
 import {
   DEMO_ACCOUNTS,
@@ -29,7 +32,7 @@ import {
   type Moved,
   type SyncWindow,
 } from '../../providers/index.ts';
-import type { AccountSetup, DraftInput, Mailroom as Contract, Page } from '../client/contract.ts';
+import type { AccountSetup, DraftUpload, Mailroom as Contract, Page } from '../client/contract.ts';
 import {
   accountBook,
   demoSettings,
@@ -86,6 +89,8 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   private key: Promise<CryptoKey> | undefined;
   /** The last full-text search. Only memory holds it, so a restart forgets it. */
   private found: Found | undefined;
+  /** Drafts this Mailroom filed, whose attachments the next version may carry before sync sees it. */
+  private readonly drafts = new Set<string>();
   private readonly demo: DemoSettings | undefined;
 
   constructor(ctx: DurableObjectState, env: MailroomEnv) {
@@ -295,8 +300,60 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     return moved;
   }
 
-  saveDraft(_draft: DraftInput, _replaces?: MessageRef): Promise<MessageRef> {
-    return Promise.reject(new Error('Drafts arrive with the composer.'));
+  /**
+   * Writes a draft as mail and files it in the account's Drafts, where it replaces the version
+   * before it. An attachment that travelled before is read from the message that holds it.
+   */
+  async saveDraft(draft: DraftUpload, replaces?: MessageRef): Promise<MessageRef> {
+    const checked = input.draftOf(draft);
+    const older = replaces === undefined ? undefined : input.refOf(replaces);
+    const account = this.book.get(checked.account)?.account;
+    if (!account) throw new Error('There is no such account.');
+    if (older && older.account !== account.id) {
+      throw new TypeError('A draft replaces only a draft of the account it is from.');
+    }
+    const parent = checked.inReplyTo && this.known(checked.inReplyTo);
+    if (checked.inReplyTo && !parent) throw new Error('The message this replies to is gone.');
+    const attachments: MimeAttachment[] = [];
+    for (const attachment of checked.attachments) {
+      if ('file' in attachment) {
+        const { name, type, content } = attachment.file;
+        const { contentId } = attachment;
+        attachments.push({ name, type, content, ...(contentId ? { contentId } : {}) });
+        continue;
+      }
+      const bytes = await this.bytes(attachment.in);
+      const held = bytes && (await attachmentOf(bytes, Number(attachment.id)));
+      if (!held) throw new Error('An attachment this draft carried over is gone.');
+      attachments.push(held);
+    }
+    const message = messageOf(
+      {
+        from: { email: account.address },
+        to: checked.to,
+        cc: checked.cc,
+        bcc: checked.bcc,
+        subject: checked.subject,
+        markdown: checked.markdown,
+        ...(parent ? { parent } : {}),
+        attachments,
+      },
+      {
+        date: new Date().toISOString(),
+        messageId: `<${crypto.randomUUID()}@${account.address.split('@')[1]}>`,
+        boundary: crypto.randomUUID(),
+      },
+    );
+    const raw = new TextEncoder().encode(writeMime(message));
+    const saved = await (await this.provider(account.id)).saveDraft(raw, older);
+    this.drafts.add(refKeyOf(saved));
+    if (older) {
+      // Each save replaces the last, so the cache keeps only the newest draft's bytes.
+      this.drafts.delete(refKeyOf(older));
+      await this.env.BODIES.delete(this.bodyKey(older));
+    }
+    await this.owe(() => this.queue.folder({ account: account.id, path: saved.path }));
+    return saved;
   }
 
   send(_draft: MessageRef, _at?: string): Promise<Outgoing> {
@@ -339,18 +396,13 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   ): Promise<{ body: ReadableStream<Uint8Array>; type: string; name: string } | null> {
     const bytes = await this.bytes(input.refOf(ref));
     if (!bytes || !/^\d{1,4}$/.test(String(attachmentId))) return null;
-    const index = Number(attachmentId);
-    const attachment = (await PostalMime.parse(bytes)).attachments[index];
+    const attachment = await attachmentOf(bytes, Number(attachmentId));
     if (!attachment) return null;
-    const content =
-      typeof attachment.content === 'string'
-        ? new TextEncoder().encode(attachment.content)
-        : new Uint8Array(attachment.content);
     return {
       // The Workers runtime types a Blob's stream loosely, as ReadableStream<any>, so it's named here.
-      body: new Blob([content]).stream() as ReadableStream<Uint8Array>,
-      type: attachment.mimeType,
-      name: attachment.filename ?? `Attachment ${index + 1}`,
+      body: new Blob([attachment.content]).stream() as ReadableStream<Uint8Array>,
+      type: attachment.type,
+      name: attachment.name,
     };
   }
 
@@ -566,16 +618,23 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 
   /** A message's raw bytes: from the cache, or from the server once and kept from then on. */
   private async bytes(ref: MessageRef): Promise<Uint8Array<ArrayBuffer> | null> {
-    const key = `${this.member}/${ref.account}/${encodeURIComponent(ref.path)}/${ref.uidValidity}/${ref.uid}`;
+    const key = this.bodyKey(ref);
     const cached = await this.env.BODIES.get(key);
     if (cached) return new Uint8Array(await cached.arrayBuffer());
-    const known =
-      this.store.reads.message(ref) ?? this.found?.outside.find((hit) => sameRef(hit, ref));
-    if (!known) return null;
+    if (!this.known(ref) && !this.drafts.has(refKeyOf(ref))) return null;
     const stream = await (await this.provider(ref.account)).body(ref);
     const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
     await this.env.BODIES.put(key, bytes);
     return bytes;
+  }
+
+  private bodyKey(ref: MessageRef) {
+    return `${this.member}/${ref.account}/${encodeURIComponent(ref.path)}/${ref.uidValidity}/${ref.uid}`;
+  }
+
+  /** A message the index holds, or the last full-text search found. */
+  private known(ref: MessageRef) {
+    return this.store.reads.message(ref) ?? this.found?.outside.find((hit) => sameRef(hit, ref));
   }
 
   protected async forgetBodies(prefix: string) {
@@ -658,4 +717,23 @@ const sizeOf = (content: ArrayBuffer | Uint8Array | string) =>
 
 function report(error: unknown) {
   console.error('Mailroom:', error instanceof Error ? error.message : error);
+}
+
+const refKeyOf = ({ account, path, uidValidity, uid }: MessageRef) =>
+  JSON.stringify([account, path, uidValidity, uid]);
+
+/** One attachment of a raw message, by its place among them, as `Body.attachments` numbers them. */
+async function attachmentOf(bytes: Uint8Array, index: number): Promise<MimeAttachment | undefined> {
+  const attachment = (await PostalMime.parse(bytes)).attachments[index];
+  if (!attachment) return undefined;
+  const content =
+    typeof attachment.content === 'string'
+      ? new TextEncoder().encode(attachment.content)
+      : new Uint8Array(attachment.content);
+  return {
+    name: attachment.filename ?? `Attachment ${index + 1}`,
+    type: attachment.mimeType,
+    content,
+    ...(attachment.contentId ? { contentId: attachment.contentId.replace(/^<|>$/g, '') } : {}),
+  };
 }
