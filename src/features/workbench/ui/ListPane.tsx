@@ -96,6 +96,8 @@ export function ListPane({
   );
 }
 
+const focusRing = `2px solid ${colorVars['--color-accent']}`;
+
 const styles = stylex.create({
   pane: {
     display: 'flex',
@@ -114,7 +116,13 @@ const styles = stylex.create({
         default: `${borderVars['--border-width']} solid CanvasText`,
         [media.phone]: 'none',
       },
+      // The list's focus ring goes around its whole sheet, header and all.
+      [stylex.when.descendant(':focus-visible')]: {
+        default: focusRing,
+        [media.phone]: 'none',
+      },
     },
+    outlineOffset: '-2px',
   },
   empty: {
     display: 'grid',
@@ -175,7 +183,9 @@ const styles = stylex.create({
       [media.phone]: {
         default: null,
         [media.forcedColors]: `${borderVars['--border-width']} solid CanvasText`,
+        [stylex.when.descendant(':focus-visible')]: focusRing,
       },
     },
+    outlineOffset: '-2px',
   },
 });

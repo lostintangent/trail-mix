@@ -31,7 +31,8 @@ const FIRST_GUESS = 72;
 /**
  * The conversations of a view, newest first, drawn only where the list is scrolled to. The selected
  * conversation lifts from the sheet onto paper. The list takes focus as one control and moves its
- * selection with the arrow keys, Home, End and the page keys.
+ * selection with the arrow keys, Home, End and the page keys. The sheet it lies on draws its focus
+ * ring, so the list carries StyleX's default marker for `stylex.when.descendant(':focus-visible')`.
  */
 export function ConversationList({
   label,
@@ -95,7 +96,7 @@ export function ConversationList({
       aria-activedescendant={selectedIndex < 0 ? undefined : optionId(selectedIndex)}
       tabIndex={0}
       onKeyDown={move}
-      {...stylex.props(styles.scroller)}
+      {...stylex.props(styles.scroller, stylex.defaultMarker())}
     >
       <div {...stylex.props(styles.canvas(virtualizer.getTotalSize()))}>
         {virtualizer.getVirtualItems().map(({ index, start }) => {
@@ -214,13 +215,7 @@ const styles = stylex.create({
     overflowY: 'auto',
     overscrollBehavior: 'contain',
     paddingInline: spacingVars['--spacing-1-5'],
-    // The focus ring follows the shape of the sheet the list lies on.
-    borderRadius: 'inherit',
-    outline: {
-      default: 'none',
-      ':focus-visible': `2px solid ${colorVars['--color-accent']}`,
-    },
-    outlineOffset: '-2px',
+    outline: 'none',
   },
   canvas: (height: number) => ({ position: 'relative', height }),
   row: {
