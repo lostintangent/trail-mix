@@ -13,7 +13,7 @@
     "build": "bun --bun vite build",
     "check": "bun check --no-script -b",
     "preview": "node node_modules/vite/bin/vite.js preview",
-    "test:mail": "bun tests/mail-server/server.ts prepare && bun test --path-ignore-patterns=node_modules/** tests/mail-server tests/mail-check tests/contract tests/reader/demo.mail.test.ts tests/mail-clients tests/accounts src/features/mailroom",
+    "test:mail": "bun tests/mail-server/server.ts prepare && bun test --path-ignore-patterns=node_modules/** tests/mail-server tests/workerd.mail.test.ts tests/mail-check tests/contract tests/reader/demo.mail.test.ts tests/mail-clients tests/accounts src/features/mailroom",
     "mail-server": "bun tests/mail-server/server.ts",
     "mail-check": "bun tests/mail-check/check.ts",
     "types": "node node_modules/wrangler/bin/wrangler.js types --include-env=false",

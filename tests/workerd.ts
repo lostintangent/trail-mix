@@ -1,6 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:net';
+import { mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import shellConfig from '../wrangler.jsonc';
@@ -36,7 +35,10 @@ export async function startWorker(
       ...config,
     }),
   );
-  const port = await freePort();
+  // Wrangler prints where it listens, and everything after, into a file: a file never fills, as a
+  // pipe nobody reads would, and it outlives the test that started the Worker.
+  const output = join(scratch, 'wrangler.log');
+  const written = openSync(output, 'a');
   // Node starts workerd, because Miniflare cannot reach it under Bun (oven-sh/bun#39247). A shell
   // that exits at once starts Node, so the Worker runs on its own: when a test times out, Bun ends
   // the processes its tests and hooks started, and a Worker started from a hook would go with it.
@@ -52,19 +54,25 @@ export async function startWorker(
       'dev',
       '--config',
       join(scratch, 'wrangler.json'),
+      // Wrangler takes free ports, for the Worker and for its inspector, as it binds them. A port
+      // found free beforehand could be taken in between, by another Worker starting or by one of the
+      // ports Wrangler and workerd bind for themselves.
       '--port',
-      String(port),
+      '0',
+      '--inspector-port',
+      '0',
       '--ip',
       '127.0.0.1',
       '--persist-to',
       join(scratch, 'state'),
+      // Where it listens is said at `info`.
       '--log-level',
-      logs ? 'log' : 'error',
+      logs ? 'log' : 'info',
     ],
     {
       cwd: scratch,
       detached: true,
-      stdio: logs ? 'inherit' : 'ignore',
+      stdio: ['ignore', written, written],
       env: {
         ...process.env,
         // Wrangler otherwise keeps a debug log of every run in its own folder.
@@ -81,7 +89,9 @@ export async function startWorker(
       },
     },
   );
+  const following = logs ? follow(output) : undefined;
   const stop = () => {
+    following?.stop();
     if (workerd.pid) {
       try {
         process.kill(-workerd.pid, 'SIGKILL');
@@ -91,23 +101,55 @@ export async function startWorker(
     }
     rmSync(scratch, { recursive: true, force: true });
   };
-  const url = `http://127.0.0.1:${port}`;
   try {
+    const url = await listening(output, workerd.pid!);
     await until(`${url}/`);
+    return { url, stop, group: workerd.pid! };
   } catch (error) {
     stop();
     throw error;
   }
-  return { url, stop, group: workerd.pid! };
 }
 
-function freePort(): Promise<number> {
-  return new Promise((resolve) => {
-    const server = createServer().listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      server.close(() => resolve(typeof address === 'object' && address ? address.port : 0));
-    });
-  });
+/** The address Wrangler says it is ready on, once it says so. */
+async function listening(output: string, group: number): Promise<string> {
+  const deadline = Date.now() + 60_000;
+  for (;;) {
+    const printed = Bun.stripANSI(readFileSync(output, 'utf8'));
+    const url = /Ready on (http:\/\/127\.0\.0\.1:\d+)/.exec(printed)?.[1];
+    if (url) return url;
+    if (Date.now() > deadline || !running(group)) {
+      throw new Error(`workerd did not start:\n${printed.slice(-2000)}`);
+    }
+    await Bun.sleep(100);
+  }
+}
+
+/** Whether any process of the group is still running. */
+function running(group: number): boolean {
+  try {
+    process.kill(-group, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Prints what Wrangler writes to `output` as it comes, until stopped. */
+function follow(output: string) {
+  let shown = 0;
+  const show = () => {
+    const printed = readFileSync(output);
+    process.stdout.write(printed.subarray(shown));
+    shown = printed.length;
+  };
+  const timer = setInterval(show, 200);
+  return {
+    stop() {
+      clearInterval(timer);
+      show();
+    },
+  };
 }
 
 async function until(url: string) {
