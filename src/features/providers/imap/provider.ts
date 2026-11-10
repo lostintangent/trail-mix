@@ -36,12 +36,16 @@ export type Network = { imapTransport?: ImapTransport; ca?: string | Uint8Array 
 /** How much of a text part a preview reads. HTML spends more of it on markup. */
 const PREVIEW_BYTES = { text: 1024, html: 4096 };
 
+/** How long a watcher waits to connect again after the server drops it. */
+const WATCH_RETRY_MS = 2000;
+
 /** The IMAP and SMTP provider. Vendors differ only in the account's hosts, sign-in and quirks. */
 export function imapProvider(account: ImapAccount, network: Network = {}): MailProvider {
   const { account: id } = account;
   let client: Promise<ImapFlow> | undefined;
   let roles: Map<FolderRole, string> | undefined;
   const watchers = new Set<ImapFlow>();
+  let closed = false;
 
   /** A watcher idles as soon as it can, and starts IDLE again every few minutes. */
   function open(watching = false): ImapFlow {
@@ -64,6 +68,7 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
 
   /** The one connection commands share. It reconnects when the last one has dropped. */
   async function session(): Promise<ImapFlow> {
+    if (closed) throw new Error('This provider is closed.');
     const current = client && (await client.catch(() => undefined));
     if (current?.usable) return current;
     client = (async () => {
@@ -411,29 +416,49 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
       });
     },
 
+    /**
+     * Watches on a connection of its own. When the server drops it, the watcher connects again a
+     * few seconds later and reports a change, since whatever happened in between went unheard.
+     */
     watch(path: string, onChange: () => void) {
-      const connection = open(true);
       let stopped = false;
-      watchers.add(connection);
+      let connection: ImapFlow | undefined;
+      let retry: ReturnType<typeof setTimeout> | undefined;
       const changed = () => {
         if (!stopped) onChange();
       };
-      void (async () => {
-        try {
-          await connection.connect();
-          connection.on('exists', changed);
-          connection.on('expunge', changed);
-          connection.on('flags', changed);
-          await connection.mailboxOpen(path);
-          await connection.idle();
-        } catch {
-          // Best effort: the Mailroom polls whether or not watching works.
-        }
-      })();
+      const begin = (again: boolean) => {
+        if (stopped || closed) return;
+        const watching = open(true);
+        connection = watching;
+        watchers.add(watching);
+        watching.on('exists', changed);
+        watching.on('expunge', changed);
+        watching.on('flags', changed);
+        watching.once('close', () => {
+          watchers.delete(watching);
+          if (!stopped && !closed) retry = setTimeout(() => begin(true), WATCH_RETRY_MS);
+        });
+        void (async () => {
+          try {
+            await watching.connect();
+            await watching.mailboxOpen(path);
+            if (again) changed();
+            await watching.idle();
+          } catch {
+            // The connection closes, and the watcher tries again. The Mailroom polls meanwhile.
+            watching.close();
+          }
+        })();
+      };
+      begin(false);
       return () => {
         stopped = true;
-        watchers.delete(connection);
-        void connection.logout().catch(() => connection.close());
+        clearTimeout(retry);
+        const watching = connection;
+        if (!watching) return;
+        watchers.delete(watching);
+        void watching.logout().catch(() => watching.close());
       };
     },
 
@@ -463,6 +488,7 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
     },
 
     async close() {
+      closed = true;
       const shared = client ? await client.catch(() => undefined) : undefined;
       const connections = [...watchers, ...(shared ? [shared] : [])];
       watchers.clear();

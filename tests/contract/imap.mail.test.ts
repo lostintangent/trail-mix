@@ -1,7 +1,7 @@
 // The contract suite against the IMAP provider and the test mail server, once for each profile, so
 // the provider meets the contract without QRESYNC and SPECIAL-USE, as on Zoho, and without
 // CONDSTORE, as on Outlook.
-import { afterAll } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { ImapFlow } from 'imapflow';
 import nodemailer from 'nodemailer';
@@ -9,6 +9,7 @@ import { imapProvider } from '../../src/features/providers/imap/provider.ts';
 import {
   caFile,
   empty,
+  kick,
   ports,
   profiles,
   resetUidValidity,
@@ -102,3 +103,29 @@ for (const profile of Object.keys(profiles) as Profile[]) {
     timeout: 30_000,
   });
 }
+
+describe('The IMAP provider', () => {
+  test('watches again after the server drops it, and reports what it may have missed', async () => {
+    await start('full');
+    await empty(alice.email);
+    const provider = imapProvider(
+      {
+        account: 'test',
+        imap: { host: 'localhost', port: ports.imaps, secure: true },
+        smtp: { host: 'localhost', port: ports.submissions, secure: true },
+        auth,
+      },
+      { ca: readFileSync(caFile, 'utf8') },
+    );
+    let changes = 0;
+    const stop = provider.watch('INBOX', () => changes++);
+    await Bun.sleep(1000);
+    await kick(alice.email);
+    for (const deadline = Date.now() + 10_000; changes === 0 && Date.now() < deadline;) {
+      await Bun.sleep(100);
+    }
+    stop();
+    await provider.close();
+    expect(changes).toBeGreaterThan(0);
+  }, 30_000);
+});
