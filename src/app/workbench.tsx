@@ -37,6 +37,9 @@ export const Route = createFileRoute('/')({
 
 function App() {
   const [mode, setMode] = useThemeMode();
+  // The hint socket is open on the first-run screen too, so an account added on another device
+  // shows here.
+  useHints();
   // A member with no accounts has no mail to show, and starts by adding one.
   const isFirstRun = useQuery(accountsQuery).data?.length === 0;
   return (
@@ -57,7 +60,7 @@ function App() {
 
 const NONE = [] as const;
 
-/** The member's mail on the workbench, kept current by the hint socket. */
+/** The member's mail on the workbench, which the hint socket keeps current. */
 function Desk({
   sidebarFooter,
   extraCommands,
@@ -65,7 +68,6 @@ function Desk({
   sidebarFooter: ReactNode;
   extraCommands: readonly Command[];
 }) {
-  useHints();
   const [view, setView] = useState(FIRST_VIEW);
   const accounts = useQuery(accountsQuery).data ?? NONE;
   // Folder changes on their way show at once, laid over the Mailroom's snapshot.

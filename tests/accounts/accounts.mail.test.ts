@@ -136,12 +136,14 @@ for (const [size, options] of Object.entries(SIZES)) {
       expect(setup).not.toContain(PRESETS.zoho.imap.host);
     }, 30_000);
 
-    test('an account added from the first-run screen opens on its mail, and its password is nowhere', async () => {
-      const page = await open({ colorScheme: 'dark' });
+    test('an account added from the first-run screen opens on its mail, here and on another device, and its password is nowhere', async () => {
+      const [page, elsewhere] = [await open({ colorScheme: 'dark' }), await open()];
+      await firstRun(elsewhere).waitFor();
       await fillAlice(page, alice.password);
       await readable(page, size, 'dark', 'first-run');
       await page.getByRole('button', { name: 'Add account' }).click();
       await cabinKeys(page).waitFor({ timeout: 30_000 });
+      await cabinKeys(elsewhere).waitFor({ timeout: 10_000 });
       await (await sidebar(page)).getByRole('region', { name: 'trailmix.test' }).waitFor();
       expect(await passwordFound(page)).toEqual([]);
     }, 60_000);
