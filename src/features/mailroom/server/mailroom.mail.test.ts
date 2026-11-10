@@ -623,6 +623,15 @@ describe('The Mailroom with the demo mailbox', () => {
     device.close();
   }, 180_000);
 
+  test('takes no account but the demo mailbox, so a preview can never reach real mail', async () => {
+    const cy = member('cy', () => worker);
+    await expect(cy.call('addAccount', setup)).rejects.toThrow('only the demo mailbox');
+    expect((await cy.call<Account[]>('accounts')).map(({ provider }) => provider)).toEqual([
+      'demo',
+      'demo',
+    ]);
+  });
+
   test('saves a draft with its files in a demo account, where the composer finds it', async () => {
     const cy = member('cy', () => worker);
     const [, work] = await cy.call<Account[]>('accounts');

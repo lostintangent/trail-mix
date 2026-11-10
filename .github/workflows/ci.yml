@@ -226,6 +226,10 @@ jobs:
       - name: Install Chromium
         run: bunx playwright install --with-deps chromium
 
+      # The other mail clients read what the built app's composer writes.
+      - name: Build
+        run: bun run build
+
       - name: Mail tests
         run: bun run test:mail
         env:

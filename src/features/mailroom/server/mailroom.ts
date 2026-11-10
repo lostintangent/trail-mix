@@ -197,6 +197,8 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       await this.owe(() => this.queue.check(account.id));
       return account;
     }
+    // Preview and demo deployments hold the demo mailbox, and can never reach a real account.
+    if (this.demo) throw new Error('This deployment has only the demo mailbox.');
     if (!('password' in checked)) throw new Error('Outlook sign-in arrives with its own step.');
     const address = checked.address.toLowerCase();
     if (this.book.all().some((held) => held.address.toLowerCase() === address)) {
