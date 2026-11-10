@@ -24,10 +24,13 @@ afterEach(() => {
 });
 
 /**
- * Has the server send each message's body only after `SLOW_MS`, and say in it that replies go to
- * the list, as a mailing list's Reply-To does.
+ * Has the server send each message's body only after `SLOW_MS`, or once `held` settles, and say in
+ * it that replies go to the list, as a mailing list's Reply-To does.
  */
-async function slowBodies(page: Page) {
+async function slowBodies(
+  page: Page,
+  held: () => Promise<unknown> = () => new Promise((resolve) => setTimeout(resolve, SLOW_MS)),
+) {
   await page.route('**/_serverFn/**', async (route: Route) => {
     const asked = decodeURIComponent(route.request().url());
     if (route.request().method() !== 'GET' || !asked.includes('{"t":1,"s":"body"}')) {
@@ -38,7 +41,7 @@ async function slowBodies(page: Page) {
       /\{"t":1,"s":"Date"\},\{"t":1,"s":"[^"]*"\}/,
       `{"t":1,"s":"Reply-To"},{"t":1,"s":"${LIST}"}`,
     );
-    await new Promise((resolve) => setTimeout(resolve, SLOW_MS));
+    await held();
     await route.fulfill({ response, body: said });
   });
 }
@@ -83,33 +86,46 @@ for (const [size, options] of Object.entries(SIZES)) {
 
     test('Reply opens at once while the server is slow, and goes to the list once the parent says', async () => {
       const page = await inbox('light');
-      await slowBodies(page);
+      // The parent's body comes only once the reply has been saved, addressed as it was before.
+      const saves = (to: 'sender' | 'list') =>
+        page.waitForResponse((response) => {
+          const sent = response.request().postData() ?? '';
+          return sent.includes('saveDraft') && sent.includes(LIST) === (to === 'list');
+        });
+      const savedToSender = saves('sender');
+      await slowBodies(page, () => savedToSender);
       await open(page);
-      // Long before the newest message's body has come, however long its code takes to load cold.
+      await composerLoaded(page);
+      // Before the newest message's body has come, and typed straight after, as a typist does.
+      const savedToList = saves('list');
       await page.keyboard.press('r');
+      await page.keyboard.type('Count me in.');
       const reply = composer(page);
-      await reply.getByRole('textbox', { name: 'Reply' }).waitFor({ timeout: SLOW_MS / 2 });
+      const editor = reply.getByRole('textbox', { name: 'Reply' });
+      await editor.waitFor({ timeout: SLOW_MS / 2 });
       expect(await reply.getByText('Opening…').count()).toBe(0);
+      expect(await editor.innerText()).toBe('Count me in.');
       const to = reply.getByRole('textbox', { name: 'To' });
       expect(await to.inputValue()).not.toContain(LIST);
+      // Once the parent says, the reply goes to the list, and so does the draft that will be sent.
+      await savedToSender;
       await until(async () => (await to.inputValue()) === LIST, SLOW_MS + 5000);
+      await savedToList;
       await readable(page, size, 'light-opened');
-      // And it's whom the draft is to, as saved.
-      const saving = page.waitForRequest(
-        (request) => request.method() === 'POST' && !!request.postData()?.includes('saveDraft'),
-      );
-      await page.keyboard.type('Count me in.');
-      expect((await saving).postData()).toContain(LIST);
     }, 60_000);
 
     test('whom the member chose a reply is to stays chosen when the parent’s Reply-To comes', async () => {
       const page = await inbox('dark');
       await slowBodies(page);
+      const bodyCame = page.waitForResponse((response) =>
+        decodeURIComponent(response.url()).includes('{"t":1,"s":"body"}'),
+      );
       await open(page);
       await page.keyboard.press('r');
       const to = composer(page).getByRole('textbox', { name: 'To' });
       await to.fill('kwame@example.net');
-      await page.waitForTimeout(SLOW_MS + 1000);
+      await bodyCame;
+      await painted(page);
       expect(await to.inputValue()).toBe('kwame@example.net');
     }, 60_000);
 
@@ -118,8 +134,7 @@ for (const [size, options] of Object.entries(SIZES)) {
       const narrow = { viewport: { width: 1024, height: 768 } };
       const page = await inbox('dark', size === 'desktop' ? narrow : {});
       await open(page);
-      // A member reads a moment before replying, by which time the composer has loaded.
-      await page.waitForTimeout(2500);
+      await composerLoaded(page);
       await page.keyboard.press('r');
       const reply = composer(page);
       await reply.getByRole('textbox', { name: 'Reply' }).waitFor();
@@ -149,7 +164,7 @@ for (const [size, options] of Object.entries(SIZES)) {
       await page.keyboard.type(' See you Thursday.');
       await until(() => Promise.resolve(saves >= 2), 10_000);
       await saved.waitFor({ timeout: 10_000 });
-      await page.waitForTimeout(500);
+      await painted(page);
       expect(await page.evaluate(() => (window as unknown as { moved: string[] }).moved)).toEqual(
         [],
       );
@@ -176,7 +191,7 @@ for (const [size, options] of Object.entries(SIZES)) {
       // The copy in Sent takes its place.
       const copy = reader(page).locator('button', { hasText: text });
       await copy.waitFor({ timeout: 60_000 });
-      await page.waitForTimeout(500);
+      await painted(page);
       const sent = afterSend(await shown(page));
       expect(sent[0]).toEqual({ composer: false, leaving: 1, running: 1, copies: 0, drafts: 0 });
       expect(
@@ -196,7 +211,7 @@ for (const [size, options] of Object.entries(SIZES)) {
       await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
       const editor = composer(page).getByRole('textbox', { name: 'Reply' });
       await editor.waitFor();
-      await page.waitForTimeout(500);
+      await painted(page);
       expect(await editor.innerText()).toBe(text);
       const sent = afterSend(await shown(page));
       const back = sent.findIndex(({ composer }) => composer);
@@ -320,6 +335,28 @@ function onPaper(element: Element): boolean {
   probe.remove();
   return shown(getComputedStyle(element).backgroundColor) === shown(paper);
 }
+
+/**
+ * Waits until the composer and its Send have loaded, as they have once a member has read for a
+ * moment before replying.
+ */
+const composerLoaded = (page: Page) =>
+  page.waitForFunction(() =>
+    ['Composer-', 'SendActions-'].every((chunk) =>
+      performance
+        .getEntriesByType('resource')
+        .some(({ name }) => name.includes(`/assets/${chunk}`)),
+    ),
+  );
+
+/** Waits for two more frames to paint, and for what they report to be delivered. */
+const painted = (page: Page) =>
+  page.evaluate(
+    () =>
+      new Promise((done) =>
+        requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(done, 0))),
+      ),
+  );
 
 /** Waits until a check holds, or fails once `ms` have passed without it. */
 async function until(check: () => Promise<boolean>, ms: number) {

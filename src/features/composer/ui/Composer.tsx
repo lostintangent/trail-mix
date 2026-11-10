@@ -235,7 +235,8 @@ function Writer({
     edit(() => ({ [field]: addressesOf(text) }));
   };
   // The parent's Reply-To arrives with its body. Until the member has chosen whom it's to, the
-  // reply goes there instead, which is no change of theirs, so nothing saves for it.
+  // reply goes there instead. That alone is no change of theirs, so nothing saves for it, but once
+  // they have written, the draft saved is the one sent, so it saves again to go where it says.
   const hasChosen = useRef(false);
   useEffect(() => {
     if (!recipients || hasChosen.current) return;
@@ -245,6 +246,7 @@ function Writer({
       cc: addressText(recipients.cc),
     }));
     setWriting((was) => ({ ...was, ...recipients }));
+    setEdits((count) => (count > 0 ? count + 1 : count));
     if (recipients.cc.length > 0) setHasCopies(true);
   }, [recipients]);
   const take = (files: File[], inline: boolean) => {

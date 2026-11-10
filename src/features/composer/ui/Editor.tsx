@@ -12,7 +12,7 @@ import { Placeholder } from '@tiptap/extensions';
 import { Markdown } from '@tiptap/markdown';
 import { EditorContent, useEditor, type Editor as TiptapEditor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { tm } from '../../../app/theme/tokens.stylex.ts';
 import { DraftImage, DraftParagraph } from './draftImage.ts';
 import { editableHtml } from './editable.ts';
@@ -94,7 +94,7 @@ export function Editor({
     onCreate: ({ editor: created }) => {
       known.current = created.getMarkdown();
       if ('html' in start) latest.current.onChange(known.current, false);
-      if (isFocused) focusAtEnd(created);
+      if (isFocused && !created.isFocused) focusAtEnd(created);
     },
     editorProps: {
       attributes: {
@@ -146,6 +146,15 @@ export function Editor({
   useEffect(() => {
     if (editor) onEditor(editor);
   }, [editor, onEditor]);
+  // The cursor is in the text in the commit that shows it, so a key pressed straight after Reply is
+  // typed rather than taken as a command. Tiptap's own create comes a task later. The view is in
+  // the page once its container has placed it, which it may not have yet when the editor's code
+  // has only just loaded, and then the cursor waits for the create.
+  const isFocusedAtStart = useRef(isFocused);
+  useLayoutEffect(() => {
+    const placed: Placed | null = editor;
+    if (placed?.isEditorContentInitialized && isFocusedAtStart.current) focusAtEnd(placed);
+  }, [editor]);
   // A file the composer took shows once the composer has it, and a saved one from its draft.
   useEffect(() => {
     for (const show of images.current) show();
@@ -153,6 +162,9 @@ export function Editor({
 
   return <EditorContent editor={editor} {...stylex.props(styles.editor)} />;
 }
+
+/** An editor as `@tiptap/react` marks it once its container has placed its view in the page. */
+type Placed = TiptapEditor & { isEditorContentInitialized?: boolean };
 
 /**
  * Puts the cursor at the end of the text. Tiptap's own `focus` builds its transaction before it
