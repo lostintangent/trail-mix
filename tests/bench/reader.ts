@@ -7,7 +7,8 @@ import { percentile, type BenchArea } from './budget.ts';
 /**
  * The reader's budgets, as AGENTS.md sets them. Moving by key to a conversation whose newest
  * message is 300 KB of HTML renders within 200 ms, its body fetched and sanitized ahead while the
- * browser was idle. That move comes after a rest, which the reader follows at once. The repeats of
+ * browser was idle. What is timed is the frame drawn, sized and shown with the start of the
+ * message, which is several screens of it. The rest of long mail follows once the member stays. That move comes after a rest, which the reader follows at once. The repeats of
  * a key held down after it still move through the list within 50 ms, because the reader waits for
  * the selection to rest. It runs on the built app with a 50,000-message demo mailbox at the phone's
  * CPU, around the demo's Kernel Weekly, which is that newsletter.

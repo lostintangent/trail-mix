@@ -11,6 +11,7 @@ import {
   type RefObject,
 } from 'react';
 import { tm } from '../../../app/theme/tokens.stylex.ts';
+import { REST_MS } from '../core/rest.ts';
 import { frameDocument, type FrameLook, type SafeMail } from '../core/sanitize.ts';
 import { hearsListeners, returnFocusFrom } from './focus.ts';
 
@@ -28,6 +29,8 @@ import { hearsListeners, returnFocusFrom } from './focus.ts';
  * A navigation crosses to the browser's process and back before the frame begins, and its parser
  * stops for the page's next frame partway through long mail, which then lays the half it has out
  * in full only to lay the whole out again. Written whole, it is laid out once, as it is fitted.
+ * Long mail is written in two, its start at once and the rest once the member stays on it, so the
+ * start shows without waiting on all of it, and mail passed by is never laid out in full.
  *
  * A document keeps every content security policy it was ever given, so a document after the first,
  * as when the sender's images are allowed or the theme changes, is written into a new frame.
@@ -78,13 +81,20 @@ export function MessageFrame({ mail, quotes, title }: MessageFrameProps) {
     }
     holding.current = element;
     document.open();
-    document.write(written);
-    document.close();
+    document.write(written.start);
+    if (!written.rest) document.close();
     fitToContent();
     document.addEventListener('keydown', (event) => passing.current(event));
     // Where the frame's document hears nothing, as in WebKit, the page takes the focus back instead.
     forgetFocus.current?.();
     forgetFocus.current = hearsListeners(document) ? null : returnFocusFrom(element, box.current);
+    if (!written.rest) return;
+    const rest = setTimeout(() => {
+      document.write(written.rest);
+      document.close();
+      fitToContent();
+    }, REST_MS);
+    return () => clearTimeout(rest);
   }, [written, fitToContent, frameKey]);
 
   return (

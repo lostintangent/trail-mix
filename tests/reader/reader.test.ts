@@ -183,6 +183,41 @@ for (const type of BROWSERS) {
         await page.close();
       });
 
+      test('shows the start of long mail at once, and all of it once the member stays', async () => {
+        const long = `<p>The start.</p>${'<p>A paragraph of the long middle.</p>'.repeat(8_000)}<p>The end.</p>`;
+        page = await browser.newPage({ viewport });
+        await page.goto(harness.origin);
+        await page.evaluate(([html]) => window.showConversation('newsletter', html, []), [long]);
+        // What the frame holds in the first frame drawn with it shown.
+        const first = await page.waitForFunction(
+          () => {
+            const frame = document.querySelector('iframe');
+            const text = frame?.contentDocument?.body?.textContent ?? '';
+            return (
+              frame?.style.visibility === 'visible' && {
+                text: text.slice(0, 10),
+                end: text.includes('The end.'),
+              }
+            );
+          },
+          undefined,
+          { polling: 'raf' },
+        );
+        expect(await first.jsonValue()).toEqual({ text: 'The start.', end: false });
+        await framesFitted(page);
+        expect(
+          await page.evaluate(() => {
+            const frame = document.querySelector('iframe')!;
+            const shown = frame.contentDocument!.documentElement;
+            return {
+              end: shown.textContent?.endsWith('The end.') ?? false,
+              fits: Math.abs(frame.offsetHeight - shown.scrollHeight) <= 1,
+            };
+          }),
+        ).toEqual({ end: true, fits: true });
+        await page.close();
+      });
+
       test('loads a sender’s images only when asked, and only through the proxy', async () => {
         await open('newsletter');
         expect(harness.proxied).toEqual([]);

@@ -28,7 +28,7 @@ import type {
 import { conversationQuery } from '../../mailroom/client/index.ts';
 import { preloadTriageActions } from '../../conversations/index.ts';
 import { preloadComposer } from '../../composer/ui/index.ts';
-import { preloadReader, Reader } from '../../reader/index.ts';
+import { preloadReader, Reader, REST_MS } from '../../reader/index.ts';
 import { PhoneIsland } from './PhoneIsland.tsx';
 
 /** The conversation the reader shows, with its messages and the account they belong to. */
@@ -193,9 +193,6 @@ export function ReaderPane({
     </section>
   );
 }
-
-/** How long a selection rests before the reader follows it, while the member moves quickly. */
-const REST_MS = 150;
 
 /**
  * The selection the reader shows. One made after a rest shows at once. While the member moves

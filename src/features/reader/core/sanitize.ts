@@ -181,8 +181,17 @@ export type FrameLook = {
   quotes: 'folded' | 'shown';
 };
 
-/** The whole document a message's frame shows, under its own content security policy. */
-export function frameDocument(mail: SafeMail, look: FrameLook): string {
+/**
+ * The document a message's frame shows, under its own content security policy, in the parts it is
+ * written in. Long mail comes in two: its start, with the head, which is laid out and shown at once,
+ * and the rest, written once the member stays on it. Short mail is all `start`.
+ */
+export type FrameDocument = { start: string; rest: string };
+
+/** How much of long mail is written first: several screens of most mail, a few kilobytes of it. */
+export const FIRST_PART = 32_000;
+
+export function frameDocument(mail: SafeMail, look: FrameLook): FrameDocument {
   const images = ['data:', ...new Set(mail.sources.map(cspSource).filter(Boolean))];
   const policy = [
     "default-src 'none'",
@@ -193,7 +202,24 @@ export function frameDocument(mail: SafeMail, look: FrameLook): string {
     "base-uri 'none'",
   ].join('; ');
   const style = frameStyle(look);
-  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${escapeAttribute(policy)}"><meta name="referrer" content="no-referrer"><base target="_blank"><style>${style}</style></head><body>${mail.html}</body></html>`;
+  const head = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${escapeAttribute(policy)}"><meta name="referrer" content="no-referrer"><base target="_blank"><style>${style}</style></head><body>`;
+  const end = '</body></html>';
+  const cut = cutOf(mail.html);
+  return cut === undefined
+    ? { start: head + mail.html + end, rest: '' }
+    : { start: head + mail.html.slice(0, cut), rest: mail.html.slice(cut) + end };
+}
+
+/**
+ * Where long mail is cut in two: at the first tag past its first part and past every style it sets,
+ * so what shows first is styled as it will stay. Mail that is short, or whose styles come late, is
+ * not cut, and the whole of it is the start.
+ */
+function cutOf(html: string): number | undefined {
+  if (html.length < FIRST_PART * 2) return undefined;
+  const styled = html.toLowerCase().lastIndexOf('</style');
+  const cut = html.indexOf('<', Math.max(FIRST_PART, styled + 1));
+  return cut > 0 && cut < html.length * 0.75 ? cut : undefined;
 }
 
 const FOLD = 'data-tm-quote';
