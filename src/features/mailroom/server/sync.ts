@@ -92,6 +92,7 @@ export function syncQueue(syncing: Syncing) {
     const { account } = job;
     const folders = await provider.folders();
     if (job.cancelled) return undefined;
+    const before = JSON.stringify(store.folders(account));
     const gone = sql.transaction(() =>
       store.listFolders(account, folders).flatMap((path) => {
         for (const held of jobs) {
@@ -103,7 +104,8 @@ export function syncQueue(syncing: Syncing) {
       }),
     );
     jobs = jobs.filter((held) => !held.cancelled);
-    hint({ changed: 'folders', account });
+    // A hint means something changed: the folders, their names or their counts.
+    if (JSON.stringify(store.folders(account)) !== before) hint({ changed: 'folders', account });
     for (const folder of gone) hint({ changed: 'conversations', folder });
     return folders;
   }

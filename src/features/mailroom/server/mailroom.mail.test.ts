@@ -98,14 +98,16 @@ describe('The Mailroom', () => {
     expect(thread.map((message) => message.path)).toEqual(['Sent', 'INBOX']);
   });
 
-  test('tells every open device about new mail within five seconds', async () => {
+  test('tells every open device about new mail within five seconds, and nothing else', async () => {
+    const wakes = (await ada.call<Wake[]>('wakeLog')).length;
     const devices = [ada.device(), ada.device()];
     const elsewhere = bea.device();
-    // Opening a device checks the account at once, and the Inbox is watched from then on.
-    const checked = devices.map((device) => device.next((hint) => hint.changed === 'folders'));
+    // Opening a device checks the account at once, and the Inbox is watched from then on. Nothing
+    // changed, so the check hints nothing.
     await Promise.all([...devices, elsewhere].map((device) => device.opened));
-    await Promise.all(checked);
+    await ada.until(async () => (await ada.call<Wake[]>('wakeLog')).length > wakes);
     await Bun.sleep(1000);
+    expect(devices.map((device) => device.hints)).toEqual([[], []]);
 
     const sent = Date.now();
     await submit({ subject: 'Arriving now' });

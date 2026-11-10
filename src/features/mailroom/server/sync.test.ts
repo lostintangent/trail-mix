@@ -71,21 +71,30 @@ test('mail a watcher reports goes ahead of a first sync still under way', async 
   while (!reached('Sent')) await room.queue.run({ steps: 1, ms: Infinity });
   expect(room.queue.owing()).toBe(true);
 
-  const raw = [
-    'From: Ada Park <ada@example.com>',
-    'To: sam@trailmix.test',
-    'Subject: Arrived mid-sync',
-    `Date: ${new Date(AT).toUTCString()}`,
-    'Message-ID: <mid-sync@example.com>',
-    '',
-    'Hello.',
-    '',
-  ].join('\r\n');
-  await room.servers.personal.deliver(new TextEncoder().encode(raw));
+  await room.servers.personal.deliver(new TextEncoder().encode(raw('Arrived mid-sync')));
   room.queue.folder({ account: 'personal', path: 'INBOX' });
   await room.queue.run({ steps: 1, ms: Infinity });
   const inbox = room.store.reads.folder({ account: 'personal', path: 'INBOX' });
   expect(inbox.map((message) => message.subject)).toContain('Arrived mid-sync');
+});
+
+test('a check that finds nothing new hints nothing, and new mail hints its folder and the counts', async () => {
+  const room = mailroom(100);
+  room.queue.check('personal');
+  await room.queue.run(ALL);
+
+  room.hints.length = 0;
+  room.queue.check('personal');
+  await room.queue.run(ALL);
+  expect(room.hints).toEqual([]);
+
+  await room.servers.personal.deliver(new TextEncoder().encode(raw('Arriving now')));
+  room.queue.folder({ account: 'personal', path: 'INBOX' });
+  await room.queue.run(ALL);
+  expect(room.hints).toEqual([
+    { changed: 'conversations', folder: { account: 'personal', path: 'INBOX' } },
+    { changed: 'folders', account: 'personal' },
+  ]);
 });
 
 test('a step under way when its account goes lands nothing', async () => {
@@ -111,3 +120,17 @@ test('a step under way when its account goes lands nothing', async () => {
   expect(room.store.folders('personal')).toEqual([]);
   expect(room.settled).toEqual([]);
 });
+
+/** A message from Ada, dated when the demo was made. */
+function raw(subject: string) {
+  return [
+    'From: Ada Park <ada@example.com>',
+    'To: sam@trailmix.test',
+    `Subject: ${subject}`,
+    `Date: ${new Date(AT).toUTCString()}`,
+    `Message-ID: <${subject.toLowerCase().replaceAll(' ', '-')}@example.com>`,
+    '',
+    'Hello.',
+    '',
+  ].join('\r\n');
+}
