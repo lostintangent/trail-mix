@@ -1,5 +1,5 @@
 import { availableParallelism, cpus } from 'node:os';
-import type { Browser, BrowserContext, Page } from 'playwright';
+import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
 
 /**
  * The phone the browser budgets are measured on: four times slower than the reference desktop. A
@@ -43,6 +43,19 @@ export function cpuProfile(browser: Browser): Promise<CpuProfile> {
     return { index, rate };
   })();
   return measured;
+}
+
+/**
+ * Measures this machine before a bench starts anything else, such as the Workers runtime, a preview
+ * server or the browser it drives, so the benchmark sees the machine quiet. Later calls reuse it.
+ */
+export async function calibrate(): Promise<CpuProfile> {
+  const browser = await chromium.launch();
+  try {
+    return await cpuProfile(browser);
+  } finally {
+    await browser.close();
+  }
 }
 
 /** A page slowed down to the phone's CPU. */

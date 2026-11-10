@@ -21,10 +21,17 @@ if (unknown.length > 0) {
   process.exit(1);
 }
 
+// The areas that drive a browser emulate a phone calibrated to this machine, so it is measured
+// first, while nothing else the bench starts is running yet.
+const BROWSER_AREAS = ['workbench', 'reader'];
+const areas = named.length > 0 ? named : AREAS;
+if (areas.some((name) => BROWSER_AREAS.includes(name)))
+  await (await import('./phone.ts')).calibrate();
+
 // Each area loads only when it runs. The workbench drives a browser and the Mailroom a Worker, so
 // neither carries the other's tools, and each type-checks against its own runtime.
 const results: Measurement[] = [];
-for (const name of named.length > 0 ? named : AREAS) {
+for (const name of areas) {
   const area = ((await import(`./${name}.ts`)) as Record<string, BenchArea>)[name];
   if (!area) throw new Error(`tests/bench/${name}.ts exports no area called ${name}.`);
   results.push(...(await area.measure()));

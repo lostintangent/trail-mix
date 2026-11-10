@@ -3,6 +3,7 @@ import { chromium, type Page } from 'playwright';
 import { startPreview } from '../e2e/preview.ts';
 import { percentile, type BenchArea, type Measurement } from './budget.ts';
 import { phone, slowDown } from './phone.ts';
+import { watch } from './steady.ts';
 
 /**
  * The workbench's budgets, as AGENTS.md sets them: a cold load to the first Inbox rows, the
@@ -39,6 +40,7 @@ export const workbench: BenchArea = {
 
       const context = await phone(browser);
       const page = await context.newPage();
+      const phoneWatch = watch(page);
       await slowDown(page);
       const scripts: Promise<number>[] = [];
       page.on('response', (response) => {
@@ -46,21 +48,35 @@ export const workbench: BenchArea = {
           scripts.push(response.body().then((body) => gzipSync(body).length / 1000));
         }
       });
-      await page.goto(preview.url);
-      const coldLoad = await firstRows(page);
+      const coldLoad = await phoneWatch.during('Cold load', async () => {
+        await page.goto(preview.url);
+        return firstRows(page);
+      });
       console.log('The cold load, step by step, in ms from navigation:');
       console.table(await coldLoadSteps(page));
       const firstLoadJs = (await Promise.all(scripts)).reduce((sum, size) => sum + size, 0);
-      const scrollFrame = percentile(await scrollFrames(page), 0.95);
+      await phoneWatch.steady();
+      const scrollFrame = percentile(
+        await phoneWatch.during('Scrolling', () => scrollFrames(page)),
+        0.95,
+      );
       await context.close();
 
       // Keys move through the list on a desktop, where the list stays in view as its selection opens.
       const desktop = await browser.newContext({ viewport: { width: 1440, height: 900 } });
       const desk = await desktop.newPage();
+      const deskWatch = watch(desk);
       await slowDown(desk);
       await desk.goto(preview.url);
       await firstRows(desk);
-      const keyMove = percentile(await keyMoves(desk), 0.95);
+      // The moves start from the first conversation, open, read and settled, so the read mark that
+      // opening it sends lands before the moves are timed.
+      await desk.getByRole('option').first().click();
+      await deskWatch.steady();
+      const keyMove = percentile(
+        await deskWatch.during('Moving by key', () => keyMoves(desk)),
+        0.95,
+      );
       await desktop.close();
 
       return [
