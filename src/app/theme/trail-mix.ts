@@ -46,18 +46,6 @@ export const trailMix = defineTheme({
     // Tags, avatars, the active filter.
     '--color-accent-muted': pair('oklch(0.5 0.19 265 / 0.09)', 'oklch(0.77 0.13 265 / 0.14)'),
   },
-  components: {
-    // Selection lifts instead of tinting: the current view rises from the desk onto a pane.
-    'side-nav-item': {
-      base: { color: 'var(--color-text-secondary)' },
-      selected: {
-        color: 'var(--color-text-primary)',
-        backgroundColor: 'var(--color-background-surface)',
-        boxShadow: '0 0 0 1px var(--color-border)',
-        fontWeight: 'var(--font-weight-semibold)',
-      },
-    },
-  },
   adaptations: {
     // Pointer picks the size: under a finger, at any width, every control is at least 44px.
     rules: [

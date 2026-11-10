@@ -429,17 +429,6 @@ export const trailMixTheme = {
       "base": {
         "padding": "var(--spacing-3)"
       }
-    },
-    "side-nav-item": {
-      "base": {
-        "color": "var(--color-text-secondary)"
-      },
-      "selected": {
-        "color": "var(--color-text-primary)",
-        "backgroundColor": "var(--color-background-surface)",
-        "boxShadow": "0 0 0 1px var(--color-border)",
-        "fontWeight": "var(--font-weight-semibold)"
-      }
     }
   },
   __onDark: {

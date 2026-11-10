@@ -519,17 +519,6 @@
     --astryx-section-padding: var(--spacing-3);
   }
 
-  .astryx-side-nav-item {
-    color: var(--color-text-secondary);
-  }
-
-  .astryx-side-nav-item[data-selected="selected"] {
-    color: var(--color-text-primary);
-    background-color: var(--color-background-surface);
-    box-shadow: 0 0 0 1px var(--color-border);
-    font-weight: var(--font-weight-semibold);
-  }
-
   .astryx-text[data-color="primary"] { color: var(--color-text-primary); }
 
   .astryx-heading[data-color="primary"] { color: var(--color-text-primary); }

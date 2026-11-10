@@ -15,14 +15,3 @@ body {
   color: var(--color-text-primary);
   font-family: var(--font-family-body);
 }
-
-@media (forced-colors: active) {
-  /* The theme lifts the selected view onto a pane, and forced colors erase that lift. The current
-     view is marked with Highlight instead, drawn as is, because the backplate forced colors put
-     behind its label would otherwise cover the HighlightText. */
-  .astryx-side-nav-item[data-selected='selected'] {
-    forced-color-adjust: none;
-    background-color: Highlight;
-    color: HighlightText;
-  }
-}
