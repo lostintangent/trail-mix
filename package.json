@@ -8,7 +8,7 @@
     "dev": "node node_modules/vite/bin/vite.js dev",
     "build": "bun --bun vite build",
     "preview": "node node_modules/vite/bin/vite.js preview",
-    "test:mail": "bun test --path-ignore-patterns=node_modules/** tests/mail-server tests/mail-check",
+    "test:mail": "bun test --path-ignore-patterns=node_modules/** tests/mail-server tests/mail-check tests/contract",
     "mail-server": "bun tests/mail-server/server.ts",
     "mail-check": "bun tests/mail-check/check.ts",
     "theme": "bun --bun astryx theme build src/app/theme/trail-mix.ts --out src/app/theme/built/trail-mix.css"
@@ -22,6 +22,7 @@
     "imapflow": "2.11.0",
     "lucide-react": "1.71.0",
     "nodemailer": "10.4.0",
+    "postal-mime": "4.2.0",
     "react": "19.3.1",
     "react-dom": "19.3.1"
   },
