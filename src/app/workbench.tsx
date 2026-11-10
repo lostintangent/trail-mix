@@ -3,7 +3,7 @@ import { createFileRoute } from '@tanstack/react-router';
 import { useCallback, useMemo, useState, type ReactNode } from 'react';
 import type { Command } from '../features/commands/index.ts';
 import { useTriagedList } from '../features/conversations/index.ts';
-import { viewCounts } from '../features/folders/index.ts';
+import { useChangedFolders, viewCounts } from '../features/folders/index.ts';
 import type { View } from '../features/mail/core/index.ts';
 import {
   accountsQuery,
@@ -59,7 +59,8 @@ function Desk({
   useHints();
   const [view, setView] = useState(FIRST_VIEW);
   const accounts = useQuery(accountsQuery).data ?? NONE;
-  const folders = useQuery(foldersQuery).data ?? NONE;
+  // Folder changes on their way show at once, laid over the Mailroom's snapshot.
+  const folders = useChangedFolders(useQuery(foldersQuery).data ?? NONE);
   const outbox = useQuery(outboxQuery).data ?? NONE;
   const counts = useMemo(() => viewCounts(folders, outbox), [folders, outbox]);
   const { data, hasNextPage, isFetching, isFetchingNextPage, fetchNextPage } = useInfiniteQuery({

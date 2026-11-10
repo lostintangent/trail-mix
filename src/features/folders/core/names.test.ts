@@ -1,17 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { Folder, FolderRole } from '../../mail/core/index.ts';
-import {
-  childPath,
-  createProblem,
-  deleteProblem,
-  inside,
-  isOwn,
-  nameProblem,
-  placeOf,
-  renameProblem,
-  renamedPath,
-  whatGoes,
-} from './names.ts';
+import { childPath, inside, isOwn, placeOf, renamedPath, whatGoes } from './names.ts';
+import { createProblem, deleteProblem, nameProblem, renameProblem } from './problems.ts';
 
 const folder = (path: string, extra: Partial<Folder> = {}): Folder => {
   const at = path.lastIndexOf('/');

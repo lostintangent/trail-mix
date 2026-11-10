@@ -10,10 +10,12 @@ import {
 import { Tooltip } from '@astryxdesign/core/Tooltip';
 import * as stylex from '@stylexjs/stylex';
 import { File, FolderPlus, Inbox, Send, Star, type LucideIcon } from 'lucide-react';
-import { memo, type ReactNode } from 'react';
+import { memo, Suspense, type ReactNode } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, Folder, FolderRef, View } from '../../mail/core/index.ts';
 import { StampDot } from '../../../app/theme/StampDot.tsx';
+import type { FolderEdit } from './commands.ts';
+import { NameField } from './lazy.ts';
 import { folderName } from './name.ts';
 import { folderTree, type FolderNode } from './tree.ts';
 
@@ -46,6 +48,9 @@ export const Sidebar = memo(function Sidebar({
   header,
   footer,
   onNewFolder,
+  editing,
+  onEdited,
+  folderMenu,
 }: {
   id: string;
   view: View;
@@ -59,6 +64,12 @@ export const Sidebar = memo(function Sidebar({
   footer: ReactNode;
   /** Asks for a new folder in an account, from the + beside its name. */
   onNewFolder: (account: Account) => void;
+  /** A folder being named in place, new or renamed. */
+  editing?: FolderEdit;
+  /** Told the name to keep, or nothing to leave the folder as it was. */
+  onEdited: (name: string | undefined) => void;
+  /** What can be done to the folder in view, at the end of its row. */
+  folderMenu?: ReactNode;
 }) {
   return (
     <nav id={id} aria-label="Mailboxes" {...stylex.props(styles.sidebar)}>
@@ -101,6 +112,14 @@ export const Sidebar = memo(function Sidebar({
                 depth={0}
                 view={view}
                 onSelect={onSelect}
+                editing={
+                  editing?.do === 'create' && editing.account.id !== account.id
+                    ? undefined
+                    : editing
+                }
+                folders={folders.filter((folder) => folder.account === account.id)}
+                onEdited={onEdited}
+                folderMenu={folderMenu}
               />
             </section>
           ))}
@@ -110,38 +129,110 @@ export const Sidebar = memo(function Sidebar({
   );
 });
 
-/** An account's folders, each one followed by the folders inside it, a step further in. */
+/**
+ * An account's folders, each one followed by the folders inside it, a step further in. A folder
+ * being renamed shows its name in a field, and a new one's field leads the folders it will join.
+ */
 function FolderRows({
   nodes,
   depth,
   view,
   onSelect,
+  editing,
+  folders,
+  onEdited,
+  folderMenu,
+  parent,
 }: {
   nodes: FolderNode[];
   depth: number;
   view: View;
   onSelect: (view: View) => void;
+  editing: FolderEdit | undefined;
+  /** The account's folders, whose names a new name can't take beside them. */
+  folders: readonly Folder[];
+  onEdited: (name: string | undefined) => void;
+  folderMenu: ReactNode;
+  /** The folder these sit inside, if any. */
+  parent?: Folder;
 }) {
+  const isCreatingHere = editing?.do === 'create' && editing.parent?.path === parent?.path;
+  // A new folder is named where the member's own folders sit: first inside a folder, and at the
+  // top of an account, before Junk and Trash.
+  const bins = nodes.findIndex(({ folder }) => folder.role === 'junk' || folder.role === 'trash');
+  const fieldAt = parent ? 0 : bins < 0 ? nodes.length : bins;
+  const field = isCreatingHere && (
+    <li key="new folder">
+      <Suspense>
+        <NameField
+          label={`Name of the new folder in ${parent ? folderName(parent) : editing.account.name}`}
+          depth={depth}
+          place={{ folders, parent: parent?.path, delimiter: parent?.delimiter }}
+          onDone={onEdited}
+        />
+      </Suspense>
+    </li>
+  );
+  const row = ({ folder, children }: FolderNode) => {
+    const isRenaming = editing?.do === 'rename' && editing.folder.path === folder.path;
+    const isSelected = view.in === 'folder' && isFolder(view.folder, folder);
+    const isParent = editing?.do === 'create' && editing.parent?.path === folder.path;
+    const hasMenu = isSelected && folderMenu !== undefined;
+    return (
+      <li key={folder.path}>
+        {isRenaming ? (
+          <Suspense>
+            <NameField
+              label={`New name for ${folderName(folder)}`}
+              initial={folder.name}
+              depth={depth}
+              place={{
+                folders,
+                parent: folder.parent,
+                delimiter: folder.delimiter,
+                renaming: folder,
+              }}
+              onDone={onEdited}
+            />
+          </Suspense>
+        ) : (
+          <span {...stylex.props(styles.folderLine)}>
+            <Row
+              label={folderName(folder)}
+              hasMenu={hasMenu}
+              depth={depth}
+              count={folder.unread}
+              isCountUnread={folder.role === 'inbox'}
+              isSelected={isSelected}
+              isCollapsed={false}
+              onSelect={() =>
+                onSelect({ in: 'folder', folder: { account: folder.account, path: folder.path } })
+              }
+            />
+            {hasMenu && <span {...stylex.props(styles.folderMenu)}>{folderMenu}</span>}
+          </span>
+        )}
+        {(children.length > 0 || isParent) && (
+          <FolderRows
+            nodes={children}
+            depth={depth + 1}
+            view={view}
+            onSelect={onSelect}
+            editing={editing}
+            folders={folders}
+            onEdited={onEdited}
+            folderMenu={folderMenu}
+            parent={folder}
+          />
+        )}
+      </li>
+    );
+  };
   return (
     <ul {...stylex.props(styles.rows, depth > 0 && styles.inside)}>
-      {nodes.map(({ folder, children }) => (
-        <li key={folder.path}>
-          <Row
-            label={folderName(folder)}
-            depth={depth}
-            count={folder.unread}
-            isCountUnread={folder.role === 'inbox'}
-            isSelected={view.in === 'folder' && isFolder(view.folder, folder)}
-            isCollapsed={false}
-            onSelect={() =>
-              onSelect({ in: 'folder', folder: { account: folder.account, path: folder.path } })
-            }
-          />
-          {children.length > 0 && (
-            <FolderRows nodes={children} depth={depth + 1} view={view} onSelect={onSelect} />
-          )}
-        </li>
-      ))}
+      {nodes.slice(0, fieldAt).map(row)}
+      {field}
+      {nodes.slice(fieldAt).map(row)}
     </ul>
   );
 }
@@ -151,6 +242,7 @@ const isFolder = (ref: FolderRef, folder: Folder) =>
 
 function Row({
   label,
+  hasMenu = false,
   icon,
   depth = 0,
   count,
@@ -160,6 +252,8 @@ function Row({
   onSelect,
 }: {
   label: string;
+  /** Whether a menu sits over the row's end, which its count then makes room for. */
+  hasMenu?: boolean;
   /** A folder has none, and lines its name up with the views' labels. */
   icon?: LucideIcon;
   /** How many folders a folder sits inside. */
@@ -182,6 +276,7 @@ function Row({
         !icon && styles.folderRow(depth),
         isSelected && styles.selected,
         isCollapsed && styles.railRow,
+        hasMenu && styles.roomForMenu,
       )}
     >
       {icon && <Icon icon={icon} size="sm" />}
@@ -236,6 +331,16 @@ const styles = stylex.create({
   },
   inside: {
     marginTop: spacingVars['--spacing-0-5'],
+  },
+  // A folder's row, with the menu for the folder in view at its end, over the row's own end.
+  folderLine: {
+    position: 'relative',
+    display: 'flex',
+    alignItems: 'center',
+  },
+  folderMenu: {
+    position: 'absolute',
+    insetInlineEnd: spacingVars['--spacing-1'],
   },
   account: {
     marginTop: spacingVars['--spacing-3'],
@@ -299,6 +404,9 @@ const styles = stylex.create({
     },
     fontWeight: fontWeightVars['--font-weight-semibold'],
     forcedColorAdjust: 'none',
+  },
+  roomForMenu: {
+    paddingInlineEnd: `calc(${tm.target} + ${spacingVars['--spacing-1']})`,
   },
   railRow: {
     justifyContent: 'center',

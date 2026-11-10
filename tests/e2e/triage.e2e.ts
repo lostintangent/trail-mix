@@ -424,15 +424,16 @@ test('folders are created, renamed and deleted, and a move to one deleted elsewh
     work(page).getByRole('button', { name: new RegExp(`^${name}`) });
 
   await here.getByRole('button', { name: 'New folder in Work' }).click();
-  await here.getByRole('dialog').getByLabel('Name').fill('Trips');
-  await here.getByRole('dialog').getByRole('button', { name: 'Create' }).click();
+  await here.getByLabel('Name of the new folder in Work').fill('Trips');
+  await here.keyboard.press('Enter');
   await folderRow(here, 'Trips').waitFor({ timeout: ELSEWHERE_MS });
   await folderRow(there, 'Trips').waitFor({ timeout: ELSEWHERE_MS });
 
   await folderRow(here, 'Trips').click();
-  await here.getByRole('button', { name: 'Rename Trips' }).click();
-  await here.getByRole('dialog').getByLabel('Name').fill('Journeys');
-  await here.getByRole('dialog').getByRole('button', { name: 'Rename' }).click();
+  await here.getByRole('button', { name: 'Folder', exact: true }).click();
+  await here.getByRole('menuitem', { name: 'Rename Trips' }).click();
+  await here.getByLabel('New name for Trips').fill('Journeys');
+  await here.keyboard.press('Enter');
   await folderRow(here, 'Journeys').waitFor({ timeout: ELSEWHERE_MS });
   await folderRow(there, 'Journeys').waitFor({ timeout: ELSEWHERE_MS });
 
@@ -449,7 +450,8 @@ test('folders are created, renamed and deleted, and a move to one deleted elsewh
   const [moving, below] = await Promise.all([textAt(1), textAt(2)]);
 
   await folderRow(there, 'Journeys').click();
-  await there.getByRole('button', { name: 'Delete Journeys' }).click();
+  await there.getByRole('button', { name: 'Folder', exact: true }).click();
+  await there.getByRole('menuitem', { name: 'Delete Journeys' }).click();
   await there.getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click();
   await folderRow(there, 'Journeys').waitFor({ state: 'detached', timeout: ELSEWHERE_MS });
 

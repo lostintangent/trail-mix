@@ -64,7 +64,7 @@ Every feature is built against three contracts. Change one only together with th
 
 - **The mail vocabulary**, in `src/features/mail/core`. It is the one set of types every layer shares.
 - **MailProvider**, in `src/features/providers/provider.ts`. Adding a protocol means implementing this interface and nothing else. `sync` reports events (`message`, `flags`, `gone`, `reset`) since a cursor, one bounded batch at a time and newest first, and the index is the fold of those events. A folder starting over begins with a batch of at most 100, so its newest mail shows soon. The fold returns the rows to write, and the Mailroom writes nothing else. The cursor belongs to the provider and is opaque to the Mailroom. `search` asks the server across a whole folder and resolves with envelopes, newest first and at most 100. A full-text result outside the index opens like any other and is never written to the index. `watch` is best effort, so the Mailroom still polls. `deleteFolder` takes the folders inside with it, deepest first, and resolves only once the server no longer lists them.
-- **What a browser can ask its Mailroom**, in `src/features/mailroom/client`. Typed server functions carry queries and commands, one WebSocket carries hints, and plain GET routes carry the bytes of messages and remote images. There is no other channel. Queries return snapshots. Commands return once the Mailroom has accepted them. `addAccount` is the only call that carries a secret. Archive and delete are moves to a folder role. A folder is created at its parent's path, delimiter and name, renamed only within its parent, and never renamed or deleted when it, or a folder inside it, has a role. `folders/core/names.ts` holds the name rules, which the browser checks before it asks and the Mailroom checks again.
+- **What a browser can ask its Mailroom**, in `src/features/mailroom/client`. Typed server functions carry queries and commands, one WebSocket carries hints, and plain GET routes carry the bytes of messages and remote images. There is no other channel. Queries return snapshots. Commands return once the Mailroom has accepted them. `addAccount` is the only call that carries a secret. Archive and delete are moves to a folder role. A folder is created at its parent's path, delimiter and name, renamed only within its parent, and never renamed or deleted when it, or a folder inside it, has a role. `folders/core/problems.ts` holds the name rules, which the browser checks before it asks and the Mailroom checks again. A folder change shows in the browser at once, laid over the folders until a snapshot shows it, and is lifted with the server's reason if refused.
 
 ## Architecture rules
 
@@ -143,7 +143,7 @@ src/
       server/          the Durable Object: schema versions, sync, Outbox, credentials
       client/          queries and commands, and the hint socket
     workbench/ui/      the panes, the side panels and the phone track
-    folders/ui/
+    folders/           core/ places folders and names the rules a change must meet, ui/ is the sidebar
     conversations/ui/
     reader/            core/ sanitizes and folds quotes, ui/ renders the sandboxed frame
     composer/          core/ renders Markdown to mail, ui/ is the editor
