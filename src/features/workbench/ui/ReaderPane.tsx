@@ -160,7 +160,7 @@ export function ReaderPane({
         </div>
       )}
       {island && !writing ? (
-        <PhoneIsland label="Conversation">
+        <PhoneIsland label="Conversation" spans>
           <Suspense>{island}</Suspense>
         </PhoneIsland>
       ) : null}

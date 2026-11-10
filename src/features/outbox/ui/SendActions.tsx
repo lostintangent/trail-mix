@@ -25,7 +25,8 @@ import { loadSending } from './useSend.ts';
 /**
  * Send, and Send later beside it, drawn from the send commands: each time ahead they offer, or a
  * date and time picked in the member's own time zone, which goes to the Mailroom as an instant. A
- * time already past sends now, through the undo window. Where room is short, both are icons.
+ * time already past sends now, through the undo window. Where room is short, Send later is an icon,
+ * and Send keeps its word, as the main action.
  */
 export function SendActions({
   commands,
@@ -68,9 +69,8 @@ export function SendActions({
       />
       <Button
         label={send.title}
-        tooltip={isCompact ? (tooltip ?? send.title) : tooltip}
+        tooltip={tooltip}
         icon={<Icon icon={Send} />}
-        isIconOnly={isCompact}
         variant="primary"
         isDisabled={!isEnabled}
         onClick={() => void send.run()}

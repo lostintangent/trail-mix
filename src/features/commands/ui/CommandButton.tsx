@@ -10,15 +10,33 @@ import { isApple, useCommands, type Command } from '../registry.ts';
 /**
  * A command as an icon button: its title is the button's name, and its tooltip adds the key that
  * runs it, so the visible control teaches the shortcut.
+ *
+ * A pane's main action, such as Write or Reply at the far end of a phone's island, is an ink-blue
+ * primary button with its icon and a word instead.
  */
 export function CommandButton({
   command,
   iconStyle,
+  primary,
 }: {
   command: Command;
   /** How the icon looks, such as marked with the highlighter while a toggle is on. */
   iconStyle?: StyleXStyles;
+  /** Draws it as the pane's main action, with this word, such as "Write" for New message. */
+  primary?: string;
 }) {
+  if (primary !== undefined) {
+    return (
+      <Button
+        label={primary}
+        variant="primary"
+        icon={command.icon && <Icon icon={command.icon} />}
+        isDisabled={command.isEnabled === false}
+        onClick={() => void command.run()}
+        xstyle={styles.farEnd}
+      />
+    );
+  }
   const tooltip = command.shortcut
     ? `${command.title} (${label(command.shortcut, isApple)})`
     : command.title;
@@ -76,6 +94,9 @@ export function PrimaryCommandButton({ id }: { id: string }) {
 }
 
 const styles = stylex.create({
+  farEnd: {
+    marginInlineStart: 'auto',
+  },
   // The icon and title start the line, and the key ends it.
   button: {
     justifyContent: 'space-between',

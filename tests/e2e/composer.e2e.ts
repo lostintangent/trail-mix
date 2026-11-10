@@ -179,6 +179,24 @@ test('⌘↵ sends what was written, and Undo brings the composer back as it was
   ).resolves.toBe('On my way.');
 }, 60_000);
 
+test('Link turns the selected words into a link, adding https to an address typed without it', async () => {
+  const page = await inbox();
+  await page.keyboard.press('c');
+  const composer = composerNamed(page, 'New message');
+  await composer.getByRole('textbox', { name: 'Message' }).click();
+  await page.keyboard.type('the plan');
+  await page.keyboard.press('ControlOrMeta+a');
+  await composer.getByRole('button', { name: 'Link', exact: true }).click();
+  await composer.getByRole('textbox', { name: 'Link address' }).fill('example.com/plan');
+  await page.keyboard.press('Enter');
+  const link = composer.getByRole('textbox', { name: 'Message' }).getByRole('link');
+  await expect(link.getAttribute('href')).resolves.toBe('https://example.com/plan');
+  await expect(link.textContent()).resolves.toBe('the plan');
+  // Pressed while the cursor is in a link, Link takes it away again.
+  await composer.getByRole('button', { name: 'Link', exact: true }).click();
+  await expect(link.count()).resolves.toBe(0);
+}, 60_000);
+
 test('a draft another client wrote as HTML opens with its words, and closed untouched stays as it was', async () => {
   const page = await inbox();
   // Every command this browser sends, by name, to find any that could change the draft.

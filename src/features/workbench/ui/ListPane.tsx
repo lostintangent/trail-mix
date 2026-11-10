@@ -54,7 +54,7 @@ export function ListPane({
   isCollapsed,
   onExpand,
   onShowFolders,
-  find,
+  island,
   write,
   actions,
 }: {
@@ -87,9 +87,9 @@ export function ListPane({
   isCollapsed: boolean;
   onExpand: () => void;
   onShowFolders: () => void;
-  /** On a phone, the island's way to the search field and the commands it finds. */
-  find?: ReactNode;
-  /** Starts a new message: at the end of the title on a desktop, and in the island on a phone. */
+  /** On a phone, what the island holds after the way to the folders: search, then Write. */
+  island?: ReactNode;
+  /** Starts a new message, at the end of the title on a desktop. */
   write?: ReactNode;
   /** What can be done to the view itself, such as renaming its folder, at the header's end. */
   actions?: ReactNode;
@@ -157,15 +157,14 @@ export function ListPane({
       {isPicking ? (
         <PhoneIsland label="Picked conversations">{picked}</PhoneIsland>
       ) : (
-        <PhoneIsland label="Mailbox actions">
+        <PhoneIsland label="Mailbox actions" spans={island !== undefined}>
           <IconButton
             label="Folders"
             icon={<Icon icon={Menu} />}
             variant="ghost"
             onClick={onShowFolders}
           />
-          {find}
-          {write}
+          {island}
         </PhoneIsland>
       )}
     </section>

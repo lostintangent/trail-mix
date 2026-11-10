@@ -4,6 +4,7 @@ import { IconButton } from '@astryxdesign/core/IconButton';
 import {
   borderVars,
   colorVars,
+  fontWeightVars,
   radiusVars,
   spacingVars,
   typeScaleVars,
@@ -13,7 +14,16 @@ import {
 import * as stylex from '@stylexjs/stylex';
 import { useQuery } from '@tanstack/react-query';
 import { useEditorState, type Editor as TiptapEditor } from '@tiptap/react';
-import { Bold, Code, ImagePlus, Italic, Paperclip, Trash2, X } from 'lucide-react';
+import {
+  Bold,
+  Code,
+  ImagePlus,
+  Italic,
+  Link as LinkIcon,
+  Paperclip,
+  Trash2,
+  X,
+} from 'lucide-react';
 import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { StampDot } from '../../../app/theme/StampDot.tsx';
@@ -22,6 +32,8 @@ import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, Message, MessageRef } from '../../mail/core/index.ts';
 import { bodyQuery, partUrl } from '../../mailroom/client/index.ts';
 import { contentIdFor } from '../core/draft.ts';
+import { visibleBand, type Band } from '../core/keyboard.ts';
+import { linkOf } from '../core/links.ts';
 import {
   addressesOf,
   addressText,
@@ -237,6 +249,8 @@ function Writer({
   const account = accounts.find((each) => each.id === writing.account);
   const files = writing.attachments.filter((attached) => attached.contentId === undefined);
   const isCoarse = useMediaQuery(media.coarse);
+  const [isLinking, setLinking] = useState(false);
+  const band = useVisibleBand(isSheet);
 
   const title = isNew ? 'New message' : 'Reply';
   // On a coarse pointer a tap is the only way in, and a tooltip it left would stay.
@@ -262,7 +276,12 @@ function Writer({
     <section
       aria-label={title}
       {...(isSheet ? { role: 'dialog', 'aria-modal': true } : {})}
-      {...stylex.props(styles.sheet, isNew && styles.full, isSheet && styles.risen)}
+      {...stylex.props(
+        styles.sheet,
+        isNew && styles.full,
+        isSheet && styles.risen,
+        isSheet && styles.band(band.top, band.bottom),
+      )}
     >
       {isSheet && (
         <header {...stylex.props(styles.sheetHeader)}>
@@ -387,12 +406,13 @@ function Writer({
         )}
       </div>
 
+      {isLinking && editor && <LinkField editor={editor} onDone={() => setLinking(false)} />}
       <div
         role="toolbar"
         aria-label="Formatting and files"
         {...stylex.props(styles.toolbar, isSheet && styles.sheetToolbar)}
       >
-        {editor && <Formatting editor={editor} tip={tip} />}
+        {editor && <Formatting editor={editor} tip={tip} onLink={() => setLinking(true)} />}
         <FilePicker
           id={`${id}-image`}
           label="Insert an image"
@@ -454,13 +474,18 @@ const SAVED: Record<SaveState, string> = {
   failed: 'Couldn’t save. Trying again…',
 };
 
-/** Bold, italic and code, each pressed while the text at the cursor has it. */
+/**
+ * Bold, italic, code and a link, each pressed while the text at the cursor has it. Link asks for
+ * an address, or takes the link away from text that has one.
+ */
 function Formatting({
   editor,
   tip,
+  onLink,
 }: {
   editor: TiptapEditor;
   tip: (label: string) => string | undefined;
+  onLink: () => void;
 }) {
   const active = useEditorState({
     editor,
@@ -468,12 +493,20 @@ function Formatting({
       bold: current.isActive('bold'),
       italic: current.isActive('italic'),
       code: current.isActive('code'),
+      link: current.isActive('link'),
     }),
   });
   const buttons: [label: string, icon: typeof Bold, key: keyof typeof active, run: () => void][] = [
     ['Bold', Bold, 'bold', () => editor.chain().focus().toggleBold().run()],
     ['Italic', Italic, 'italic', () => editor.chain().focus().toggleItalic().run()],
     ['Code', Code, 'code', () => editor.chain().focus().toggleCode().run()],
+    [
+      'Link',
+      LinkIcon,
+      'link',
+      () =>
+        active.link ? editor.chain().focus().extendMarkRange('link').unsetLink().run() : onLink(),
+    ],
   ];
   return buttons.map(([label, icon, key, run]) => (
     <IconButton
@@ -486,6 +519,68 @@ function Formatting({
       onClick={run}
     />
   ));
+}
+
+/**
+ * Where the member gives a link's address: for the selected text, or, with nothing selected, as
+ * a link of its own where the cursor is. Enter adds it and Esc goes back to the text.
+ */
+function LinkField({ editor, onDone }: { editor: TiptapEditor; onDone: () => void }) {
+  const [typed, setTyped] = useState('');
+  const href = linkOf(typed);
+  const done = () => {
+    onDone();
+    editor.commands.focus();
+  };
+  return (
+    <form
+      aria-label="Link"
+      onSubmit={(event) => {
+        event.preventDefault();
+        if (!href) return;
+        const chain = editor.chain().focus();
+        if (editor.state.selection.empty) {
+          chain
+            .insertContent({
+              type: 'text',
+              text: typed.trim(),
+              marks: [{ type: 'link', attrs: { href } }],
+            })
+            .run();
+        } else {
+          chain.extendMarkRange('link').setLink({ href }).run();
+        }
+        onDone();
+      }}
+      {...stylex.props(styles.linkField)}
+    >
+      <input
+        aria-label="Link address"
+        placeholder="Paste or type a link"
+        inputMode="url"
+        autoComplete="off"
+        spellCheck={false}
+        autoFocus
+        value={typed}
+        onChange={(event) => setTyped(event.target.value)}
+        onKeyDown={(event) => {
+          // Esc leaves the link unmade, and doesn't close the composer as Back.
+          if (event.key !== 'Escape') return;
+          event.preventDefault();
+          done();
+        }}
+        {...stylex.props(styles.input)}
+      />
+      <Button label="Add link" type="submit" variant="secondary" size="sm" isDisabled={!href} />
+      <IconButton
+        label="Cancel"
+        icon={<Icon icon={X} />}
+        variant="ghost"
+        size="sm"
+        onClick={done}
+      />
+    </form>
+  );
 }
 
 /** A toolbar button that picks files. */
@@ -578,6 +673,30 @@ function useFileUrls() {
   };
 }
 
+/**
+ * Where a phone's sheet can lie as the on-screen keyboard comes and goes, from the visual viewport,
+ * which shrinks for the keyboard while the page it covers doesn't.
+ */
+function useVisibleBand(isWanted: boolean): Band {
+  const [band, setBand] = useState<Band>({ top: 0, bottom: 0 });
+  useEffect(() => {
+    const viewport = window.visualViewport;
+    if (!isWanted || !viewport) return;
+    const follow = () => {
+      const next = visibleBand(window.innerHeight, viewport);
+      setBand((was) => (was.top === next.top && was.bottom === next.bottom ? was : next));
+    };
+    follow();
+    viewport.addEventListener('resize', follow);
+    viewport.addEventListener('scroll', follow);
+    return () => {
+      viewport.removeEventListener('resize', follow);
+      viewport.removeEventListener('scroll', follow);
+    };
+  }, [isWanted]);
+  return band;
+}
+
 function sizeOf(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
@@ -587,6 +706,8 @@ function sizeOf(bytes: number): string {
 function refOf({ account, path, uidValidity, uid }: MessageRef): MessageRef {
   return { account, path, uidValidity, uid };
 }
+
+const FOCUS_WIDTH = `calc(${borderVars['--border-width']} * 2)`;
 
 /** A phone's sheet rises from the bottom of the screen. */
 const rise = stylex.keyframes({
@@ -602,10 +723,17 @@ const styles = stylex.create({
     padding: spacingVars['--spacing-4'],
     borderRadius: tm.sheetRadius,
     backgroundColor: colorVars['--color-background-surface'],
-    boxShadow: tm.sheetEdge,
+    // While the member writes, the sheet wears the ink-blue ring that marks where typing goes.
+    boxShadow: {
+      default: tm.sheetEdge,
+      ':focus-within': `0 0 0 ${FOCUS_WIDTH} ${colorVars['--color-accent']}`,
+    },
     outline: {
       default: null,
-      [media.forcedColors]: `${borderVars['--border-width']} solid CanvasText`,
+      [media.forcedColors]: {
+        default: `${borderVars['--border-width']} solid CanvasText`,
+        ':focus-within': `${FOCUS_WIDTH} solid Highlight`,
+      },
     },
   },
   full: {
@@ -628,6 +756,22 @@ const styles = stylex.create({
     animationName: { default: rise, [media.reducedMotion]: 'none' },
     animationDuration: '300ms',
     animationTimingFunction: tm.easeLayout,
+  },
+  // Above the on-screen keyboard, within what the page still shows, so the toolbar stays in reach.
+  band: (top: number, bottom: number) => ({
+    top: `calc(${tm.safeTop} + ${spacingVars['--spacing-6']} + ${top}px)`,
+    bottom: `${bottom}px`,
+    paddingBottom: bottom > 0 ? 0 : tm.safeBottom,
+  }),
+  linkField: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: spacingVars['--spacing-2'],
+    paddingInline: spacingVars['--spacing-2'],
+    borderRadius: radiusVars['--radius-element'],
+    borderWidth: borderVars['--border-width'],
+    borderStyle: 'solid',
+    borderColor: colorVars['--color-border'],
   },
   scrim: {
     position: 'fixed',
@@ -654,7 +798,7 @@ const styles = stylex.create({
   title: {
     margin: 0,
     fontSize: typeScaleVars['--text-body-size'],
-    fontWeight: 600,
+    fontWeight: fontWeightVars['--font-weight-semibold'],
   },
   sheetBody: {
     flexGrow: 1,
@@ -719,7 +863,7 @@ const styles = stylex.create({
     color: colorVars['--color-text-primary'],
     fontFamily: typographyVars['--font-family-body'],
     fontSize: typeScaleVars['--text-body-size'],
-    fontWeight: 600,
+    fontWeight: fontWeightVars['--font-weight-semibold'],
     minHeight: tm.target,
     cursor: 'pointer',
   },

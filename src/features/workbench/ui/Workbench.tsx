@@ -227,7 +227,7 @@ export function Workbench({
       });
       return (
         <>
-          {reply && <CommandButton command={reply} />}
+          {reply && place === 'bar' && <CommandButton command={reply} />}
           {replyAll && place === 'bar' && <CommandButton command={replyAll} />}
           <TriageActions
             commands={triageCommands({
@@ -239,6 +239,8 @@ export function Workbench({
             })}
             isCompact={place === 'island'}
           />
+          {/* On a phone, Reply is the island's main action, at its far end. */}
+          {reply && place === 'island' && <CommandButton command={reply} primary="Reply" />}
         </>
       );
     },
@@ -536,7 +538,12 @@ export function Workbench({
                 isCollapsed={!isPhone && list.isCollapsed}
                 onExpand={() => setList({ ...list, isCollapsed: false })}
                 onShowFolders={() => setPhonePane('sidebar')}
-                find={searchAndCommands && <CommandButton command={searchAndCommands} />}
+                island={
+                  <>
+                    {searchAndCommands && <CommandButton command={searchAndCommands} />}
+                    {newMessage && <CommandButton command={newMessage} primary="Write" />}
+                  </>
+                }
                 write={newMessage && !isFieldInSidebar && <CommandButton command={newMessage} />}
                 actions={
                   view.in === 'folder' && (
