@@ -7,7 +7,6 @@ import { Features } from 'lightningcss';
 import { defineConfig } from 'vite';
 import { astryxIcons } from './src/shared/build/astryxIcons.ts';
 import { astryxMessages } from './src/shared/build/astryxMessages.ts';
-import { astryxUseTheme } from './src/shared/build/astryxUseTheme.ts';
 import { stylexDefinitionsFirst } from './src/shared/build/stylexDefinitionsFirst.ts';
 import { stylexOptions } from './src/shared/build/stylexOptions.ts';
 
@@ -32,11 +31,9 @@ export default defineConfig(({ isPreview }) => ({
       },
       client: { entry: 'app/main.tsx' },
     }),
-    // Astryx's message formatter and its fallback icons, kept to what the bundled components use,
-    // and its theme generator, kept with the toasts, the only screen that runs it.
+    // Astryx's message formatter and its fallback icons, kept to what the bundled components use.
     astryxMessages(),
     astryxIcons(),
-    astryxUseTheme(),
     stylexDefinitionsFirst(),
     stylex(stylexOptions),
     react(),
