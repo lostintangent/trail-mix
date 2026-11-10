@@ -35,6 +35,8 @@ export type Account = {
   stamp: StampColor;
   /** Markdown. */
   signature?: string;
+  /** Senders whose remote images load, always through the Worker's proxy. */
+  allowImagesFrom: string[];
   status: 'ready' | 'syncing' | 'needs-sign-in' | 'error';
 };
 
