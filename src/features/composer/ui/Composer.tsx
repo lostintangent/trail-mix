@@ -37,7 +37,6 @@ import { linkOf } from '../core/links.ts';
 import {
   addressesOf,
   addressText,
-  isAnswer,
   newMessage,
   reopened,
   replyTo,
@@ -127,10 +126,7 @@ export function Composer({ compose, ...props }: ComposerProps) {
       draft={compose.as === 'draft' || compose.as === 'resumed' ? refOf(compose.draft) : undefined}
       isNew={compose.as === 'new' || !start.inReplyTo}
       // A draft that answers mail the index doesn't hold stands alone, but is a reply all the same.
-      isReply={
-        start.inReplyTo !== undefined ||
-        (compose.as === 'draft' && body !== undefined && isAnswer(body))
-      }
+      isReply={start.inReplyTo !== undefined || start.answers !== undefined}
       {...props}
     />
   );

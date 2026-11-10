@@ -356,7 +356,7 @@ describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix
     await page.context().close();
   }, 60_000);
 
-  test('a draft answering mail Trail Mix never held opens as a reply, and keeps what it answers as it saves', async () => {
+  test('a draft answering mail Trail Mix never held opens as a reply, keeps what it answers as it saves, and stays a reply when its send is undone', async () => {
     // Written in another client, in answer to mail older than the index keeps.
     const subject = `Re: The old plan ${Date.now()}`;
     const thread = {
@@ -423,6 +423,16 @@ describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix
       10_000,
     );
     expect({ inReplyTo: saved.inReplyTo, references: saved.references }).toEqual(thread);
+
+    // Sent, then undone, it comes back as the reply it was.
+    await page.keyboard.press('ControlOrMeta+Enter');
+    await reply.waitFor({ state: 'detached' });
+    const notifications = page.getByRole('region', { name: 'Notifications' });
+    await notifications.getByText(/^Sending to Bob in \d+s$/).waitFor();
+    await notifications.getByRole('button', { name: 'Undo' }).click();
+    await expect(
+      reply.getByRole('textbox', { name: 'Reply' }).textContent({ timeout: 10_000 }),
+    ).resolves.toContain('Let me know by Friday.');
     await page.context().close();
   }, 60_000);
 

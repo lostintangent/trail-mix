@@ -34,11 +34,17 @@ export type Writing = {
   signature?: string;
   /** The message this one replies to, which threads it. */
   inReplyTo?: MessageRef;
+  /**
+   * The Message-ID a draft answers, by its own In-Reply-To, when the index holds no message to
+   * name. It makes the draft a reply. A save never carries it: the Mailroom keeps the draft's
+   * threading from the draft itself.
+   */
+  answers?: string;
   attachments: Attached[];
 };
 
 /** What a save sends, as the client contract's `DraftInput` has it. */
-export type DraftInput = Omit<Writing, 'attachments' | 'signature'> & {
+export type DraftInput = Omit<Writing, 'attachments' | 'signature' | 'answers'> & {
   attachments: ({ file: File; contentId?: string } | { in: MessageRef; id: string })[];
 };
 
@@ -85,7 +91,8 @@ export function replyTo(parent: Message, body: Body | undefined, account: Accoun
 
 /**
  * A draft opened again: its words exactly as written, which its text part holds, its files as the
- * parts that hold them, and the message it replies to when the conversation still has it.
+ * parts that hold them, and the message it replies to when the conversation still has it, or else
+ * the Message-ID it answers.
  */
 export function reopened(draft: Message, body: Body, conversation: readonly Message[]): Writing {
   const parentId = header(body, 'In-Reply-To')?.trim();
@@ -102,24 +109,21 @@ export function reopened(draft: Message, body: Body, conversation: readonly Mess
     subject: draft.subject,
     markdown,
     ...(signature ? { signature } : {}),
-    ...(parent ? { inReplyTo: refOf(parent) } : {}),
+    ...(parent ? { inReplyTo: refOf(parent) } : parentId ? { answers: parentId } : {}),
     attachments: body.attachments.map((part) => ({ ...part, in: refOf(draft) })),
   };
-}
-
-/**
- * Whether a message answers another, by its own In-Reply-To, whether or not the index holds the
- * one it answers.
- */
-export function isAnswer(body: Body): boolean {
-  return Boolean(header(body, 'In-Reply-To')?.trim());
 }
 
 /**
  * What a save sends of the writing: the Markdown signed, and every file it carries, except an
  * image the member has taken out of the text, which leaves the draft with it.
  */
-export function draftInputOf({ attachments, signature, ...writing }: Writing): DraftInput {
+export function draftInputOf({
+  attachments,
+  signature,
+  answers: _answers,
+  ...writing
+}: Writing): DraftInput {
   const shown = (contentId: string | undefined) =>
     contentId === undefined || writing.markdown.includes(`cid:${contentId}`);
   return {

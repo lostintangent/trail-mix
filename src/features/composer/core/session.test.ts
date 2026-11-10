@@ -122,11 +122,15 @@ test('a draft opens with its words as written, its files as stored parts, and it
   ]);
 });
 
-test('a draft whose parent has left the conversation opens unthreaded rather than wrong', () => {
+test('a draft whose parent the conversation doesn’t hold names no message, but still answers it', () => {
   const body: Body = { text: 'Hi', attachments: [], headers: [['In-Reply-To', '<gone@x>']] };
-  expect(reopened({ ...parent, flags: { ...parent.flags, draft: true } }, body, []).inReplyTo).toBe(
-    undefined,
-  );
+  const writing = reopened({ ...parent, flags: { ...parent.flags, draft: true } }, body, []);
+  expect(writing.inReplyTo).toBe(undefined);
+  expect(writing.answers).toBe('<gone@x>');
+  // The Mailroom keeps its threading from the draft itself, so a save doesn't carry it.
+  expect(draftInputOf(writing)).not.toContainKey('answers');
+  // A draft that answers nothing is no reply.
+  expect(reopened(parent, { ...body, headers: [] }, [])).not.toContainKey('answers');
 });
 
 test('after a save, each file is named by the part of the saved draft that holds it', () => {
