@@ -65,13 +65,13 @@ test('a core that reaches a framework through other modules is reported with the
     'src/features/composer/core/render.ts': "import { toolbar } from '../ui/toolbar.ts';",
     'src/features/composer/ui/toolbar.ts': "export { Toolbar as toolbar } from './Toolbar.tsx';",
     'src/features/composer/ui/Toolbar.tsx': "import { useState } from 'react';",
-    'src/features/mail/core/roles.ts': "import type { ImapFlow } from 'imapflow';",
-    'src/features/mail/core/roles.test.ts': "import { env } from 'cloudflare:workers';",
+    'src/features/providers/imap/core/sync.ts': "import type { ImapFlow } from 'imapflow';",
+    'src/features/providers/imap/core/sync.test.ts': "import { env } from 'cloudflare:workers';",
   });
 
   expect(impureCores(graph)).toEqual([
     'src/features/composer/core/render.ts -> src/features/composer/ui/toolbar.ts -> src/features/composer/ui/Toolbar.tsx -> react (React)',
-    'src/features/mail/core/roles.ts -> imapflow (a mail library)',
+    'src/features/providers/imap/core/sync.ts -> imapflow (a mail library)',
   ]);
 });
 
