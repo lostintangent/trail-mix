@@ -7,6 +7,7 @@ import {
 import { connect as tcp } from 'node:net';
 import { connect as tls } from 'node:tls';
 import nodemailer from 'nodemailer';
+import type SMTPTransport from 'nodemailer/lib/smtp-transport';
 import type { SMTPTransportGetSocket } from 'nodemailer/lib/smtp-transport';
 import PostalMime from 'postal-mime';
 import type { AccountId, Flags, Folder, FolderRole, MessageRef } from '../../mail/core/index.ts';
@@ -25,6 +26,7 @@ import { flagsOf, planSync, type SyncPlan } from './core/sync.ts';
 import { subtree } from './core/folders.ts';
 import type { Endpoint } from './core/presets.ts';
 import { submitFailure } from './core/send.ts';
+import { signInFailure } from './core/signin.ts';
 
 export type ImapAccount = {
   account: AccountId;
@@ -63,7 +65,6 @@ const WATCH_RETRY_MS = 2000;
 /** The IMAP and SMTP provider. Vendors differ only in the account's hosts, sign-in and quirks. */
 export function imapProvider(account: ImapAccount, network: Network = {}): MailProvider {
   const { account: id } = account;
-  const patience = network.patience ?? SMTP_PATIENCE_MS;
   let client: Promise<ImapFlow> | undefined;
   let roles: Map<FolderRole, string> | undefined;
   const watchers = new Set<ImapFlow>();
@@ -264,54 +265,14 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
     return flags;
   }
 
-  function smtpSocket({ host, port, secure }: Endpoint): SMTPTransportGetSocket {
-    const ca = network.ca ? { ca: [toText(network.ca)] } : {};
-    return (_options, callback) => {
-      // Opened by host name, so the certificate is checked against the name on every runtime.
-      const socket = secure ? tls({ host, port, servername: host, ...ca }) : tcp({ host, port });
-      // It calls back once. Later errors are the connection's, which nodemailer hears itself.
-      let answered = false;
-      const answer = (error?: Error) => {
-        if (answered) return;
-        answered = true;
-        clearTimeout(quiet);
-        if (error) callback(error);
-        else callback(null, { connection: socket, secured: secure });
-      };
-      // nodemailer times nothing until this calls back, so a host that never answers is timed here.
-      const quiet = setTimeout(() => {
-        socket.destroy();
-        answer(Object.assign(new Error('It didn’t answer.'), { code: 'ETIMEDOUT' }));
-      }, patience);
-      socket.once(secure ? 'secureConnect' : 'connect', () => answer());
-      socket.once('error', answer);
-    };
-  }
-
   /**
    * Hands a message to the host over SMTP, and rejects with what a failure means for trying again.
    * The transaction log says when the server gave the go-ahead for the body, after which a lost
    * connection may have delivered it.
    */
   async function deliver(raw: Uint8Array, from: string, to: string[]) {
-    const auth =
-      'accessToken' in account.auth
-        ? {
-            type: 'OAuth2' as const,
-            user: account.auth.user,
-            accessToken: account.auth.accessToken,
-          }
-        : { user: account.auth.user, pass: account.auth.pass };
     let bodySent = false;
-    const transport = nodemailer.createTransport({
-      ...account.smtp,
-      requireTLS: !account.smtp.secure,
-      auth,
-      getSocket: smtpSocket(account.smtp),
-      connectionTimeout: patience,
-      greetingTimeout: patience,
-      socketTimeout: patience,
-      ...(network.ca ? { tls: { ca: [toText(network.ca)] } } : {}),
+    const transport = smtpTransport(account, network, {
       transactionLog: true,
       logger: {
         debug(entry: { tnx?: string } | undefined, line: unknown) {
@@ -660,6 +621,89 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
   }
 
   return provider;
+}
+
+/**
+ * Signs in to the account's IMAP host, then to its SMTP host, and out of each again, sending
+ * nothing. Rejects with why a host turned it away, in its own words when it gave any.
+ */
+export async function checkSignIn(account: ImapAccount, network: Network = {}): Promise<void> {
+  const credentials = {
+    user: account.auth.user,
+    password: 'pass' in account.auth ? account.auth.pass : account.auth.accessToken,
+  };
+  // Only the reason leaves, never the client's error, which may carry what was sent.
+  const provider = imapProvider(account, network);
+  const imap = await provider.folders().then(
+    () => undefined,
+    (error: SignInError) => signInFailure(error, account.imap, credentials),
+  );
+  await provider.close();
+  if (imap) throw new Error(imap);
+  const transport = smtpTransport(account, network);
+  const smtp = await transport.verify().then(
+    () => undefined,
+    (error: SignInError) => signInFailure(error, account.smtp, credentials),
+  );
+  transport.close();
+  if (smtp) throw new Error(smtp);
+}
+
+type SignInError = Parameters<typeof signInFailure>[0];
+
+/**
+ * A transport to the account's SMTP host, signed in as the account, that waits on a host gone
+ * quiet only as long as the network's patience.
+ */
+function smtpTransport(
+  account: ImapAccount,
+  network: Network,
+  log: Pick<SMTPTransport.Options, 'transactionLog' | 'logger'> = {},
+) {
+  const patience = network.patience ?? SMTP_PATIENCE_MS;
+  const auth =
+    'accessToken' in account.auth
+      ? { type: 'OAuth2' as const, user: account.auth.user, accessToken: account.auth.accessToken }
+      : { user: account.auth.user, pass: account.auth.pass };
+  return nodemailer.createTransport({
+    ...account.smtp,
+    requireTLS: !account.smtp.secure,
+    auth,
+    getSocket: smtpSocket(account.smtp, network, patience),
+    connectionTimeout: patience,
+    greetingTimeout: patience,
+    socketTimeout: patience,
+    ...(network.ca ? { tls: { ca: [toText(network.ca)] } } : {}),
+    ...log,
+  });
+}
+
+function smtpSocket(
+  { host, port, secure }: Endpoint,
+  network: Network,
+  patience: number,
+): SMTPTransportGetSocket {
+  const ca = network.ca ? { ca: [toText(network.ca)] } : {};
+  return (_options, callback) => {
+    // Opened by host name, so the certificate is checked against the name on every runtime.
+    const socket = secure ? tls({ host, port, servername: host, ...ca }) : tcp({ host, port });
+    // It calls back once. Later errors are the connection's, which nodemailer hears itself.
+    let answered = false;
+    const answer = (error?: Error) => {
+      if (answered) return;
+      answered = true;
+      clearTimeout(quiet);
+      if (error) callback(error);
+      else callback(null, { connection: socket, secured: secure });
+    };
+    // nodemailer times nothing until this calls back, so a host that never answers is timed here.
+    const quiet = setTimeout(() => {
+      socket.destroy();
+      answer(Object.assign(new Error('It didn’t answer.'), { code: 'ETIMEDOUT' }));
+    }, patience);
+    socket.once(secure ? 'secureConnect' : 'connect', () => answer());
+    socket.once('error', answer);
+  };
 }
 
 const ROLES: Record<string, FolderRole> = {

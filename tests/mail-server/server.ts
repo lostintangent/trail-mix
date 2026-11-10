@@ -120,6 +120,7 @@ async function launch(binaries: Dovecot, profile: Profile) {
 
   rmSync(join(state, 'serve.ready'), { force: true });
   rmSync(join(state, 'paused'), { recursive: true, force: true });
+  rmSync(join(state, 'no-submission'), { recursive: true, force: true });
   // Started by a shell that exits at once, so that, as Dovecot does, the server runs on its own and
   // records its own pid. When a test times out, Bun ends the processes its tests and hooks
   // started, and a server started from a harness's hook would go with them.
@@ -543,6 +544,18 @@ export function pauseSending(user: string, paused: boolean) {
 
 const pausedFile = (user: string) => join(state, 'paused', user.toLowerCase());
 
+/**
+ * Turns a user's SMTP sign-in off, or on again, as Outlook does for an account whose SMTP AUTH is
+ * off: IMAP still takes the password, and submission refuses it with a 535.
+ */
+export function refuseSubmissionSignIn(user: string, refused: boolean) {
+  mkdirSync(join(state, 'no-submission'), { recursive: true });
+  if (refused) writeFileSync(noSubmissionFile(user), '');
+  else rmSync(noSubmissionFile(user), { force: true });
+}
+
+const noSubmissionFile = (user: string) => join(state, 'no-submission', user.toLowerCase());
+
 /** How long a host that files its own copy in Sent takes to file it. */
 const FILING_DELAY_MS = 250;
 
@@ -603,6 +616,11 @@ async function serve() {
       authMethods: ['PLAIN', 'LOGIN', 'XOAUTH2'],
       onAuth(auth, _session, callback) {
         if (!authenticate(auth)) return callback(reject(535, 'Invalid credentials'));
+        if (existsSync(noSubmissionFile(auth.username ?? ''))) {
+          return callback(
+            reject(535, '5.7.139 Authentication unsuccessful, SMTP AUTH is disabled'),
+          );
+        }
         callback(null, { user: auth.username });
       },
       onMailFrom(address, session, callback) {

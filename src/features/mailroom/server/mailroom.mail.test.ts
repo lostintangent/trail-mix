@@ -21,6 +21,7 @@ import {
   empty,
   pauseSending,
   ports,
+  refuseSubmissionSignIn,
   settled,
   start,
   stop,
@@ -65,12 +66,41 @@ describe('The Mailroom', () => {
     await stop();
   });
 
-  test('connects an account only once its host takes the password, and keeps it only sealed', async () => {
-    await expect(
-      ada.call('addAccount', { ...setup, password: 'not-the-password' }),
-    ).rejects.toThrow();
-    expect(await ada.call('accounts')).toEqual([]);
+  test('refuses an account in its hosts’ own words, and keeps nothing', async () => {
+    const closed = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response() });
+    const nowhere = { host: 'localhost', port: closed.port!, secure: true };
+    await closed.stop(true);
+    const refusal = (attempt: Partial<typeof setup>) =>
+      ada.call('addAccount', { ...setup, ...attempt }).then(
+        () => 'kept',
+        (error: Error) => error.message,
+      );
 
+    await expect(refusal({ password: 'not-the-password' })).resolves.toBe(
+      'localhost refused the password: [AUTHENTICATIONFAILED] Authentication failed.',
+    );
+    await expect(refusal({ imap: nowhere })).resolves.toBe(
+      `Trail Mix couldn’t reach localhost on port ${nowhere.port}.`,
+    );
+    await expect(refusal({ smtp: nowhere })).resolves.toBe(
+      `Trail Mix couldn’t reach localhost on port ${nowhere.port}.`,
+    );
+    // The IMAP host takes the password, and the SMTP host turns it away.
+    refuseSubmissionSignIn(alice.email, true);
+    try {
+      await expect(refusal({})).resolves.toBe(
+        'localhost refused the password: 535 5.7.139 Authentication unsuccessful, SMTP AUTH is disabled',
+      );
+    } finally {
+      refuseSubmissionSignIn(alice.email, false);
+    }
+
+    expect(await ada.call('accounts')).toEqual([]);
+    const stored = await ada.call<{ tables: Record<string, unknown[]> }>('stored');
+    expect(stored.tables.credentials).toEqual([]);
+  }, 60_000);
+
+  test('connects an account once both its hosts take the password, and keeps it only sealed', async () => {
     account = await ada.call<Account>('addAccount', setup);
     expect(account).toMatchObject({ name: 'Alice', address: alice.email, stamp: 'vermilion' });
     await ada.until(async () => (await ada.call<Account[]>('accounts'))[0]?.status === 'ready');

@@ -28,10 +28,13 @@ import {
   DEMO_ACCOUNTS,
   demoMailbox,
   demoServer,
+  checkSignIn,
   imapProvider,
   type DemoKind,
+  type ImapAccount,
   type MailProvider,
   type Moved,
+  type Network,
   type SyncWindow,
 } from '../../providers/index.ts';
 import type { AccountSetup, DraftUpload, Mailroom as Contract, Page } from '../client/contract.ts';
@@ -206,14 +209,9 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     }
     const connection = connectionOf(checked);
 
-    // Nothing is kept until the host accepts the password.
+    // Nothing is kept until both hosts accept the password.
     const id = crypto.randomUUID();
-    const trial = imapOver(id, connection, checked.password);
-    try {
-      await trial.folders();
-    } finally {
-      await trial.close();
-    }
+    await checkSignIn(imapAccount(id, connection, checked.password), network);
 
     const account = this.book.add(
       {
@@ -807,22 +805,30 @@ function imapOver(
   connection: Extract<Connection, { provider: 'imap' }>,
   password: string,
 ): MailProvider {
-  return imapProvider(
-    {
-      account,
-      imap: connection.imap,
-      smtp: connection.smtp,
-      auth: { user: connection.user, pass: password },
-      filesSent: connection.filesSent,
-    },
-    {
-      // workerd's STARTTLS works only on its own sockets. Its types want `allowHalfOpen` given.
-      imapTransport: createSocketsTransport((address, options) =>
-        connect(address, options && { ...options, allowHalfOpen: options.allowHalfOpen ?? false }),
-      ),
-    },
-  );
+  return imapProvider(imapAccount(account, connection, password), network);
 }
+
+function imapAccount(
+  account: AccountId,
+  connection: Extract<Connection, { provider: 'imap' }>,
+  password: string,
+): ImapAccount {
+  return {
+    account,
+    imap: connection.imap,
+    smtp: connection.smtp,
+    auth: { user: connection.user, pass: password },
+    filesSent: connection.filesSent,
+  };
+}
+
+/** How the Mailroom reaches hosts: workerd's STARTTLS works only on its own sockets. */
+const network: Network = {
+  // Its types want `allowHalfOpen` given.
+  imapTransport: createSocketsTransport((address, options) =>
+    connect(address, options && { ...options, allowHalfOpen: options.allowHalfOpen ?? false }),
+  ),
+};
 
 /** The Mailroom's storage, as `schema.ts` speaks to it, on a Durable Object's SQLite. */
 function durableSql(storage: DurableObjectStorage): Sql {
