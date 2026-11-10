@@ -1,20 +1,36 @@
+import { PANELS, panelSize, readPanel, type PanelSpec } from '../features/workbench/index.ts';
 import { THEME_STORAGE_KEY } from './theme/mode.ts';
+
+type Prepaint = { themeKey: string; panels: PanelSpec[] };
 
 /**
  * Runs inline in the document head, before first paint and before the app starts: it applies the
- * saved theme mode, so the desk is painted in the right colors from the start.
+ * saved theme mode and the side panels' sizes, so the workbench appears as it was left.
  *
- * The shell inlines this function's source, so it must stay self-contained. It may use its
- * parameters and browser globals, and nothing imported or declared outside it.
+ * The shell inlines this function's source, and the two it is handed, so each must stay
+ * self-contained. They may use their parameters and browser globals, and nothing imported or
+ * declared outside them.
  */
-function prepaint(themeStorageKey: string): void {
+function prepaint(
+  { themeKey, panels }: Prepaint,
+  read: typeof readPanel,
+  size: typeof panelSize,
+): void {
+  const root = document.documentElement;
+  let storage: Pick<Storage, 'getItem'> = { getItem: () => null };
   try {
-    const mode = localStorage.getItem(themeStorageKey);
-    if (mode === 'light' || mode === 'dark') document.documentElement.dataset['theme'] = mode;
+    storage = localStorage;
+    const mode = storage.getItem(themeKey);
+    if (mode === 'light' || mode === 'dark') root.dataset['theme'] = mode;
   } catch {
-    // Without storage the system decides.
+    // Without storage the system picks the theme, and the panels take their defaults.
+  }
+  for (const panel of panels) {
+    root.style.setProperty(panel.variable, `${size(panel, read(panel, storage))}px`);
   }
 }
 
+const config: Prepaint = { themeKey: THEME_STORAGE_KEY, panels: Object.values(PANELS) };
+
 /** The inline script the document shell carries. */
-export const prepaintScript = `(${prepaint.toString()})(${JSON.stringify(THEME_STORAGE_KEY)})`;
+export const prepaintScript = `(${prepaint.toString()})(${JSON.stringify(config)}, ${readPanel.toString()}, ${panelSize.toString()})`;

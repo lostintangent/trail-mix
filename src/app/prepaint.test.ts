@@ -1,39 +1,76 @@
 import { expect, test } from 'bun:test';
 import { runInNewContext } from 'node:vm';
+import { PANELS } from '../features/workbench/index.ts';
 import { prepaintScript } from './prepaint.ts';
-import { parse, THEME_STORAGE_KEY } from './theme/mode.ts';
+import { THEME_STORAGE_KEY } from './theme/mode.ts';
 
-/** Runs the inline script as the shell does, against a device's storage and an empty `<html>`. */
-function paint(storage: { getItem(key: string): string | null }): string | undefined {
+/** What the inline script leaves on `<html>`, run as the shell runs it, before anything else. */
+function paint(localStorage: Pick<Storage, 'getItem'>) {
   const dataset: Record<string, string> = {};
-  const document = { documentElement: { dataset } };
+  const style = new Map<string, string>();
+  const documentElement = {
+    dataset,
+    style: { setProperty: (name: string, value: string) => style.set(name, value) },
+  };
   // A context with only these two globals, so a script that reached for anything else would throw.
-  runInNewContext(prepaintScript, { localStorage: storage, document });
-  return dataset['theme'];
+  runInNewContext(prepaintScript, { localStorage, document: { documentElement } });
+  return {
+    theme: dataset['theme'],
+    sidebar: style.get(PANELS.sidebar.variable),
+    list: style.get(PANELS.list.variable),
+  };
 }
 
-test('the saved Light or Dark choice is on <html> before first paint', () => {
-  const saved = (value: string) => ({
-    getItem: (key: string) => (key === THEME_STORAGE_KEY ? value : null),
+const saved = (entries: Record<string, string>) => ({
+  getItem: (key: string) => entries[key] ?? null,
+});
+
+test('the saved theme and panel sizes are on <html> before first paint', () => {
+  const painted = paint(
+    saved({
+      [THEME_STORAGE_KEY]: 'dark',
+      [PANELS.sidebar.key]: JSON.stringify({ width: 300, isCollapsed: false }),
+      [PANELS.list.key]: JSON.stringify({ width: 420, isCollapsed: true }),
+    }),
+  );
+
+  expect(painted).toEqual({ theme: 'dark', sidebar: '300px', list: `${PANELS.list.rail}px` });
+});
+
+test('with nothing saved, the system picks the theme and the panels take their widths', () => {
+  expect(paint(saved({}))).toEqual({
+    theme: undefined,
+    sidebar: `${PANELS.sidebar.width}px`,
+    list: `${PANELS.list.width}px`,
   });
-
-  expect(paint(saved('dark'))).toBe('dark');
-  expect(paint(saved('light'))).toBe('light');
 });
 
-test('with no saved choice, or one it does not know, the system decides', () => {
-  for (const value of [null, 'system', 'sepia', '']) {
-    expect(paint({ getItem: () => value })).toBeUndefined();
-    expect(parse(value)).toBe('system');
-  }
+test('a saved value it does not understand is ignored rather than breaking the page', () => {
+  const painted = paint(
+    saved({
+      [THEME_STORAGE_KEY]: 'sepia',
+      [PANELS.sidebar.key]: '{"width":"wide"}',
+      [PANELS.list.key]: 'not json',
+    }),
+  );
+
+  expect(painted).toEqual({
+    theme: undefined,
+    sidebar: `${PANELS.sidebar.width}px`,
+    list: `${PANELS.list.width}px`,
+  });
 });
 
-test('storage that throws leaves the system in charge instead of breaking the page', () => {
+test('storage that throws leaves the defaults in charge', () => {
   const blocked = {
     getItem: (): string | null => {
       throw new Error('SecurityError');
     },
   };
 
-  expect(paint(blocked)).toBeUndefined();
+  expect(paint(blocked)).toEqual({
+    theme: undefined,
+    sidebar: `${PANELS.sidebar.width}px`,
+    list: `${PANELS.list.width}px`,
+  });
 });

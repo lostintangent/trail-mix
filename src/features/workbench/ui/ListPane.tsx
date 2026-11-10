@@ -4,18 +4,44 @@ import { Icon } from '@astryxdesign/core/Icon';
 import { IconButton } from '@astryxdesign/core/IconButton';
 import { borderVars, colorVars, spacingVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { Inbox, Menu } from 'lucide-react';
+import { ChevronRight, Inbox, Menu } from 'lucide-react';
 import { useId } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 
 /**
- * The conversation list's sheet. On a desktop the whole pane is the sheet. On a phone its header
- * sits on the desk, with a way back to the folders, and the sheet starts below it.
+ * The conversation list's sheet. On a desktop the whole pane is the sheet, and collapsed to its rail
+ * it keeps only a way to open it again. On a phone its header sits on the desk, with a way back to
+ * the folders, and the sheet starts below it.
  */
-export function ListPane({ title, onShowFolders }: { title: string; onShowFolders: () => void }) {
+export function ListPane({
+  id,
+  title,
+  isCollapsed,
+  onExpand,
+  onShowFolders,
+}: {
+  id: string;
+  title: string;
+  isCollapsed: boolean;
+  onExpand: () => void;
+  onShowFolders: () => void;
+}) {
   const titleId = useId();
+  if (isCollapsed) {
+    return (
+      <section id={id} aria-label={title} {...stylex.props(styles.pane, styles.rail)}>
+        <IconButton
+          label={`Show ${title}`}
+          tooltip={`Show ${title}`}
+          icon={<Icon icon={ChevronRight} />}
+          variant="ghost"
+          onClick={onExpand}
+        />
+      </section>
+    );
+  }
   return (
-    <section aria-labelledby={titleId} {...stylex.props(styles.pane)}>
+    <section id={id} aria-labelledby={titleId} {...stylex.props(styles.pane)}>
       <header {...stylex.props(styles.header)}>
         <div {...stylex.props(styles.phoneOnly)}>
           <IconButton
@@ -59,6 +85,10 @@ const styles = stylex.create({
         [media.phone]: 'none',
       },
     },
+  },
+  rail: {
+    alignItems: 'center',
+    paddingBlock: spacingVars['--spacing-2'],
   },
   header: {
     display: 'flex',
