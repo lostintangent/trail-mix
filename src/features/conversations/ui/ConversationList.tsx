@@ -20,6 +20,7 @@ import {
   type KeyboardEvent,
   type RefObject,
 } from 'react';
+import { stampStyles } from '../../../app/theme/stamps.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { ConversationId, ConversationSummary, StampColor } from '../../mail/core/index.ts';
 import { formatListDate } from './dates.ts';
@@ -150,7 +151,7 @@ const Row = memo(function Row({
         isSelected && styles.selected,
       )}
     >
-      <span {...stylex.props(styles.stamp, stamps[stamp])} />
+      <span {...stylex.props(styles.stamp, stampStyles[stamp])} />
       <span {...stylex.props(styles.lines)}>
         <span {...stylex.props(styles.top)}>
           {isUnread && <span {...stylex.props(styles.dot)} />}
@@ -300,13 +301,4 @@ const styles = stylex.create({
     flexShrink: 0,
     color: tm.textQuiet,
   },
-});
-
-const stamps = stylex.create({
-  vermilion: { backgroundColor: tm.stampVermilion },
-  teal: { backgroundColor: tm.stampTeal },
-  violet: { backgroundColor: tm.stampViolet },
-  amber: { backgroundColor: tm.stampAmber },
-  green: { backgroundColor: tm.stampGreen },
-  slate: { backgroundColor: tm.stampSlate },
 });

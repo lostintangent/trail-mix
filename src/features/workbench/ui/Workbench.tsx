@@ -1,13 +1,19 @@
 import { colorVars, durationVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { useId, useState, type ReactNode } from 'react';
+import { useId, useMemo, useState, type ReactNode } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
-import type { ConversationId, ConversationSummary, StampColor } from '../../mail/core/index.ts';
+import type {
+  Account,
+  ConversationId,
+  ConversationSummary,
+  Folder,
+  View,
+} from '../../mail/core/index.ts';
 import { ListPane } from './ListPane.tsx';
 import { PanelEdge } from './PanelEdge.tsx';
 import { PANELS } from './panels.ts';
 import { ReaderPane } from './ReaderPane.tsx';
-import { Sidebar, VIEWS, type UnifiedView } from './Sidebar.tsx';
+import { Sidebar, UNIFIED_VIEWS, type ViewCounts } from './Sidebar.tsx';
 import { useMediaQuery } from './useMediaQuery.ts';
 import { usePanel } from './usePanel.ts';
 
@@ -22,16 +28,24 @@ const COLUMNS = `var(${PANELS.sidebar.variable}) var(${PANELS.list.variable}) mi
  * the three panes ride a horizontal track, and one shows at a time.
  */
 export function Workbench({
+  view,
+  onViewChange,
+  accounts,
+  folders,
+  counts,
   conversations,
-  stamps,
   sidebarFooter,
 }: {
+  view: View;
+  onViewChange: (view: View) => void;
+  accounts: readonly Account[];
+  folders: readonly Folder[];
+  counts: ViewCounts;
   conversations: readonly ConversationSummary[];
-  stamps: ReadonlyMap<string, StampColor>;
   sidebarFooter: ReactNode;
 }) {
-  const [view, setView] = useState<UnifiedView>('inbox');
   const [selected, setSelected] = useState<ConversationId>();
+  const stamps = useMemo(() => new Map(accounts.map(({ id, stamp }) => [id, stamp])), [accounts]);
   const [phonePane, setPhonePane] = useState<Pane>('list');
   const [sidebar, setSidebar] = usePanel(PANELS.sidebar);
   const [list, setList] = usePanel(PANELS.list);
@@ -39,7 +53,7 @@ export function Workbench({
   const isPhone = useMediaQuery(media.phone);
   const sidebarId = useId();
   const listId = useId();
-  const title = VIEWS.find(({ id }) => id === view)?.label ?? '';
+  const title = viewTitle(view, folders);
   // Panes off a phone's screen are inert, so focus and assistive tech stay on the one in view.
   const isOffscreen = (pane: Pane) => isPhone && pane !== phonePane;
 
@@ -58,9 +72,12 @@ export function Workbench({
             id={sidebarId}
             view={view}
             onSelect={(next) => {
-              setView(next);
+              onViewChange(next);
               setPhonePane('list');
             }}
+            accounts={accounts}
+            folders={folders}
+            counts={counts}
             isCollapsed={!isPhone && sidebar.isCollapsed}
             footer={sidebarFooter}
           />
@@ -103,6 +120,21 @@ export function Workbench({
       </div>
     </div>
   );
+}
+
+function viewTitle(view: View, folders: readonly Folder[]): string {
+  switch (view.in) {
+    case 'folder':
+      return (
+        folders.find(
+          ({ account, path }) => account === view.folder.account && path === view.folder.path,
+        )?.name ?? view.folder.path
+      );
+    case 'search':
+      return 'Search';
+    default:
+      return UNIFIED_VIEWS.find((unified) => unified.in === view.in)?.label ?? '';
+  }
 }
 
 const styles = stylex.create({
