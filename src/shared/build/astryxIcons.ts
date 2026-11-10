@@ -11,7 +11,8 @@ const COMMENT = /^\s*(?:\/\*[\s\S]*?\*\/|\/\/.*$)/gm;
 /**
  * The icons Astryx components in this app ask the theme for. The neutral theme registers 28
  * Lucide icons and Astryx bundles a heroicon-style fallback for each, all on the first load.
- * Field statuses map `error`, `warning`, and `success` to icons through lookup tables. `menu` and
+ * Field statuses map `error`, `warning`, and `success` to icons through lookup tables, and `Link`
+ * marks a link that leaves the app with `externalLink`. `menu` and
  * `search` are only ARIA roles and input types in bundled code, but the guard can't tell, so a
  * kept icon is the safe answer.
  */
@@ -22,6 +23,7 @@ export const THEME_ICON_NAMES = new Set([
   'chevronRight',
   'close',
   'error',
+  'externalLink',
   'info',
   'menu',
   'search',
