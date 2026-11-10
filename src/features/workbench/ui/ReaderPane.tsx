@@ -103,7 +103,7 @@ export function ReaderPane({
     if (shown !== undefined && isShowing) announce(shown);
   }, [shown, isShowing]);
   usePreloadedReader(upcoming.length > 0);
-  usePreloadedComposer(isShowing);
+  usePreloadedComposer(isShowing ? shown : undefined);
   // Preparing what comes next is never urgent, so a change to it, as when the open conversation
   // leaves the list, doesn't make the open conversation render again in the change's own frame.
   const preparing = useDeferredValue(upcoming);
@@ -210,15 +210,28 @@ function useLastPress() {
 /** How long after the list first shows something to open the reader starts loading. */
 const PRELOAD_AFTER_MS = 1_000;
 
-/** While a conversation is open, the composer loads when the browser is idle, ready for a reply. */
-function usePreloadedComposer(isWanted: boolean) {
+/** How long a conversation stays open before the composer loads for a reply. */
+const PRELOAD_COMPOSER_AFTER_MS = 2_000;
+
+/**
+ * Once a conversation has stayed open a moment, the composer loads while the browser is idle,
+ * ready for a reply. Its code is large, so it never loads while the member moves through the list.
+ */
+function usePreloadedComposer(shown: ConversationId | undefined) {
   useEffect(() => {
-    if (!isWanted) return;
-    // Safari has no idle callback.
-    if (!('requestIdleCallback' in window)) return void preloadComposer();
-    const id = requestIdleCallback(() => void preloadComposer());
-    return () => cancelIdleCallback(id);
-  }, [isWanted]);
+    if (shown === undefined) return;
+    let idleId: number | undefined;
+    const timer = setTimeout(() => {
+      // Safari has no idle callback.
+      if ('requestIdleCallback' in window)
+        idleId = requestIdleCallback(() => void preloadComposer());
+      else void preloadComposer();
+    }, PRELOAD_COMPOSER_AFTER_MS);
+    return () => {
+      clearTimeout(timer);
+      if (idleId !== undefined) cancelIdleCallback(idleId);
+    };
+  }, [shown]);
 }
 
 function usePreloadedReader(isWanted: boolean) {

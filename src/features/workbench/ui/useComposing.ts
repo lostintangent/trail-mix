@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { Account, ConversationId, Message, MessageRef } from '../../mail/core/index.ts';
 import { conversationQuery } from '../../mailroom/client/index.ts';
 import type { Compose, Writing } from '../../composer/ui/index.ts';
@@ -12,26 +12,35 @@ import type { Compose, Writing } from '../../composer/ui/index.ts';
  */
 export function useComposing(selected: ConversationId | undefined, leaving: readonly MessageRef[]) {
   const queryClient = useQueryClient();
-  const [compose, setCompose] = useState<Compose>();
+  // What is being written and the conversation it started in. Each start is a composer of its
+  // own, even for a message like the one before.
+  const [started, setStarted] = useState<{
+    compose: Compose;
+    in: ConversationId | undefined;
+    session: number;
+  }>();
   const [editing, setEditing] = useState<MessageRef>();
   const [replaced, setReplaced] = useState<readonly MessageRef[]>([]);
-  // Each start is a composer of its own, even for a message like the one before.
-  const [session, setSession] = useState(0);
+  const selectedNow = useRef(selected);
+  useLayoutEffect(() => {
+    selectedNow.current = selected;
+  });
+  const start = useCallback((next: Compose | undefined) => {
+    setStarted(
+      (was) => next && { compose: next, in: selectedNow.current, session: (was?.session ?? 0) + 1 },
+    );
+    setEditing(next?.as === 'draft' || next?.as === 'resumed' ? next.draft : undefined);
+  }, []);
+  // Opening another conversation closes the composer at once, and then forgets it, so coming back
+  // doesn't open it again from where it began.
+  const compose = started?.in === selected ? started?.compose : undefined;
+  useEffect(() => {
+    if (started && started.in !== selected) start(undefined);
+  }, [started, selected, start]);
   const open = useRef<Compose>(undefined);
   useEffect(() => {
     open.current = compose;
   }, [compose]);
-  const start = useCallback((next: Compose | undefined) => {
-    setCompose(next);
-    setEditing(next?.as === 'draft' || next?.as === 'resumed' ? next.draft : undefined);
-    if (next) setSession((count) => count + 1);
-  }, []);
-
-  const [startedIn, setStartedIn] = useState(selected);
-  if (startedIn !== selected) {
-    setStartedIn(selected);
-    if (compose) start(undefined);
-  }
 
   const write = useCallback((account: Account) => start({ as: 'new', account }), [start]);
   /** Answers a conversation's newest message that isn't a draft. */
@@ -80,7 +89,7 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
 
   return {
     compose,
-    session,
+    session: started?.session ?? 0,
     write,
     reply,
     replyIn,
