@@ -39,9 +39,21 @@ export type ImapAccount = {
 /**
  * How the provider reaches the network. On workerd, the Mailroom passes imapflow's transport over
  * `cloudflare:sockets`, whose STARTTLS works there. Elsewhere Node's sockets serve, and `ca` adds
- * a certificate authority to trust, such as the test mail server's.
+ * a certificate authority to trust, such as the test mail server's. `patience` stands in for
+ * `SMTP_PATIENCE_MS`, so a test of a host gone quiet need not wait as long.
  */
-export type Network = { imapTransport?: ImapTransport; ca?: string | Uint8Array };
+export type Network = {
+  imapTransport?: ImapTransport;
+  ca?: string | Uint8Array;
+  patience?: number;
+};
+
+/**
+ * How long a send waits on an SMTP host that has gone quiet: to connect, for its greeting, and for
+ * each reply. Sends run in the Mailroom's wake, ahead of sync, and without this a host that stalls
+ * would hold them for nodemailer's ten minutes, or for good if it stalls during TLS.
+ */
+const SMTP_PATIENCE_MS = 60_000;
 
 /** How much of a text part a preview reads. HTML spends more of it on markup. */
 const PREVIEW_BYTES = { text: 1024, html: 4096 };
@@ -52,6 +64,7 @@ const WATCH_RETRY_MS = 2000;
 /** The IMAP and SMTP provider. Vendors differ only in the account's hosts, sign-in and quirks. */
 export function imapProvider(account: ImapAccount, network: Network = {}): MailProvider {
   const { account: id } = account;
+  const patience = network.patience ?? SMTP_PATIENCE_MS;
   let client: Promise<ImapFlow> | undefined;
   let roles: Map<FolderRole, string> | undefined;
   const watchers = new Set<ImapFlow>();
@@ -257,10 +270,22 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
     return (_options, callback) => {
       // Opened by host name, so the certificate is checked against the name on every runtime.
       const socket = secure ? tls({ host, port, servername: host, ...ca }) : tcp({ host, port });
-      socket.once(secure ? 'secureConnect' : 'connect', () =>
-        callback(null, { connection: socket, secured: secure }),
-      );
-      socket.once('error', (error) => callback(error));
+      // It calls back once. Later errors are the connection's, which nodemailer hears itself.
+      let answered = false;
+      const answer = (error?: Error) => {
+        if (answered) return;
+        answered = true;
+        clearTimeout(quiet);
+        if (error) callback(error);
+        else callback(null, { connection: socket, secured: secure });
+      };
+      // nodemailer times nothing until this calls back, so a host that never answers is timed here.
+      const quiet = setTimeout(() => {
+        socket.destroy();
+        answer(Object.assign(new Error('It didn’t answer.'), { code: 'ETIMEDOUT' }));
+      }, patience);
+      socket.once(secure ? 'secureConnect' : 'connect', () => answer());
+      socket.once('error', answer);
     };
   }
 
@@ -284,6 +309,9 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
       requireTLS: !account.smtp.secure,
       auth,
       getSocket: smtpSocket(account.smtp),
+      connectionTimeout: patience,
+      greetingTimeout: patience,
+      socketTimeout: patience,
       ...(network.ca ? { tls: { ca: [toText(network.ca)] } } : {}),
       transactionLog: true,
       logger: {

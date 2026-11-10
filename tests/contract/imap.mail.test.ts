@@ -166,6 +166,47 @@ describe('The IMAP provider', () => {
     expect(delivered).toBe(0);
   }, 30_000);
 
+  // A host that accepts the connection and then says nothing, during TLS or after its greeting.
+  for (const [quiet, smtp] of [
+    ['during TLS', { secure: true, greets: false }],
+    ['after its greeting', { secure: false, greets: true }],
+  ] as const) {
+    test(`a submit to a host that goes quiet ${quiet} fails for now, after a while`, async () => {
+      await start('full');
+      await empty(alice.email);
+      const host = Bun.listen({
+        hostname: 'localhost',
+        port: 0,
+        socket: {
+          open: (socket) => void (smtp.greets && socket.write('220 Busy ESMTP\r\n')),
+          data() {},
+        },
+      });
+      const sending = imapProvider(
+        {
+          account: 'test',
+          imap: { host: 'localhost', port: ports.imaps, secure: true },
+          smtp: { host: 'localhost', port: host.port, secure: smtp.secure },
+          auth,
+        },
+        { ca: readFileSync(caFile, 'utf8'), patience: 1000 },
+      );
+      try {
+        const raw = message({ id: 'quiet', subject: 'quiet', from: alice.email, to: alice.email });
+        const draft = await sending.saveDraft(bytes(raw));
+        const started = Date.now();
+        const failure = await sending.submit(draft, '<quiet@example.com>').catch((e: unknown) => e);
+        expect(Date.now() - started).toBeLessThan(5000);
+        expect(failure).toBeInstanceOf(SendFailure);
+        expect(failure).toMatchObject({ passing: true });
+        expect((failure as SendFailure).message).toMatch(/^Couldn’t reach localhost: /);
+      } finally {
+        await sending.close();
+        host.stop(true);
+      }
+    }, 30_000);
+  }
+
   test('a submit whose connection drops after the message went out says it may have gone', async () => {
     const { failure, delivered } = await failedSubmit({
       id: 'dropped',
