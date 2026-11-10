@@ -164,7 +164,7 @@ export function seededMessage(
       writeMime({
         ...content(),
         headers: [...list, ...(step.headers ?? [])],
-        text: text(),
+        ...(step.htmlOnly ? {} : { text: text() }),
         ...(step.plain ? {} : { html: step.html?.() ?? htmlOf(text()) }),
         attachments: step.files?.() ?? [],
         boundary: `${key}.${cycle}.${index}`,
@@ -231,6 +231,8 @@ type Step = {
   /** Made from the text unless set, and left out when `plain`. Made only when the bytes are. */
   html?: () => string;
   plain?: boolean;
+  /** Written as HTML alone, with no text part, as some clients save a draft. */
+  htmlOnly?: boolean;
   /** Quotes the message before it, as a reply does. */
   quotes?: boolean;
   /** Made only when the message's bytes are. */
@@ -616,6 +618,10 @@ const STORIES: Record<string, (cycle: number) => Thread> = {
       {
         from: 'me',
         draft: true,
+        // Another client's draft, which only Trail Mix's editor can turn back into Markdown.
+        htmlOnly: true,
+        html: () =>
+          '<div dir="ltr">Draft agenda for the <b>offsite</b>:<ul><li>Morning: walk through <a href="https://example.org/plan">the plan</a></li><li>Lunch</li><li>Afternoon: review the <i>mobile layout</i></li></ul></div>',
         text: [
           'Draft agenda for the offsite:',
           '',

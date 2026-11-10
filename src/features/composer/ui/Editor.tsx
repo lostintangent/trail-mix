@@ -14,6 +14,7 @@ import { EditorContent, useEditor, type Editor as TiptapEditor } from '@tiptap/r
 import StarterKit from '@tiptap/starter-kit';
 import { useEffect, useRef } from 'react';
 import { tm } from '../../../app/theme/tokens.stylex.ts';
+import { editableHtml } from './editable.ts';
 
 /**
  * Where the member writes: Markdown, edited as the text it makes. Typing Markdown formats it as it
@@ -24,8 +25,12 @@ import { tm } from '../../../app/theme/tokens.stylex.ts';
  * remote image from it.
  */
 export type EditorProps = {
-  markdown: string;
-  onChange: (markdown: string) => void;
+  /**
+   * What the editor starts with: Markdown, or the HTML of a draft another client wrote, which it
+   * turns into Markdown and hands to `onChange` once, as what was there rather than a change.
+   */
+  start: { markdown: string } | { html: string };
+  onChange: (markdown: string, isEdit: boolean) => void;
   /** Where an image the draft holds shows from, by its Content-ID, while it is written. */
   imageUrl: (contentId: string) => string | undefined;
   /** Takes pasted or dropped files, and says which are images to place where they landed. */
@@ -38,7 +43,7 @@ export type EditorProps = {
 };
 
 export function Editor({
-  markdown,
+  start,
   onChange,
   imageUrl,
   onFiles,
@@ -50,6 +55,7 @@ export function Editor({
   useEffect(() => {
     latest.current = { onChange, imageUrl, onFiles };
   });
+  const known = useRef<string>(undefined);
   const editor = useEditor({
     autofocus: isFocused ? 'end' : false,
     extensions: [
@@ -74,8 +80,13 @@ export function Editor({
         emptyEditorClass: css(styles.placeholder),
       }),
     ],
-    content: markdown,
-    contentType: 'markdown',
+    ...('html' in start
+      ? { content: editableHtml(start.html), contentType: 'html' as const }
+      : { content: start.markdown, contentType: 'markdown' as const }),
+    onCreate: ({ editor: created }) => {
+      known.current = created.getMarkdown();
+      if ('html' in start) latest.current.onChange(known.current, false);
+    },
     editorProps: {
       attributes: {
         'aria-label': label,
@@ -86,7 +97,15 @@ export function Editor({
       handlePaste: (_view, event) => place(event.clipboardData?.files),
       handleDrop: (_view, event) => place(event.dataTransfer?.files),
     },
-    onUpdate: ({ editor: updated }) => latest.current.onChange(updated.getMarkdown()),
+    // The editor changes its own document too, as it starts and when it adds a line to type on
+    // after a list at the end. Only a change to what the Markdown says, once it has started, is the
+    // member's.
+    onUpdate: ({ editor: updated }) => {
+      const markdown = updated.getMarkdown();
+      const isEdit = known.current !== undefined && markdown.trimEnd() !== known.current.trimEnd();
+      known.current = markdown;
+      latest.current.onChange(markdown, isEdit);
+    },
   });
   const current = useRef(editor);
   useEffect(() => {

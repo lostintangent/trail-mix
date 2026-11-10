@@ -37,7 +37,7 @@ import {
   type Attached,
   type Writing,
 } from '../core/session.ts';
-import { Editor } from './Editor.tsx';
+import { Editor, type EditorProps } from './Editor.tsx';
 import { useAutosave, type SaveState } from './useAutosave.ts';
 
 /** What the member asked to write: a new message, a reply, or a draft opened again. */
@@ -85,6 +85,12 @@ export function Composer({ compose, accounts, onDraft, onSend, onClose }: Compos
   return (
     <Writer
       start={start}
+      from={
+        // A draft another client wrote as HTML alone opens from its HTML, so no word is lost.
+        compose.as === 'draft' && body?.text === undefined && body?.html !== undefined
+          ? { html: body.html }
+          : { markdown: start.markdown }
+      }
       draft={compose.as === 'draft' ? refOf(compose.draft) : undefined}
       isNew={compose.as === 'new' || !start.inReplyTo}
       accounts={accounts}
@@ -116,6 +122,7 @@ function startOf(
 
 function Writer({
   start,
+  from,
   draft,
   isNew,
   accounts,
@@ -124,6 +131,7 @@ function Writer({
   onClose,
 }: {
   start: Writing;
+  from: EditorProps['start'];
   draft: MessageRef | undefined;
   isNew: boolean;
   accounts: readonly Account[];
@@ -271,8 +279,11 @@ function Writer({
       </div>
 
       <Editor
-        markdown={start.markdown}
-        onChange={(markdown) => edit(() => ({ markdown }))}
+        start={from}
+        onChange={(markdown, isEdit) => {
+          if (isEdit) edit(() => ({ markdown }));
+          else setWriting((was) => ({ ...was, markdown }));
+        }}
         imageUrl={imageUrl}
         onFiles={(dropped) => take(dropped, true)}
         onEditor={setEditor}

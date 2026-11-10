@@ -1,6 +1,6 @@
 import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
 import { chromium, type Browser, type Page } from 'playwright';
-import { SAVE_AT_LEAST_EVERY_MS } from '../../src/features/composer/core/session.ts';
+import { SAVE_AFTER_MS, SAVE_AT_LEAST_EVERY_MS } from '../../src/features/composer/core/session.ts';
 import { startPreview, type Preview } from './preview.ts';
 
 /**
@@ -81,6 +81,41 @@ test('a reply is saved as it is written, opens again with its words and files, a
   await page.getByText('Draft discarded').waitFor();
   await page.waitForTimeout(2_000);
   await expect(draft.count()).resolves.toBe(0);
+}, 60_000);
+
+test('a draft another client wrote as HTML opens with its words, and closed untouched stays as it was', async () => {
+  const page = await inbox();
+  // Every command this browser sends, by name, to find any that could change the draft.
+  const sent: string[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST') sent.push(request.postData() ?? '');
+  });
+  await page
+    .getByRole('button', { name: /^Drafts/ })
+    .first()
+    .click();
+  await page.getByRole('option').filter({ hasText: 'Offsite agenda' }).click();
+  const line = reader(page).getByRole('button', { name: /^Draft/ });
+  await line.click();
+
+  const words = page
+    .getByRole('region', { name: 'New message' })
+    .getByRole('textbox', { name: 'Message' });
+  await words.getByRole('listitem').first().waitFor();
+  await expect(words.textContent()).resolves.toBe(
+    'Draft agenda for the offsite:Morning: walk through the planLunchAfternoon: review the mobile layout',
+  );
+  await expect(words.locator('strong').textContent()).resolves.toBe('offsite');
+  await expect(words.locator('em').textContent()).resolves.toBe('mobile layout');
+  await expect(words.getByRole('link').getAttribute('href')).resolves.toBe(
+    'https://example.org/plan',
+  );
+  await expect(words.getByRole('listitem').count()).resolves.toBe(3);
+
+  await page.getByRole('button', { name: 'Close' }).click();
+  await page.waitForTimeout(SAVE_AFTER_MS + 1_000);
+  expect(sent.filter((body) => /saveDraft|"move"/.test(body))).toEqual([]);
+  await line.waitFor();
 }, 60_000);
 
 test('a tab closed mid-sentence keeps all but the last few seconds of what was written', async () => {
