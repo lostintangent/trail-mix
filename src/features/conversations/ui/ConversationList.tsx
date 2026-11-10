@@ -13,6 +13,7 @@ import { Paperclip, Star } from 'lucide-react';
 import {
   memo,
   useCallback,
+  useEffect,
   useId,
   useLayoutEffect,
   useRef,
@@ -28,6 +29,9 @@ import { formatListDate } from './dates.ts';
 /** A row's height before one has been drawn: three lines of text and the row's padding. */
 const FIRST_GUESS = 72;
 
+/** How many rows short of the end the list asks for more, so the next page arrives in time. */
+const AHEAD = 30;
+
 /**
  * The conversations of a view, newest first, drawn only where the list is scrolled to. The selected
  * conversation lifts from the sheet onto paper. The list takes focus as one control and moves its
@@ -40,6 +44,7 @@ export function ConversationList({
   stamps,
   selected,
   onSelect,
+  onNearEnd,
 }: {
   label: string;
   conversations: readonly ConversationSummary[];
@@ -47,6 +52,8 @@ export function ConversationList({
   stamps: ReadonlyMap<string, StampColor>;
   selected: ConversationId | undefined;
   onSelect: (id: ConversationId) => void;
+  /** Called while the rows drawn come within reach of the end. */
+  onNearEnd: () => void;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const listId = useId();
@@ -67,6 +74,10 @@ export function ConversationList({
     },
   });
   useLayoutEffect(() => virtualizer.measure(), [virtualizer, rowHeight]);
+  const lastDrawn = virtualizer.getVirtualItems().at(-1)?.index ?? -1;
+  useEffect(() => {
+    if (lastDrawn >= conversations.length - AHEAD) onNearEnd();
+  }, [lastDrawn, conversations.length, onNearEnd]);
   const optionId = (index: number) => `${listId}-${index}`;
 
   const move = (event: KeyboardEvent<HTMLDivElement>) => {

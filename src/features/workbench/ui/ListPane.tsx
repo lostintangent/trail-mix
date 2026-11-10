@@ -30,6 +30,7 @@ export function ListPane({
   stamps,
   selected,
   onSelect,
+  onNearEnd,
   isCollapsed,
   onExpand,
   onShowFolders,
@@ -37,10 +38,12 @@ export function ListPane({
   id: string;
   title: string;
   unread: number | undefined;
-  conversations: readonly ConversationSummary[];
+  /** Nothing until the view's first page arrives. */
+  conversations: readonly ConversationSummary[] | undefined;
   stamps: ReadonlyMap<string, StampColor>;
   selected: ConversationId | undefined;
   onSelect: (id: ConversationId) => void;
+  onNearEnd: () => void;
   isCollapsed: boolean;
   onExpand: () => void;
   onShowFolders: () => void;
@@ -67,22 +70,23 @@ export function ListPane({
         </Heading>
         {unread ? <span {...stylex.props(styles.unread)}>{unread} unread</span> : null}
       </header>
-      <div {...stylex.props(styles.sheet, conversations.length === 0 && styles.empty)}>
-        {conversations.length === 0 ? (
+      <div {...stylex.props(styles.sheet, conversations?.length === 0 && styles.empty)}>
+        {conversations?.length === 0 ? (
           <EmptyState
             icon={<Icon icon={Inbox} size="lg" color="secondary" />}
             title="No mail yet"
             description="Mail from the accounts you connect will gather here, newest first."
           />
-        ) : (
+        ) : conversations ? (
           <ConversationList
             label={title}
             conversations={conversations}
             stamps={stamps}
             selected={selected}
             onSelect={onSelect}
+            onNearEnd={onNearEnd}
           />
-        )}
+        ) : null}
       </div>
       <PhoneIsland label="Mailbox actions">
         <IconButton

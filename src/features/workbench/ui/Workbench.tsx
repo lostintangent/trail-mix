@@ -35,6 +35,7 @@ export function Workbench({
   folders,
   counts,
   conversations,
+  onListNearEnd,
   sidebarFooter,
 }: {
   view: View;
@@ -42,7 +43,10 @@ export function Workbench({
   accounts: readonly Account[];
   folders: readonly Folder[];
   counts: ViewCounts;
-  conversations: readonly ConversationSummary[];
+  /** Nothing until the view's first page arrives. */
+  conversations: readonly ConversationSummary[] | undefined;
+  /** Asks for the view's next page, if it has one. */
+  onListNearEnd: () => void;
   sidebarFooter: ReactNode;
 }) {
   const [selected, setSelected] = useState<ConversationId>();
@@ -108,6 +112,7 @@ export function Workbench({
               setSelected(id);
               setPhonePane('reader');
             }}
+            onNearEnd={onListNearEnd}
             isCollapsed={!isPhone && list.isCollapsed}
             onExpand={() => setList({ ...list, isCollapsed: false })}
             onShowFolders={() => setPhonePane('sidebar')}
