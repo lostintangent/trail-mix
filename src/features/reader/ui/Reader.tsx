@@ -122,6 +122,10 @@ function Conversation({
   const [opened, setOpened] = useState(() => new Set(newest ? [openedKey(newest)] : []));
   if (!newest) return null;
   const folder = folderOf(messages, folders);
+  // A draft's line already says what it is, so the count is of the mail itself, and only a
+  // conversation of drafts alone counts its drafts.
+  const written = messages.filter((message) => !isDraft(message)).length;
+  const size = written > 0 ? counted(written, 'message') : counted(messages.length, 'draft');
   const actionsOf = (message: Message) =>
     message === newest
       ? actionsFor?.(message)
@@ -132,11 +136,7 @@ function Conversation({
       <h1 {...stylex.props(styles.subject)}>{subjectOf(messages)}</h1>
       <p {...stylex.props(styles.meta)}>
         <span aria-hidden {...stylex.props(styles.stamp, stampStyles[account.stamp])} />
-        {[
-          account.name,
-          ...(folder ? [folderName(folder)] : []),
-          messages.length === 1 ? '1 message' : `${messages.length} messages`,
-        ].join(' · ')}
+        {[account.name, ...(folder ? [folderName(folder)] : []), size].join(' · ')}
       </p>
       {messages.map((message) =>
         isDraft(message) ? (
@@ -177,6 +177,8 @@ function Conversation({
     </div>
   );
 }
+
+const counted = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
 /** How the reader remembers an opened message: by its Message-ID, or its ref if it has none. */
 const openedKey = (message: Message) => message.messageId || refKey(message);

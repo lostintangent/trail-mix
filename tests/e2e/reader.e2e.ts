@@ -38,8 +38,9 @@ async function open(options: BrowserContextOptions): Promise<Page> {
 const reader = (page: Page) => page.getByRole('region', { name: 'Reader' });
 const row = (page: Page, subject: string) =>
   page.getByRole('option').filter({ hasText: subject }).first();
-/** The line under the subject: the account, the folder and how many messages. */
-const meta = (page: Page) => reader(page).getByText(/ · \d+ messages?$/);
+/** Waits for the line under the subject, the account, the folder and how many messages, to say this. */
+const says = (page: Page, line: string | RegExp) =>
+  reader(page).getByText(line, { exact: true }).waitFor({ timeout: 2_000 });
 const folder = (page: Page, account: string, name: string) =>
   page
     .getByRole('region', { name: account })
@@ -53,17 +54,24 @@ async function readable(page: Page, screen: string) {
 test('the line under the subject names the folder the conversation lies in', async () => {
   const page = await open({ ...DESKTOP, colorScheme: 'light' });
   await row(page, 'Workers migration plan').click();
-  await expect(meta(page).textContent()).resolves.toBe('Personal · Inbox · 3 messages');
+  await says(page, 'Personal · Inbox · 3 messages');
   await readable(page, 'desktop-light');
+
+  // A draft's own line says what it is, so the count is of the mail alone.
+  await row(page, 'Lunch Thursday?').click();
+  await reader(page)
+    .getByRole('button', { name: /^Draft/ })
+    .waitFor();
+  await says(page, 'Personal · Inbox · 1 message');
 
   // Opened from Sent, where the member's own reply is, it still lies in the Inbox.
   await folder(page, 'Personal', 'Sent').click();
   await row(page, 'Workers migration plan').click();
-  await expect(meta(page).textContent()).resolves.toBe('Personal · Inbox · 3 messages');
+  await says(page, 'Personal · Inbox · 3 messages');
 
   await folder(page, 'Personal', 'Archive').click();
   await page.getByRole('option').first().click();
-  await expect(meta(page).textContent()).resolves.toMatch(/^Personal · Archive · \d+ messages?$/);
+  await says(page, /^Personal · Archive · \d+ messages?$/);
 }, 30_000);
 
 test('each message answers and shows the source of its own, and the palette the newest', async () => {
