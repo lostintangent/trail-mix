@@ -42,31 +42,49 @@ export default {
   },
 };
 
+/**
+ * Answers with one JSON line per check as it finishes, so results show while a long watch runs. A
+ * blank line every 30 seconds keeps the response from looking idle to the client.
+ */
 export class Check {
   async fetch(request: Request): Promise<Response> {
     const check = (await request.json()) as CheckRequest;
-    const results = [
-      await timed(`list folders and fetch a message over ${check.imap.port}`, () =>
-        listAndFetch(check),
-      ),
-    ];
-    for (const endpoint of check.smtp) {
-      const label = `${endpoint.port} (${endpoint.secure ? 'implicit TLS' : 'STARTTLS'})`;
-      results.push(
-        await timed(`send to self over ${label}`, () =>
-          sendToSelf(check, endpoint, `Trail Mix check over ${label}`),
-        ),
-      );
-    }
-    if (check.watchSeconds > 0) {
-      results.push(
-        await timed(`watch INBOX for ${check.watchSeconds}s, then see new mail`, () =>
-          watch(check),
-        ),
-      );
-    }
-    return Response.json({ runtime: navigator.userAgent, results });
+    const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
+    const writer = writable.getWriter();
+    const encoder = new TextEncoder();
+    const send = (line: string) => writer.write(encoder.encode(`${line}\n`));
+
+    void (async () => {
+      const heartbeat = setInterval(() => void send(''), 30_000);
+      try {
+        await send(JSON.stringify({ runtime: navigator.userAgent }));
+        for (const [name, run] of checks(check)) await send(JSON.stringify(await timed(name, run)));
+      } finally {
+        clearInterval(heartbeat);
+        await writer.close();
+      }
+    })();
+    return new Response(readable, { headers: { 'content-type': 'application/x-ndjson' } });
   }
+}
+
+function checks(check: CheckRequest): [string, () => Promise<unknown>][] {
+  const label = ({ port, secure }: Endpoint) => `${port} (${secure ? 'implicit TLS' : 'STARTTLS'})`;
+  return [
+    [`list folders and fetch a message over ${check.imap.port}`, () => listAndFetch(check)],
+    ...check.smtp.map((endpoint): [string, () => Promise<unknown>] => [
+      `send to self over ${label(endpoint)}`,
+      () => sendToSelf(check, endpoint, `Trail Mix check over ${label(endpoint)}`),
+    ]),
+    ...(check.watchSeconds > 0
+      ? [
+          [`watch INBOX for ${check.watchSeconds}s, then see new mail`, () => watch(check)] as [
+            string,
+            () => Promise<unknown>,
+          ],
+        ]
+      : []),
+  ];
 }
 
 async function listAndFetch(check: CheckRequest) {

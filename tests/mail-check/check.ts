@@ -225,18 +225,39 @@ async function runInWorkerd(request: CheckRequest, preset: Preset): Promise<numb
       body: JSON.stringify(request),
     });
     const redact = redactor(request);
-    const body = await response.text();
-    if (!response.ok)
-      throw new Error(redact(`workerd answered ${response.status}: ${body.slice(0, 500)}`));
-    const { runtime, results } = JSON.parse(body) as { runtime: string; results: CheckResult[] };
-    console.log(`On ${runtime}, as ${request.user}:`);
-    for (const r of results) {
-      const outcome = r.ok ? JSON.stringify(r.detail) : r.error;
-      console.log(
-        redact(`${r.ok ? 'PASS' : 'FAIL'} ${`${r.ms}ms`.padStart(8)}  ${r.check}  ${outcome}`),
+    if (!response.ok || !response.body) {
+      throw new Error(
+        redact(`workerd answered ${response.status}: ${(await response.text()).slice(0, 500)}`),
       );
     }
-    return results.every((r) => r.ok) ? 0 : 1;
+    // One JSON line per check, printed as each one finishes. Blank lines only keep the response alive.
+    const expected = 1 + request.smtp.length + (request.watchSeconds > 0 ? 1 : 0);
+    let [reported, failed] = [0, 0];
+    let pending = '';
+    for await (const chunk of response.body.pipeThrough(new TextDecoderStream())) {
+      const lines = (pending + chunk).split('\n');
+      pending = lines.pop() ?? '';
+      for (const line of lines.filter(Boolean)) {
+        const message = JSON.parse(line) as CheckResult | { runtime: string };
+        if ('runtime' in message) {
+          console.log(`On ${message.runtime}, as ${request.user}:`);
+          continue;
+        }
+        reported++;
+        if (!message.ok) failed++;
+        const outcome = message.ok ? JSON.stringify(message.detail) : message.error;
+        console.log(
+          redact(
+            `${message.ok ? 'PASS' : 'FAIL'} ${`${message.ms}ms`.padStart(8)}  ${message.check}  ${outcome}`,
+          ),
+        );
+      }
+    }
+    if (reported < expected) {
+      console.log(`FAIL workerd stopped after ${reported} of ${expected} checks`);
+      return 1;
+    }
+    return failed ? 1 : 0;
   } finally {
     if (workerd.pid) process.kill(-workerd.pid, 'SIGKILL');
     rmSync(scratch, { recursive: true, force: true });
