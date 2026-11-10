@@ -89,6 +89,10 @@ import {
   RemoveQuestion,
   type AccountPageOf,
 } from '../../accounts/index.ts';
+import { memberCommands, MembersPage, operatorQuery } from '../../members/index.ts';
+
+/** What can lie on the reader's sheet in place of a conversation. */
+type SheetPage = AccountPageOf | { as: 'members' };
 import { usePanel } from './usePanel.ts';
 
 type Pane = 'sidebar' | 'list' | 'reader';
@@ -189,13 +193,14 @@ export function Workbench({
   // A new message is from the account the view holds, or else the first.
   const writeFrom = scope ?? accounts[0];
   const closeComposer = composing.close;
-  // An account's page lies where a new message's composer would, so writing one closes it.
-  const [accountPage, setAccountPage] = useState<AccountPageOf>();
+  // An account's page, or the Members page, lies where a new message's composer would, so writing
+  // one closes it.
+  const [page, setPage] = useState<SheetPage>();
   const [removing, setRemoving] = useState<Account>();
   const write =
     writeFrom &&
     (() => {
-      setAccountPage(undefined);
+      setPage(undefined);
       composing.write(writeFrom);
     });
   const [isSheetOpen, setSheetOpen] = useState(false);
@@ -325,38 +330,44 @@ export function Workbench({
     [folderEditing.commands],
   );
   // An account's page takes the reader's place, from nothing selected, where a phone slides to it.
-  const openAccountPage = useCallback(
-    (page: AccountPageOf) => {
+  const openPage = useCallback(
+    (page: SheetPage) => {
       closeComposer();
       setSelection(NOTHING_SELECTED);
       setPicking(false);
-      setAccountPage(page);
+      setPage(page);
       setPhonePane('reader');
     },
     [closeComposer],
   );
-  const closeAccountPage = useCallback(() => {
-    setAccountPage(undefined);
+  const closePage = useCallback(() => {
+    setPage(undefined);
     if (isPhone) setPhonePane('list');
   }, [isPhone]);
   const accountsCommands = useMemo(
     () =>
       accountCommands({
         accounts,
-        add: () => openAccountPage({ as: 'add' }),
-        edit: (account) => openAccountPage({ as: 'edit', account: account.id }),
+        add: () => openPage({ as: 'add' }),
+        edit: (account) => openPage({ as: 'edit', account: account.id }),
         remove: setRemoving,
       }),
-    [accounts, openAccountPage],
+    [accounts, openPage],
   );
-  const addAccount = useCallback(() => openAccountPage({ as: 'add' }), [openAccountPage]);
+  const addAccount = useCallback(() => openPage({ as: 'add' }), [openPage]);
+  // Only the operator has a Members page.
+  const isOperator = useQuery(operatorQuery).data === true;
+  const openMembers = useMemo(
+    () => (isOperator ? () => openPage({ as: 'members' }) : undefined),
+    [isOperator, openPage],
+  );
   const editAccount = useCallback(
-    (account: Account) => openAccountPage({ as: 'edit', account: account.id }),
-    [openAccountPage],
+    (account: Account) => openPage({ as: 'edit', account: account.id }),
+    [openPage],
   );
   // A removed account's page closes, and so does a view of its folders.
   const removed = (account: Account) => {
-    if (accountPage?.as === 'edit' && accountPage.account === account.id) closeAccountPage();
+    if (page?.as === 'edit' && page.account === account.id) closePage();
     if (view.in === 'folder' && view.folder.account === account.id) onViewChange({ in: 'inbox' });
   };
   const order = useRef<ConversationId[]>([]);
@@ -364,7 +375,7 @@ export function Workbench({
     order.current = conversations?.map(({ id }) => id) ?? [];
   }, [conversations]);
   const pick = useCallback((id: ConversationId, by: SelectBy) => {
-    setAccountPage(undefined);
+    setPage(undefined);
     setSelection((current) => select(current, id, by, order.current));
     if (by === 'only') setPhonePane('reader');
   }, []);
@@ -448,8 +459,8 @@ export function Workbench({
     ...workbenchCommands({
       next: stepTo(anchorAt + 1),
       previous: anchorAt > 0 ? stepTo(anchorAt - 1) : undefined,
-      back: accountPage
-        ? closeAccountPage
+      back: page
+        ? closePage
         : composing.compose
           ? closeComposer
           : isPhone
@@ -480,6 +491,7 @@ export function Workbench({
     ...outbox.commands,
     ...folderEditing.commands,
     ...accountsCommands,
+    ...memberCommands(openMembers),
     ...writingCommands,
     ...extraCommands,
   ]);
@@ -557,6 +569,7 @@ export function Workbench({
                 folderMenu={rowMenu}
                 onEditAccount={editAccount}
                 onAddAccount={addAccount}
+                onMembers={openMembers}
                 header={isFieldInSidebar ? SIDEBAR_HEADER : undefined}
                 footer={footer}
               />
@@ -662,16 +675,18 @@ export function Workbench({
                   hidden={composing.hidden}
                   onOpenDraft={composing.openDraft}
                   page={
-                    accountPage && (
+                    page?.as === 'members' ? (
+                      <MembersPage />
+                    ) : page ? (
                       <AccountPage
-                        page={accountPage}
+                        page={page}
                         accounts={accounts}
-                        onClose={closeAccountPage}
+                        onClose={closePage}
                         onRemove={setRemoving}
                       />
-                    )
+                    ) : undefined
                   }
-                  onBack={accountPage ? closeAccountPage : () => setPhonePane('list')}
+                  onBack={page ? closePage : () => setPhonePane('list')}
                 />
               )}
             </div>

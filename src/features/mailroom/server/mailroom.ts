@@ -493,6 +493,23 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     return Promise.resolve(new Response(null, { status: 101, webSocket: device }));
   }
 
+  /**
+   * Closes every device's hint socket. The Worker calls it only while the operator removes this
+   * member, whose sign-in has just ended, so the devices can't connect again. It isn't a browser's
+   * to call.
+   */
+  closeDevices(): Promise<void> {
+    for (const socket of this.ctx.getWebSockets()) {
+      try {
+        socket.close(1008, 'Signed out');
+      } catch {
+        // Already closing.
+      }
+    }
+    for (const id of [...this.watchers.keys()]) this.unwatch(id);
+    return Promise.resolve();
+  }
+
   override webSocketMessage(): void {
     // Devices only listen.
   }

@@ -26,8 +26,17 @@ export type SignIn = (request: Request) => Promise<string | undefined>;
 export function signInFor(config: SignInConfig, keys?: JWTVerifyGetKey): SignIn | undefined {
   const { ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: audience, DEV_MEMBER: developer } = config;
   if (team && audience) return accessSignIn(team, audience, keys ?? certificatesOf(team));
-  if (developer) return developmentSignIn(developer);
+  if (signsInDevelopers(config) && developer) return developmentSignIn(developer);
   return undefined;
+}
+
+/**
+ * Whether this deployment signs in its development member, which only a developer's machine
+ * does: no Access, and `DEV_MEMBER` set. Anything meant for a developer alone hangs on this.
+ */
+export function signsInDevelopers(config: SignInConfig): boolean {
+  const { ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: audience, DEV_MEMBER: developer } = config;
+  return !(team && audience) && Boolean(developer);
 }
 
 /**

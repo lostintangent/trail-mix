@@ -150,7 +150,7 @@ src/
     outbox/            core/ is the state machine the Mailroom's alarm drives, ui/ lists what waits
     commands/          registry.ts and the palette
     accounts/          core/ reads the add-account form, ui/ is the first-run screen and each account's page
-    members/           server/ edits the Cloudflare Access list, ui/ is the Members page
+    members/           core/ reads and changes the Access policy, server/ edits it through Cloudflare's API, ui/ is the Members page
   server/
     entry.ts           the Worker entry
     access.ts          the sign-in seam

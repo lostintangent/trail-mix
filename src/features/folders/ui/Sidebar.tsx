@@ -18,6 +18,7 @@ import {
   Send,
   Settings2,
   Star,
+  Users,
   type LucideIcon,
 } from 'lucide-react';
 import { memo, Suspense, type ReactNode } from 'react';
@@ -63,6 +64,7 @@ export const Sidebar = memo(function Sidebar({
   folderMenu,
   onEditAccount,
   onAddAccount,
+  onMembers,
 }: {
   id: string;
   view: View;
@@ -86,6 +88,8 @@ export const Sidebar = memo(function Sidebar({
   onEditAccount?: (account: Account) => void;
   /** Starts adding an account, from the end of the accounts. */
   onAddAccount?: () => void;
+  /** Opens the Members page, which only the operator has. */
+  onMembers?: () => void;
 }) {
   return (
     <nav id={id} aria-label="Mailboxes" {...stylex.props(styles.sidebar)}>
@@ -158,6 +162,15 @@ export const Sidebar = memo(function Sidebar({
               size="sm"
               onClick={onAddAccount}
             />
+            {onMembers && (
+              <Button
+                label="Members"
+                icon={<Icon icon={Users} size="sm" />}
+                variant="ghost"
+                size="sm"
+                onClick={onMembers}
+              />
+            )}
           </div>
         )}
       </div>
@@ -386,6 +399,9 @@ const styles = stylex.create({
     marginTop: spacingVars['--spacing-3'],
   },
   addAccount: {
+    display: 'flex',
+    flexWrap: 'wrap',
+    gap: spacingVars['--spacing-1'],
     marginTop: spacingVars['--spacing-3'],
     paddingInline: spacingVars['--spacing-1'],
   },

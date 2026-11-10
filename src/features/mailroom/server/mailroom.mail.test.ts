@@ -717,6 +717,30 @@ describe('The Mailroom with the demo mailbox', () => {
   }, 120_000);
   afterAll(() => worker?.stop());
 
+  test('a removed member’s devices are closed, and erasing leaves nothing of theirs in storage', async () => {
+    const dee = member('dee', () => worker);
+    const device = dee.device();
+    await device.opened;
+    await dee.until(async () => (await dee.page({ in: 'inbox' })).length > 0);
+    // An opened message's body is cached, so there is something in the bucket to erase too.
+    const [row] = await dee.page({ in: 'inbox' });
+    await dee.call('body', (await dee.call<Message[]>('conversation', row!.id))[0]);
+
+    await dee.call('closeDevices');
+    expect(await device.closed).toBe(1008);
+
+    await dee.call('eraseEverything');
+    const { tables, bodies } = await dee.call<{ tables: Record<string, unknown[]>; bodies: [] }>(
+      'stored',
+    );
+    expect(bodies).toEqual([]);
+    expect(
+      Object.entries(tables).filter(
+        ([name, rows]) => name !== 'schema' && !name.startsWith('search_') && rows.length,
+      ),
+    ).toEqual([]);
+  }, 60_000);
+
   test('starts with Personal and Work, and fills each Inbox first and newest first', async () => {
     const cy = member('cy', () => worker);
     const device = cy.device();

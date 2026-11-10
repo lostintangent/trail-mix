@@ -102,6 +102,10 @@ export function member(name: string, worker: () => LocalWorker) {
           socket.addEventListener('open', resolve);
           socket.addEventListener('error', reject);
         }),
+        /** Resolves with the close code once the Mailroom closes the socket. */
+        closed: new Promise<number>((resolve) => {
+          socket.addEventListener('close', (event) => resolve(event.code));
+        }),
         /** Resolves when a hint from now on matches. */
         next(matches: (hint: Hint) => boolean, ms = 10_000) {
           const from = hints.length;

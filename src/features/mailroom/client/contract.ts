@@ -14,6 +14,7 @@ import type {
   Outgoing,
   View,
 } from '../../mail/core/index.ts';
+import type { Members } from '../../members/core/index.ts';
 // Brings Start's `Register` in, so the declaration below can add to it in either program.
 import type {} from '@tanstack/react-start';
 
@@ -141,18 +142,25 @@ export type DraftUpload = Omit<DraftInput, 'attachments'> & {
   attachments: ({ file: FileBytes; contentId?: string } | { in: MessageRef; id: string })[];
 };
 
-/** The Mailroom as the Worker reaches it: its queries and commands, and the hint socket by `fetch`. */
+/**
+ * The Mailroom as the Worker reaches it: its queries and commands, the hint socket by `fetch`, and
+ * closing its devices, which only the operator's removal of this member asks for.
+ */
 export type Mailroom = Queries &
   Omit<Commands, 'saveDraft'> & {
     saveDraft(draft: DraftUpload, replaces?: MessageRef): Promise<MessageRef>;
     fetch(request: Request): Promise<Response>;
+    closeDevices(): Promise<void>;
   };
 
 declare module '@tanstack/react-start' {
   interface Register {
     server: {
-      /** The Worker hands each request its signed-in member's Mailroom, and nothing that names them. */
-      requestContext: { mailroom: Mailroom };
+      /**
+       * The Worker hands each request its signed-in member's Mailroom, and nothing that names them,
+       * and the Members page's side for them, which answers the operator alone.
+       */
+      requestContext: { mailroom: Mailroom; members: Members };
     };
   }
 }

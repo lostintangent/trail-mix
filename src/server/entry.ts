@@ -1,7 +1,8 @@
 import start from '@tanstack/react-start/server-entry';
 import type { Mailroom } from '../features/mailroom/client/contract.ts';
 import { readMessagePath } from '../features/mailroom/client/urls.ts';
-import { signInFor, type SignInConfig } from './access.ts';
+import { CLOUDFLARE_API, cloudflareApi, membersFor } from '../features/members/server/index.ts';
+import { signInFor, signsInDevelopers, type SignInConfig } from './access.ts';
 import { proxyImage } from './routes/images.ts';
 import { serveMessageBytes, type MessageBytes } from './routes/messages.ts';
 import { updates } from './routes/updates.ts';
@@ -13,6 +14,13 @@ export type Env = SignInConfig & {
   MAILROOM: { idFromName(name: string): unknown; get(id: unknown): Mailroom & MessageBytes };
   /** The commit this deployment runs. */
   VERSION?: string;
+  /** Who manages members. Without it, nobody does. */
+  OPERATOR_EMAIL?: string;
+  /** The account Access belongs to, and the operator's token that edits its member list. */
+  CLOUDFLARE_ACCOUNT_ID?: string;
+  ACCESS_API_TOKEN?: string;
+  /** A stand-in for Cloudflare's API, which only a developer's own deployment heeds. */
+  CLOUDFLARE_API?: string;
 };
 
 /**
@@ -36,9 +44,25 @@ export default {
     const message = readMessagePath(url.pathname);
     if (message) return serveMessageBytes(message, mailroom);
     if (url.pathname === '/images') return proxyImage(request);
-    return start.fetch(request, { context: { mailroom } });
+    return start.fetch(request, { context: { mailroom, members: membersOf(env, member) } });
   },
 };
+
+/**
+ * The Members page's side for the signed-in member. It answers the operator alone, and only its
+ * removal of a member names that member's Mailroom, as the rule "Every request is a member" allows.
+ */
+function membersOf(env: Env, member: string) {
+  const { CLOUDFLARE_ACCOUNT_ID: account, ACCESS_API_TOKEN: token } = env;
+  const base = signsInDevelopers(env) && env.CLOUDFLARE_API ? env.CLOUDFLARE_API : CLOUDFLARE_API;
+  return membersFor({
+    caller: member,
+    operator: env.OPERATOR_EMAIL,
+    audience: env.ACCESS_AUD,
+    api: account && token ? cloudflareApi({ base, account, token }) : undefined,
+    mailroomOf: (removed) => env.MAILROOM.get(env.MAILROOM.idFromName(removed)),
+  });
+}
 
 /**
  * Whether a request that changes something, or opens the hint socket, came from Trail Mix's own
