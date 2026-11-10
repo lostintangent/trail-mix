@@ -47,6 +47,8 @@ export const workbench: BenchArea = {
       });
       await page.goto(preview.url);
       const coldLoad = await firstRows(page);
+      console.log('The cold load, step by step, in ms from navigation:');
+      console.table(await coldLoadSteps(page));
       const firstLoadJs = (await Promise.all(scripts)).reduce((sum, size) => sum + size, 0);
       const scrollFrame = percentile(await scrollFrames(page), 0.95);
       await context.close();
@@ -102,6 +104,36 @@ async function firstRows(page: Page): Promise<number> {
   return page.evaluate(
     () => new Promise<number>((resolve) => requestAnimationFrame(() => resolve(performance.now()))),
   );
+}
+
+/**
+ * Where the cold load's time went, from the page's own timings: the HTML, the scripts arriving, each
+ * query to the Mailroom from start to end, and the first rows on screen.
+ */
+function coldLoadSteps(page: Page): Promise<{ step: string; start: number; end: number }[]> {
+  return page.evaluate(() => {
+    const at = (ms: number) => Math.round(ms);
+    const [navigation] = performance.getEntriesByType(
+      'navigation',
+    ) as PerformanceNavigationTiming[];
+    const resources = performance.getEntriesByType('resource') as PerformanceResourceTiming[];
+    const scripts = resources.filter(({ name }) => new URL(name).pathname.endsWith('.js'));
+    const queries = resources.filter(({ name }) => name.includes('/_serverFn/'));
+    return [
+      { step: 'HTML', start: 0, end: at(navigation?.responseEnd ?? 0) },
+      {
+        step: 'Scripts',
+        start: at(Math.min(...scripts.map(({ startTime }) => startTime))),
+        end: at(Math.max(...scripts.map(({ responseEnd }) => responseEnd))),
+      },
+      ...queries.map(({ name, startTime, responseEnd }) => ({
+        step: `Query ${/"s":"(\w+)"/.exec(new URL(name).searchParams.get('payload') ?? '')?.[1]}`,
+        start: at(startTime),
+        end: at(responseEnd),
+      })),
+      { step: 'First rows', start: at(performance.now()), end: at(performance.now()) },
+    ];
+  });
 }
 
 /** The interval between each frame while the list scrolls 120 pixels a frame for three seconds. */
