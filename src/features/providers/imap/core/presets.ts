@@ -1,3 +1,5 @@
+import type { DeviceSignIn } from './device-sign-in.ts';
+
 /** Where a host listens. Implicit TLS when `secure`, STARTTLS otherwise. */
 export type Endpoint = { host: string; port: number; secure: boolean };
 
@@ -8,8 +10,8 @@ export type Endpoint = { host: string; port: number; secure: boolean };
 export type Preset = {
   imap: Endpoint;
   smtp: Endpoint;
-  /** A password, or Microsoft's device-code sign-in. */
-  signIn: 'password' | 'microsoft';
+  /** A password, or a sign-in at the vendor with a device code. */
+  signIn: 'password' | DeviceSignIn;
   /** Whether the host files its own copy in Sent when it accepts a message. */
   filesSent: boolean;
 };
@@ -28,7 +30,19 @@ export const PRESETS = {
   outlook: {
     imap: { host: 'outlook.office365.com', port: 993, secure: true },
     smtp: { host: 'smtp-mail.outlook.com', port: 587, secure: false },
-    signIn: 'microsoft',
+    // Personal Microsoft accounts, through the app the operator registered in Microsoft Entra.
+    signIn: {
+      vendor: 'Microsoft',
+      authority: 'https://login.microsoftonline.com/consumers',
+      codePath: '/oauth2/v2.0/devicecode',
+      tokenPath: '/oauth2/v2.0/token',
+      // IMAP and SMTP as the member, and offline_access for a refresh token, so they stay signed in.
+      scopes: [
+        'https://outlook.office.com/IMAP.AccessAsUser.All',
+        'https://outlook.office.com/SMTP.Send',
+        'offline_access',
+      ],
+    },
     filesSent: true,
   },
 } as const satisfies Record<string, Preset>;
