@@ -8,7 +8,7 @@ import {
 } from '@astryxdesign/core/theme/tokens.stylex';
 import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
 import * as stylex from '@stylexjs/stylex';
-import { useVirtualizer } from '@tanstack/react-virtual';
+import { defaultRangeExtractor, useVirtualizer } from '@tanstack/react-virtual';
 import { Paperclip, Star } from 'lucide-react';
 import {
   memo,
@@ -50,15 +50,22 @@ export function ConversationList({
   const scroller = useRef<HTMLDivElement>(null);
   const listId = useId();
   const rowHeight = useRowHeight(scroller);
+  const selectedIndex = conversations.findIndex(({ id }) => id === selected);
   const virtualizer = useVirtualizer({
     count: conversations.length,
     getScrollElement: () => scroller.current,
     estimateSize: () => rowHeight,
     getItemKey: (index) => conversations[index]?.id ?? index,
     overscan: 6,
+    // The selected row stays drawn when it scrolls away, since the list names it as the active one.
+    rangeExtractor: (range) => {
+      const drawn = defaultRangeExtractor(range);
+      return selectedIndex < 0 || drawn.includes(selectedIndex)
+        ? drawn
+        : [...drawn, selectedIndex].sort((a, b) => a - b);
+    },
   });
   useLayoutEffect(() => virtualizer.measure(), [virtualizer, rowHeight]);
-  const selectedIndex = conversations.findIndex(({ id }) => id === selected);
   const optionId = (index: number) => `${listId}-${index}`;
 
   const move = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -207,7 +214,11 @@ const styles = stylex.create({
     overflowY: 'auto',
     overscrollBehavior: 'contain',
     paddingInline: spacingVars['--spacing-1-5'],
-    outline: 'none',
+    outline: {
+      default: 'none',
+      ':focus-visible': `2px solid ${colorVars['--color-accent']}`,
+    },
+    outlineOffset: '-2px',
   },
   canvas: (height: number) => ({ position: 'relative', height }),
   row: {
