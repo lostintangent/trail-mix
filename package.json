@@ -4,6 +4,10 @@
   "private": true,
   "license": "MIT",
   "type": "module",
+  "sideEffects": [
+    "*.css",
+    "*.stylex.ts"
+  ],
   "scripts": {
     "dev": "node node_modules/vite/bin/vite.js dev",
     "build": "bun --bun vite build",

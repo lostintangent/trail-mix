@@ -1,9 +1,15 @@
 import { Icon } from '@astryxdesign/core/Icon';
-import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl';
+import { IconButton } from '@astryxdesign/core/IconButton';
 import { Monitor, Moon, Sun } from 'lucide-react';
-import { parse, type ThemeMode } from './mode.ts';
+import type { ThemeMode } from './mode.ts';
 
-/** System, Light or Dark, saved for this device. */
+const MODES = {
+  system: { label: 'System', icon: Monitor, next: 'light' },
+  light: { label: 'Light', icon: Sun, next: 'dark' },
+  dark: { label: 'Dark', icon: Moon, next: 'system' },
+} as const satisfies Record<ThemeMode, { label: string; icon: typeof Sun; next: ThemeMode }>;
+
+/** The theme this device shows, System, Light or Dark. Each press moves to the next. */
 export function ThemeChoice({
   mode,
   onChange,
@@ -11,22 +17,15 @@ export function ThemeChoice({
   mode: ThemeMode;
   onChange: (mode: ThemeMode) => void;
 }) {
+  const { label, icon, next } = MODES[mode];
   return (
-    <SegmentedControl
-      label="Theme"
-      value={mode}
-      onChange={(value) => onChange(parse(value))}
+    <IconButton
+      label={`Theme: ${label}`}
+      tooltip={`Theme: ${label}. Switch to ${MODES[next].label}`}
+      icon={<Icon icon={icon} />}
+      variant="ghost"
       size="sm"
-      layout="fill"
-    >
-      <SegmentedControlItem
-        value="system"
-        label="System"
-        icon={<Icon icon={Monitor} />}
-        isLabelHidden
-      />
-      <SegmentedControlItem value="light" label="Light" icon={<Icon icon={Sun} />} isLabelHidden />
-      <SegmentedControlItem value="dark" label="Dark" icon={<Icon icon={Moon} />} isLabelHidden />
-    </SegmentedControl>
+      onClick={() => onChange(next)}
+    />
   );
 }
