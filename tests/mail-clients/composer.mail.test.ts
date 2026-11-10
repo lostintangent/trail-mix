@@ -356,6 +356,76 @@ describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix
     await page.context().close();
   }, 60_000);
 
+  test('a draft answering mail Trail Mix never held opens as a reply, and keeps what it answers as it saves', async () => {
+    // Written in another client, in answer to mail older than the index keeps.
+    const subject = `Re: The old plan ${Date.now()}`;
+    const thread = {
+      inReplyTo: '<old-plan@example.com>',
+      references: '<first-plan@example.com> <old-plan@example.com>',
+    };
+    await withImap(alice, (client) =>
+      client.append(
+        'Drafts',
+        [
+          `Message-ID: <plan-reply-${Date.now()}@example.com>`,
+          `Date: ${new Date().toUTCString()}`,
+          `From: Alice <${alice.email}>`,
+          `To: Bob <${bob.email}>`,
+          `Subject: ${subject}`,
+          `In-Reply-To: ${thread.inReplyTo}`,
+          `References: ${thread.references}`,
+          'Content-Type: text/plain; charset=utf-8',
+          '',
+          'Still on for it?',
+          '',
+        ].join('\r\n'),
+        ['\\Draft', '\\Seen'],
+      ),
+    );
+    const page = await trailMix();
+    await page
+      .getByRole('button', { name: /^Drafts/ })
+      .first()
+      .click();
+    await page.getByRole('option').filter({ hasText: subject }).click({ timeout: 30_000 });
+    await page
+      .getByRole('region', { name: 'Reader' })
+      .getByRole('button', { name: /^Draft/ })
+      .click();
+    const reply = page.getByRole('region', { name: 'Reply' });
+    // Nothing it answers lies above it, so it fills the reader with its subject.
+    await expect(reply.getByRole('textbox', { name: 'Subject' }).inputValue()).resolves.toBe(
+      subject,
+    );
+    await reply.getByRole('textbox', { name: 'Reply' }).getByText('Still on for it?').click();
+    await page.keyboard.press('End');
+    await page.keyboard.type(' Let me know by Friday.');
+
+    // Saved over the draft it opened, which answers the same mail.
+    const saved = await until(
+      () =>
+        withImap(alice, async (client) => {
+          const lock = await client.getMailboxLock('Drafts');
+          try {
+            const found = await client.search({ subject }, { uid: true });
+            if (!Array.isArray(found) || found.length !== 1) return undefined;
+            const message = await client.fetchOne(
+              String(found[0]),
+              { source: true },
+              { uid: true },
+            );
+            const parsed = message && message.source && (await PostalMime.parse(message.source));
+            return parsed && parsed.text?.includes('Let me know by Friday.') ? parsed : undefined;
+          } finally {
+            lock.release();
+          }
+        }),
+      10_000,
+    );
+    expect({ inReplyTo: saved.inReplyTo, references: saved.references }).toEqual(thread);
+    await page.context().close();
+  }, 60_000);
+
   describe('a draft another client wrote, answering mail with remote images, loads none of them', () => {
     // A web server on this machine that counts every request, standing in for a tracking pixel.
     const asked: string[] = [];

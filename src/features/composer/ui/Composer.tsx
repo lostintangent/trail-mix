@@ -37,6 +37,7 @@ import { linkOf } from '../core/links.ts';
 import {
   addressesOf,
   addressText,
+  isAnswer,
   newMessage,
   reopened,
   replyTo,
@@ -125,6 +126,11 @@ export function Composer({ compose, ...props }: ComposerProps) {
       }
       draft={compose.as === 'draft' || compose.as === 'resumed' ? refOf(compose.draft) : undefined}
       isNew={compose.as === 'new' || !start.inReplyTo}
+      // A draft that answers mail the index doesn't hold stands alone, but is a reply all the same.
+      isReply={
+        start.inReplyTo !== undefined ||
+        (compose.as === 'draft' && body !== undefined && isAnswer(body))
+      }
       {...props}
     />
   );
@@ -156,6 +162,7 @@ function Writer({
   from,
   draft,
   isNew,
+  isReply,
   accounts,
   onDraft,
   onSend,
@@ -168,7 +175,10 @@ function Writer({
   start: Writing;
   from: EditorProps['start'];
   draft: MessageRef | undefined;
+  /** Whether it stands alone, filling the reader with its Subject, rather than under its parent. */
   isNew: boolean;
+  /** Whether it answers another message, which names it a reply. */
+  isReply: boolean;
 } & Omit<ComposerProps, 'compose'>) {
   const [writing, setWriting] = useState(start);
   const [edits, setEdits] = useState(0);
@@ -252,7 +262,7 @@ function Writer({
   const [linking, setLinking] = useState<Range>();
   const band = useVisibleBand(isSheet);
 
-  const title = isNew ? 'New message' : 'Reply';
+  const title = isReply ? 'Reply' : 'New message';
   // On a coarse pointer a tap is the only way in, and a tooltip it left would stay.
   const tip = (label: string) => (isCoarse ? undefined : label);
   const status = (
@@ -371,7 +381,7 @@ function Writer({
           imageUrl={imageUrl}
           onFiles={(dropped) => take(dropped, true)}
           onEditor={setEditor}
-          label={isNew ? 'Message' : 'Reply'}
+          label={isReply ? 'Reply' : 'Message'}
           isFocused={start.to.length > 0}
         />
         {writing.signature && (

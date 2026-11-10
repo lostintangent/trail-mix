@@ -108,6 +108,14 @@ export function reopened(draft: Message, body: Body, conversation: readonly Mess
 }
 
 /**
+ * Whether a message answers another, by its own In-Reply-To, whether or not the index holds the
+ * one it answers.
+ */
+export function isAnswer(body: Body): boolean {
+  return Boolean(header(body, 'In-Reply-To')?.trim());
+}
+
+/**
  * What a save sends of the writing: the Markdown signed, and every file it carries, except an
  * image the member has taken out of the text, which leaves the draft with it.
  */

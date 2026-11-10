@@ -431,6 +431,21 @@ describe('The Mailroom', () => {
       ...change,
     });
     const notes = () => new File(['Bring a jacket.'], 'notes.txt', { type: 'text/plain' });
+    /** What a draft on the server answers, by its own headers. */
+    const answered = async (saved: MessageRef) => {
+      const { inReplyTo, references } = await PostalMime.parse((await draftOnServer(saved)).source);
+      return { inReplyTo, references };
+    };
+    /** The message with this subject, once a check, as a device opening makes, has indexed it. */
+    const checked = async (subject: string) => {
+      const device = ada.device();
+      await device.opened;
+      await ada.until(async () =>
+        (await ada.page({ in: 'search', text: subject })).some((row) => row.subject === subject),
+      );
+      device.close();
+      return held(subject);
+    };
 
     test('writes the Markdown, a pasted image and a file as one message in Drafts, joined to its reply', async () => {
       const lunch = await held('Re: Lunch');
@@ -545,6 +560,78 @@ describe('The Mailroom', () => {
       await ada.call('move', [second], 'trash');
     }, 30_000);
 
+    test('a draft answering mail the index never held keeps what it answers through every save', async () => {
+      // Written in another client, in answer to mail older than the index keeps.
+      const subject = 'Re: Before the window';
+      const thread = {
+        inReplyTo: '<before-window@trailmix.test>',
+        references: '<first-ever@trailmix.test> <before-window@trailmix.test>',
+      };
+      await asAlice((client) =>
+        client.append(
+          'Drafts',
+          [
+            `References: ${thread.references}`,
+            raw({
+              id: 'elsewhere',
+              subject,
+              minutesAgo: 5,
+              from: alice.email,
+              to: bob.email,
+              inReplyTo: 'before-window',
+            }),
+          ].join('\r\n'),
+          ['\\Draft', '\\Seen'],
+        ),
+      );
+      const reopened = await checked(subject);
+
+      // The composer names no parent, since the conversation holds none.
+      const first = await ada.call<MessageRef>(
+        'saveDraft',
+        draft({ subject, markdown: 'Not this time.\n' }),
+        reopened,
+      );
+      expect(await answered(first)).toEqual(thread);
+      const second = await ada.call<MessageRef>(
+        'saveDraft',
+        draft({ subject, markdown: 'Not this time, sorry.\n' }),
+        first,
+      );
+      expect(await answered(second)).toEqual(thread);
+      await ada.call('move', [second], 'trash');
+    }, 30_000);
+
+    test('a reply whose parent goes between two saves saves on, answering it, and only a first save refuses', async () => {
+      await asAlice((client) =>
+        client.append('INBOX', raw({ id: 'picnic', subject: 'Picnic', minutesAgo: 5 })),
+      );
+      const picnic = await checked('Picnic');
+      const reply = (markdown: string) =>
+        draft({ subject: 'Re: Picnic', markdown, inReplyTo: picnic });
+      const first = await ada.call<MessageRef>('saveDraft', reply('Count me in.\n'));
+      await ada.call('move', [picnic], 'trash');
+      await ada.until(() =>
+        ada.call('body', picnic).then(
+          () => false,
+          (error: Error) => /no longer in this mailbox/.test(error.message),
+        ),
+      );
+
+      // The composer still names the parent it began with.
+      const second = await ada.call<MessageRef>(
+        'saveDraft',
+        reply('Count me in, rain or shine.\n'),
+        first,
+      );
+      expect(await answered(second)).toEqual({
+        inReplyTo: '<picnic@trailmix.test>',
+        references: '<picnic@trailmix.test>',
+      });
+      await expect(ada.call('saveDraft', reply('Me too.\n'))).rejects.toThrow(/replies to is gone/);
+      await ada.call('move', [second], 'trash');
+    }, 30_000);
+
     test('writes From with the name the account was last given, or the address alone', async () => {
       const from = async () => {
         const saved = await ada.call<MessageRef>('saveDraft', draft({}));
@@ -570,6 +657,8 @@ describe('The Mailroom', () => {
       ).rejects.toThrow(/only a draft of the account/);
       const saved = await ada.call<MessageRef>('saveDraft', draft({}), lunch);
       expect(await onServer('INBOX')).toContainKey('<lunch-reply@trailmix.test>');
+      // Nor does it take what a message it doesn't replace answers.
+      expect(await answered(saved)).toEqual({ inReplyTo: undefined, references: undefined });
       await ada.call('move', [saved], 'trash');
     }, 30_000);
   });

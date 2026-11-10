@@ -6,6 +6,7 @@ import { messageOf } from '../../composer/index.ts';
 import { createProblem, deleteProblem, inside, renameProblem } from '../../folders/core/index.ts';
 import {
   messageIdOf,
+  referencesOf,
   sameRef,
   writeMime,
   type Account,
@@ -317,7 +318,10 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 
   /**
    * Writes a draft as mail and files it in the account's Drafts, where it replaces the version
-   * before it. An attachment that travelled before is read from the message that holds it.
+   * before it. An attachment that travelled before is read from the message that holds it. A draft
+   * is its own authority on what it answers: one that names no parent the index holds, as a draft
+   * another client wrote may not, or whose parent went since the last save, keeps the threading of
+   * the draft it replaces. Only a first save refuses a parent that has gone.
    */
   async saveDraft(draft: DraftUpload, replaces?: MessageRef): Promise<MessageRef> {
     const checked = input.draftOf(draft);
@@ -330,8 +334,11 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     if (older && this.sending.holds(older)) {
       throw new Error('That draft is on its way. Undo the send to change it.');
     }
-    const parent = checked.inReplyTo && this.known(checked.inReplyTo);
-    if (checked.inReplyTo && !parent) throw new Error('The message this replies to is gone.');
+    const known = checked.inReplyTo && this.known(checked.inReplyTo);
+    if (checked.inReplyTo && !known && !older) {
+      throw new Error('The message this replies to is gone.');
+    }
+    const parent = known || (older && (await this.answeredBy(older)));
     const attachments: MimeAttachment[] = [];
     for (const attachment of checked.attachments) {
       if ('file' in attachment) {
@@ -754,6 +761,26 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       cc: addresses(parsed.cc),
       subject: parsed.subject ?? '',
     };
+  }
+
+  /**
+   * What a draft answers, by its own In-Reply-To and References, as a parent to thread a save to.
+   * Nothing for a message that isn't in Drafts, which no save replaces, or a draft that answers
+   * nothing. A draft that can't be read any more leaves its threading behind, never the save.
+   */
+  private async answeredBy(
+    draft: MessageRef,
+  ): Promise<Pick<Envelope, 'messageId' | 'references'> | undefined> {
+    const drafts = this.store.folders(draft.account).find((folder) => folder.role === 'drafts');
+    if (draft.path !== drafts?.path) return undefined;
+    const bytes = await this.bytes(draft).catch(() => null);
+    if (!bytes) return undefined;
+    const { references, inReplyTo } = await PostalMime.parse(bytes);
+    const thread = referencesOf(references, inReplyTo);
+    const parent = thread.at(-1);
+    return parent === undefined
+      ? undefined
+      : { messageId: parent, references: thread.slice(0, -1) };
   }
 
   /** A message the index holds, or the last full-text search found. */
