@@ -144,8 +144,13 @@ export async function kick(user: string) {
 
 /** Gives a folder a new UIDVALIDITY, which tells clients to forget everything they knew of it. */
 export async function resetUidValidity(user: string, folder: string) {
-  const uidValidity = Math.floor(Date.now() / 1000);
-  await $`${(await dovecot()).doveadm} -c ${conf} mailbox update -u ${user} --uid-validity ${uidValidity} ${folder}`.quiet();
+  const { doveadm } = await dovecot();
+  // One past the current value, because a clock-based one can equal it for a folder made this second.
+  const status =
+    await $`${doveadm} -c ${conf} mailbox status -u ${user} uidvalidity ${folder}`.text();
+  const current = Number(/uidvalidity=(\d+)/.exec(status)?.[1]);
+  if (!current) throw new Error(`No UIDVALIDITY for ${user}'s ${folder}: ${status}`);
+  await $`${doveadm} -c ${conf} mailbox update -u ${user} --uid-validity ${current + 1} ${folder}`.quiet();
 }
 
 // Dovecot's configuration
