@@ -1,7 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import { createContext, use, useEffect, useLayoutEffect } from 'react';
 import { worksWhileTyping } from './core/keys.ts';
-import { commandFor, type CommandLike } from './core/registry.ts';
+import { commandFor, matching, type CommandLike } from './core/registry.ts';
 
 /**
  * Every action is a command. One registry feeds the palette, the shortcut sheet and the visible
@@ -69,3 +69,22 @@ export function registerSearchFocus(focus: () => void): () => void {
 }
 
 export const focusSearch = () => searchFocus?.();
+
+/** How many commands the palette offers at once, best first. */
+const PALETTE_SIZE = 8;
+
+/**
+ * The commands the palette offers for what's been typed, best first: every match but the command
+ * that opens the palette, which does nothing from inside it.
+ */
+export function paletteOf(commands: readonly Command[], text: string): Command[] {
+  return matching(commands, text)
+    .filter(({ run }) => run !== focusSearch)
+    .slice(0, PALETTE_SIZE);
+}
+
+/**
+ * The palette's best match for what's in the field at this moment, from the commands bound now,
+ * for an Enter pressed before the palette has drawn what was typed.
+ */
+export const bestCommandFor = (text: string): Command | undefined => paletteOf(bound, text)[0];

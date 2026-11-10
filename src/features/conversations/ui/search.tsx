@@ -15,8 +15,10 @@ import { Search, X } from 'lucide-react';
 import { createContext, Suspense, use, useEffect, useId, useRef, useState } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import {
+  bestCommandFor,
   CommandMatches,
   isApple,
+  preloadCommandMatches,
   registerSearchFocus,
   shortcutLabel,
   type PaletteKeys,
@@ -82,10 +84,19 @@ export function SearchField() {
         } else if (
           isOpen &&
           (event.key === 'ArrowDown' || event.key === 'ArrowUp' || event.key === 'Enter') &&
-          !event.nativeEvent.isComposing &&
-          keys.current?.(event.key)
+          !event.nativeEvent.isComposing
         ) {
+          const typed = input.current?.value ?? '';
+          if (keys.current?.(event.key, typed)) {
+            event.preventDefault();
+            return;
+          }
+          // Enter pressed before the palette has drawn what was typed runs the best match for it.
+          const best = event.key === 'Enter' ? bestCommandFor(typed) : undefined;
+          if (!best) return;
           event.preventDefault();
+          done();
+          void best.run();
         }
       }}
     >
@@ -100,7 +111,10 @@ export function SearchField() {
           aria-controls={isOpen ? listId : undefined}
           aria-activedescendant={isOpen ? active : undefined}
           onChange={(event) => onSearch(event.target.value)}
-          onFocus={() => void loadScope().catch(() => {})}
+          onFocus={() => {
+            void loadScope().catch(() => {});
+            preloadCommandMatches();
+          }}
           enterKeyHint="search"
           autoComplete="off"
           spellCheck={false}

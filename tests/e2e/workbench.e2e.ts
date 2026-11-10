@@ -326,6 +326,34 @@ test('the search field is the palette: ⌘K, a click or the phone’s island ope
   await phone.context.close();
 });
 
+test('Enter runs the best match for what the field holds, even before the palette has drawn it', async () => {
+  const { context, page, problems } = await open(SIZES.desktop);
+  await page.getByRole('option').first().waitFor();
+  const field = page.getByRole('searchbox', { name: 'Search mail' });
+  await field.click();
+  // The words and Enter land in one moment, before the palette can have drawn them.
+  await field.evaluate((input: HTMLInputElement) => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(
+      input,
+      'go to outbox',
+    );
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+    );
+  });
+  await page.getByRole('heading', { name: 'Outbox', level: 2 }).waitFor({ timeout: 5_000 });
+  await expect(field.inputValue()).resolves.toBe('');
+
+  // So does a quick typist's Enter, straight after the last key.
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.keyboard.type('go to drafts');
+  await page.keyboard.press('Enter');
+  await page.getByRole('heading', { name: 'Drafts', level: 2 }).waitFor({ timeout: 5_000 });
+  expect(problems).toEqual([]);
+  await context.close();
+});
+
 test('search finds mail as it is typed, marks what matched, and reads bodies only when asked', async () => {
   const { context, page, problems } = await open(SIZES.desktop);
   const field = page.getByRole('searchbox', { name: 'Search mail' });
