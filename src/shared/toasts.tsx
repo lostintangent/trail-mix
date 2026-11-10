@@ -1,5 +1,5 @@
 import type { ToastDismissFn, ToastViewportProps } from '@astryxdesign/core/Toast';
-import { lazy, Suspense, useEffect, useState, type ReactNode } from 'react';
+import { lazy, memo, Suspense, useEffect, useState, type ReactNode } from 'react';
 
 /**
  * Toasts, kept off the first load. Astryx's toasts carry their own layers and gestures, which the
@@ -40,7 +40,7 @@ export async function toast(toast: Toast): Promise<ToastDismissFn> {
 }
 
 /** Where toasts appear, loaded a moment after the first screen or when a toast is first shown. */
-export function Toasts({ layerInset }: Pick<ToastViewportProps, 'layerInset'>) {
+export const Toasts = memo(function Toasts({ layerInset }: Pick<ToastViewportProps, 'layerInset'>) {
   const [isWanted, setWanted] = useState(wanted);
   useEffect(() => {
     if (isWanted) return;
@@ -59,7 +59,7 @@ export function Toasts({ layerInset }: Pick<ToastViewportProps, 'layerInset'>) {
       <Host layerInset={layerInset} onReady={resolveShow} />
     </Suspense>
   ) : null;
-}
+});
 
 function want() {
   wanted = true;

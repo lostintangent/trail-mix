@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, Keyboard, Search, Undo2 } from 'lucide-react';
-import type { Command } from '../../commands/index.ts';
+import { SEARCH_COMMAND, type Command } from '../../commands/index.ts';
 
 /**
  * The workbench's own commands: moving through the list, going back, undoing the last triage,
@@ -58,7 +58,7 @@ export function workbenchCommands({
       run: () => undo?.(),
     },
     {
-      id: 'search.focus',
+      id: SEARCH_COMMAND,
       title: 'Search and commands',
       group: 'Search',
       shortcut: 'Mod+K',

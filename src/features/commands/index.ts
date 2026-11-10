@@ -7,8 +7,10 @@ export {
   isApple,
   registerSearchFocus,
   runCommandKey,
+  SEARCH_COMMAND,
   useCommandKeys,
   useCommands,
+  useSteadyCommands,
   type Command,
 } from './registry.ts';
 export {

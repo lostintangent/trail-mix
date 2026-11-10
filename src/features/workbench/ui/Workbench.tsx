@@ -61,8 +61,10 @@ import {
   Commands,
   focusSearch,
   runCommandKey,
+  SEARCH_COMMAND,
   ShortcutSheet,
   useCommandKeys,
+  useSteadyCommands,
   type Command,
 } from '../../commands/index.ts';
 import { Composer, composerCommands, type Sender, type Writing } from '../../composer/ui/index.ts';
@@ -98,6 +100,9 @@ const SIDEBAR_HEADER = (
     {SEARCH_FIELD}
   </>
 );
+
+/** Where a phone's toasts rise to: above the island, where the pane's actions float. */
+const ABOVE_ISLAND = { blockEnd: `calc(${tm.target} + ${spacingVars['--spacing-1']} * 2)` };
 
 /** What the sidebar is shown while a search is typed: no mailbox open, the same at every key. */
 const SEARCHING: View = { in: 'search', text: '' };
@@ -226,6 +231,8 @@ export function Workbench({
   // On a phone the marks sit at the top of the screen, and the island files it beside a Reply.
   const readerActions = useCallback(
     ({ id, conversation, account }: Reading, place: ActionsPlace) => {
+      // A desktop shows the bar, and a phone the top and the island, so only those are drawn.
+      if (isPhone === (place === 'bar')) return null;
       const triage = (
         <TriageActions
           commands={triageCommands({
@@ -251,7 +258,7 @@ export function Workbench({
         </>
       );
     },
-    [folders, replyIn],
+    [folders, replyIn, isPhone],
   );
   // The reader's place renders again only as the list or the conversation shown changes.
   const readerPlace = useCallback(
@@ -388,7 +395,9 @@ export function Workbench({
     const row = conversations?.[at];
     return row && (() => pick(row.id, 'only'));
   };
-  const commands = [
+  // The registry is made anew each render, as the selection moves, but its commands keep their
+  // identity while they look the same, so what draws them and the palette render only on a change.
+  const commands = useSteadyCommands([
     ...selectedCommands,
     ...workbenchCommands({
       next: stepTo(anchorAt + 1),
@@ -424,7 +433,7 @@ export function Workbench({
     ...folderEditing.commands,
     ...writingCommands,
     ...extraCommands,
-  ];
+  ]);
   useCommandKeys(commands);
   const isSidebarRail = !isPhone && sidebar.isCollapsed;
   const footer = useMemo(
@@ -438,7 +447,7 @@ export function Workbench({
   );
 
   const newMessage = commands.find(({ id }) => id === 'message.new');
-  const searchAndCommands = commands.find(({ id }) => id === 'search.focus');
+  const searchAndCommands = commands.find(({ id }) => id === SEARCH_COMMAND);
   const writing =
     compose &&
     ({
@@ -475,13 +484,7 @@ export function Workbench({
       <SearchContext value={search}>
         <div {...stylex.props(styles.desk)}>
           {/* On a phone, toasts rise above the island, where the pane's actions float. */}
-          <Toasts
-            layerInset={
-              isPhone
-                ? { blockEnd: `calc(${tm.target} + ${spacingVars['--spacing-1']} * 2)` }
-                : undefined
-            }
-          />
+          <Toasts layerInset={isPhone ? ABOVE_ISLAND : undefined} />
           <div
             {...stylex.props(
               styles.track,

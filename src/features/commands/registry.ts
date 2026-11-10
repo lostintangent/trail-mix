@@ -1,5 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
-import { createContext, use, useEffect, useLayoutEffect } from 'react';
+import { createContext, use, useEffect, useLayoutEffect, useRef } from 'react';
 import { worksWhileTyping } from './core/keys.ts';
 import { commandFor, matching, type CommandLike } from './core/registry.ts';
 
@@ -44,6 +44,42 @@ export function runCommandKey(event: KeyboardEvent) {
   void command.run();
 }
 
+/**
+ * The commands as the same objects for as long as each looks the same, so a control drawn from one
+ * renders again only when what it shows changes, not each time the commands are made anew, as for
+ * each conversation the reader opens. The list stays the same while every command in it does.
+ * Running one runs the latest command of its id, so a control that didn't render again still acts
+ * on what is shown now.
+ */
+export function useSteadyCommands(commands: readonly Command[]): readonly Command[] {
+  const latest = useRef(commands);
+  useLayoutEffect(() => {
+    latest.current = commands;
+  });
+  const kept = useRef<readonly Command[]>([]);
+  const before = kept.current;
+  const now = commands.map((command) => {
+    const held = before.find(({ id }) => id === command.id);
+    return held && looksSame(command, held)
+      ? held
+      : { ...command, run: () => latest.current.find(({ id }) => id === command.id)?.run() };
+  });
+  if (now.length !== before.length || now.some((command, at) => command !== before[at])) {
+    kept.current = now;
+  }
+  return kept.current;
+}
+
+/** Whether two commands show the same: alike in everything but what running each does. */
+function looksSame(a: Command, b: Command): boolean {
+  const { run: _a, ...shownA } = a;
+  const { run: _b, ...shownB } = b;
+  const keys = Object.keys(shownA) as (keyof typeof shownA)[];
+  return (
+    keys.length === Object.keys(shownB).length && keys.every((key) => shownA[key] === shownB[key])
+  );
+}
+
 /** Binds the registry's keys while the component that gathers it is mounted. */
 export function useCommandKeys(commands: readonly Command[]) {
   useLayoutEffect(() => {
@@ -70,6 +106,9 @@ export function registerSearchFocus(focus: () => void): () => void {
 
 export const focusSearch = () => searchFocus?.();
 
+/** The id of the command that opens the palette, which the palette leaves out of what it offers. */
+export const SEARCH_COMMAND = 'search.focus';
+
 /** How many commands the palette offers at once, best first. */
 const PALETTE_SIZE = 8;
 
@@ -79,7 +118,7 @@ const PALETTE_SIZE = 8;
  */
 export function paletteOf(commands: readonly Command[], text: string): Command[] {
   return matching(commands, text)
-    .filter(({ run }) => run !== focusSearch)
+    .filter(({ id }) => id !== SEARCH_COMMAND)
     .slice(0, PALETTE_SIZE);
 }
 

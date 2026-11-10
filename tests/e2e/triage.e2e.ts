@@ -215,12 +215,21 @@ function msUntilGone(page: Page, action: string, subject: string): Promise<numbe
 test('archiving shows at once, reaches another open browser, and Undo brings it back to both', async () => {
   const [here, there] = await Promise.all([inbox(), inbox()]);
   const subject = /Invoice for October/;
-  await row(here, subject).click();
+  // The bar's controls stay as they were drawn for the conversation above, which the reader has
+  // prepared the next one beside, and act on the one J opens.
+  const place = Number(await row(here, subject).getAttribute('aria-posinset'));
+  const above = await textAt(here, place - 1);
+  await at(here, place - 1).click();
+  await shownSubject(here);
+  await here.waitForTimeout(1_500);
+  await here.keyboard.press('j');
+  await expect(shownSubject(here)).resolves.toBe('Invoice for October');
   await bar(here).getByRole('button', { name: 'Archive' }).waitFor();
 
   const release = await slowCommands(here);
   expect(await msUntilGone(here, 'Archive', 'Invoice for October')).toBeLessThan(50);
   await release();
+  await expect(textAt(here, place - 1)).resolves.toBe(above);
   await row(there, subject).waitFor({ state: 'detached', timeout: ELSEWHERE_MS });
 
   await undoButton(here).click();

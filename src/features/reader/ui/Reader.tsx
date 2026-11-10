@@ -10,7 +10,7 @@ import {
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { memo, useEffect, useState } from 'react';
+import { memo, useEffect, useState, useDeferredValue } from 'react';
 import { stampStyles } from '../../../app/theme/stamps.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Command } from '../../commands/index.ts';
@@ -50,6 +50,11 @@ export type ReaderProps = {
   hidden?: readonly MessageRef[];
   /** Opens a draft to go on writing it. Without it, a draft reads like any message. */
   onOpenDraft?: (draft: Message) => void;
+  /**
+   * Whether the member has already moved on, as a held key passes the conversation its first press
+   * opened. Its subject shows, and its messages wait until the member stays.
+   */
+  isPassing?: boolean;
 };
 
 /**
@@ -91,6 +96,7 @@ function isSameReading(before: ReaderProps, after: ReaderProps): boolean {
     before.actionsFor === after.actionsFor &&
     before.onMessageKey === after.onMessageKey &&
     before.onOpenDraft === after.onOpenDraft &&
+    before.isPassing === after.isPassing &&
     keys(before.hidden) === keys(after.hidden) &&
     ids(before) === ids(after)
   );
@@ -100,13 +106,15 @@ function isSameReading(before: ReaderProps, after: ReaderProps): boolean {
  * The conversation's messages, oldest first. A draft lies folded, and opening it goes on writing it
  * when the reader can, so the newest message that lies open is the newest one sent.
  */
-function Conversation({
+// A conversation renders again only when it changes, not when what the reader prepares does.
+const Conversation = memo(function Conversation({
   conversation,
   account,
   folders,
   actionsFor,
   hidden,
   onOpenDraft,
+  isPassing = false,
 }: Omit<ReaderProps, 'hidden' | 'folders'> & {
   hidden: readonly MessageRef[];
   folders: readonly Folder[];
@@ -120,6 +128,10 @@ function Conversation({
   // The newest opens, and the member opens earlier ones. A move gives a message a new ref, as an
   // undone archive's moves do, so an opened one is known by what it keeps: its Message-ID.
   const [opened, setOpened] = useState(() => new Set(newest ? [openedKey(newest)] : []));
+  // The subject shows in the commit that opens the conversation, so a key that opens it paints at
+  // once. Its open messages, with their frames, follow in a render of their own that yields to the
+  // next keys, and not at all while a held key passes the conversation by.
+  const isSheetsShown = useDeferredValue(!isPassing, false);
   if (!newest) return null;
   const folder = folderOf(messages, folders);
   // A draft's line already says what it is, so the count is of the mail itself, and only a
@@ -151,12 +163,14 @@ function Conversation({
             <span>Go on writing</span>
           </button>
         ) : opened.has(openedKey(message)) ? (
-          <MessageSheet
-            key={refKey(message)}
-            message={message}
-            account={account}
-            actions={actionsOf(message)}
-          />
+          isSheetsShown && (
+            <MessageSheet
+              key={refKey(message)}
+              message={message}
+              account={account}
+              actions={actionsOf(message)}
+            />
+          )
         ) : (
           <button
             key={refKey(message)}
@@ -176,7 +190,7 @@ function Conversation({
       )}
     </div>
   );
-}
+});
 
 const counted = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 

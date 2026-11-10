@@ -4,6 +4,7 @@ import { IconButton } from '@astryxdesign/core/IconButton';
 import { spacingVars, typeScaleVars, typographyVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import type { StyleXStyles } from '@stylexjs/stylex';
+import { memo } from 'react';
 import { label } from '../core/keys.ts';
 import { isApple, useCommands, type Command } from '../registry.ts';
 
@@ -13,8 +14,11 @@ import { isApple, useCommands, type Command } from '../registry.ts';
  *
  * A pane's main action, such as Write or Reply at the far end of a phone's island, is an ink-blue
  * primary button with its icon and a word instead.
+ *
+ * It renders again only when its props change, so a command that keeps its identity while it looks
+ * the same, as `useSteadyCommands` keeps it, costs nothing as what's around it renders.
  */
-export function CommandButton({
+export const CommandButton = memo(function CommandButton({
   command,
   iconStyle,
   primary,
@@ -50,7 +54,7 @@ export function CommandButton({
       onClick={() => void command.run()}
     />
   );
-}
+});
 
 /**
  * The registry's command of one id as an icon button. It finds the command as it renders, so the

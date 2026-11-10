@@ -251,10 +251,13 @@ async function until(condition: () => boolean, timeout = 2_000) {
 }
 
 async function framesFitted(page: Page) {
-  await page.waitForFunction(() =>
-    [...document.querySelectorAll('iframe')].every(
-      (frame) =>
-        frame.style.visibility === 'visible' && frame.contentDocument?.readyState === 'complete',
-    ),
+  // The open messages follow the subject in a render of their own, so wait for them to be there.
+  await page.waitForFunction(
+    () =>
+      document.querySelectorAll('article').length > 0 &&
+      [...document.querySelectorAll('iframe')].every(
+        (frame) =>
+          frame.style.visibility === 'visible' && frame.contentDocument?.readyState === 'complete',
+      ),
   );
 }

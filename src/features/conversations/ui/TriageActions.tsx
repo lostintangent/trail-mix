@@ -2,8 +2,9 @@ import { DropdownMenu, type DropdownMenuOption } from '@astryxdesign/core/Dropdo
 import { Icon } from '@astryxdesign/core/Icon';
 import * as stylex from '@stylexjs/stylex';
 import { Ellipsis, FolderInput } from 'lucide-react';
+import { memo, useMemo, type ReactNode } from 'react';
 import { tm } from '../../../app/theme/tokens.stylex.ts';
-import { CommandButton, type Command } from '../../commands/index.ts';
+import { CommandButton, useSteadyCommands, type Command } from '../../commands/index.ts';
 import { MOVE } from './commands.ts';
 
 /**
@@ -12,6 +13,9 @@ import { MOVE } from './commands.ts';
  * unread. A flagged conversation's star is marked with the highlighter. Where room is short, as in
  * a phone's island, flagging joins the menu of more. A phone's reader splits the two parts between
  * the top of the screen and the island.
+ *
+ * The reader makes its commands anew for each conversation it opens, though they mostly look the
+ * same, so the controls draw from steady commands and render again only where something changed.
  */
 export function TriageActions({
   commands,
@@ -22,22 +26,21 @@ export function TriageActions({
   part?: 'all' | 'filing' | 'marking';
   isCompact?: boolean;
 }) {
-  const command = (id: string) => commands.find((each) => each.id === id);
+  const steady = useSteadyCommands(commands);
+  const command = (id: string) => steady.find((each) => each.id === id);
   const archive = command('conversation.archive');
   const remove = command('conversation.delete');
   const flag = command('conversation.flag');
-  const asItem = ({ id, title, run }: Command): DropdownMenuOption => ({
-    id,
-    label: title,
-    onClick: () => void run(),
-  });
-  const moves = commands.filter(({ id }) => id.startsWith(MOVE)).map(asItem);
-  const more = [
-    ...(isCompact && flag ? [flag] : []),
-    ...['conversation.read', 'conversation.unread'].flatMap((id) => command(id) ?? []),
-  ]
-    .filter(({ isEnabled }) => isEnabled !== false)
-    .map(asItem);
+  // Each menu's items stay the same while its own commands do.
+  const moving = useSteadyCommands(steady.filter(({ id }) => id.startsWith(MOVE)));
+  const marking = useSteadyCommands(
+    [
+      ...(isCompact && flag ? [flag] : []),
+      ...['conversation.read', 'conversation.unread'].flatMap((id) => command(id) ?? []),
+    ].filter(({ isEnabled }) => isEnabled !== false),
+  );
+  const moves = useMemo(() => moving.map(asItem), [moving]);
+  const more = useMemo(() => marking.map(asItem), [marking]);
 
   const isFiling = part !== 'marking';
   const isMarking = part !== 'filing';
@@ -46,38 +49,42 @@ export function TriageActions({
     <>
       {isFiling && archive && <CommandButton command={archive} />}
       {isFiling && remove && <CommandButton command={remove} />}
-      {isFiling && (
-        <DropdownMenu
-          button={{
-            label: 'Move to',
-            tooltip: 'Move to',
-            icon: <Icon icon={FolderInput} />,
-            isIconOnly: true,
-            variant: 'ghost',
-          }}
-          hasChevron={false}
-          items={moves}
-        />
-      )}
+      {isFiling && <Menu label="Move to" icon={MOVE_ICON} items={moves} />}
       {isMarking && flag && !isCompact && (
         <CommandButton command={flag} iconStyle={flag.isChecked && styles.flagged} />
       )}
-      {isMarking && (
-        <DropdownMenu
-          button={{
-            label: 'More',
-            tooltip: 'More',
-            icon: <Icon icon={Ellipsis} />,
-            isIconOnly: true,
-            variant: 'ghost',
-          }}
-          hasChevron={false}
-          items={more}
-        />
-      )}
+      {isMarking && <Menu label="More" icon={MORE_ICON} items={more} />}
     </>
   );
 }
+
+const asItem = ({ id, title, run }: Command): DropdownMenuOption => ({
+  id,
+  label: title,
+  onClick: () => void run(),
+});
+
+const MOVE_ICON = <Icon icon={FolderInput} />;
+const MORE_ICON = <Icon icon={Ellipsis} />;
+
+/** A menu behind an icon button, which renders again only when its items change. */
+const Menu = memo(function Menu({
+  label,
+  icon,
+  items,
+}: {
+  label: string;
+  icon: ReactNode;
+  items: DropdownMenuOption[];
+}) {
+  return (
+    <DropdownMenu
+      button={{ label, tooltip: label, icon, isIconOnly: true, variant: 'ghost' }}
+      hasChevron={false}
+      items={items}
+    />
+  );
+});
 
 const styles = stylex.create({
   flagged: {

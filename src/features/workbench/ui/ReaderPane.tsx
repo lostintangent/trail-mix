@@ -163,6 +163,7 @@ export function ReaderPane({
               onMessageKey={onMessageKey}
               hidden={hidden}
               onOpenDraft={openDraft}
+              isPassing={shown !== selected}
             />
           </Suspense>
           {isDocked && <div {...stylex.props(styles.writing)}>{writing?.composer}</div>}
