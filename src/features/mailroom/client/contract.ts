@@ -102,9 +102,11 @@ export type DraftInput = {
   inReplyTo?: MessageRef;
   /**
    * New bytes travel once. After that, an attachment is named by the message that holds it: the
-   * draft this one replaces, or the message being forwarded.
+   * draft this one replaces, or the message being forwarded. A pasted image carries the Content-ID
+   * the Markdown shows it by as `cid:`, which the browser mints with `contentIdFor`, and stored
+   * bytes keep theirs.
    */
-  attachments: (File | { in: MessageRef; id: string })[];
+  attachments: ({ file: File; contentId?: string } | { in: MessageRef; id: string })[];
 };
 
 /** The Mailroom as the Worker reaches it: its queries and commands, and the hint socket by `fetch`. */
