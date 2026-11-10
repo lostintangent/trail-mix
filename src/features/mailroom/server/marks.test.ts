@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { foldForSearch, highlight, marksOf, type Envelope } from '../../mail/core/index.ts';
-import { envelopeIndex } from './envelope-index.ts';
+import { envelopeIndex, searchable } from './envelope-index.ts';
 import { testSql } from './test-sql.ts';
 
 /**
@@ -35,17 +35,21 @@ test('every letter and digit folds as the index stores it', () => {
     sql.run(
       `INSERT INTO search (rowid, senders, recipients, subject, preview) VALUES (?, '', '', ?, '')`,
       at + 1,
-      char,
+      searchable(char),
     ),
   );
   sql.run(`CREATE VIRTUAL TABLE terms USING fts5vocab(search, 'instance')`);
-  const stored = new Map(
-    sql
-      .all<{ term: string; doc: number }>(`SELECT term, doc FROM terms`)
-      .map(({ term, doc }) => [doc, term]),
-  );
+  // A letter NFKC spells as several words, such as ½, is stored as each of them.
+  const stored = new Map<number, string>();
+  for (const { term, doc } of sql.all<{ term: string; doc: number }>(
+    `SELECT term, doc FROM terms ORDER BY doc, offset`,
+  )) {
+    stored.set(doc, (stored.get(doc) ?? '') + term);
+  }
 
-  expect(letters.filter((char, at) => foldForSearch(char) !== stored.get(at + 1))).toEqual([]);
+  expect(letters.filter((char, at) => foldForSearch(char) !== (stored.get(at + 1) ?? ''))).toEqual(
+    [],
+  );
 });
 
 /** Subjects that each test one way folding can go wrong. */

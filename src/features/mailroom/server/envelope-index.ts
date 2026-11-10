@@ -108,10 +108,10 @@ export function envelopeIndex(sql: Sql) {
       sql.run(
         `INSERT INTO search (rowid, senders, recipients, subject, preview) VALUES (?, ?, ?, ?, ?)`,
         inserted!.rowid,
-        senders,
-        recipients,
-        message.subject,
-        message.preview,
+        searchable(senders),
+        searchable(recipients),
+        searchable(message.subject),
+        searchable(message.preview),
       );
       for (const id of linkIdsOf(message)) {
         sql.run(
@@ -413,6 +413,12 @@ function positionOf(cursor: PageCursor): [date: string, id: string] {
 
 /** A folder as a map key. */
 const placeOf = ({ account, path }: FolderRef) => JSON.stringify([account, path]);
+
+/**
+ * Text as the index keeps it for search. A search's words are NFKC-normalized, so what they are
+ * matched against is too, and a ligature or a fullwidth letter matches its plain form either way.
+ */
+export const searchable = (text: string) => text.normalize('NFKC');
 
 /** What search reads of a message's people: names and addresses, each as written. */
 function searchTextOf({ from, to, cc }: Message) {

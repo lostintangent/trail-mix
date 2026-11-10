@@ -283,6 +283,20 @@ describe('search', () => {
     expect(store.search('  "* ')).toEqual({ items: [] });
   });
 
+  test('finds a ligature or a fullwidth word by its plain form, and the other way round', () => {
+    const store = fresh();
+    store.fold(
+      arrive(
+        envelope('Oﬃce ﬁle', { date: '2026-11-02T08:00:00.000Z' }),
+        envelope('Ｔｏｋｙｏ office file', { date: '2026-11-01T08:00:00.000Z' }),
+      ),
+    );
+    expect(found(store, 'office file')).toEqual(['Oﬃce ﬁle', 'Ｔｏｋｙｏ office file']);
+    expect(found(store, 'oﬃ ﬁ')).toEqual(['Oﬃce ﬁle', 'Ｔｏｋｙｏ office file']);
+    expect(found(store, 'tokyo')).toEqual(['Ｔｏｋｙｏ office file']);
+    expect(found(store, 'ｔｏｋ')).toEqual(['Ｔｏｋｙｏ office file']);
+  });
+
   test('finds across every account, one row per conversation, and pages newest first', () => {
     const store = fresh();
     const first = envelope('Lunch', { date: '2026-11-01T08:00:00.000Z' });

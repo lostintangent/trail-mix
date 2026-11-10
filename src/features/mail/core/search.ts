@@ -60,9 +60,11 @@ function markedLength(word: string, marks: Marks): number {
 }
 
 /**
- * Text as the index compares it, folded as FTS5's `unicode61 remove_diacritics 2` tokenizer folds:
- * lowercase, and a Latin letter on an ASCII base without its accents. Nothing else is spelled out,
- * so a ligature, a fullwidth letter or a Cyrillic й stays itself.
+ * Text as the index compares it: NFKC-normalized, as the index keeps it, so a ligature or a
+ * fullwidth letter is its plain form, then folded as FTS5's `unicode61 remove_diacritics 2`
+ * tokenizer folds: lowercase, and a Latin letter on an ASCII base without its accents. Nothing else
+ * is spelled out, so a Cyrillic й stays itself. A character NFKC spells as several words, such as
+ * ½, folds to them run together, so only its first word marks it.
  */
 export function foldForSearch(text: string): string {
   let folded = '';
@@ -71,6 +73,16 @@ export function foldForSearch(text: string): string {
 }
 
 function foldChar(char: string): string {
+  let folded = '';
+  for (const compatible of char.normalize('NFKC')) {
+    if (LETTER.test(compatible)) folded += foldLetter(compatible);
+  }
+  return folded;
+}
+
+const LETTER = /[\p{L}\p{N}]/u;
+
+function foldLetter(char: string): string {
   const special = FTS5_FOLDS[char];
   if (special !== undefined) return special;
   const decomposed = char.normalize('NFD');

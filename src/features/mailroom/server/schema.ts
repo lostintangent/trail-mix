@@ -122,6 +122,19 @@ export const versions: readonly (readonly string[])[] = [
     // owns it, so nothing rebuilds it.
     `CREATE TABLE outbox (id TEXT PRIMARY KEY, account TEXT NOT NULL, outgoing TEXT NOT NULL)`,
   ],
+  [
+    // Search keeps its text NFKC-normalized, as a search's words are, so the index rebuilds.
+    `DROP TABLE search`,
+    `CREATE VIRTUAL TABLE search USING fts5(
+      senders, recipients, subject, preview,
+      tokenize = 'unicode61 remove_diacritics 2'
+    )`,
+    `DELETE FROM messages`,
+    `DELETE FROM links`,
+    `DELETE FROM conversations`,
+    `DELETE FROM placements`,
+    `UPDATE folders SET cursor = NULL`,
+  ],
 ];
 
 /**
