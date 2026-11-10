@@ -1,6 +1,7 @@
 import { chromium, type Page } from 'playwright';
 import { startPreview } from '../e2e/preview.ts';
 import { slowDown } from './phone.ts';
+import { watch } from './steady.ts';
 import { percentile, type BenchArea } from './budget.ts';
 
 /**
@@ -41,15 +42,16 @@ export const reader: BenchArea = {
 
       // Cold: after the app has idled as long as the prepared case does, the newsletter opened by
       // a click, its body fetched and sanitized only then.
-      const cold = await desktop(preview.url);
+      const { page: cold, watcher: coldWatcher } = await desktop(preview.url);
       await cold.waitForTimeout(IDLE_MS);
-      const coldOpen = await timed(cold, () =>
-        cold.getByRole('option').filter({ hasText: NEWSLETTER }).first().click(),
+      await coldWatcher.steady();
+      const coldOpen = await coldWatcher.during('Cold open', () =>
+        timed(cold, () => cold.getByRole('option').filter({ hasText: NEWSLETTER }).first().click()),
       );
       await cold.context().close();
 
       // Prepared: the conversation above the newsletter is open, the browser idles, then Down.
-      const page = await desktop(preview.url);
+      const { page, watcher } = await desktop(preview.url);
       const rows = page.getByRole('option');
       const at = await rows.evaluateAll(
         (options, name) =>
@@ -59,8 +61,13 @@ export const reader: BenchArea = {
       await rows.nth(at - 1).click();
       await page.waitForTimeout(IDLE_MS);
       const moves: number[] = [];
-      for (let round = 0; round < 5; round++) {
-        moves.push(await timed(page, () => press(page, 'ArrowDown')));
+      for (let round = 1; round <= 5; round++) {
+        await watcher.steady();
+        moves.push(
+          await watcher.during(`Prepared move ${round}`, () =>
+            timed(page, () => press(page, 'ArrowDown')),
+          ),
+        );
         await press(page, 'ArrowUp');
         await page.waitForTimeout(IDLE_MS / 3);
       }
@@ -70,6 +77,7 @@ export const reader: BenchArea = {
       // repeat opens the next conversation at once. The later repeats never let the selection
       // rest, so the reader shows nothing more until the key comes up.
       await page.waitForTimeout(IDLE_MS);
+      await watcher.steady();
       await timed(page, () => press(page, 'ArrowDown'));
       // The list draws only the rows near the selection, so the next row is found by position.
       const next = await page.evaluate(() => {
@@ -78,7 +86,7 @@ export const reader: BenchArea = {
         return document.querySelector(`[role="option"][aria-posinset="${position}"]`)?.textContent;
       });
       await page.waitForTimeout(REPEAT_DELAY_MS);
-      const held = await heldKey(page);
+      const held = await watcher.during('Holding a key', () => heldKey(page));
       await page.context().close();
       if (held.shown.length > 1 || !held.shown.every((subject) => next?.includes(subject))) {
         throw new Error(
@@ -112,14 +120,18 @@ export const reader: BenchArea = {
       await preview.stop();
     }
 
-    /** The app on a desktop, where the list stays in view as its selection opens, slowed down. */
-    async function desktop(url: string): Promise<Page> {
+    /**
+     * The app on a desktop, where the list stays in view as its selection opens, slowed down, and
+     * watched from before it loads.
+     */
+    async function desktop(url: string) {
       const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
       const page = await context.newPage();
+      const watcher = watch(page);
       await slowDown(page);
       await page.goto(url);
       await page.waitForSelector('[role="option"]', { timeout: 30_000 });
-      return page;
+      return { page, watcher };
     }
   },
 };
