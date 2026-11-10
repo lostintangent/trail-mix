@@ -6,6 +6,7 @@ import { messageOf } from '../../composer/index.ts';
 import { createProblem, deleteProblem, inside, renameProblem } from '../../folders/core/index.ts';
 import {
   messageIdOf,
+  sameRef,
   writeMime,
   type Account,
   type AccountId,
@@ -47,7 +48,7 @@ import { envelopeIndex, pageAfter, type EnvelopeIndex } from './envelope-index.t
 import * as input from './input.ts';
 import { upgrade, type Sql, type SqlValue } from './schema.ts';
 import { outboxQueue, type OutboxQueue } from './outbox.ts';
-import { foundOf, opened, sameRef, type Found } from './search.ts';
+import { foundOf, opened, type Found } from './search.ts';
 import { syncQueue, type SyncQueue } from './sync.ts';
 
 export type MailroomEnv = {

@@ -1,10 +1,10 @@
 import {
   applySyncEvent,
+  sameRef,
   type ConversationId,
   type ConversationSummary,
   type Envelope,
   type Message,
-  type MessageRef,
 } from '../../mail/core/index.ts';
 import { matchedRow, summaryOf, type EnvelopeIndex } from './envelope-index.ts';
 
@@ -73,9 +73,3 @@ export function opened(
   );
   return [...indexed, ...extra].sort((a, b) => a.date.localeCompare(b.date));
 }
-
-export const sameRef = (a: MessageRef, b: MessageRef) =>
-  a.account === b.account &&
-  a.path === b.path &&
-  a.uidValidity === b.uidValidity &&
-  a.uid === b.uid;
