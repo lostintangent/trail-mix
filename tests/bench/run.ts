@@ -1,4 +1,5 @@
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { availableParallelism, cpus } from 'node:os';
 import { join } from 'node:path';
 import type { BenchArea, Measurement } from './budget.ts';
 
@@ -25,8 +26,9 @@ if (unknown.length > 0) {
 // first, while nothing else the bench starts is running yet.
 const BROWSER_AREAS = ['workbench', 'reader'];
 const areas = named.length > 0 ? named : AREAS;
-if (areas.some((name) => BROWSER_AREAS.includes(name)))
-  await (await import('./phone.ts')).calibrate();
+const phone = areas.some((name) => BROWSER_AREAS.includes(name))
+  ? await (await import('./phone.ts')).calibrate()
+  : undefined;
 
 // Each area loads only when it runs. The workbench drives a browser and the Mailroom a Worker, so
 // neither carries the other's tools, and each type-checks against its own runtime.
@@ -51,6 +53,10 @@ const out = join(import.meta.dir, '../../test-results');
 mkdirSync(out, { recursive: true });
 writeFileSync(join(out, 'bench.json'), JSON.stringify(results, null, 2));
 if (over.length > 0) {
-  console.error(`${over.length} of ${results.length} budgets exceeded.`);
+  // CI runs on several CPU models, so a failure names the machine it was measured on.
+  const [cpu] = cpus();
+  const machine = `${cpu?.model.trim() ?? 'an unknown CPU'}, ${availableParallelism()} cores`;
+  const slowdown = phone ? `, the phone at ${phone.rate.toFixed(2)}x slowdown` : '';
+  console.error(`${over.length} of ${results.length} budgets exceeded on ${machine}${slowdown}.`);
   process.exit(1);
 }
