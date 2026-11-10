@@ -1,11 +1,12 @@
 import { chromium, type Page } from 'playwright';
 import { startPreview } from '../e2e/preview.ts';
+import { slowDown } from './phone.ts';
 import { percentile, type BenchArea } from './budget.ts';
 
 /**
  * The reader's budget, as AGENTS.md sets it: moving by key to a conversation whose newest message
  * is 300 KB of HTML renders within 200 ms, its body fetched and sanitized ahead while the browser
- * was idle. It runs on the built app with a 50,000-message demo mailbox at 4x CPU slowdown, and
+ * was idle. It runs on the built app with a 50,000-message demo mailbox at the phone's CPU, and
  * moves onto the demo's Kernel Weekly, which is that newsletter.
  *
  * The first open of the same newsletter, cold, with nothing prepared, is printed beside it.
@@ -81,8 +82,7 @@ export const reader: BenchArea = {
     async function desktop(url: string): Promise<Page> {
       const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
       const page = await context.newPage();
-      const cdp = await context.newCDPSession(page);
-      await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+      await slowDown(page);
       await page.goto(url);
       await page.waitForSelector('[role="option"]', { timeout: 30_000 });
       return page;

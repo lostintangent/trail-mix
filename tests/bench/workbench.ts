@@ -1,12 +1,13 @@
 import { gzipSync } from 'node:zlib';
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import { chromium, type Page } from 'playwright';
 import { startPreview } from '../e2e/preview.ts';
 import { percentile, type BenchArea, type Measurement } from './budget.ts';
+import { phone, slowDown } from './phone.ts';
 
 /**
  * The workbench's budgets, as AGENTS.md sets them: a cold load to the first Inbox rows, the
  * JavaScript that load needs, scrolling a 50,000-message folder, and moving through it by key. Each
- * runs on the built app with a 50,000-message demo mailbox, on a phone profile at 4x CPU slowdown.
+ * runs on the built app with a 50,000-message demo mailbox, at the CPU of the phone in `phone.ts`.
  */
 const BUDGET = { coldLoad: 1000, firstLoadJs: 250, scrollFrame: 1000 / 60, keyMove: 50 };
 
@@ -82,20 +83,6 @@ export const workbench: BenchArea = {
 
 function measured(name: string, value: number, budget: number, unit: Measurement['unit']) {
   return { area: 'workbench', name, value, budget, unit };
-}
-
-function phone(browser: Browser): Promise<BrowserContext> {
-  return browser.newContext({
-    viewport: { width: 390, height: 844 },
-    isMobile: true,
-    hasTouch: true,
-    deviceScaleFactor: 3,
-  });
-}
-
-async function slowDown(page: Page): Promise<void> {
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
 }
 
 /** Milliseconds from navigation until the first conversation row is on screen. */
