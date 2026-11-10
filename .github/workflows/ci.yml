@@ -155,8 +155,19 @@ jobs:
       - name: Install
         run: bun install --frozen-lockfile
 
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-chromium-${{ hashFiles('bun.lock') }}
+
+      # The reader renders the demo mailbox, read through the Mailroom on workerd, in Chromium.
+      - name: Install Chromium
+        run: bunx playwright install --with-deps chromium
+
       - name: Mail tests
         run: bun run test:mail
+        env:
+          READER_BROWSERS: chromium
 
       # The bench's 50,000 messages take half a minute to load into the test mail server, so they
       # are kept between runs until what the demo says changes.
