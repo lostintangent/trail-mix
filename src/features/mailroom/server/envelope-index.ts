@@ -1,6 +1,7 @@
 import {
   applySyncEvent,
   linkIdsOf,
+  searchWords,
   type ConversationId,
   type ConversationSummary,
   type Folder,
@@ -389,11 +390,7 @@ function pageOf(rows: { summary: string; date: string; id: string }[], size: num
  * Words are runs of letters and digits, so nothing typed can be FTS5 syntax. Nothing, without one.
  */
 export function matchOf(text: string): string | undefined {
-  const words =
-    text
-      .normalize('NFKC')
-      .match(/[\p{L}\p{N}]+/gu)
-      ?.slice(0, 16) ?? [];
+  const words = searchWords(text).slice(0, 16);
   return words.length ? words.map((word) => `"${word}"*`).join(' ') : undefined;
 }
 
