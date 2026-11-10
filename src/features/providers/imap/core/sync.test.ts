@@ -262,16 +262,19 @@ test('an envelope the server did not return is asked for again, and none it was 
 });
 
 test('a folder of 50,000 messages riddled with gaps keeps a cursor under 64 KB, flags and all', () => {
-  const mailbox = new Mailbox();
   const random = generator(7);
-  for (let i = 0; i < 80_000; i++) mailbox.deliver(undefined, random() < 0.97 ? read : unread);
-  // Moving and deleting leaves a gap after roughly every third message.
-  for (const uid of [...mailbox.messages.keys()]) if (random() < 0.375) mailbox.expunge(uid);
-  let synced = sync(mailbox, null, OUTLOOK);
-  while (synced.more) synced = sync(mailbox, synced.cursor, OUTLOOK);
+  // Moving and deleting leaves a gap after roughly every third message, and most mail is read.
+  const envelopes = Array.from({ length: 80_000 }, (_, i) =>
+    message(1, i + 1, '2026-11-09T12:00:00.000Z', random() < 0.97 ? read : unread),
+  ).filter(() => random() >= 0.375);
+  const state = { uidValidity: 1, uidNext: 80_001, inWindow: envelopes.map(({ uid }) => uid) };
 
-  expect(mailbox.messages.size).toBeGreaterThan(49_000);
-  expect(synced.cursor.length).toBeLessThan(64 * 1024);
+  // The whole folder in one batch, so the test measures the cursor rather than a hundred syncs.
+  const { cursor, more } = planSync(INBOX, null, state, envelopes.length).reconcile({ envelopes });
+
+  expect(more).toBe(false);
+  expect(envelopes.length).toBeGreaterThan(49_000);
+  expect(cursor.length).toBeLessThan(64 * 1024);
 });
 
 test('IMAP flags are read without regard to case, and keywords are left out', () => {
