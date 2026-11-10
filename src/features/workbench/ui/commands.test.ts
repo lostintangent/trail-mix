@@ -68,10 +68,7 @@ test('every key resolves to its own command, and typing a command’s title find
     const commands = registry(isUnread);
     for (const command of commands.filter(({ isEnabled }) => isEnabled !== false)) {
       const words = command.title.split(' ');
-      expect({ typed: command.title, found: matching(commands, command.title) }).toEqual({
-        typed: command.title,
-        found: expect.arrayContaining([command]),
-      });
+      expect(matching(commands, command.title)).toContain(command);
       const start = words.slice(0, 2).join(' ').toLowerCase();
       expect(matching(commands, start)).toContain(command);
       if (command.shortcut) {
