@@ -86,6 +86,7 @@ function Desk({
       folders={folders}
       counts={counts}
       conversations={conversations}
+      hasMore={hasNextPage}
       isFetching={isFetching}
       onListNearEnd={onListNearEnd}
       sidebarFooter={sidebarFooter}

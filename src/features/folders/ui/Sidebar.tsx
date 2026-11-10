@@ -311,6 +311,9 @@ const styles = stylex.create({
   },
   header: {
     flexShrink: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: spacingVars['--spacing-2'],
     padding: '1px',
     paddingBottom: spacingVars['--spacing-2'],
   },

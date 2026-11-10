@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Keyboard, Search, Undo2 } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Keyboard, Search, Undo2 } from 'lucide-react';
 import type { Command } from '../../commands/index.ts';
 
 /**
@@ -27,7 +27,7 @@ export function workbenchCommands({
       title: 'Next conversation',
       group: 'Move',
       shortcut: 'J',
-      icon: ArrowDown,
+      icon: ChevronRight,
       isEnabled: next !== undefined,
       run: () => next?.(),
     },
@@ -36,7 +36,7 @@ export function workbenchCommands({
       title: 'Previous conversation',
       group: 'Move',
       shortcut: 'K',
-      icon: ArrowUp,
+      icon: ChevronLeft,
       isEnabled: previous !== undefined,
       run: () => previous?.(),
     },

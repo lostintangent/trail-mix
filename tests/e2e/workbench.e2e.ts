@@ -353,6 +353,51 @@ test('search finds mail as it is typed, marks what matched, and reads bodies onl
   await context.close();
 }, 30_000);
 
+test('the reader says where its conversation sits, and steps to the ones either side', async () => {
+  const { context, page, problems } = await open(SIZES.desktop);
+  const bar = page.getByRole('toolbar', { name: 'Conversation' });
+  const rows = page.getByRole('option');
+  const loaded = async () => Number(await rows.first().getAttribute('aria-setsize'));
+  // The reader shows the selected row once its keys rest, and says where that row sits.
+  const shows = (place: string) =>
+    page.waitForFunction(
+      (place) => {
+        const title = document.querySelector('section[aria-label="Reader"] h1')?.textContent;
+        const row = document.querySelector('[role="option"][aria-selected="true"]');
+        const bar = document.querySelector('[role="toolbar"][aria-label="Conversation"]');
+        return title && row?.textContent?.includes(title) && bar?.textContent?.includes(place);
+      },
+      place,
+      { timeout: 5_000 },
+    );
+
+  // The Inbox has more than its first page, which the place says until the rest are loaded.
+  await openConversation(page, 1);
+  await shows(`2 of ${await loaded()}+`);
+  await bar.getByRole('button', { name: 'Next conversation' }).click();
+  await shows(`3 of ${await loaded()}+`);
+  await bar.getByRole('button', { name: 'Previous conversation' }).click();
+  await shows(`2 of ${await loaded()}+`);
+
+  // A folder whose conversations all came in one page has nothing more to say.
+  await page
+    .getByRole('region', { name: 'Work' })
+    .getByRole('button', { name: /^Receipts/ })
+    .click();
+  await rows.first().click();
+  await shows(`1 of ${await loaded()}`);
+  expect(await bar.textContent()).not.toContain(`1 of ${await loaded()}+`);
+
+  // New message tops the sidebar, and opens a message of its own.
+  await page
+    .getByRole('navigation', { name: 'Mailboxes' })
+    .getByRole('button', { name: 'New message' })
+    .click();
+  await page.getByRole('region', { name: 'New message' }).waitFor({ timeout: 5_000 });
+  expect(problems).toEqual([]);
+  await context.close();
+}, 30_000);
+
 /**
  * Opens a conversation from the unified Inbox and waits for its mail. On a phone it first goes back
  * to the list, from the reader or the folders.

@@ -36,6 +36,7 @@ import { ListPane } from './ListPane.tsx';
 import { PanelEdge } from './PanelEdge.tsx';
 import { PANELS } from './panels.ts';
 import { ReaderPane, type Reading } from './ReaderPane.tsx';
+import { ReaderPlace } from './ReaderPlace.tsx';
 import {
   NOTHING_SELECTED,
   rowChange,
@@ -54,6 +55,7 @@ import { PickedActions, SelectionPane } from './SelectionPane.tsx';
 import { workbenchCommands } from './commands.ts';
 import {
   CommandButton,
+  PrimaryCommandButton,
   Commands,
   focusSearch,
   runCommandKey,
@@ -84,6 +86,17 @@ type Pane = 'sidebar' | 'list' | 'reader';
 /** The one search field, wherever it sits. It reads the search from `SearchContext`. */
 const SEARCH_FIELD = <SearchField />;
 
+/**
+ * The top of a desktop's sidebar: New message, then the search field. Each reads what it shows as
+ * it renders, so the sidebar, memoized around this, doesn't render again with every key.
+ */
+const SIDEBAR_HEADER = (
+  <>
+    <PrimaryCommandButton id="message.new" />
+    {SEARCH_FIELD}
+  </>
+);
+
 /** What the sidebar is shown while a search is typed: no mailbox open, the same at every key. */
 const SEARCHING: View = { in: 'search', text: '' };
 
@@ -102,6 +115,7 @@ export function Workbench({
   folders,
   counts,
   conversations,
+  hasMore,
   isFetching,
   onListNearEnd,
   sidebarFooter,
@@ -114,6 +128,8 @@ export function Workbench({
   counts: ViewCounts;
   /** Nothing until the view's first page arrives. */
   conversations: readonly ConversationSummary[] | undefined;
+  /** Whether the view has pages beyond those loaded. */
+  hasMore: boolean;
   /** Whether the view's rows are on their way. */
   isFetching: boolean;
   /** Asks for the view's next page, if it has one. */
@@ -141,8 +157,8 @@ export function Workbench({
   const listId = useId();
   const { title, unread, scope } = describeView(view, accounts, folders, counts);
   const { search, marks, searchBodies } = useSearch(view, onViewChange);
-  // On a desktop the sidebar's box is the search field. On a phone, or while the sidebar is a rail,
-  // the field sits above the list instead.
+  // On a desktop New message and the search field top the sidebar. On a phone, or while the sidebar
+  // is a rail, the field sits above the list and New message in the list's header or island.
   const isFieldInSidebar = !isPhone && !sidebar.isCollapsed;
   // Panes off a phone's screen are inert, so focus and assistive tech stay on the one in view.
   const isOffscreen = (pane: Pane) => isPhone && pane !== phonePane;
@@ -227,6 +243,17 @@ export function Workbench({
       );
     },
     [folders, replyIn],
+  );
+  // The reader's place renders again only as the list or the conversation shown changes.
+  const readerPlace = useCallback(
+    (shown: ConversationId) => (
+      <ReaderPlace
+        at={(conversations?.findIndex(({ id }) => id === shown) ?? -1) + 1}
+        of={conversations?.length ?? 0}
+        hasMore={hasMore}
+      />
+    ),
+    [conversations, hasMore],
   );
 
   // Moving the selection re-renders only what shows it: the list, its two changed rows, and the
@@ -448,7 +475,7 @@ export function Workbench({
                 editing={folderEditing.editing}
                 onEdited={folderEditing.onEdited}
                 folderMenu={rowMenu}
-                header={isFieldInSidebar ? SEARCH_FIELD : undefined}
+                header={isFieldInSidebar ? SIDEBAR_HEADER : undefined}
                 footer={footer}
               />
               <PanelEdge
@@ -510,7 +537,7 @@ export function Workbench({
                 onExpand={() => setList({ ...list, isCollapsed: false })}
                 onShowFolders={() => setPhonePane('sidebar')}
                 find={searchAndCommands && <CommandButton command={searchAndCommands} />}
-                write={newMessage && <CommandButton command={newMessage} />}
+                write={newMessage && !isFieldInSidebar && <CommandButton command={newMessage} />}
                 actions={
                   view.in === 'folder' && (
                     <Suspense>
@@ -540,6 +567,7 @@ export function Workbench({
                   upcoming={neighbors(conversations, selected)}
                   onShown={markRead}
                   actions={readerActions}
+                  place={readerPlace}
                   onMessageKey={runCommandKey}
                   writing={writing}
                   hidden={composing.hidden}

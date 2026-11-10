@@ -45,6 +45,7 @@ export function ReaderPane({
   upcoming,
   onShown,
   actions,
+  place,
   onMessageKey,
   writing,
   hidden,
@@ -65,6 +66,8 @@ export function ReaderPane({
    * the island at the bottom of the screen, which has room for fewer.
    */
   actions?: (reading: Reading, place: 'bar' | 'island') => ReactNode;
+  /** Where the conversation shown sits in the list, at the end of a desktop's bar. */
+  place?: (shown: ConversationId) => ReactNode;
   /** Keys pressed inside a message, which the window never hears. The same function each render. */
   onMessageKey?: (event: KeyboardEvent) => void;
   /**
@@ -92,6 +95,7 @@ export function ReaderPane({
   // Made once for each conversation shown, so the moves of a held key pass them by.
   const bar = useMemo(() => reading && actions?.(reading, 'bar'), [reading, actions]);
   const island = useMemo(() => reading && actions?.(reading, 'island'), [reading, actions]);
+  const placed = useMemo(() => reading && place?.(reading.id), [reading, place]);
   const isShowing = reading !== undefined;
   const openDraft = useMemo(
     () => reading && onOpenDraft && ((draft: Message) => onOpenDraft(draft, reading.conversation)),
@@ -129,6 +133,7 @@ export function ReaderPane({
       {bar && !isFilled ? (
         <div role="toolbar" aria-label="Conversation" {...stylex.props(styles.bar)}>
           <Suspense>{bar}</Suspense>
+          {placed}
         </div>
       ) : null}
       {isFilled ? null : reading ? (
