@@ -62,6 +62,45 @@ describe('the check command', () => {
     expect(exit).toBe(0);
   });
 
+  test('reaches the server names it is given, with the preset’s ports and TLS', async () => {
+    const { alice } = users;
+    const at = async (host: string) => {
+      const run = check(
+        '--preset',
+        'test',
+        '--user',
+        alice.email,
+        '--imap-host',
+        host,
+        '--smtp-host',
+        host,
+      );
+      void run.stdin.write(`${alice.password}\n`);
+      void run.stdin.end();
+      const [out, exit] = await Promise.all([new Response(run.stdout).text(), run.exited]);
+      const [header = '', ...lines] = out.trim().split('\n');
+      return { header, lines, exit };
+    };
+    const checks = [
+      `list folders and fetch a message over ${ports.imaps}`,
+      `send to self over ${ports.submissions} (implicit TLS)`,
+      `send to self over ${ports.submission} (STARTTLS)`,
+    ];
+
+    // The test mail server's certificate names its address too, so it answers there as well.
+    const address = await at('127.0.0.1');
+    expect(address.header).toEndWith('at 127.0.0.1:');
+    expect(address.lines.map((line) => line.slice(0, 4))).toEqual(['PASS', 'PASS', 'PASS']);
+    checks.forEach((check, i) => expect(address.lines[i]).toContain(check));
+    expect(address.exit).toBe(0);
+
+    // A name that resolves nowhere fails every check, so none of them went to the preset's host.
+    const nowhere = await at('nowhere.invalid');
+    expect(nowhere.lines.map((line) => line.slice(0, 4))).toEqual(['FAIL', 'FAIL', 'FAIL']);
+    checks.forEach((check, i) => expect(nowhere.lines[i]).toContain(check));
+    expect(nowhere.exit).toBe(1);
+  });
+
   test('fails, and says why, when the password is wrong', async () => {
     const run = check('--preset', 'test', '--user', users.alice.email);
     void run.stdin.write('not-the-password\n');

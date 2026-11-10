@@ -44,7 +44,7 @@ test('an account change keeps only a name, a From name, a stamp and a signature'
 test('an IMAP account needs both hosts unless a preset supplies them, and keeps its password as typed', () => {
   const host = { host: 'mail.example.com', port: 993, secure: true };
   const account = { provider: 'imap' as const, name: 'Me', address: 'me@example.com' };
-  expect(setupOf({ ...account, preset: 'zoho', password: ' p ', imap: host })).toEqual({
+  expect(setupOf({ ...account, preset: 'zoho', password: ' p ' })).toEqual({
     ...account,
     preset: 'zoho',
     password: ' p ',
@@ -58,6 +58,25 @@ test('an IMAP account needs both hosts unless a preset supplies them, and keeps 
     ...account,
     preset: 'outlook',
   });
+});
+
+test('a preset keeps the hosts its account lists, both or neither', () => {
+  const imap = { host: 'imap.example.com', port: 993, secure: true };
+  const smtp = { host: 'smtp.example.com', port: 465, secure: true };
+  const account = { provider: 'imap' as const, name: 'Me', address: 'me@example.com' };
+  expect(setupOf({ ...account, preset: 'zoho', password: 'p', imap, smtp })).toEqual({
+    ...account,
+    preset: 'zoho',
+    imap,
+    smtp,
+    password: 'p',
+  });
+  // Half a pair would reach one of the account's servers and one of somebody else's.
+  expect(() => setupOf({ ...account, preset: 'zoho', password: 'p', imap })).toThrow(TypeError);
+  expect(() => setupOf({ ...account, preset: 'zoho', password: 'p', smtp })).toThrow(TypeError);
+  expect(() =>
+    setupOf({ ...account, preset: 'zoho', password: 'p', imap, smtp: { ...smtp, port: 0 } }),
+  ).toThrow(TypeError);
 });
 
 test('an account’s From name is one line, and an empty one is no name', () => {

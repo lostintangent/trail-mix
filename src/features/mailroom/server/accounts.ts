@@ -1,5 +1,11 @@
 import type { Account, AccountId, StampColor } from '../../mail/core/index.ts';
-import type { DemoKind, DemoMailbox, Endpoint } from '../../providers/index.ts';
+import {
+  PRESETS,
+  type DemoKind,
+  type DemoMailbox,
+  type Endpoint,
+  type PresetName,
+} from '../../providers/index.ts';
 import type { Sql } from './schema.ts';
 
 /**
@@ -13,6 +19,29 @@ export type AccountBook = ReturnType<typeof accountBook>;
 export type Connection =
   | { provider: 'imap'; imap: Endpoint; smtp: Endpoint; user: string; filesSent: boolean }
   | { provider: 'demo'; kind: DemoKind };
+
+/**
+ * How an account that signs in with a password is reached: through the endpoints it was given, or
+ * else its preset's. Quirks always come from the preset.
+ */
+export function connectionOf(setup: {
+  address: string;
+  preset?: PresetName;
+  imap?: Endpoint;
+  smtp?: Endpoint;
+}): Extract<Connection, { provider: 'imap' }> {
+  const preset = setup.preset && PRESETS[setup.preset];
+  const imap = setup.imap ?? preset?.imap;
+  const smtp = setup.smtp ?? preset?.smtp;
+  if (!imap || !smtp) throw new TypeError('Without a preset, both hosts are needed.');
+  return {
+    provider: 'imap',
+    imap,
+    smtp,
+    user: setup.address,
+    filesSent: preset?.filesSent ?? false,
+  };
+}
 
 /** Stamps go to accounts in this order, each to the first account without one in use. */
 export const STAMPS: readonly StampColor[] = [

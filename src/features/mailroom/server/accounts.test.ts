@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
-import { DEMO_ACCOUNTS, demoMailbox } from '../../providers/index.ts';
-import { accountBook, demoSettings, type Connection } from './accounts.ts';
+import { DEMO_ACCOUNTS, demoMailbox, PRESETS } from '../../providers/index.ts';
+import { accountBook, connectionOf, demoSettings, type Connection } from './accounts.ts';
 import { upgrade } from './schema.ts';
 import { testSql } from './test-sql.ts';
 
@@ -87,4 +87,24 @@ test('a demo account from before From names writes as its demo person, and IMAP 
     ['mail', undefined],
     ['demo', DEMO_ACCOUNTS.personal.me.name],
   ]);
+});
+
+test('an account is reached through the hosts it was given, or else its preset’s, with the preset’s quirks', () => {
+  const address = 'me@example.com';
+  const imap = { host: 'imap.example.com', port: 993, secure: true };
+  const smtp = { host: 'smtp.example.com', port: 465, secure: true };
+  expect(connectionOf({ address, preset: 'zoho', imap, smtp })).toEqual({
+    provider: 'imap',
+    imap,
+    smtp,
+    user: address,
+    filesSent: PRESETS.zoho.filesSent,
+  });
+  expect(connectionOf({ address, preset: 'outlook', imap, smtp }).filesSent).toBe(true);
+  expect(connectionOf({ address, preset: 'zoho' })).toMatchObject({
+    imap: PRESETS.zoho.imap,
+    smtp: PRESETS.zoho.smtp,
+  });
+  expect(connectionOf({ address, imap, smtp })).toMatchObject({ imap, smtp, filesSent: false });
+  expect(() => connectionOf({ address, imap })).toThrow(TypeError);
 });

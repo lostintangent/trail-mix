@@ -152,10 +152,16 @@ export function setupOf(value: unknown): AccountSetup {
   const named = { provider: 'imap', name, address, ...(fromName ? { fromName } : {}) } as const;
   if (setup.preset === 'outlook') return { ...named, preset: 'outlook' };
   const password = textOf(setup.password, 'A password', 1000, false, false);
-  if (setup.preset === 'zoho') return { ...named, preset: 'zoho', password };
-  if (setup.preset !== undefined) throw new TypeError('That isn’t a preset.');
+  if (setup.preset !== undefined && setup.preset !== 'zoho') {
+    throw new TypeError('That isn’t a preset.');
+  }
+  const preset = setup.preset === 'zoho' ? ({ preset: 'zoho' } as const) : {};
+  if (preset.preset && setup.imap === undefined && setup.smtp === undefined) {
+    return { ...named, ...preset, password };
+  }
   return {
     ...named,
+    ...preset,
     imap: endpointOf(setup.imap),
     smtp: endpointOf(setup.smtp),
     password,
@@ -246,7 +252,7 @@ function endpointOf(value: unknown): Endpoint {
     typeof secure !== 'boolean'
   ) {
     throw new TypeError(
-      'Without a preset, both hosts need a name, a port and whether they use TLS.',
+      'Both hosts need a name, a port and whether they use TLS, unless a preset supplies them.',
     );
   }
   return { host, port, secure };

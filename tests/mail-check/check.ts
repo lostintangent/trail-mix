@@ -7,6 +7,10 @@
 //   bun tests/mail-check/check.ts --preset outlook --user me@outlook.com --client-id <Entra app ID>
 //   bun tests/mail-check/check.ts --preset test --user alice@trailmix.test    (the test mail server)
 //
+// --imap-host and --smtp-host replace the preset's server names, keeping its ports and TLS. Zoho's
+// names depend on the account, so give the ones its settings list, such as imap.zoho.com and
+// smtp.zoho.com.
+//
 // A password is read from the terminal with echo off, or from the first line of a pipe. It is never
 // an argument or an environment variable, so it stays out of shell history and process listings.
 // Outlook signs in with Microsoft's device-code flow instead, and no refresh token is requested.
@@ -33,7 +37,8 @@ const at = (host: string, port: number): Endpoint => ({
 });
 
 export const presets: Record<string, Preset> = {
-  // Zoho accounts on a domain of their own. Addresses at zoho.com use imap.zoho.com and smtp.zoho.com.
+  // A paid Zoho organization's names. Other accounts use other names, given with --imap-host and
+  // --smtp-host: imap and smtp.zoho.com for a personal or free one, other domains outside the US.
   zoho: {
     imap: at('imappro.zoho.com', 993),
     smtp: [at('smtppro.zoho.com', 465), at('smtppro.zoho.com', 587)],
@@ -127,14 +132,18 @@ if (import.meta.main) {
       preset: { type: 'string' },
       user: { type: 'string' },
       'client-id': { type: 'string' },
+      'imap-host': { type: 'string' },
+      'smtp-host': { type: 'string' },
       'watch-minutes': { type: 'string', default: '0' },
     },
   });
   const preset = presets[values.preset ?? ''];
   const user = values.user;
+  const imapHost = values['imap-host'];
+  const smtpHost = values['smtp-host'];
   if (!preset || !user) {
     console.error(
-      `usage: bun tests/mail-check/check.ts --preset ${Object.keys(presets).join('|')} --user <address> [--client-id <id>] [--watch-minutes 15.5]`,
+      `usage: bun tests/mail-check/check.ts --preset ${Object.keys(presets).join('|')} --user <address> [--imap-host <name>] [--smtp-host <name>] [--client-id <id>] [--watch-minutes 15.5]`,
     );
     process.exit(2);
   }
@@ -160,8 +169,8 @@ if (import.meta.main) {
     user,
     secret,
     auth: preset.authority ? 'oauth' : 'password',
-    imap: preset.imap,
-    smtp: preset.smtp,
+    imap: imapHost ? { ...preset.imap, host: imapHost } : preset.imap,
+    smtp: smtpHost ? preset.smtp.map((endpoint) => ({ ...endpoint, host: smtpHost })) : preset.smtp,
     watchSeconds: Math.round(Number(values['watch-minutes']) * 60),
   };
   process.exitCode = await runInWorkerd(request, preset);
@@ -198,7 +207,8 @@ async function runInWorkerd(request: CheckRequest, preset: Preset): Promise<numb
       for (const line of lines.filter(Boolean)) {
         const message = JSON.parse(line) as CheckResult | { runtime: string };
         if ('runtime' in message) {
-          console.log(`On ${message.runtime}, as ${request.user}:`);
+          const hosts = new Set([request.imap, ...request.smtp].map(({ host }) => host));
+          console.log(`On ${message.runtime}, as ${request.user}, at ${[...hosts].join(' and ')}:`);
           continue;
         }
         reported++;

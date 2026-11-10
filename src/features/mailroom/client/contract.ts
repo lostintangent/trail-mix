@@ -93,7 +93,11 @@ export type AccountSetup =
       name: string;
       address: string;
       fromName?: string;
-      /** Supplies hosts, ports and quirks. Without one, both endpoints are required. */
+      /**
+       * Supplies quirks, and the endpoints when none are given. Endpoints come both or neither,
+       * and given ones win: Zoho's server names depend on the account. Without a preset, both are
+       * required.
+       */
       preset?: 'zoho';
       imap?: Endpoint;
       smtp?: Endpoint;

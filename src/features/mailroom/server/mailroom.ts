@@ -29,7 +29,6 @@ import {
   demoMailbox,
   demoServer,
   imapProvider,
-  PRESETS,
   type DemoKind,
   type MailProvider,
   type Moved,
@@ -38,6 +37,7 @@ import {
 import type { AccountSetup, DraftUpload, Mailroom as Contract, Page } from '../client/contract.ts';
 import {
   accountBook,
+  connectionOf,
   demoSettings,
   type AccountBook,
   type Connection,
@@ -204,14 +204,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     if (this.book.all().some((held) => held.address.toLowerCase() === address)) {
       throw new Error(`${checked.address} is already connected.`);
     }
-    const preset = checked.preset && PRESETS[checked.preset];
-    const connection: Connection = {
-      provider: 'imap',
-      imap: preset?.imap ?? checked.imap!,
-      smtp: preset?.smtp ?? checked.smtp!,
-      user: checked.address,
-      filesSent: preset?.filesSent ?? false,
-    };
+    const connection = connectionOf(checked);
 
     // Nothing is kept until the host accepts the password.
     const id = crypto.randomUUID();
