@@ -220,7 +220,9 @@ test('Link turns the selected words into a link, adding https to an address type
   const composer = composerNamed(page, 'New message');
   await composer.getByRole('textbox', { name: 'Message' }).click();
   await page.keyboard.type('the plan');
-  await page.keyboard.press('ControlOrMeta+a');
+  // Select the words by arrow keys, which every platform reads alike. Ctrl+A on Linux reaches a
+  // touch WebKit as iOS's Ctrl+A, which moves to the start of the line.
+  for (let at = 0; at < 'the plan'.length; at++) await page.keyboard.press('Shift+ArrowLeft');
   await composer.getByRole('button', { name: 'Link', exact: true }).click();
   // The words chosen as Link was pressed are the ones it links, even once the selection has moved,
   // as Safari moves it when the focus goes to the address.
