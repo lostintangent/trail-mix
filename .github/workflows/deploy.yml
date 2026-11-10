@@ -79,6 +79,20 @@ jobs:
             echo "::notice::The Members page needs both OPERATOR_EMAIL and ACCESS_API_TOKEN. Until then it says it isn't set up."
           fi
 
+      # Outlook accounts sign in at Microsoft through the app the operator registered in Entra.
+      - name: Check the Outlook sign-in setting
+        env:
+          MICROSOFT_CLIENT_ID: ${{ vars.MICROSOFT_CLIENT_ID }}
+        run: |
+          if [ -z "$MICROSOFT_CLIENT_ID" ]; then
+            echo "::notice::MICROSOFT_CLIENT_ID isn't set, so adding an Outlook account says it isn't set up."
+            exit 0
+          fi
+          if ! [[ "$MICROSOFT_CLIENT_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]; then
+            echo "::error::MICROSOFT_CLIENT_ID is the Application (client) ID of your Entra app, such as 00000000-0000-0000-0000-000000000000."
+            exit 1
+          fi
+
   production:
     needs: settings
     if: >-
@@ -185,6 +199,7 @@ jobs:
           ACCESS_TEAM_DOMAIN: ${{ vars.ACCESS_TEAM_DOMAIN }}
           ACCESS_AUD: ${{ vars.ACCESS_AUD }}
           OPERATOR_EMAIL: ${{ vars.OPERATOR_EMAIL }}
+          MICROSOFT_CLIENT_ID: ${{ vars.MICROSOFT_CLIENT_ID }}
           ACCESS_API_TOKEN: ${{ secrets.ACCESS_API_TOKEN }}
           KEY: ${{ steps.account.outputs.key }}
         run: |
@@ -195,6 +210,9 @@ jobs:
           fi
           if [ -n "$OPERATOR_EMAIL" ]; then
             args+=(--var "OPERATOR_EMAIL:$OPERATOR_EMAIL")
+          fi
+          if [ -n "$MICROSOFT_CLIENT_ID" ]; then
+            args+=(--var "MICROSOFT_CLIENT_ID:$MICROSOFT_CLIENT_ID")
           fi
 
           # Secrets reach the Worker in a file only the runner's user can read, which jq writes from

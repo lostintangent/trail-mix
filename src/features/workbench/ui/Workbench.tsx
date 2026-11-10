@@ -18,6 +18,7 @@ import { Toasts } from '../../../shared/toasts.tsx';
 import {
   marksOf,
   type Account,
+  type AccountId,
   type ConversationId,
   type ConversationSummary,
   type Folder,
@@ -371,8 +372,18 @@ export function Workbench({
         add: () => openPage({ as: 'add' }),
         edit: (account) => openPage({ as: 'edit', account: account.id }),
         remove: setRemoving,
+        signIn: (account) => openPage({ as: 'edit', account: account.id, isSigningIn: true }),
       }),
     [accounts, openPage],
+  );
+  // A send held because its account's sign-in lapsed offers signing in again from its row.
+  const lapsed = useMemo(
+    () => new Set(accounts.flatMap(({ id, status }) => (status === 'needs-sign-in' ? [id] : []))),
+    [accounts],
+  );
+  const signInAgain = useCallback(
+    (account: AccountId) => openPage({ as: 'edit', account, isSigningIn: true }),
+    [openPage],
   );
   const addAccount = useCallback(() => openPage({ as: 'add' }), [openPage]);
   // Only the operator has a Members page.
@@ -631,6 +642,8 @@ export function Workbench({
                       <OutboxList
                         label={title}
                         stamps={stamps}
+                        lapsed={lapsed}
+                        onSignIn={signInAgain}
                         selected={selected}
                         onOpen={(id) => pick(id, 'only')}
                       />

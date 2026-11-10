@@ -4,28 +4,38 @@ import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/Segme
 import { TextInput } from '@astryxdesign/core/TextInput';
 import { fontWeightVars, spacingVars, typeScaleVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useState } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account } from '../../mail/core/index.ts';
-import { accountsQuery, mailroom } from '../../mailroom/client/index.ts';
+import {
+  accountsQuery,
+  mailroom,
+  signInPresetsQuery,
+  signInsQuery,
+  type SignIn,
+} from '../../mailroom/client/index.ts';
 import { PRESETS } from '../../providers/imap/core/index.ts';
 import {
   formFor,
   formProblems,
   nameFor,
   setupFrom,
+  signInSetupFrom,
   type AccountForm,
   type PresetServers,
 } from '../core/form.ts';
-import { DEMO_SAID, isDemoOnly, refusalSaid } from '../core/said.ts';
+import { DEMO_SAID, isDemoOnly, refusalSaid, signInNotSetUp } from '../core/said.ts';
+import { SignInStep } from './SignInStep.tsx';
 
 const ZOHO: PresetServers = PRESETS.zoho;
+const MICROSOFT = PRESETS.outlook.device.vendor;
 
 /**
- * Adding an account: Zoho, with its server names filled in to change, or any IMAP and SMTP host by
- * its names and ports. The Mailroom tries the password with the host before it keeps anything, and
- * a refusal shows in the host's own words.
+ * Adding an account: Zoho, with its server names filled in to change, Outlook, whose member signs
+ * in at Microsoft with a code, or any IMAP and SMTP host by its names and ports. The Mailroom tries
+ * the password, or the token Microsoft gives, with the hosts before it keeps anything, and a refusal
+ * shows in the host's own words.
  *
  * The password lives only in this form's state. It goes to the Mailroom once, in `addAccount`,
  * called directly rather than through a mutation, whose cache would keep it as a variable.
@@ -50,26 +60,59 @@ export function AddAccount({
   const problems = formProblems(form, accounts);
   const shown = hasTried ? problems : {};
   const isBusy = checking !== undefined;
+  const { data: signInPresets } = useQuery(signInPresetsQuery);
+  const isOutlook = form.server === 'outlook';
+  const canSignIn = !isOutlook || !signInPresets || signInPresets.includes('outlook');
+  const [signingIn, setSigningIn] = useState<SignIn>();
 
-  const add = async () => {
-    setTried(true);
-    if (Object.keys(problems).length > 0 || isBusy || isDemo) return;
-    setRefusal(undefined);
-    setChecking(form.imapHost.trim());
-    try {
-      const account = await mailroom.addAccount(setupFrom(form, ZOHO));
+  const added = useCallback(
+    (account: Account) => {
       queryClient.setQueryData(accountsQuery.queryKey, (held = []) =>
         held.some(({ id }) => id === account.id) ? held : [...held, account],
       );
       // Every view, folder and count changes with an account, and the hint socket may not be open.
       void queryClient.invalidateQueries({ predicate: ({ queryKey }) => queryKey[0] !== 'body' });
       onAdded?.(account);
+    },
+    [queryClient, onAdded],
+  );
+
+  const add = async () => {
+    setTried(true);
+    if (Object.keys(problems).length > 0 || isBusy || isDemo || !canSignIn) return;
+    setRefusal(undefined);
+    setChecking(isOutlook ? MICROSOFT : form.imapHost.trim());
+    try {
+      if (isOutlook) {
+        const started = await mailroom.signIn(signInSetupFrom(form));
+        // The list shows it at once, before the hint that it started arrives.
+        queryClient.setQueryData(signInsQuery.queryKey, (held = []) => [
+          ...held.filter(({ address }) => address !== started.address),
+          started,
+        ]);
+        setSigningIn(started);
+      } else {
+        added(await mailroom.addAccount(setupFrom(form, ZOHO)));
+      }
     } catch (error) {
       setRefusal(refusalSaid(error instanceof Error ? error.message : String(error)));
     } finally {
       setChecking(undefined);
     }
   };
+
+  if (signingIn) {
+    return (
+      <SignInStep
+        key={signingIn.code}
+        started={signingIn}
+        vendor={MICROSOFT}
+        onFinished={added}
+        onAgain={() => void add()}
+        onBack={() => setSigningIn(undefined)}
+      />
+    );
+  }
 
   const field = (key: keyof AccountForm) => ({
     value: form[key],
@@ -96,11 +139,14 @@ export function AddAccount({
         label="Mail host"
         value={form.server}
         onChange={(server) =>
-          setForm((held) => formFor(server === 'zoho' ? 'zoho' : 'other', ZOHO, held))
+          setForm((held) =>
+            formFor(server === 'zoho' || server === 'outlook' ? server : 'other', ZOHO, held),
+          )
         }
         isDisabled={isBusy}
       >
         <SegmentedControlItem value="zoho" label="Zoho" xstyle={styles.choice} />
+        <SegmentedControlItem value="outlook" label="Outlook" xstyle={styles.choice} />
         <SegmentedControlItem value="other" label="Another IMAP host" xstyle={styles.choice} />
       </SegmentedControl>
 
@@ -111,17 +157,19 @@ export function AddAccount({
         placeholder="you@example.com"
         {...field('address')}
       />
-      <TextInput
-        label="Password"
-        type="password"
-        autoComplete="off"
-        description={
-          form.server === 'zoho'
-            ? 'An app password, which Zoho makes under My Account, Security, App Passwords.'
-            : 'Your password, or an app password if your host asks for one.'
-        }
-        {...field('password')}
-      />
+      {!isOutlook && (
+        <TextInput
+          label="Password"
+          type="password"
+          autoComplete="off"
+          description={
+            form.server === 'zoho'
+              ? 'An app password, which Zoho makes under My Account, Security, App Passwords.'
+              : 'Your password, or an app password if your host asks for one.'
+          }
+          {...field('password')}
+        />
+      )}
       <TextInput
         label="Name"
         isOptional
@@ -137,22 +185,33 @@ export function AddAccount({
         {...field('fromName')}
       />
 
-      <fieldset {...stylex.props(styles.servers)}>
-        <legend {...stylex.props(styles.legend)}>Servers</legend>
+      {isOutlook && !canSignIn && (
+        <Banner status="info" title={signInNotSetUp(MICROSOFT, 'MICROSOFT_CLIENT_ID')} />
+      )}
+      {isOutlook && canSignIn && (
         <p {...stylex.props(styles.quiet)}>
-          {form.server === 'zoho'
-            ? 'Use the server names Zoho Mail lists for your account, under Settings, Mail Accounts.'
-            : 'Ports 993 and 465 use TLS from the start, and 143 and 587 use STARTTLS.'}
+          You sign in at Microsoft with a code, so Trail Mix never sees your password.
         </p>
-        <div {...stylex.props(form.server === 'other' && styles.pair)}>
-          <TextInput label="IMAP server" {...field('imapHost')} />
-          {form.server === 'other' && <TextInput label="IMAP port" {...field('imapPort')} />}
-        </div>
-        <div {...stylex.props(form.server === 'other' && styles.pair)}>
-          <TextInput label="SMTP server" {...field('smtpHost')} />
-          {form.server === 'other' && <TextInput label="SMTP port" {...field('smtpPort')} />}
-        </div>
-      </fieldset>
+      )}
+
+      {!isOutlook && (
+        <fieldset {...stylex.props(styles.servers)}>
+          <legend {...stylex.props(styles.legend)}>Servers</legend>
+          <p {...stylex.props(styles.quiet)}>
+            {form.server === 'zoho'
+              ? 'Use the server names Zoho Mail lists for your account, under Settings, Mail Accounts.'
+              : 'Ports 993 and 465 use TLS from the start, and 143 and 587 use STARTTLS.'}
+          </p>
+          <div {...stylex.props(form.server === 'other' && styles.pair)}>
+            <TextInput label="IMAP server" {...field('imapHost')} />
+            {form.server === 'other' && <TextInput label="IMAP port" {...field('imapPort')} />}
+          </div>
+          <div {...stylex.props(form.server === 'other' && styles.pair)}>
+            <TextInput label="SMTP server" {...field('smtpHost')} />
+            {form.server === 'other' && <TextInput label="SMTP port" {...field('smtpPort')} />}
+          </div>
+        </fieldset>
+      )}
 
       {refusal && (
         <div role="alert">
@@ -163,13 +222,19 @@ export function AddAccount({
         <Button
           type="submit"
           variant="primary"
-          label={isBusy ? `Checking with ${checking}…` : 'Add account'}
+          label={
+            isBusy
+              ? `${isOutlook ? 'Asking' : 'Checking with'} ${checking}…`
+              : isOutlook
+                ? `Sign in with ${MICROSOFT}`
+                : 'Add account'
+          }
           isLoading={isBusy}
-          isDisabled={isDemo}
+          isDisabled={isDemo || !canSignIn}
         />
         {onCancel && <Button label="Cancel" variant="ghost" onClick={onCancel} />}
       </div>
-      {isBusy && (
+      {isBusy && !isOutlook && (
         <p role="status" {...stylex.props(styles.quiet)}>
           Signing in to {form.imapHost.trim()}, then {form.smtpHost.trim()}. A host that doesn’t
           answer can take half a minute.

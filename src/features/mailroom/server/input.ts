@@ -10,7 +10,13 @@ import type {
   View,
 } from '../../mail/core/index.ts';
 import type { Endpoint } from '../../providers/index.ts';
-import type { AccountSetup, DraftUpload, FileBytes, PageCursor } from '../client/contract.ts';
+import type {
+  AccountSetup,
+  DraftUpload,
+  FileBytes,
+  PageCursor,
+  SignInSetup,
+} from '../client/contract.ts';
 import { STAMPS } from './accounts.ts';
 
 /**
@@ -146,11 +152,7 @@ export function setupOf(value: unknown): AccountSetup {
   if (setup.provider === 'demo') return { provider: 'demo' };
   if (setup.provider !== 'imap')
     throw new TypeError('That isn’t an account Trail Mix can connect.');
-  const name = textOf(setup.name, 'A name');
-  const address = addressOf(setup.address);
-  const fromName = setup.fromName === undefined ? '' : lineOf(setup.fromName, 'A name', 200);
-  const named = { provider: 'imap', name, address, ...(fromName ? { fromName } : {}) } as const;
-  if (setup.preset === 'outlook') return { ...named, preset: 'outlook' };
+  const named = { provider: 'imap', ...namedOf(setup) } as const;
   const password = textOf(setup.password, 'A password', 1000, false, false);
   if (setup.preset !== undefined && setup.preset !== 'zoho') {
     throw new TypeError('That isn’t a preset.');
@@ -166,6 +168,24 @@ export function setupOf(value: unknown): AccountSetup {
     smtp: endpointOf(setup.smtp),
     password,
   };
+}
+
+/** What a sign-in is for: a new account that signs in at its vendor, or one signing in again. */
+export function signInOf(value: unknown): SignInSetup | AccountId {
+  if (typeof value === 'string') return accountOf(value);
+  const setup = record(value, 'a sign-in');
+  if (setup.preset !== 'outlook') {
+    throw new TypeError('That account doesn’t sign in at its vendor.');
+  }
+  return { preset: 'outlook', ...namedOf(setup) };
+}
+
+/** What a member calls an account, its address, and the name its mail is from, if any. */
+function namedOf(setup: Record<string, unknown>) {
+  const name = textOf(setup.name, 'A name');
+  const address = addressOf(setup.address);
+  const fromName = setup.fromName === undefined ? '' : lineOf(setup.fromName, 'A name', 200);
+  return { name, address, ...(fromName ? { fromName } : {}) };
 }
 
 /** A draft as the composer saved it, with its new files' bytes. */

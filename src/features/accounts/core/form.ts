@@ -3,11 +3,12 @@ import type { Account } from '../../mail/core/index.ts';
 /**
  * The add-account form, as the member fills it in, and the setup it becomes. Zoho is a preset whose
  * server names come filled in and can be changed, since Zoho gives each account the names its own
- * settings list. Any other host is reached by its server names and ports. A password is only ever
- * held here, in the form, until it goes to the Mailroom.
+ * settings list. Outlook signs in at Microsoft, so it takes no password and its servers are fixed.
+ * Any other host is reached by its server names and ports. A password is only ever held here, in
+ * the form, until it goes to the Mailroom.
  */
 export type AccountForm = {
-  server: 'zoho' | 'other';
+  server: 'zoho' | 'outlook' | 'other';
   /** What the sidebar calls the account. Left empty, it is the address's domain. */
   name: string;
   address: string;
@@ -75,6 +76,8 @@ export function formProblems(form: AccountForm, accounts: readonly Account[]): P
   }
   if (nameFor(form).length > 200) problems.name = 'A name can be up to 200 characters.';
   if (form.fromName.trim().length > 200) problems.fromName = 'A name can be up to 200 characters.';
+  // Outlook's member signs in at Microsoft, on servers Trail Mix already knows.
+  if (form.server === 'outlook') return problems;
   if (!form.password) problems.password = 'Enter the password.';
   for (const [host, port, what] of [
     ['imapHost', 'imapPort', 'IMAP'],
@@ -111,6 +114,17 @@ export function setupFrom(form: AccountForm, zoho: PresetServers) {
     imap: at(form.imapHost, form.imapPort, zoho.imap),
     smtp: at(form.smtpHost, form.smtpPort, zoho.smtp),
     password: form.password,
+  };
+}
+
+/** What the Mailroom is asked to sign in to at the vendor: an Outlook account, which has no password. */
+export function signInSetupFrom(form: AccountForm) {
+  const fromName = form.fromName.trim();
+  return {
+    preset: 'outlook' as const,
+    name: nameFor(form),
+    address: form.address.trim(),
+    ...(fromName ? { fromName } : {}),
   };
 }
 

@@ -153,6 +153,11 @@ export const versions: readonly (readonly string[])[] = [
     `DELETE FROM placements`,
     `UPDATE folders SET cursor = NULL`,
   ],
+  [
+    // Sign-ins at a vendor while the member enters the code, one per address, each with its device
+    // code sealed beside it until it stops. Each goes minutes after its code expires.
+    `CREATE TABLE sign_ins (address TEXT PRIMARY KEY, pending TEXT NOT NULL, sealed BLOB)`,
+  ],
 ];
 
 /**

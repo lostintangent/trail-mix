@@ -14,7 +14,7 @@ import { Send } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { stampStyles } from '../../../app/theme/stamps.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
-import type { ConversationId, Outgoing, StampColor } from '../../mail/core/index.ts';
+import type { AccountId, ConversationId, Outgoing, StampColor } from '../../mail/core/index.ts';
 import { outboxQuery } from '../../mailroom/client/index.ts';
 import { formatAhead } from '../core/later.ts';
 import { UNDO_SECONDS } from '../core/outbox.ts';
@@ -27,17 +27,23 @@ import { outboxActions, type OutboxActions } from './sending.tsx';
  * The Outbox: every send the Mailroom holds, failed ones first, then soonest to go. Each row says
  * whom it's to, its subject and when it goes, and opens its conversation. A send still inside its
  * window or waiting for its time offers Undo. A failed one shows the server's reason, with Retry
- * and Edit, which takes the send back and opens its draft. Airmail runs along what is leaving.
+ * and Edit, which takes the send back and opens its draft. A send held because its account must be
+ * signed in again offers that sign-in instead of Retry. Airmail runs along what is leaving.
  */
 export function OutboxList({
   label,
   stamps,
+  lapsed,
   selected,
   onOpen,
+  onSignIn,
 }: {
   label: string;
   /** Each account's stamp color, by account id. */
   stamps: ReadonlyMap<string, StampColor>;
+  /** The accounts waiting for their member to sign in again. */
+  lapsed: ReadonlySet<AccountId>;
+  onSignIn: (account: AccountId) => void;
   /** The conversation open in the reader, whose row lifts. */
   selected: ConversationId | undefined;
   onOpen: (conversation: ConversationId) => void;
@@ -74,7 +80,9 @@ export function OutboxList({
           standing={standing}
           stamp={stamps.get(outgoing.draft.account) ?? 'slate'}
           isSelected={outgoing.conversation !== undefined && outgoing.conversation === selected}
+          isLapsed={lapsed.has(outgoing.draft.account)}
           onOpen={onOpen}
+          onSignIn={() => onSignIn(outgoing.draft.account)}
           act={act}
         />
       ))}
@@ -87,14 +95,18 @@ function Row({
   standing,
   stamp,
   isSelected,
+  isLapsed,
   onOpen,
+  onSignIn,
   act,
 }: {
   outgoing: Outgoing;
   standing: Standing;
   stamp: StampColor;
   isSelected: boolean;
+  isLapsed: boolean;
   onOpen: (conversation: ConversationId) => void;
+  onSignIn: () => void;
   act: OutboxActions;
 }) {
   const { conversation, to, subject } = outgoing;
@@ -129,12 +141,16 @@ function Row({
         )}
         {error !== undefined && (
           <>
-            <Button
-              label="Retry"
-              variant="secondary"
-              size="sm"
-              onClick={() => void act.retry(outgoing)}
-            />
+            {isLapsed ? (
+              <Button label="Sign in again" variant="secondary" size="sm" onClick={onSignIn} />
+            ) : (
+              <Button
+                label="Retry"
+                variant="secondary"
+                size="sm"
+                onClick={() => void act.retry(outgoing)}
+              />
+            )}
             <Button
               label="Edit"
               variant="ghost"

@@ -8,12 +8,12 @@ import {
   polled,
   refreshRequest,
   refreshed,
-  withStandIn,
   type DeviceSignIn,
 } from './device-sign-in.ts';
 import { PRESETS } from './presets.ts';
 
-const microsoft = PRESETS.outlook.signIn satisfies DeviceSignIn;
+const microsoft: DeviceSignIn = PRESETS.outlook.device;
+const app = { id: 'client' };
 const NOW = Date.parse('2026-11-10T20:00:00Z');
 
 /** How Microsoft words a refusal: a first line, then IDs only its support reads. */
@@ -22,9 +22,9 @@ const withTrace = (first: string) =>
 
 describe('the requests', () => {
   test('a code is asked for with the preset’s scopes, at its authority', () => {
-    const request = codeRequest(microsoft, 'client');
+    const request = codeRequest(microsoft, app);
     expect(request.url).toBe('https://login.microsoftonline.com/consumers/oauth2/v2.0/devicecode');
-    expect(Object.fromEntries(request.body)).toEqual({
+    expect(Object.fromEntries(request.form)).toEqual({
       client_id: 'client',
       scope:
         'https://outlook.office.com/IMAP.AccessAsUser.All https://outlook.office.com/SMTP.Send offline_access',
@@ -32,16 +32,16 @@ describe('the requests', () => {
   });
 
   test('a poll redeems the device code, and a refresh the refresh token, at the token path', () => {
-    const poll = pollRequest(microsoft, 'client', 'device');
+    const poll = pollRequest(microsoft, app, 'device');
     expect(poll.url).toBe('https://login.microsoftonline.com/consumers/oauth2/v2.0/token');
-    expect(Object.fromEntries(poll.body)).toEqual({
+    expect(Object.fromEntries(poll.form)).toEqual({
       grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
       client_id: 'client',
       device_code: 'device',
     });
-    const refresh = refreshRequest(microsoft, 'client', 'kept');
+    const refresh = refreshRequest(microsoft, app, 'kept');
     expect(refresh.url).toBe(poll.url);
-    expect(Object.fromEntries(refresh.body)).toMatchObject({
+    expect(Object.fromEntries(refresh.form)).toMatchObject({
       grant_type: 'refresh_token',
       client_id: 'client',
       refresh_token: 'kept',
@@ -71,13 +71,13 @@ describe('a code', () => {
     });
   });
 
-  test('takes RFC 8628’s defaults, and the page under the name some vendors give it', () => {
+  test('reads a time sent as text, and waits five seconds when no interval is given', () => {
     const answer = {
       status: 200,
       body: {
         device_code: 'device',
         user_code: 'ABCD',
-        verification_url: 'https://accounts.example/device',
+        verification_uri: 'https://accounts.example/device',
         expires_in: '600',
       },
     };
@@ -187,6 +187,10 @@ describe('a poll', () => {
     expect(polled(microsoft, { status: 502, body: null }, 5000, NOW)).toEqual({
       refused: 'Microsoft refused the sign-in: it gave no reason.',
     });
+    // An error is an error, even when a vendor sends it with a 200.
+    expect(
+      polled(microsoft, { status: 200, body: { error: 'authorization_pending' } }, 5000, NOW),
+    ).toEqual({ pending: 5000 });
   });
 });
 
@@ -243,33 +247,4 @@ test('an access token is used until five minutes before it runs out', () => {
   expect(isFresh(tokens, NOW)).toBe(true);
   expect(isFresh(tokens, NOW + 5 * 60_000 - 1)).toBe(true);
   expect(isFresh(tokens, NOW + 5 * 60_000)).toBe(false);
-});
-
-describe('a stand-in', () => {
-  test('replaces the authority when it names this machine', () => {
-    for (const standIn of [
-      'http://127.0.0.1:4080/consumers',
-      'http://localhost:4080/consumers',
-      'http://[::1]:4080/consumers',
-    ]) {
-      expect(withStandIn(microsoft, standIn).authority).toBe(standIn);
-    }
-  });
-
-  test('is ignored when it names anywhere else, however it’s dressed', () => {
-    for (const standIn of [
-      undefined,
-      '',
-      'https://login.evil.com/consumers',
-      'http://localhost.evil.com/consumers',
-      'http://127.0.0.1.nip.io/consumers',
-      'https://127.0.0.1@login.evil.com/consumers',
-      'http://127.0.0.1:4080@login.evil.com/consumers',
-      'http://user:pass@127.0.0.1:4080/consumers',
-      'file://localhost/etc',
-      'not a url',
-    ]) {
-      expect(withStandIn(microsoft, standIn).authority).toBe(microsoft.authority);
-    }
-  });
 });

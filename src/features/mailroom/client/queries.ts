@@ -6,6 +6,10 @@ import { mailroom } from './rpc.ts';
 /** What each query's snapshot is cached under. */
 export const keys = {
   accounts: ['accounts'],
+  // Under accounts, so the accounts hint, which names every sign-in's change, refetches them too.
+  signIns: ['accounts', 'sign-ins'],
+  // How the deployment is set up, which no hint changes.
+  signInPresets: ['sign-in-presets'],
   folders: ['folders'],
   outbox: ['outbox'],
   conversations: (view: View) => ['conversations', view] as const,
@@ -15,6 +19,8 @@ export const keys = {
 
 export type Key =
   | typeof keys.accounts
+  | typeof keys.signIns
+  | typeof keys.signInPresets
   | typeof keys.folders
   | typeof keys.outbox
   | ReturnType<typeof keys.conversations>
@@ -55,6 +61,21 @@ const isSameFolder = (a: FolderRef, b: FolderRef) => a.account === b.account && 
 export const accountsQuery = queryOptions({
   queryKey: keys.accounts,
   queryFn: () => mailroom.accounts(),
+});
+
+/**
+ * Sign-ins under way. A member who went to the vendor's page in another tab or app comes back to
+ * this one, so it refetches then too, in case the hint that finished it came while it slept.
+ */
+export const signInsQuery = queryOptions({
+  queryKey: keys.signIns,
+  queryFn: () => mailroom.signIns(),
+  refetchOnWindowFocus: true,
+});
+
+export const signInPresetsQuery = queryOptions({
+  queryKey: keys.signInPresets,
+  queryFn: () => mailroom.signInPresets(),
 });
 
 export const foldersQuery = queryOptions({

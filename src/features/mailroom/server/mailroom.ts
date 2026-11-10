@@ -2,6 +2,7 @@ import { DurableObject } from 'cloudflare:workers';
 import { connect } from 'cloudflare:sockets';
 import { createSocketsTransport } from 'imapflow';
 import PostalMime, { type Address as PostalAddress } from 'postal-mime';
+import * as signing from '../../accounts/core/index.ts';
 import { messageOf } from '../../composer/index.ts';
 import { createProblem, deleteProblem, inside, renameProblem } from '../../folders/core/index.ts';
 import {
@@ -27,18 +28,43 @@ import {
 } from '../../mail/core/index.ts';
 import {
   DEMO_ACCOUNTS,
+  PRESETS,
+  codeFrom,
+  codeRequest,
   demoMailbox,
   demoServer,
   checkSignIn,
   imapProvider,
+  isFresh,
+  pollRequest,
+  polled,
+  refreshRequest,
+  refreshed,
+  withStandIn,
+  type Answer,
+  type Client,
   type DemoKind,
+  type DeviceSignIn,
   type ImapAccount,
   type MailProvider,
   type Moved,
   type Network,
+  type Polled,
+  type Preset,
+  type PresetName,
+  type Request as VendorRequest,
   type SyncWindow,
+  type Tokens,
 } from '../../providers/index.ts';
-import type { AccountSetup, DraftUpload, Mailroom as Contract, Page } from '../client/contract.ts';
+import type {
+  AccountSetup,
+  DraftUpload,
+  Mailroom as Contract,
+  Page,
+  SignIn,
+  SignInPreset,
+  SignInSetup,
+} from '../client/contract.ts';
 import {
   accountBook,
   connectionOf,
@@ -53,6 +79,7 @@ import * as input from './input.ts';
 import { upgrade, type Sql, type SqlValue } from './schema.ts';
 import { outboxQueue, type OutboxQueue } from './outbox.ts';
 import { foundOf, opened, type Found } from './search.ts';
+import { signInBook, type SignInBook } from './sign-ins.ts';
 import { syncQueue, type SyncQueue } from './sync.ts';
 
 export type MailroomEnv = {
@@ -67,7 +94,22 @@ export type MailroomEnv = {
   DEMO_MAILBOX?: string;
   /** Fixes the demo accounts' creation time, an ISO 8601 instant, so their dates never move. */
   DEMO_MAILBOX_AT?: string;
+  /** The app the operator registered with Microsoft, which Outlook accounts sign in through. */
+  MICROSOFT_CLIENT_ID?: string;
+  /**
+   * A test's stand-in for Outlook, as JSON: Microsoft's sign-in and the hosts. Honored only when
+   * every address in it names this machine.
+   */
+  OUTLOOK_STAND_IN?: string;
 };
+
+/** Where each preset that can sign in finds the operator's app in the Worker's settings. */
+const APPS = {
+  outlook: { id: 'MICROSOFT_CLIENT_ID', standIn: 'OUTLOOK_STAND_IN' },
+} as const satisfies Record<SignInPreset, { id: keyof MailroomEnv; standIn: keyof MailroomEnv }>;
+
+/** How long a vendor has to answer one request of a sign-in. */
+const VENDOR_PATIENCE_MS = 15_000;
 
 /** How far back mail is indexed. Older mail stays on the server. */
 const WINDOW_DAYS = 365;
@@ -89,6 +131,12 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   protected readonly sql: Sql;
   protected readonly store: EnvelopeIndex;
   private readonly book: AccountBook;
+  /** Sign-ins at a vendor while members enter their codes. */
+  private readonly underWay: SignInBook;
+  /** Each signed-in account's access token while it's fresh. Only memory holds them. */
+  private readonly tokens = new Map<AccountId, Tokens>();
+  /** A refresh under way per account, so connections opening at once share it. */
+  private readonly refreshing = new Map<AccountId, Promise<Tokens>>();
   private readonly providers = new Map<AccountId, Promise<MailProvider>>();
   private readonly watchers = new Map<AccountId, () => void>();
   protected readonly queue: SyncQueue;
@@ -109,6 +157,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     const found = upgrade(this.sql);
     this.store = envelopeIndex(this.sql);
     this.book = accountBook(this.sql);
+    this.underWay = signInBook(this.sql);
     this.queue = syncQueue({
       sql: this.sql,
       store: this.store,
@@ -117,6 +166,8 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       window: (account) => this.windowOf(account),
       settled: (account, error) => {
         if (error) report(error);
+        // An account that needs signing in again stays so until the member does.
+        if (this.book.get(account)?.account.status === 'needs-sign-in') return;
         this.setStatus(account, error ? 'error' : 'ready');
       },
     });
@@ -134,6 +185,12 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     // Every wake is a cold start, and this is where one begins: a send found mid-submit was cut
     // short by whatever ended the last instance.
     this.sending.recover();
+    // A sign-in being checked as the last instance ended lost its tokens with it.
+    const now = Date.now();
+    for (const pending of this.underWay.all(now)) {
+      const recovered = signing.recover(pending, now);
+      if (recovered !== pending) this.underWay.update(recovered);
+    }
     if (found === 0 && this.demo) {
       this.addDemo();
       this.addDemo();
@@ -191,6 +248,15 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     return Promise.resolve(this.sending.list().map((outgoing) => this.placed(outgoing)));
   }
 
+  signIns(): Promise<SignIn[]> {
+    return Promise.resolve(this.underWay.all(Date.now()).map(signInOf));
+  }
+
+  signInPresets(): Promise<SignInPreset[]> {
+    const presets = Object.keys(APPS) as SignInPreset[];
+    return Promise.resolve(presets.filter((preset) => this.vendor(preset)));
+  }
+
   // Commands
 
   async addAccount(setup: AccountSetup): Promise<Account> {
@@ -212,7 +278,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 
     // Nothing is kept until both hosts accept the password.
     const id = crypto.randomUUID();
-    await checkSignIn(imapAccount(id, connection, checked.password), network);
+    await checkSignIn(imapAccount(id, connection, { pass: checked.password }), network);
 
     const account = this.book.add(
       {
@@ -229,6 +295,43 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     this.hint({ changed: 'accounts' });
     await this.owe(() => this.queue.check(id));
     return account;
+  }
+
+  /**
+   * Starts a sign-in at the preset's vendor, for a new account or for one that needs signing in
+   * again. The alarm polls it from here.
+   */
+  async signIn(to: SignInSetup | AccountId): Promise<SignIn> {
+    const checked = input.signInOf(to);
+    if (this.demo) throw new Error('This deployment has only the demo mailbox.');
+    let address: string;
+    let preset: PresetName | undefined;
+    let pendingTo: signing.Pending['to'];
+    if (typeof checked === 'string') {
+      const held = this.book.get(checked)?.account;
+      if (!held) throw new Error('There is no such account.');
+      ({ address, preset } = held);
+      pendingTo = { account: held.id };
+    } else {
+      ({ address, preset } = checked);
+      if (this.book.all().some((account) => sameAddress(account.address, address))) {
+        throw new Error(`${address} is already connected.`);
+      }
+      const { name, fromName } = checked;
+      pendingTo = { preset: checked.preset, name, ...(fromName ? { fromName } : {}) };
+    }
+    const vendor = this.vendor(preset);
+    if (!vendor) throw new Error(notSetUp(preset));
+
+    const now = Date.now();
+    const answer = await this.ask(codeRequest(vendor.signIn, vendor.client));
+    const code = codeFrom(vendor.signIn, answer, now);
+    const pending = signing.started(address, pendingTo, code, now);
+    const sealed = await seal(await this.memberKey(), code.deviceCode, deviceCodeOf(address));
+    this.underWay.start(pending, sealed);
+    this.hint({ changed: 'accounts' });
+    await this.wakeBy(pending.pollAt);
+    return signInOf(pending);
   }
 
   updateAccount(
@@ -254,7 +357,9 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       this.book.remove(account);
       this.store.forget(account);
       this.sending.forget(account);
+      this.underWay.forget(account);
     });
+    this.tokens.delete(account);
     this.found = undefined;
     this.hint({ changed: 'accounts' });
     this.hint({ changed: 'folders', account });
@@ -279,6 +384,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     const accounts = this.book.all();
     for (const { id } of accounts) await this.disconnect(id);
     this.found = undefined;
+    this.tokens.clear();
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
     upgrade(this.sql);
@@ -538,12 +644,20 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
    * once and picks up from the stored cursors. Returns how many steps it landed.
    */
   protected async wake(): Promise<number> {
+    // A sign-in polls first, so a long sync never keeps a member waiting on their code.
+    await this.pollSignIns();
     const accounts = this.book.all();
-    if (accounts.length === 0) return 0;
+    if (accounts.length === 0) {
+      const signInAt = this.signInWake();
+      if (signInAt !== undefined) await this.ctx.storage.setAlarm(signInAt);
+      return 0;
+    }
     const open = this.devices() > 0;
     // If this wake ends early, as an eviction would end it, the next one is already set.
     const poll = Date.now() + (open ? WATCHING_MS : CHECKING_MS);
-    await this.ctx.storage.setAlarm(Math.min(poll, this.sending.nextWake() ?? poll));
+    await this.ctx.storage.setAlarm(
+      Math.min(poll, this.sending.nextWake() ?? poll, this.signInWake() ?? poll),
+    );
     // A send that is due goes before sync, which can wait.
     await this.sending.run(() => new Date().toISOString());
     if (Date.now() - this.checkedAt >= CHECKING_MS) this.checkAll();
@@ -553,7 +667,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     await this.watchAll(this.devices() > 0);
     const sendAt = this.sending.nextWake() ?? poll;
     if (this.queue.owing() || sendAt <= Date.now()) await this.ctx.storage.setAlarm(Date.now());
-    else await this.ctx.storage.setAlarm(Math.min(poll, sendAt));
+    else await this.ctx.storage.setAlarm(Math.min(poll, sendAt, this.signInWake() ?? poll));
     return landed;
   }
 
@@ -583,8 +697,8 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   }
 
   private async watchAll(open: boolean) {
-    for (const { id } of this.book.all()) {
-      if (open) await this.watch(id).catch(report);
+    for (const { id, status } of this.book.all()) {
+      if (open && status !== 'needs-sign-in') await this.watch(id).catch(report);
       else this.unwatch(id);
     }
   }
@@ -643,15 +757,193 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
           if (!mailbox) throw new Error('There is no such account.');
           return demoServer(account, mailbox, (next) => this.book.saveDemo(account, next)).provider;
         }
+        if (!connection) throw new Error('There is no such account.');
+        if (deviceOf(this.book.get(account)?.account.preset)) {
+          return imapOver(account, connection, { accessToken: () => this.accessToken(account) });
+        }
         const sealed = this.book.sealed(account);
-        if (!connection || !sealed) throw new Error('There is no such account.');
-        const password = await open(await this.memberKey(), sealed, account);
-        return imapOver(account, connection, password);
+        if (!sealed) throw new Error('There is no such account.');
+        const pass = await open(await this.memberKey(), sealed, account);
+        return imapOver(account, connection, { pass });
       })().then((made) => this.reached(made));
       this.providers.set(account, provider);
       provider.catch(() => this.providers.delete(account));
     }
     return provider;
+  }
+
+  // Signing in at a vendor
+
+  /** The preset's sign-in, and the operator's app at its vendor, if this deployment has one. */
+  private vendor(
+    preset: PresetName | undefined,
+  ): { signIn: DeviceSignIn; client: Client } | undefined {
+    const device = preset && this.preset(preset).device;
+    if (this.demo || !preset || !device || !(preset in APPS)) return undefined;
+    const id = this.env[APPS[preset as SignInPreset].id];
+    return id ? { signIn: device, client: { id } } : undefined;
+  }
+
+  /** A preset, with a test's stand-ins for its vendor when the test gave them. */
+  protected preset(name: PresetName): Preset {
+    const app = name in APPS ? APPS[name as SignInPreset] : undefined;
+    return withStandIn(PRESETS[name], app && this.env[app.standIn]);
+  }
+
+  /** A request to a vendor, and its answer, within the vendor's patience. */
+  private async ask(request: VendorRequest): Promise<Answer> {
+    const response = await fetch(request.url, {
+      method: 'POST',
+      body: request.form,
+      signal: AbortSignal.timeout(VENDOR_PATIENCE_MS),
+    });
+    const body: unknown = await response.json().catch(() => null);
+    return { status: response.status, body };
+  }
+
+  /** When the next waiting sign-in needs a wake. */
+  private signInWake(): number | undefined {
+    return signing.nextWake(this.underWay.all(Date.now()));
+  }
+
+  /** Polls each sign-in whose interval has passed, and stops each whose code has expired. */
+  private async pollSignIns() {
+    for (const pending of this.underWay.all(Date.now())) {
+      const need = signing.due(pending, Date.now());
+      if (need === 'expire') this.movedOn(signing.expired(pending, Date.now()));
+      else if (need === 'poll') await this.pollSignIn(pending).catch(report);
+    }
+  }
+
+  private async pollSignIn(pending: signing.Pending) {
+    const vendor = this.vendor(this.presetOf(pending));
+    const sealed = this.underWay.sealed(pending.address);
+    if (!vendor || !sealed) {
+      this.movedOn(signing.refused(pending, notSetUp(this.presetOf(pending)), Date.now()));
+      return;
+    }
+    const deviceCode = await open(await this.memberKey(), sealed, deviceCodeOf(pending.address));
+    const { signIn, client } = vendor;
+    let result: Polled;
+    try {
+      const answer = await this.ask(pollRequest(signIn, client, deviceCode));
+      result = polled(signIn, answer, pending.interval, Date.now());
+    } catch (error) {
+      // A vendor out of reach is asked again after the interval, until the code expires.
+      report(error);
+      result = { pending: pending.interval };
+    }
+    const next = signing.polled(pending, result, Date.now());
+    this.movedOn(next, next.state !== pending.state);
+    if ('granted' in result) await this.finishSignIn(next, result.granted, signIn);
+  }
+
+  /** The preset a sign-in is for: the new account's, or that of the account signing in again. */
+  private presetOf(pending: signing.Pending): PresetName | undefined {
+    return 'account' in pending.to
+      ? this.book.get(pending.to.account)?.account.preset
+      : pending.to.preset;
+  }
+
+  /** Stores where a sign-in moved on to, and tells devices when they'd see a change. */
+  private movedOn(pending: signing.Pending, seen = true) {
+    this.underWay.update(pending);
+    if (seen) this.hint({ changed: 'accounts' });
+  }
+
+  /**
+   * Finishes a sign-in the vendor approved: signs in to both hosts with the token first, as a
+   * password is checked, then adds the account or reconnects the one signing in again. If either
+   * host refuses, the tokens go and only the reason stays.
+   */
+  private async finishSignIn(pending: signing.Pending, tokens: Tokens, signIn: DeviceSignIn) {
+    const stop = (reason: string) => this.movedOn(signing.refused(pending, reason, Date.now()));
+    const { address } = pending;
+    const held = 'account' in pending.to ? this.book.get(pending.to.account) : undefined;
+    if ('account' in pending.to && held?.connection.provider !== 'imap') {
+      return stop('That account was removed before the sign-in finished.');
+    }
+    const id = held?.account.id ?? crypto.randomUUID();
+    const connection =
+      held?.connection.provider === 'imap' ? held.connection : this.connectionOf(pending);
+    const accessToken = () => Promise.resolve(tokens.access);
+    try {
+      await checkSignIn(imapAccount(id, connection, { accessToken }), network);
+    } catch (error) {
+      const said = error instanceof Error ? error.message : String(error);
+      return stop(signIn.whenRefused ? `${said} ${signIn.whenRefused}` : said);
+    }
+    const sealed = await seal(await this.memberKey(), tokens.refresh, id);
+    if (held) {
+      await this.disconnect(id);
+      this.book.reseal(id, sealed);
+      this.tokens.set(id, tokens);
+      this.setStatus(id, 'syncing');
+    } else {
+      if (this.book.all().some((account) => sameAddress(account.address, address))) {
+        return stop(`${address} is already connected.`);
+      }
+      const { name, fromName, preset } = pending.to as signing.NewAccount;
+      this.book.add(
+        { id, name, address, ...(fromName ? { fromName } : {}), provider: 'imap', preset },
+        connection,
+        { sealed },
+      );
+      this.tokens.set(id, tokens);
+    }
+    this.underWay.finish(pending);
+    this.hint({ changed: 'accounts' });
+    await this.owe(() => this.queue.check(id));
+  }
+
+  /** How a new account is reached: its preset's hosts, or a test's stand-ins for them. */
+  private connectionOf(pending: signing.Pending) {
+    const { preset } = pending.to as signing.NewAccount;
+    const { imap, smtp } = this.preset(preset);
+    return connectionOf({ address: pending.address, preset, imap, smtp });
+  }
+
+  /** An access token for an account that signs in at its vendor: the one held, or a fresh one. */
+  private async accessToken(account: AccountId): Promise<string> {
+    const held = this.tokens.get(account);
+    if (held && isFresh(held, Date.now())) return held.access;
+    let refreshing = this.refreshing.get(account);
+    if (!refreshing) {
+      refreshing = this.refresh(account).finally(() => this.refreshing.delete(account));
+      this.refreshing.set(account, refreshing);
+    }
+    return (await refreshing).access;
+  }
+
+  /**
+   * A new access token from the account's refresh token, at the accounts server it signed in at.
+   * A refresh token the vendor replaces is stored before the new access token is used. One the
+   * vendor refuses for good leaves the account waiting for its member, and nothing asks again.
+   */
+  private async refresh(account: AccountId): Promise<Tokens> {
+    const held = this.book.get(account);
+    if (!held) throw new Error('There is no such account.');
+    if (held.account.status === 'needs-sign-in') throw new Error(lapsed(held.account));
+    const vendor = this.vendor(held.account.preset);
+    const sealed = this.book.sealed(account);
+    if (!vendor || !sealed) throw new Error(notSetUp(held.account.preset));
+    const key = await this.memberKey();
+    const kept = await open(key, sealed, account);
+    const answer = await this.ask(refreshRequest(vendor.signIn, vendor.client, kept));
+    const result = refreshed(vendor.signIn, answer, kept, Date.now());
+    if ('lapsed' in result) {
+      report(result.lapsed);
+      this.tokens.delete(account);
+      this.unwatch(account);
+      this.setStatus(account, 'needs-sign-in');
+      throw new Error(lapsed(held.account));
+    }
+    if ('failed' in result) throw new Error(result.failed);
+    if (result.granted.refresh !== kept) {
+      this.book.reseal(account, await seal(key, result.granted.refresh, account));
+    }
+    this.tokens.set(account, result.granted);
+    return result.granted;
   }
 
   /** Forgets what an account owes, so a step of it under way lands nothing, and closes its provider. */
@@ -847,24 +1139,66 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 function imapOver(
   account: AccountId,
   connection: Extract<Connection, { provider: 'imap' }>,
-  password: string,
+  secret: Secret,
 ): MailProvider {
-  return imapProvider(imapAccount(account, connection, password), network);
+  return imapProvider(imapAccount(account, connection, secret), network);
 }
+
+/** A password, or what gives each connection an access token from the account's vendor. */
+type Secret = { pass: string } | { accessToken: () => Promise<string> };
 
 function imapAccount(
   account: AccountId,
   connection: Extract<Connection, { provider: 'imap' }>,
-  password: string,
+  secret: Secret,
 ): ImapAccount {
   return {
     account,
     imap: connection.imap,
     smtp: connection.smtp,
-    auth: { user: connection.user, pass: password },
+    auth: { user: connection.user, ...secret },
     filesSent: connection.filesSent,
   };
 }
+
+/** A sign-in as a browser sees it, without what only the Mailroom needs. */
+function signInOf(pending: signing.Pending): SignIn {
+  const seen = {
+    address: pending.address,
+    ...('account' in pending.to ? { account: pending.to.account } : {}),
+    code: pending.code,
+    link: pending.link,
+    expiresAt: new Date(pending.expiresAt).toISOString(),
+  };
+  return pending.state === 'refused'
+    ? { ...seen, state: 'refused', reason: pending.reason }
+    : { ...seen, state: pending.state };
+}
+
+/**
+ * What a device code is sealed to: its address, apart from every account's id, so it can never be
+ * opened as an account's secret.
+ */
+const deviceCodeOf = (address: string) => `sign-in:${address.toLowerCase()}`;
+
+/** How a preset's accounts sign in at its vendor, if they do instead of with a password. */
+function deviceOf(preset: PresetName | undefined): DeviceSignIn | undefined {
+  const held: Preset | undefined = preset && PRESETS[preset];
+  return held?.device;
+}
+
+/** Why a preset can't sign in here. */
+function notSetUp(preset: PresetName | undefined): string {
+  const device = deviceOf(preset);
+  if (!preset || !device || !(preset in APPS)) return 'That account doesn’t sign in at its vendor.';
+  const { id } = APPS[preset as SignInPreset];
+  return `${device.vendor} sign-in isn’t set up on this Trail Mix. The operator registers an app with ${device.vendor} and sets ${id}.`;
+}
+
+const sameAddress = (one: string, other: string) => one.toLowerCase() === other.toLowerCase();
+
+/** What a member reads when an account's sign-in has lapsed. */
+const lapsed = (account: Account) => `Sign in to ${account.name} again.`;
 
 /** How the Mailroom reaches hosts: workerd's STARTTLS works only on its own sockets. */
 const network: Network = {

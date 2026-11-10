@@ -20,6 +20,8 @@ const views: View[] = [
 /** Every snapshot a browser can hold, named for reading in a failure. */
 const snapshots: [string, Key][] = [
   ['accounts', keys.accounts],
+  ['sign-ins', keys.signIns],
+  ['sign-in presets', keys.signInPresets],
   ['folders', keys.folders],
   ['outbox', keys.outbox],
   ...views.map((view): [string, Key] => [
@@ -48,7 +50,8 @@ test('a change to a folder’s mail refetches its counts, its list, every view a
 });
 
 test('accounts, folders and the Outbox each refetch only what shows them', () => {
-  expect(staleAfter({ changed: 'accounts' })).toEqual(['accounts']);
+  // A sign-in's every change is an accounts change: it starts, stops, or becomes an account.
+  expect(staleAfter({ changed: 'accounts' })).toEqual(['accounts', 'sign-ins']);
   expect(staleAfter({ changed: 'folders', account: 'personal' })).toEqual(['folders']);
   expect(staleAfter({ changed: 'outbox' })).toEqual(['outbox']);
 });

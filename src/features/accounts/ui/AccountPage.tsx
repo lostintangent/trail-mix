@@ -4,9 +4,14 @@ import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, AccountId } from '../../mail/core/index.ts';
 import { AddAccount } from './AddAccount.tsx';
 import { EditAccount } from './EditAccount.tsx';
+import { SignInAgain, vendorOf } from './SignInAgain.tsx';
 
-/** An account page the workbench shows in place of a conversation: adding one, or editing one. */
-export type AccountPageOf = { as: 'add' } | { as: 'edit'; account: AccountId };
+/**
+ * An account page the workbench shows in place of a conversation: adding one, or editing one,
+ * signing in again at once when asked to.
+ */
+export type AccountPageOf =
+  { as: 'add' } | { as: 'edit'; account: AccountId; isSigningIn?: boolean };
 
 /**
  * Adding or editing an account, on the reader's sheet, where a phone slides to it on its track. An
@@ -25,11 +30,21 @@ export function AccountPage({
 }) {
   const editing = page.as === 'edit' ? accounts.find(({ id }) => id === page.account) : undefined;
   if (page.as === 'edit' && !editing) return null;
+  const vendor = editing && vendorOf(editing);
   return (
     <section aria-labelledby="account-page-title" {...stylex.props(styles.page)}>
       <h1 id="account-page-title" {...stylex.props(styles.title)}>
         {editing ? editing.name : 'Add an account'}
       </h1>
+      {editing && vendor && editing.status === 'needs-sign-in' && (
+        <SignInAgain
+          // Its own key, apart from the editor's beside it, so each account's sign-in starts afresh.
+          key={`${editing.id}:sign-in`}
+          account={editing}
+          vendor={vendor}
+          isStarting={page.as === 'edit' && page.isSigningIn}
+        />
+      )}
       {editing ? (
         <EditAccount
           key={editing.id}

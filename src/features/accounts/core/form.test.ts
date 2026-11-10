@@ -6,6 +6,7 @@ import {
   isSecurePort,
   nameFor,
   setupFrom,
+  signInSetupFrom,
   type AccountForm,
 } from './form.ts';
 
@@ -124,5 +125,20 @@ test('a name or From name is at most 200 characters', () => {
   expect(formProblems(filled('zoho', { name: long, fromName: long }), [])).toEqual({
     name: 'A name can be up to 200 characters.',
     fromName: 'A name can be up to 200 characters.',
+  });
+});
+
+test('Outlook asks for no password and no servers, since its member signs in at Microsoft', () => {
+  const outlook = { ...formFor('outlook', ZOHO), address: 'sam@outlook.example' };
+  expect(formProblems(outlook, [])).toEqual({});
+  expect(formProblems({ ...outlook, address: 'sam' }, [])).toHaveProperty('address');
+  expect(formProblems(outlook, [account('Sam@Outlook.example')])).toEqual({
+    address: 'sam@outlook.example is already connected.',
+  });
+  expect(signInSetupFrom({ ...outlook, fromName: ' Sam ', password: 'typed before' })).toEqual({
+    preset: 'outlook',
+    name: 'outlook.example',
+    address: 'sam@outlook.example',
+    fromName: 'Sam',
   });
 });

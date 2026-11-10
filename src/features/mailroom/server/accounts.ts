@@ -138,6 +138,11 @@ export function accountBook(sql: Sql) {
       });
     },
 
+    /** Replaces an account's sealed secret, as a vendor's sign-in gives a new refresh token. */
+    reseal(id: AccountId, sealed: Uint8Array) {
+      sql.run(`UPDATE credentials SET sealed = ? WHERE account = ?`, sealed, id);
+    },
+
     sealed(id: AccountId): Uint8Array | undefined {
       const [row] = sql.all<{ sealed: ArrayBuffer | Uint8Array }>(
         `SELECT sealed FROM credentials WHERE account = ?`,

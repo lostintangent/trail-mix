@@ -15,4 +15,23 @@ export {
   type ImapAccount,
   type Network,
 } from './imap/provider.ts';
-export { PRESETS, type Endpoint, type Preset, type PresetName } from './imap/core/index.ts';
+export {
+  PRESETS,
+  codeFrom,
+  codeRequest,
+  isFresh,
+  pollRequest,
+  polled,
+  refreshRequest,
+  refreshed,
+  withStandIn,
+  type Answer,
+  type Client,
+  type DeviceSignIn,
+  type Endpoint,
+  type Polled,
+  type Preset,
+  type PresetName,
+  type Request,
+  type Tokens,
+} from './imap/core/index.ts';

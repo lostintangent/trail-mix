@@ -1,5 +1,5 @@
 import { COMMANDS, receivedCall } from '../client/contract.ts';
-import type { MailProvider } from '../../providers/index.ts';
+import type { MailProvider, Preset, PresetName } from '../../providers/index.ts';
 import { Mailroom, type MailroomEnv } from './mailroom.ts';
 
 /**
@@ -92,6 +92,11 @@ export class TestMailroom extends Mailroom {
   async eraseIndex(): Promise<void> {
     for (const { id } of await this.accounts()) this.store.forget(id);
     await this.forgetBodies(`${this.member}/`);
+  }
+
+  /** A preset as this Mailroom reaches it, from its settings, with any stand-ins it honors. */
+  presetFrom(name: PresetName): Promise<Preset> {
+    return Promise.resolve(this.preset(name));
   }
 
   /** Every row Trail Mix stored for this member, blobs as Latin-1 text, and every cached body. */

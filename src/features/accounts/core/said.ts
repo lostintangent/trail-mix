@@ -38,3 +38,10 @@ export function refusalSaid(message: string): string {
 
 export const DEMO_SAID =
   'This Trail Mix serves only the demo mailbox, so it can’t connect an account of your own.';
+
+/**
+ * Why a member can't sign in at a vendor here: the operator hasn't registered Trail Mix with it. The
+ * Mailroom says the same when asked to sign in anyway.
+ */
+export const signInNotSetUp = (vendor: string, setting: string) =>
+  `${vendor} sign-in isn’t set up on this Trail Mix. The operator registers an app with ${vendor} and sets ${setting}.`;

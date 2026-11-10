@@ -32,11 +32,20 @@ export interface Queries {
   conversation(id: ConversationId): Promise<Message[]>;
   body(ref: MessageRef): Promise<Body>;
   outbox(): Promise<Outgoing[]>;
+  /** Sign-ins under way, and why one stopped, until its code would have expired. */
+  signIns(): Promise<SignIn[]>;
+  /** The presets this deployment can sign in at, which is how it's set up, not what's under way. */
+  signInPresets(): Promise<SignInPreset[]>;
 }
 
 export interface Commands {
   /** The only call that carries a secret. */
   addAccount(setup: AccountSetup): Promise<Account>;
+  /**
+   * Starts a sign-in at the preset's vendor, for a new account or for one whose status is
+   * `needs-sign-in`. The Mailroom finishes it. Starting another for the same address replaces it.
+   */
+  signIn(to: SignInSetup | AccountId): Promise<SignIn>;
   /** An empty `fromName` removes it, and mail is from the address alone. */
   updateAccount(
     id: AccountId,
@@ -85,7 +94,7 @@ export type Page = { items: ConversationSummary[]; next?: PageCursor };
 
 /**
  * What connecting an account takes: nothing for the demo mailbox, and a password for an IMAP host.
- * Outlook takes no password: the Mailroom starts Microsoft's device-code sign-in instead.
+ * Outlook takes no password, and is added by `signIn` instead.
  */
 export type AccountSetup =
   | { provider: 'demo' }
@@ -104,10 +113,39 @@ export type AccountSetup =
       smtp?: Endpoint;
       /** The only secret. The Mailroom encrypts it before anything is stored. */
       password: string;
-    }
-  | { provider: 'imap'; name: string; address: string; fromName?: string; preset: 'outlook' };
+    };
 
 export type Endpoint = { host: string; port: number; secure: boolean };
+
+/**
+ * An account that signs in at its vendor instead of taking a password. The Mailroom runs the
+ * preset's device-code sign-in, polls it on its alarm, and seals the refresh token in place of a
+ * password. The browser sees only the code.
+ */
+export type SignInSetup = {
+  preset: SignInPreset;
+  name: string;
+  address: string;
+  fromName?: string;
+};
+
+/** The presets whose vendor a member can sign in at instead of giving a password. */
+export type SignInPreset = 'outlook';
+
+/**
+ * A sign-in under way. Finished needs no state: the row goes, and the account appears or leaves
+ * `needs-sign-in`. One that stops keeps nothing but its reason. The accounts hint names every change.
+ */
+export type SignIn = {
+  address: string;
+  /** Present when an account is signing in again. */
+  account?: AccountId;
+  /** What the member types at `link`. */
+  code: string;
+  link: string;
+  /** ISO 8601. */
+  expiresAt: string;
+} & ({ state: 'waiting' } | { state: 'checking' } | { state: 'refused'; reason: string });
 
 /** What the composer saves. The Mailroom writes it as MIME and files it in the account's Drafts. */
 export type DraftInput = {
@@ -176,10 +214,13 @@ export const QUERIES = [
   'conversation',
   'body',
   'outbox',
+  'signIns',
+  'signInPresets',
 ] as const satisfies readonly (keyof Queries)[];
 
 export const COMMANDS = [
   'addAccount',
+  'signIn',
   'updateAccount',
   'removeAccount',
   'allowImages',
