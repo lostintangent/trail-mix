@@ -6,6 +6,7 @@ import {
   type Flags,
   type MemoryIndex,
 } from '../../../mail/core/index.ts';
+import { seededRandom } from '../../../../shared/random.ts';
 import { flagsOf, planSync, type FolderState, type SyncPlan } from './sync.ts';
 
 const INBOX = { account: 'personal', path: 'INBOX' };
@@ -262,7 +263,7 @@ test('an envelope the server did not return is asked for again, and none it was 
 });
 
 test('a folder of 50,000 messages riddled with gaps keeps a cursor under 64 KB, flags and all', () => {
-  const random = generator(7);
+  const random = seededRandom(7);
   // Moving and deleting leaves a gap after roughly every third message, and most mail is read.
   const envelopes = Array.from({ length: 80_000 }, (_, i) =>
     message(1, i + 1, '2026-11-09T12:00:00.000Z', random() < 0.97 ? read : unread),
@@ -288,7 +289,7 @@ test('IMAP flags are read without regard to case, and keywords are left out', ()
 
 test('whatever the server does between cold starts, syncing until done mirrors its window', () => {
   for (let seed = 1; seed <= 60; seed++) {
-    const random = generator(seed);
+    const random = seededRandom(seed);
     // Batches of a few messages, so a few dozen messages take many batches.
     const server = {
       ...(random() < 0.5 ? ZOHO : OUTLOOK),
@@ -348,14 +349,4 @@ function uidsOf(events: readonly { type: string; envelope?: Envelope }[]): numbe
 
 function range(from: number, to: number): number[] {
   return Array.from({ length: from - to + 1 }, (_, i) => from - i);
-}
-
-/** A seeded generator (mulberry32), so every run and every machine sees the same servers. */
-function generator(seed: number): () => number {
-  return () => {
-    seed = (seed + 0x6d2b79f5) | 0;
-    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
 }

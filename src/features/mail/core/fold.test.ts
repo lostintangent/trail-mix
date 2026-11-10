@@ -3,6 +3,7 @@ import { gatheringOf, linkConversations } from './conversations.ts';
 import { applySyncEvent, memoryIndex, type MemoryIndex, type SyncEvent } from './fold.ts';
 import type { Envelope, Message } from './model.ts';
 import { FOLDERS, arrive, envelope, fold, threads } from './testFixtures.ts';
+import { seededRandom } from '../../../shared/random.ts';
 
 const NOTHING = { put: [], remove: [] };
 
@@ -91,7 +92,7 @@ const SEEDS = Array.from({ length: 200 }, (_, seed) => seed + 1);
 
 test('the same messages, arriving in any order and any number of times, make the same index', () => {
   for (const seed of SEEDS) {
-    const random = generator(seed);
+    const random = seededRandom(seed);
     const envelopes = mailbox(random);
     const arrivals = arrive(...envelopes, ...envelopes.filter(() => random() < 0.3));
 
@@ -104,7 +105,7 @@ test('the same messages, arriving in any order and any number of times, make the
 
 test('removing messages, in any order, leaves the index as if they had never arrived', () => {
   for (const seed of SEEDS) {
-    const random = generator(seed);
+    const random = seededRandom(seed);
     const envelopes = mailbox(random);
     const leaving = envelopes.filter(() => random() < 0.4);
     const staying = envelopes.filter((envelope) => !leaving.includes(envelope));
@@ -159,14 +160,4 @@ function shuffled<T>(items: readonly T[], random: () => number): T[] {
     [copy[i], copy[j]] = [copy[j]!, copy[i]!];
   }
   return copy;
-}
-
-/** A seeded generator (mulberry32), so every run and every machine sees the same mailboxes. */
-function generator(seed: number): () => number {
-  return () => {
-    seed = (seed + 0x6d2b79f5) | 0;
-    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
 }
