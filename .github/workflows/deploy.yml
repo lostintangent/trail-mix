@@ -22,9 +22,11 @@ on:
 permissions:
   contents: read
 
-# Wrangler runs on Node, from the version the lockfile pins.
+# Wrangler runs on Node, from the version the lockfile pins. workers.dev turns away requests with
+# some libraries' default user agents before the Worker runs, so the checks of /health name theirs.
 env:
   WRANGLER: node node_modules/wrangler/bin/wrangler.js
+  USER_AGENT: trail-mix-deploy (+https://github.com/${{ github.repository }})
 
 jobs:
   # Whether this repository can deploy, and whether its Access settings would let anyone sign in.
@@ -150,7 +152,7 @@ jobs:
           esac
 
           # The commit serving now, to see the rollback bring it back.
-          before=$(curl -sS --max-time 10 "$address/health" 2> /dev/null | jq -r '.version // empty' 2> /dev/null || true)
+          before=$(curl -sS --max-time 10 -A "$USER_AGENT" "$address/health" 2> /dev/null | jq -r '.version // empty' 2> /dev/null || true)
           [[ "$before" =~ ^[0-9a-f]{40}$ ]] || before=
 
           {
@@ -195,7 +197,7 @@ jobs:
           ADDRESS: ${{ steps.account.outputs.address }}
         run: |
           for _ in $(seq 24); do
-            code=$(curl -sS --max-time 10 -o "$RUNNER_TEMP/health.json" -w '%{http_code}' "$ADDRESS/health" || true)
+            code=$(curl -sS --max-time 10 -A "$USER_AGENT" -o "$RUNNER_TEMP/health.json" -w '%{http_code}' "$ADDRESS/health" || true)
             case "$code" in
               200) reported=$(jq -r '.version // "no version"' "$RUNNER_TEMP/health.json" 2> /dev/null || echo "no JSON") ;;
               302) reported="a sign-in, so Access needs its bypass for /health" ;;
@@ -230,7 +232,7 @@ jobs:
             exit 1
           fi
           for _ in $(seq 24); do
-            reported=$(curl -sS --max-time 10 "$ADDRESS/health" 2> /dev/null | jq -r '.version // empty' 2> /dev/null || true)
+            reported=$(curl -sS --max-time 10 -A "$USER_AGENT" "$ADDRESS/health" 2> /dev/null | jq -r '.version // empty' 2> /dev/null || true)
             if [ "$reported" = "$BEFORE" ]; then
               echo "::error::Rolled back to version $PREVIOUS: $ADDRESS/health reports $BEFORE again."
               exit 1
@@ -316,7 +318,7 @@ jobs:
           ADDRESS: ${{ steps.deploy.outputs.address }}
         run: |
           for _ in $(seq 24); do
-            code=$(curl -sS --max-time 10 -o "$RUNNER_TEMP/health.json" -w '%{http_code}' "$ADDRESS/health" || true)
+            code=$(curl -sS --max-time 10 -A "$USER_AGENT" -o "$RUNNER_TEMP/health.json" -w '%{http_code}' "$ADDRESS/health" || true)
             case "$code" in
               200) reported=$(jq -r '.version // "no version"' "$RUNNER_TEMP/health.json" 2> /dev/null || echo "no JSON") ;;
               302) reported="a sign-in, so Access needs its bypass for /health" ;;
