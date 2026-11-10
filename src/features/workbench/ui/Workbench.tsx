@@ -36,14 +36,32 @@ import {
   SearchScope,
   select,
   TriageActions,
+  triageCommands,
   useTriage,
   type Action,
   type SelectBy,
   type Selection,
 } from '../../conversations/index.ts';
 import { PickedActions, SelectionPane } from './SelectionPane.tsx';
+import { workbenchCommands } from './commands.ts';
+import {
+  Commands,
+  focusSearch,
+  runCommandKey,
+  ShortcutSheet,
+  useCommandKeys,
+  type Command,
+} from '../../commands/index.ts';
+
+const NO_COMMANDS: readonly Command[] = [];
 import { StatusLine } from './StatusLine.tsx';
-import { folderName, Sidebar, UNIFIED_VIEWS, type ViewCounts } from '../../folders/index.ts';
+import {
+  folderName,
+  Sidebar,
+  UNIFIED_VIEWS,
+  viewCommands,
+  type ViewCounts,
+} from '../../folders/index.ts';
 import { useMediaQuery } from './useMediaQuery.ts';
 import { usePanel } from './usePanel.ts';
 
@@ -73,6 +91,7 @@ export function Workbench({
   isFetching,
   onListNearEnd,
   sidebarFooter,
+  extraCommands = NO_COMMANDS,
 }: {
   view: View;
   onViewChange: (view: View) => void;
@@ -86,6 +105,8 @@ export function Workbench({
   /** Asks for the view's next page, if it has one. */
   onListNearEnd: () => void;
   sidebarFooter: ReactNode;
+  /** Commands from outside the workbench, such as the theme's, for the registry. */
+  extraCommands?: readonly Command[];
 }) {
   const [selection, setSelection] = useState<Selection>(NOTHING_SELECTED);
   const [isPicking, setPicking] = useState(false);
@@ -112,7 +133,8 @@ export function Workbench({
   // Panes off a phone's screen are inert, so focus and assistive tech stay on the one in view.
   const isOffscreen = (pane: Pane) => isPhone && pane !== phonePane;
 
-  const triage = useTriage(view, folders);
+  const { triage, undoLast, canUndo } = useTriage(view, folders);
+  const [isSheetOpen, setSheetOpen] = useState(false);
   // A conversation that leaves the list gives way to the one below it, or above it at the end. On a
   // phone, where the reader fills the screen, the list comes back instead. The list shows the
   // conversation gone at once, and the reader turns to the next one just after, so the frame that
@@ -153,12 +175,14 @@ export function Workbench({
   const readerActions = useCallback(
     ({ id, conversation, account }: Reading, place: 'bar' | 'island') => (
       <TriageActions
-        accounts={[account]}
-        folders={folders}
-        isFlagged={conversation.some(({ flags }) => flags.flagged)}
-        isUnread={conversation.some(({ flags }) => !flags.seen)}
+        commands={triageCommands({
+          accounts: [account],
+          folders,
+          isFlagged: conversation.some(({ flags }) => flags.flagged),
+          isUnread: conversation.some(({ flags }) => !flags.seen),
+          onTriage: (action) => latestTriageShown.current(action, id),
+        })}
         isCompact={place === 'island'}
-        onTriage={(action) => latestTriageShown.current(action, id)}
       />
     ),
     [folders],
@@ -203,16 +227,51 @@ export function Workbench({
     () => conversations?.filter(({ id }) => selection.ids.includes(id)) ?? [],
     [conversations, selection.ids],
   );
+  // What's selected, as commands: the selection's own while several are picked, else the open one's.
+  const selectedCommands =
+    pickedRows.length === 0
+      ? []
+      : triageCommands({
+          accounts: accounts.filter(({ id }) => pickedRows.some((row) => row.account === id)),
+          folders,
+          isFlagged: pickedRows.every(({ flagged }) => flagged),
+          isUnread: pickedRows.some(({ unread }) => unread > 0),
+          onTriage: (action) =>
+            isMany || isPicking || selected === undefined
+              ? triageSelection(action)
+              : triageShown(action, selected),
+        });
   const selectionActions = (place: 'bar' | 'island') => (
-    <TriageActions
-      accounts={accounts.filter(({ id }) => pickedRows.some((row) => row.account === id))}
-      folders={folders}
-      isFlagged={pickedRows.length > 0 && pickedRows.every(({ flagged }) => flagged)}
-      isUnread={pickedRows.some(({ unread }) => unread > 0)}
-      isCompact={place === 'island'}
-      onTriage={triageSelection}
-    />
+    <TriageActions commands={selectedCommands} isCompact={place === 'island'} />
   );
+
+  // The registry: every command the workbench can run now, gathered from each feature, which binds
+  // their keys and feeds the palette and the shortcut sheet.
+  const anchorAt = conversations?.findIndex(({ id }) => id === selection.anchor) ?? -1;
+  const stepTo = (at: number) => {
+    const row = conversations?.[at];
+    return row && (() => pick(row.id, 'only'));
+  };
+  const commands = [
+    ...selectedCommands,
+    ...workbenchCommands({
+      next: stepTo(anchorAt + 1),
+      previous: anchorAt > 0 ? stepTo(anchorAt - 1) : undefined,
+      back: isPhone
+        ? phonePane === 'list'
+          ? undefined
+          : () => setPhonePane('list')
+        : isMany
+          ? stopPicking
+          : undefined,
+      undo: canUndo ? undoLast : undefined,
+      focusSearch,
+      showShortcuts: () => setSheetOpen(true),
+    }),
+    ...viewCommands(accounts, folders, openView),
+    ...extraCommands,
+  ];
+  useCommandKeys(commands);
   const isSidebarRail = !isPhone && sidebar.isCollapsed;
   const footer = useMemo(
     () => (
@@ -225,111 +284,119 @@ export function Workbench({
   );
 
   return (
-    <SearchContext value={search}>
-      <div {...stylex.props(styles.desk)}>
-        {/* On a phone, toasts rise above the island, where the pane's actions float. */}
-        <Toasts
-          layerInset={
-            isPhone
-              ? { blockEnd: `calc(${tm.target} + ${spacingVars['--spacing-1']} * 2)` }
-              : undefined
-          }
-        />
-        <div
-          {...stylex.props(
-            styles.track,
-            styles.columns(COLUMNS),
-            trackAt[phonePane],
-            isResizing && styles.resizing,
-          )}
-        >
-          <div inert={isOffscreen('sidebar')} {...stylex.props(styles.pane)}>
-            <Sidebar
-              id={sidebarId}
-              view={view.in === 'search' ? SEARCHING : view}
-              onSelect={openView}
-              accounts={accounts}
-              folders={folders}
-              counts={counts}
-              isCollapsed={isSidebarRail}
-              header={isFieldInSidebar ? SEARCH_FIELD : undefined}
-              footer={footer}
-            />
-            <PanelEdge
-              spec={PANELS.sidebar}
-              state={sidebar}
-              label="Resize the sidebar"
-              controls={sidebarId}
-              onChange={setSidebar}
-              onResizingChange={setIsResizing}
-            />
-          </div>
-          <div inert={isOffscreen('list')} {...stylex.props(styles.pane)}>
-            <ListPane
-              id={listId}
-              title={title}
-              unread={unread}
-              scope={scope}
-              below={
-                <>
-                  {!isFieldInSidebar && SEARCH_FIELD}
-                  {view.in === 'search' && (
-                    <SearchScope
-                      isFullText={view.fullText === true}
-                      isSearching={isFetching}
-                      onSearchBodies={searchBodies}
-                    />
-                  )}
-                </>
-              }
-              isSearch={view.in === 'search'}
-              conversations={conversations}
-              isUpdating={isFetching}
-              marks={marks}
-              stamps={stamps}
-              selection={selection}
-              isPicking={isPicking}
-              onSelect={pick}
-              onLongPress={startPicking}
-              onSwipe={swipe}
-              picked={
-                <PickedActions count={selection.ids.length} onCancel={stopPicking}>
-                  <Suspense>{selectionActions('island')}</Suspense>
-                </PickedActions>
-              }
-              onNearEnd={onListNearEnd}
-              isCollapsed={!isPhone && list.isCollapsed}
-              onExpand={() => setList({ ...list, isCollapsed: false })}
-              onShowFolders={() => setPhonePane('sidebar')}
-            />
-            <PanelEdge
-              spec={PANELS.list}
-              state={list}
-              label="Resize the conversation list"
-              controls={listId}
-              onChange={setList}
-              onResizingChange={setIsResizing}
-            />
-          </div>
-          <div inert={isOffscreen('reader')} {...stylex.props(styles.pane)}>
-            {isMany && !isPhone ? (
-              <SelectionPane count={selection.ids.length} onClear={stopPicking}>
-                <Suspense>{selectionActions('bar')}</Suspense>
-              </SelectionPane>
-            ) : (
-              <ReaderPane
-                selected={selected}
-                accounts={accounts}
-                upcoming={neighbors(conversations, selected)}
-                onShown={markRead}
-                actions={readerActions}
-                onBack={() => setPhonePane('list')}
-              />
+    <Commands value={commands}>
+      <SearchContext value={search}>
+        <div {...stylex.props(styles.desk)}>
+          {/* On a phone, toasts rise above the island, where the pane's actions float. */}
+          <Toasts
+            layerInset={
+              isPhone
+                ? { blockEnd: `calc(${tm.target} + ${spacingVars['--spacing-1']} * 2)` }
+                : undefined
+            }
+          />
+          <div
+            {...stylex.props(
+              styles.track,
+              styles.columns(COLUMNS),
+              trackAt[phonePane],
+              isResizing && styles.resizing,
             )}
+          >
+            <div inert={isOffscreen('sidebar')} {...stylex.props(styles.pane)}>
+              <Sidebar
+                id={sidebarId}
+                view={view.in === 'search' ? SEARCHING : view}
+                onSelect={openView}
+                accounts={accounts}
+                folders={folders}
+                counts={counts}
+                isCollapsed={isSidebarRail}
+                header={isFieldInSidebar ? SEARCH_FIELD : undefined}
+                footer={footer}
+              />
+              <PanelEdge
+                spec={PANELS.sidebar}
+                state={sidebar}
+                label="Resize the sidebar"
+                controls={sidebarId}
+                onChange={setSidebar}
+                onResizingChange={setIsResizing}
+              />
+            </div>
+            <div inert={isOffscreen('list')} {...stylex.props(styles.pane)}>
+              <ListPane
+                id={listId}
+                title={title}
+                unread={unread}
+                scope={scope}
+                below={
+                  <>
+                    {!isFieldInSidebar && SEARCH_FIELD}
+                    {view.in === 'search' && (
+                      <SearchScope
+                        isFullText={view.fullText === true}
+                        isSearching={isFetching}
+                        onSearchBodies={searchBodies}
+                      />
+                    )}
+                  </>
+                }
+                isSearch={view.in === 'search'}
+                conversations={conversations}
+                isUpdating={isFetching}
+                marks={marks}
+                stamps={stamps}
+                selection={selection}
+                isPicking={isPicking}
+                onSelect={pick}
+                onLongPress={startPicking}
+                onSwipe={swipe}
+                picked={
+                  <PickedActions count={selection.ids.length} onCancel={stopPicking}>
+                    <Suspense>{selectionActions('island')}</Suspense>
+                  </PickedActions>
+                }
+                onNearEnd={onListNearEnd}
+                isCollapsed={!isPhone && list.isCollapsed}
+                onExpand={() => setList({ ...list, isCollapsed: false })}
+                onShowFolders={() => setPhonePane('sidebar')}
+              />
+              <PanelEdge
+                spec={PANELS.list}
+                state={list}
+                label="Resize the conversation list"
+                controls={listId}
+                onChange={setList}
+                onResizingChange={setIsResizing}
+              />
+            </div>
+            <div inert={isOffscreen('reader')} {...stylex.props(styles.pane)}>
+              {isMany && !isPhone ? (
+                <SelectionPane count={selection.ids.length} onClear={stopPicking}>
+                  <Suspense>{selectionActions('bar')}</Suspense>
+                </SelectionPane>
+              ) : (
+                <ReaderPane
+                  selected={selected}
+                  accounts={accounts}
+                  upcoming={neighbors(conversations, selected)}
+                  onShown={markRead}
+                  actions={readerActions}
+                  onMessageKey={runCommandKey}
+                  onBack={() => setPhonePane('list')}
+                />
+              )}
+            </div>
           </div>
         </div>
-      </div>
-    </SearchContext>
+      </SearchContext>
+      {isSheetOpen && (
+        <Suspense>
+          <ShortcutSheet isOpen onClose={() => setSheetOpen(false)} />
+        </Suspense>
+      )}
+    </Commands>
   );
 }
 

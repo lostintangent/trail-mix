@@ -5,3 +5,4 @@ export { preloadTriageActions, TriageActions } from './ui/lazy.ts';
 export { useTriage, type Triage } from './ui/useTriage.tsx';
 export { useTriagedList } from './ui/overlays.ts';
 export { SearchContext, SearchField, SearchScope, type SearchState } from './ui/search.tsx';
+export { MOVE, triageCommands } from './ui/commands.ts';

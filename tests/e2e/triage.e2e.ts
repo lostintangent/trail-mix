@@ -257,3 +257,44 @@ test('on a phone, a row swiped far enough left is archived, and a short swipe sl
   await here.getByRole('button', { name: 'Undo' }).click();
   await options.filter({ hasText: far ?? '' }).waitFor({ timeout: ELSEWHERE_MS });
 }, 30_000);
+
+test('keys run the registry’s commands: from the list, from inside a message, and ? lists them', async () => {
+  const here = await inbox();
+  const options = here.getByRole('option');
+  const selected = here.locator('[role="option"][aria-selected="true"]');
+  await options.nth(1).click();
+  const place = () => selected.getAttribute('aria-posinset');
+  await expect(place()).resolves.toBe('2');
+
+  await here.keyboard.press('j');
+  await expect(place()).resolves.toBe('3');
+  await here.keyboard.press('k');
+  await expect(place()).resolves.toBe('2');
+  await here.waitForTimeout(300);
+
+  // E archives the open conversation, and Z puts it back.
+  const subject = (await here.locator('section[aria-label="Reader"] h1').textContent()) ?? '';
+  const row = options.filter({ hasText: subject });
+  await here.keyboard.press('e');
+  await row.waitFor({ state: 'detached', timeout: 1_000 });
+  await here.getByRole('button', { name: 'Undo' }).waitFor();
+  await here.keyboard.press('z');
+  await row.first().waitFor({ timeout: ELSEWHERE_MS });
+
+  // After a click inside a message, focus is in its frame, and E still archives.
+  await row.first().click();
+  const shown = here.locator('section[aria-label="Reader"] iframe').last();
+  await here.waitForFunction(() =>
+    [...document.querySelectorAll<HTMLIFrameElement>('section[aria-label="Reader"] iframe')].some(
+      (frame) => frame.style.visibility === 'visible',
+    ),
+  );
+  await shown.contentFrame().locator('body').click();
+  await here.keyboard.press('e');
+  await row.waitFor({ state: 'detached', timeout: 1_000 });
+
+  await here.keyboard.press('?');
+  const sheet = here.getByRole('dialog');
+  await sheet.getByRole('heading', { name: 'Keyboard shortcuts' }).waitFor();
+  await expect(sheet.getByText('Archive', { exact: true }).isVisible()).resolves.toBe(true);
+}, 30_000);

@@ -1,5 +1,5 @@
 import { useQueryClient, type InfiniteData } from '@tanstack/react-query';
-import { useCallback } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { folderName } from '../../folders/index.ts';
 import type { ConversationId, Folder, Message, View } from '../../mail/core/index.ts';
 import {
@@ -37,10 +37,22 @@ type Pages = InfiniteData<Page, PageCursor | undefined>;
  * server has it, a toast says what happened and offers Undo. If the server refuses, the overlay is
  * lifted, so the rows return as they were, and a toast says why.
  */
-export function useTriage(view: View, folders: readonly Folder[]): Triage {
+export function useTriage(
+  view: View,
+  folders: readonly Folder[],
+): { triage: Triage; undoLast: () => void; canUndo: boolean } {
   const queryClient = useQueryClient();
+  // The last triage the toast offered to undo, which Undo's key undoes too, once.
+  const last = useRef<(() => void) | undefined>(undefined);
+  const [canUndo, setCanUndo] = useState(false);
+  const undoLast = useCallback(() => {
+    const undo = last.current;
+    last.current = undefined;
+    setCanUndo(false);
+    undo?.();
+  }, []);
 
-  return useCallback(
+  const triage = useCallback<Triage>(
     (action, ids, { quietly = false } = {}) => {
       const overlays = overlaysOf(queryClient);
       const pages = queryClient.getQueryData<Pages>(conversationsQuery(view).queryKey);
@@ -95,10 +107,24 @@ export function useTriage(view: View, folders: readonly Folder[]): Triage {
           const moved = await send(command);
           if (laid) overlays.settle(laid);
           if (quietly) return;
-          void toast({
+          // The toast's Undo spends the key's undo too, so neither undoes it twice.
+          const undoThis = () => {
+            if (last.current === undoFromKey) {
+              last.current = undefined;
+              setCanUndo(false);
+            }
+            void undo(command, moved);
+          };
+          const dismissing = toast({
             body: said(action, ids.length, folders),
-            action: { label: 'Undo', onAction: () => void undo(command, moved) },
+            action: { label: 'Undo', onAction: undoThis },
           });
+          const undoFromKey = () => {
+            void dismissing.then((dismiss) => dismiss());
+            void undo(command, moved);
+          };
+          last.current = undoFromKey;
+          setCanUndo(true);
         } catch (error) {
           if (laid) overlays.lift(laid);
           restoreMessages();
@@ -108,6 +134,7 @@ export function useTriage(view: View, folders: readonly Folder[]): Triage {
     },
     [queryClient, view, folders],
   );
+  return { triage, undoLast, canUndo };
 }
 
 /** Asks the Mailroom to carry out a command, and says where each moved message went. */

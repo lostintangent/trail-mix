@@ -122,6 +122,13 @@ export function ConversationList({
     },
   });
   useLayoutEffect(() => virtualizer.measure(), [virtualizer, rowHeight]);
+  // A selection moved from elsewhere, as by J and K, scrolls into view. The list's own keys scroll as
+  // they move, in the same commit, so they're left alone here.
+  const isMovedHere = useRef(false);
+  useLayoutEffect(() => {
+    if (isMovedHere.current) isMovedHere.current = false;
+    else if (selectedIndex >= 0) virtualizer.scrollToIndex(selectedIndex, { align: 'auto' });
+  }, [virtualizer, selectedIndex]);
   const lastDrawn = virtualizer.getVirtualItems().at(-1)?.index ?? -1;
   useEffect(() => {
     if (lastDrawn >= conversations.length - AHEAD) onNearEnd();
@@ -143,6 +150,7 @@ export function ConversationList({
     const target = to === undefined ? undefined : conversations[to];
     if (to === undefined || !target) return;
     event.preventDefault();
+    isMovedHere.current = true;
     onSelect(target.id, event.shiftKey ? 'extend' : 'only');
     // A move that scrolls the list tells the virtualizer where it went at once, instead of in the
     // next frame's scroll event. So the rows it brings in render in the selection's own commit, and
