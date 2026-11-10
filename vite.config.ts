@@ -5,6 +5,8 @@ import { index, rootRoute } from '@tanstack/virtual-file-routes';
 import react from '@vitejs/plugin-react';
 import { Features } from 'lightningcss';
 import { defineConfig } from 'vite';
+import { astryxIcons } from './src/shared/build/astryxIcons.ts';
+import { astryxMessages } from './src/shared/build/astryxMessages.ts';
 import { stylexDefinitionsFirst } from './src/shared/build/stylexDefinitionsFirst.ts';
 import { stylexOptions } from './src/shared/build/stylexOptions.ts';
 
@@ -29,6 +31,9 @@ export default defineConfig(({ isPreview }) => ({
       },
       client: { entry: 'app/main.tsx' },
     }),
+    // Astryx's message formatter and its fallback icons, kept to what the bundled components use.
+    astryxMessages(),
+    astryxIcons(),
     stylexDefinitionsFirst(),
     stylex(stylexOptions),
     react(),
