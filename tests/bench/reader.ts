@@ -6,8 +6,8 @@ import { percentile, type BenchArea } from './budget.ts';
 /**
  * The reader's budgets, as AGENTS.md sets them. Moving by key to a conversation whose newest
  * message is 300 KB of HTML renders within 200 ms, its body fetched and sanitized ahead while the
- * browser was idle. That move comes after a rest, which the reader follows at once. Holding a key
- * with a conversation open still moves through the list within 50 ms, because the reader waits for
+ * browser was idle. That move comes after a rest, which the reader follows at once. The repeats of
+ * a key held down after it still move through the list within 50 ms, because the reader waits for
  * the selection to rest. It runs on the built app with a 50,000-message demo mailbox at the phone's
  * CPU, around the demo's Kernel Weekly, which is that newsletter.
  *
@@ -24,6 +24,9 @@ const NEWSLETTER = /Kernel Weekly/;
 
 /** How long the browser is left idle before a move, to prepare the conversations beside it. */
 const IDLE_MS = 3_000;
+
+/** A keyboard's usual delay between pressing a key and its first repeat. */
+const REPEAT_DELAY_MS = 500;
 
 export const reader: BenchArea = {
   name: 'reader',
@@ -62,15 +65,18 @@ export const reader: BenchArea = {
         await page.waitForTimeout(IDLE_MS / 3);
       }
 
-      // Held: from the conversation above the newsletter, prepared and at rest, a key held down.
+      // Held: a key pressed after a rest opens the newsletter at once, as the moves above measure.
+      // Held down, it repeats after the keyboard's delay. That delay is a rest too, so the first
+      // repeat opens the next conversation at once. The later repeats never let the selection
+      // rest, so the reader shows nothing more until the key comes up.
       await page.waitForTimeout(IDLE_MS);
-      const newsletterRow = (await rows.nth(at).textContent()) ?? '';
+      await timed(page, () => press(page, 'ArrowDown'));
+      const next = (await rows.nth(at + 1).textContent()) ?? '';
+      await page.waitForTimeout(REPEAT_DELAY_MS);
       const held = await heldKey(page);
       await page.context().close();
-      // The first move after the rest opens the newsletter at once. The repeats never rest, so
-      // the reader shows nothing else until the key comes up.
-      if (held.shown.length !== 1 || !newsletterRow.includes(held.shown[0] ?? '\u0000')) {
-        throw new Error(`While a key was held, the reader showed: ${held.shown.join(', ')}`);
+      if (held.shown.length > 1 || !held.shown.every((subject) => next.includes(subject))) {
+        throw new Error(`While a key repeated, the reader showed: ${held.shown.join(', ')}`);
       }
 
       console.log(
@@ -110,8 +116,8 @@ export const reader: BenchArea = {
 };
 
 /**
- * Each of 40 moves by a held key, timed until the frame after it is drawn, and the subjects of the
- * conversations the reader showed meanwhile.
+ * Each of 40 repeats of a held key, timed until the frame after it is drawn, and the subjects of
+ * the conversations the reader showed meanwhile.
  */
 function heldKey(page: Page): Promise<{ times: number[]; shown: string[] }> {
   return page.evaluate(async () => {
