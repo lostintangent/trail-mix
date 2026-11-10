@@ -42,7 +42,7 @@ export type ImapAccount = {
  * How the provider reaches the network. On workerd, the Mailroom passes imapflow's transport over
  * `cloudflare:sockets`, whose STARTTLS works there. Elsewhere Node's sockets serve, and `ca` adds
  * a certificate authority to trust, such as the test mail server's. `patience` stands in for
- * `SMTP_PATIENCE_MS`, so a test of a host gone quiet need not wait as long.
+ * `SMTP_PATIENCE_MS` and `IMAP_PATIENCE_MS`, so a test of a host gone quiet need not wait as long.
  */
 export type Network = {
   imapTransport?: ImapTransport;
@@ -56,6 +56,14 @@ export type Network = {
  * would hold them for nodemailer's ten minutes, or for good if it stalls during TLS.
  */
 const SMTP_PATIENCE_MS = 60_000;
+
+/**
+ * How long a command waits on an IMAP host that has gone quiet before its connection is given up
+ * and the command runs once more on a new one. Opening a message, saving a draft and each sync
+ * step share one connection, and one the network dropped without a word would hold them all for
+ * imapflow's five minutes.
+ */
+const IMAP_PATIENCE_MS = 30_000;
 
 /** How much of a text part a preview reads. HTML spends more of it on markup. */
 const PREVIEW_BYTES = { text: 1024, html: 4096 };
@@ -71,12 +79,17 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
   const watchers = new Set<ImapFlow>();
   let closed = false;
 
-  /** A watcher idles as soon as it can, and starts IDLE again every few minutes. */
+  /**
+   * The shared connection waits on a host gone quiet only as long as its patience. A watcher idles
+   * as soon as it can, and starts IDLE again every few minutes.
+   */
   function open(watching = false): ImapFlow {
     return imapConnection(
       account,
       network,
-      watching ? { autoIdleDelay: 100, maxIdleTime: 4 * 60_000 } : {},
+      watching
+        ? { autoIdleDelay: 100, maxIdleTime: 4 * 60_000 }
+        : { socketTimeout: network.patience ?? IMAP_PATIENCE_MS },
     );
   }
 
@@ -721,7 +734,7 @@ function smtpSocket(
 function imapConnection(
   account: ImapAccount,
   network: Network,
-  options: Pick<ImapFlowOptions, 'autoIdleDelay' | 'maxIdleTime'> = {},
+  options: Pick<ImapFlowOptions, 'autoIdleDelay' | 'maxIdleTime' | 'socketTimeout'> = {},
 ): ImapFlow {
   const { host, port, secure } = account.imap;
   const quiet = () => {};

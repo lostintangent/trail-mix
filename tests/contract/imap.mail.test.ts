@@ -3,6 +3,7 @@
 // as on Outlook, and without UIDPLUS or MOVE, as on a plain IMAP server.
 import { afterAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
+import { createServer, connect, type AddressInfo, type Socket } from 'node:net';
 import { ImapFlow } from 'imapflow';
 import nodemailer from 'nodemailer';
 import { SendFailure } from '../../src/features/providers/index.ts';
@@ -218,6 +219,39 @@ describe('The IMAP provider', () => {
     expect(delivered).toBe(1);
   }, 30_000);
 
+  test('a command on a connection gone quiet runs again on a new one, after a while', async () => {
+    await start('full');
+    await empty(alice.email);
+    const relay = quietable(ports.imaps);
+    const reading = imapProvider(
+      {
+        account: 'test',
+        imap: { host: 'localhost', port: await relay.port, secure: true },
+        smtp: { host: 'localhost', port: ports.submissions, secure: true },
+        auth,
+      },
+      { ca: readFileSync(caFile, 'utf8'), patience: 1000 },
+    );
+    try {
+      const raw = message({
+        id: 'quiet-read',
+        subject: 'Quiet',
+        from: alice.email,
+        to: alice.email,
+      });
+      const draft = await reading.saveDraft(bytes(raw));
+      // The connection the draft was saved on stays open, and the server says nothing more on it.
+      relay.quiet();
+      const started = Date.now();
+      const body = await new Response(await reading.body(draft)).text();
+      expect(Date.now() - started).toBeLessThan(5000);
+      expect(body).toContain('Subject: Quiet');
+    } finally {
+      await reading.close();
+      relay.stop();
+    }
+  }, 30_000);
+
   test('watches again after the server drops it, and reports what it may have missed', async () => {
     await start('full');
     await empty(alice.email);
@@ -242,3 +276,45 @@ describe('The IMAP provider', () => {
     expect(changes).toBeGreaterThan(0);
   }, 30_000);
 });
+
+/**
+ * A relay to `port` that can fall quiet: from then on, the connections open through it stay open
+ * and pass nothing either way, as a connection does when the network under it goes. Connections
+ * made later pass as before.
+ */
+function quietable(port: number) {
+  const open: { client: Socket; server: Socket }[] = [];
+  const relay = createServer((client) => {
+    const server = connect(port, 'localhost');
+    client.pipe(server);
+    server.pipe(client);
+    const close = () => {
+      client.destroy();
+      server.destroy();
+    };
+    client.on('error', close).on('close', close);
+    server.on('error', close).on('close', close);
+    open.push({ client, server });
+  });
+  const listening = new Promise<number>((resolve) =>
+    relay.listen(0, 'localhost', () => resolve((relay.address() as AddressInfo).port)),
+  );
+  return {
+    port: listening,
+    quiet() {
+      for (const { client, server } of open) {
+        client.unpipe(server);
+        server.unpipe(client);
+        client.pause();
+        server.pause();
+      }
+    },
+    stop() {
+      relay.close();
+      for (const { client, server } of open) {
+        client.destroy();
+        server.destroy();
+      }
+    },
+  };
+}
