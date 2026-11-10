@@ -286,15 +286,17 @@ const styles = stylex.create({
     paddingBottom: spacingVars['--spacing-2'],
   },
   // The view's name stays modest beside the list on a desktop, and leads the screen on a phone.
+  // On a phone the list is the whole screen, and its title is large and bold, as a page's is.
   title: {
     fontSize: {
       default: typeScaleVars['--text-heading-3-size'],
-      [media.phone]: typeScaleVars['--text-heading-2-size'],
+      [media.phone]: typeScaleVars['--text-heading-1-size'],
     },
     lineHeight: {
       default: typeScaleVars['--text-heading-3-leading'],
-      [media.phone]: typeScaleVars['--text-heading-2-leading'],
+      [media.phone]: typeScaleVars['--text-heading-1-leading'],
     },
+    fontWeight: { default: null, [media.phone]: fontWeightVars['--font-weight-bold'] },
   },
   // On a phone, whose list is the whole screen, a chip at the header's end says whose mail it is.
   scope: {
