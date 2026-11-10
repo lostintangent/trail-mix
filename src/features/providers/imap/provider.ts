@@ -318,7 +318,7 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
   /** Whether Sent holds a message with this Message-ID. */
   async function inSent(messageId: string) {
     if (!messageId) return false;
-    return inFolder(await folderFor('sent'), async (connection) => {
+    return inFresh(await folderFor('sent'), async (connection) => {
       return (await uidOf(connection, messageId)) !== undefined;
     });
   }

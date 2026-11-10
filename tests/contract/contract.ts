@@ -350,6 +350,17 @@ export function describeContract(
       expect(await whereIs(id)).toEqual({ delivered: 0, sent: 1, drafts: 0 });
     });
 
+    it('finds the copy in Sent that arrived after it last read Sent, and delivers nothing', async () => {
+      const { raw, id, draft } = await drafted('filed-since');
+      const sent = await role('sent');
+      expect(await count(sent, id)).toBe(0);
+      // The host files its copy while the provider still has Sent open from that read.
+      await world().deliver(raw, sent);
+      expect(await provider.submit(draft, id)).toBe('sent');
+      await provider.file(draft, id);
+      expect(await whereIs(id)).toEqual({ delivered: 0, sent: 1, drafts: 0 });
+    });
+
     it('keeps Bcc recipients out of what it delivers and files', async () => {
       const { address } = world();
       const { id, draft } = await drafted('blind', { bcc: address });
