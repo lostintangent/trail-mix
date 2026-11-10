@@ -23,6 +23,7 @@ const folders = [
   folder('personal', 'Drafts', 'drafts'),
   folder('work', 'INBOX', 'inbox'),
   folder('work', 'Receipts'),
+  { ...folder('work', 'Projects/Toy Box'), name: 'Toy Box', parent: 'Projects' },
 ];
 const nothing = () => {};
 
@@ -62,12 +63,17 @@ test('the workbench’s registry has no id twice and no key on two commands', ()
   for (const isUnread of [true, false]) expect(problemsOf(registry(isUnread))).toEqual([]);
 });
 
-test('every key resolves to its own command, and every command that can run is in the palette', () => {
+test('every key resolves to its own command, and typing a command’s title finds it', () => {
   for (const isUnread of [true, false]) {
     const commands = registry(isUnread);
-    const palette = matching(commands, '');
     for (const command of commands.filter(({ isEnabled }) => isEnabled !== false)) {
-      expect(palette).toContain(command);
+      const words = command.title.split(' ');
+      expect({ typed: command.title, found: matching(commands, command.title) }).toEqual({
+        typed: command.title,
+        found: expect.arrayContaining([command]),
+      });
+      const start = words.slice(0, 2).join(' ').toLowerCase();
+      expect(matching(commands, start)).toContain(command);
       if (command.shortcut) {
         expect(commandFor(commands, pressFor(command.shortcut), true)?.id).toBe(command.id);
       }
