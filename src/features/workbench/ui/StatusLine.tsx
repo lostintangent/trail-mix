@@ -37,6 +37,7 @@ export function StatusLine({
 const styles = stylex.create({
   line: {
     display: 'flex',
+    flexGrow: 1,
     alignItems: 'center',
     gap: spacingVars['--spacing-1-5'],
     minWidth: 0,

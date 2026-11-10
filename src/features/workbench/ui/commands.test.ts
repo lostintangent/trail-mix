@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { themeCommands } from '../../../app/theme/commands.ts';
+import { accentCommands, themeCommands } from '../../../app/theme/commands.ts';
 import { commandFor, matching, problemsOf, type Command } from '../../commands/index.ts';
 import { triageCommands } from '../../conversations/index.ts';
 import { viewCommands } from '../../folders/index.ts';
@@ -43,6 +43,7 @@ function registry(isUnread: boolean): Command[] {
     ...viewCommands(accounts, folders, nothing),
     ...sendCommands({ onSend: nothing }),
     ...themeCommands('system', nothing),
+    ...accentCommands('#c2185b', nothing),
   ];
 }
 

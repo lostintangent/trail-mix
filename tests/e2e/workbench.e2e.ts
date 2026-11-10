@@ -1,7 +1,10 @@
 import { beforeAll, expect } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { BrowserContextOptions, Locator, Page } from 'playwright';
+import type { BrowserContext, BrowserContextOptions, Locator, Page } from 'playwright';
+import { ACCENT_STORAGE_KEY } from '../../src/app/theme/accent.ts';
+import { parseHex } from '../../src/shared/color.ts';
+import { accentRule, accentTokens } from '../../src/app/theme/readableAccent.ts';
 import { unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
 
@@ -16,6 +19,8 @@ const SIZES = {
   phone: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
 } satisfies Record<string, BrowserContextOptions>;
 const THEMES = ['light', 'dark'] as const;
+/** The default, and the palest and the darkest accent a member can pick. */
+const ACCENTS = [undefined, '#ffffff', '#000000'] as const;
 
 const app = suite();
 // A test that fails leaves a screenshot of each page and what it showed, for CI to keep.
@@ -26,8 +31,9 @@ beforeAll(() => {
 });
 
 /** A page that records every console error and failed response, to assert there were none. */
-async function open(options: BrowserContextOptions, path = '/') {
+async function open(options: BrowserContextOptions, { path = '/', accent = '' } = {}) {
   const context = await app.context({ deviceScaleFactor: 2, ...options });
+  if (accent) await pickBeforeLoad(context, accent);
   const page = await context.newPage();
   const problems: string[] = [];
   page.on('pageerror', (error) => problems.push(`page error: ${error.message}`));
@@ -41,80 +47,81 @@ async function open(options: BrowserContextOptions, path = '/') {
   return { context, page, problems };
 }
 
-test('every screen renders cleanly, with readable text, at both sizes in both themes', async () => {
-  for (const [size, options] of Object.entries(SIZES)) {
-    for (const colorScheme of THEMES) {
-      const { context, page, problems } = await open({ ...options, colorScheme });
-      const screens: [string, (page: Page) => Promise<void>][] = [['list', async () => {}]];
-      if (size === 'phone') {
+for (const accent of ACCENTS) {
+  const named = accent ? ` with ${accent} as the accent` : '';
+  test(`every screen renders cleanly, with readable text, at both sizes in both themes${named}`, async () => {
+    for (const [size, options] of Object.entries(SIZES)) {
+      for (const colorScheme of THEMES) {
+        const { context, page, problems } = await open({ ...options, colorScheme }, { accent });
+        const screens: [string, (page: Page) => Promise<void>][] = [['list', async () => {}]];
+        if (size === 'phone') {
+          screens.push([
+            'folders',
+            (page) => page.getByRole('button', { name: 'Folders', exact: true }).click(),
+          ]);
+        }
+        // The newest conversation, a thread, then the newsletter, which sets its own colors.
+        screens.push(['reader', (page) => openConversation(page, 0)]);
+        // A reply to it, docked under the conversation.
         screens.push([
-          'folders',
-          (page) => page.getByRole('button', { name: 'Folders', exact: true }).click(),
-        ]);
-      }
-      // The newest conversation, a thread, then the newsletter, which sets its own colors.
-      screens.push(['reader', (page) => openConversation(page, 0)]);
-      // A reply to it, docked under the conversation.
-      screens.push([
-        'reply',
-        async (page) => {
-          // The last Reply answers the newest message: its own on a desktop, the island's on a phone.
-          await page
-            .getByRole('button', { name: 'Reply', exact: true })
-            .locator('visible=true')
-            .last()
-            .click();
-          await page.getByRole('textbox', { name: 'Reply' }).waitFor();
-        },
-      ]);
-      // Escape closes the composer, which on a phone lies over everything.
-      screens.push([
-        'newsletter',
-        async (page) => {
-          await page.keyboard.press('Escape');
-          await openConversation(page, /Kernel Weekly/);
-        },
-      ]);
-      // Adding an account, from the sidebar, which in the demo says it serves only the demo mailbox.
-      screens.push([
-        'add-account',
-        async (page) => {
-          if (size === 'phone') {
+          'reply',
+          async (page) => {
+            // The last Reply answers the newest message: its own on a desktop, the island's on a phone.
             await page
-              .getByRole('button', { name: 'Back', exact: true })
+              .getByRole('button', { name: 'Reply', exact: true })
               .locator('visible=true')
+              .last()
               .click();
-            await page.getByRole('button', { name: 'Folders', exact: true }).click();
-          }
-          await page.getByRole('button', { name: 'Add account' }).click();
-          const form = page.getByRole('form', { name: 'Add an account' });
-          await form
-            .getByText(
-              'This Trail Mix serves only the demo mailbox, so it can’t connect an account of your own.',
-            )
-            .waitFor();
-          expect(await form.getByRole('button', { name: 'Add account' }).isDisabled()).toBe(true);
-        },
-      ]);
-      // A search, whose matches the highlighter marks.
-      screens.push(['search', (page) => searchFor(page, 'lunch thu')]);
-      for (const [screen, reach] of screens) {
-        await reach(page);
-        await page.waitForTimeout(400);
-        await page.screenshot({ path: join(SHOTS, `${size}-${colorScheme}-${screen}.png`) });
-        expect({
-          screen: `${size} ${colorScheme} ${screen}`,
-          unreadable: await unreadableText(page),
-        }).toEqual({
-          screen: `${size} ${colorScheme} ${screen}`,
-          unreadable: [],
-        });
+            await page.getByRole('textbox', { name: 'Reply' }).waitFor();
+          },
+        ]);
+        // Escape closes the composer, which on a phone lies over everything.
+        screens.push([
+          'newsletter',
+          async (page) => {
+            await page.keyboard.press('Escape');
+            await openConversation(page, /Kernel Weekly/);
+          },
+        ]);
+        // Adding an account, from the sidebar, which in the demo says it serves only the demo mailbox.
+        screens.push([
+          'add-account',
+          async (page) => {
+            if (size === 'phone') {
+              await page
+                .getByRole('button', { name: 'Back', exact: true })
+                .locator('visible=true')
+                .click();
+              await page.getByRole('button', { name: 'Folders', exact: true }).click();
+            }
+            await page.getByRole('button', { name: 'Add account' }).click();
+            const form = page.getByRole('form', { name: 'Add an account' });
+            await form
+              .getByText(
+                'This Trail Mix serves only the demo mailbox, so it can’t connect an account of your own.',
+              )
+              .waitFor();
+            expect(await form.getByRole('button', { name: 'Add account' }).isDisabled()).toBe(true);
+          },
+        ]);
+        // A search, whose matches the highlighter marks.
+        screens.push(['search', (page) => searchFor(page, 'lunch thu')]);
+        for (const [screen, reach] of screens) {
+          await reach(page);
+          await page.waitForTimeout(400);
+          const shot = [size, colorScheme, screen, accent?.slice(1)].filter(Boolean).join('-');
+          await page.screenshot({ path: join(SHOTS, `${shot}.png`) });
+          expect({ screen: shot, unreadable: await unreadableText(page) }).toEqual({
+            screen: shot,
+            unreadable: [],
+          });
+        }
+        expect(problems).toEqual([]);
+        await context.close();
       }
-      expect(problems).toEqual([]);
-      await context.close();
     }
-  }
-}, 60_000);
+  }, 60_000);
+}
 
 test('side panels resize by pointer and key, snap to a rail, and come back the same before the app runs', async () => {
   const { context, page } = await open(SIZES.desktop);
@@ -171,6 +178,65 @@ test('a saved theme paints the desk before any of the app runs', async () => {
     await context.close();
   }
 });
+
+test('a saved accent paints before any of the app runs, made readable in each theme', async () => {
+  const pick = '#c2185b';
+  for (const colorScheme of THEMES) {
+    const context = await app.context({ colorScheme });
+    await pickBeforeLoad(context, pick);
+    const page = await context.newPage();
+    await page.route(/\.js(\?|$)/, (route) => route.abort());
+    await page.goto(app.url, { waitUntil: 'load' });
+    expect({ colorScheme, accent: await accentShown(page) }).toEqual({
+      colorScheme,
+      accent: shownAs(accentTokens(parseHex(pick)!, colorScheme).accent),
+    });
+    await context.close();
+  }
+});
+
+test('an accent picked beside the theme choice shows at once, outlasts a reload, and goes back to ink blue', async () => {
+  const { context, page, problems } = await open(SIZES.desktop);
+  const inkBlue = await accentShown(page);
+  const picker = page.getByLabel('Accent color');
+  const newMessage = page.getByRole('button', { name: 'New message' });
+  // The button eases from one color to the next, so it is read once that has finished.
+  const buttonOf = () =>
+    newMessage.evaluate(async (button) => {
+      await Promise.all(button.getAnimations().map(({ finished }) => finished));
+      return getComputedStyle(button).backgroundColor;
+    });
+  expect(await buttonOf()).toBe(inkBlue);
+
+  await picker.fill('#c2185b');
+  const picked = shownAs(accentTokens(parseHex('#c2185b')!, 'light').accent);
+  expect(await accentShown(page)).toBe(picked);
+  expect(await buttonOf()).toBe(picked);
+
+  await page.reload({ waitUntil: 'networkidle' });
+  expect(await accentShown(page)).toBe(picked);
+  expect(await picker.inputValue()).toBe('#c2185b');
+
+  // The palette opens the same picker.
+  await page.evaluate(() => {
+    HTMLInputElement.prototype.showPicker = function (this: HTMLInputElement) {
+      this.dataset['shown'] = 'true';
+    };
+  });
+  await page.getByRole('searchbox', { name: 'Search mail' }).click();
+  await page.keyboard.type('choose an accent');
+  await page.getByRole('listbox', { name: 'Commands' }).getByRole('option').first().waitFor();
+  await page.keyboard.press('Enter');
+  expect(await picker.getAttribute('data-shown')).toBe('true');
+
+  await page.getByRole('button', { name: 'Use the default accent' }).click();
+  expect(await accentShown(page)).toBe(inkBlue);
+  expect(await page.getByRole('button', { name: 'Use the default accent' }).count()).toBe(0);
+  await page.reload({ waitUntil: 'networkidle' });
+  expect(await accentShown(page)).toBe(inkBlue);
+  expect(problems).toEqual([]);
+  await context.close();
+}, 30_000);
 
 test('a sheet that sets its own color scheme takes the theme’s colors for that scheme', async () => {
   const { context, page } = await open({ ...SIZES.desktop, colorScheme: 'dark' });
@@ -455,6 +521,33 @@ test('the reader says where its conversation sits, and steps to the ones either 
  * Opens a conversation from the unified Inbox and waits for its mail. On a phone it first goes back
  * to the list, from the reader or the folders.
  */
+/** Saves an accent as picking it would, before the page loads. */
+async function pickBeforeLoad(context: BrowserContext, color: string) {
+  const saved = JSON.stringify({ color, css: accentRule(color) });
+  await context.addInitScript(([key, value]) => localStorage.setItem(key, value), [
+    ACCENT_STORAGE_KEY,
+    saved,
+  ] as const);
+}
+
+/** The accent as the page paints it, read from an element that takes it as its color. */
+function accentShown(page: Page): Promise<string> {
+  return page.evaluate(() => {
+    const probe = document.createElement('i');
+    probe.style.color = 'var(--color-accent)';
+    document.body.append(probe);
+    const color = getComputedStyle(probe).color;
+    probe.remove();
+    return color;
+  });
+}
+
+/** `#rrggbb` as a computed style gives it back. */
+function shownAs(hex: string): string {
+  const { r, g, b } = parseHex(hex)!;
+  return `rgb(${[r, g, b].map((v) => Math.round(v * 255)).join(', ')})`;
+}
+
 async function openConversation(page: Page, which: number | RegExp) {
   const back = page.getByRole('button', { name: 'Back', exact: true });
   if (await inView(back)) await back.click();

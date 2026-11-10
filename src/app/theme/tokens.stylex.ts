@@ -4,6 +4,7 @@ import * as stylex from '@stylexjs/stylex';
 
 const COARSE = '@media (pointer: coarse)';
 const VERMILION = 'oklch(0.64 0.19 30)';
+const INK_BLUE = 'light-dark(oklch(0.5 0.19 265), oklch(0.77 0.13 265))';
 
 /** Width picks the layout and pointer picks the size. Each component declares its own motion. */
 export const media = stylex.defineConsts({
@@ -21,9 +22,10 @@ export const tm = stylex.defineVars({
   target: { default: '32px', [COARSE]: '44px' },
   rowPad: { default: '8px', [COARSE]: '11px' },
   measure: '72ch', // longest line of message text
+  swatch: '14px', // a color to pick, the size of an icon
 
   // Color roles beyond Astryx's
-  textQuiet: 'light-dark(oklch(0.52 0.015 265), oklch(0.66 0.02 265))', // previews, times: still 4.5:1
+  textQuiet: 'light-dark(oklch(0.52 0.015 265), oklch(0.66 0 0))', // previews, times: still 4.5:1
   paperFixed: 'oklch(0.975 0.004 85)', // HTML mail that sets its own colors sits on this in both themes
   highlight: 'oklch(0.86 0.17 92)', // the suite yellow: flagged, search match
   onHighlight: 'oklch(0.25 0.03 265)', // ink on the highlighter, dark in both themes
@@ -38,8 +40,9 @@ export const tm = stylex.defineVars({
   stampGreen: 'oklch(0.68 0.15 150)',
   stampSlate: 'oklch(0.6 0.03 250)',
   // Airmail: this message is leaving. A stripe 3px tall at -45 degrees: vermilion 7px, a 4px gap,
-  // ink blue 7px, a 4px gap.
-  airmail: `repeating-linear-gradient(-45deg, ${VERMILION} 0 7px, #0000 7px 11px, var(--color-accent) 11px 18px, #0000 18px 22px)`,
+  // ink blue 7px, a 4px gap. The blue is ink blue whatever accent the member picks: palette.ts's
+  // default accent, written out because StyleX can't evaluate an import.
+  airmail: `repeating-linear-gradient(-45deg, ${VERMILION} 0 7px, #0000 7px 11px, ${INK_BLUE} 11px 18px, #0000 18px 22px)`,
   airmailHeight: '3px',
 
   // Type and motion

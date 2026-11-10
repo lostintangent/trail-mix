@@ -494,7 +494,7 @@ const styles = stylex.create({
   footer: {
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
     gap: spacingVars['--spacing-1'],
     paddingTop: spacingVars['--spacing-2'],
   },

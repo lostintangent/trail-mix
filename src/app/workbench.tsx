@@ -22,8 +22,10 @@ import {
 import { Workbench } from '../features/workbench/index.ts';
 import { AppTheme } from './theme/AppTheme.tsx';
 import { trailMixTheme } from './theme/built/trail-mix.js';
+import { AccentChoice } from './theme/AccentChoice.tsx';
 import { ThemeChoice } from './theme/ThemeChoice.tsx';
-import { themeCommands } from './theme/commands.ts';
+import { accentCommands, themeCommands } from './theme/commands.ts';
+import { useAccent } from './theme/useAccent.ts';
 import { useThemeMode } from './theme/useThemeMode.ts';
 
 /** Where the workbench opens. */
@@ -48,6 +50,7 @@ export const Route = createFileRoute('/')({
  */
 function App() {
   const [mode, setMode] = useThemeMode();
+  const [accent, setAccent] = useAccent();
   // The hint socket is open on the first-run screen too, so an account added on another device
   // shows here.
   useHints();
@@ -59,8 +62,13 @@ function App() {
       accounts.isError && <Unreachable />
     ) : !isFirstRun ? (
       <Desk
-        sidebarFooter={<ThemeChoice mode={mode} onChange={setMode} />}
-        extraCommands={themeCommands(mode, setMode)}
+        sidebarFooter={
+          <>
+            <AccentChoice accent={accent} onChange={setAccent} />
+            <ThemeChoice mode={mode} onChange={setMode} />
+          </>
+        }
+        extraCommands={[...themeCommands(mode, setMode), ...accentCommands(accent, setAccent)]}
       />
     ) : welcome === 'failed' ? (
       <Unreachable />
