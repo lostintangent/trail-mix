@@ -1,0 +1,28 @@
+@import '@astryxdesign/core/reset.css';
+@import '@astryxdesign/core/astryx.css';
+@import './theme/built/trail-mix.css';
+
+html,
+body {
+  height: 100%;
+  /* No rubber band, and no horizontal swipe back to the previous page. */
+  overscroll-behavior: none;
+}
+
+/* The desk shows from the first paint, before the app has rendered anything on it. */
+body {
+  background-color: var(--color-background-body);
+  color: var(--color-text-primary);
+  font-family: var(--font-family-body);
+}
+
+@media (forced-colors: active) {
+  /* The theme lifts the selected view onto a pane, and forced colors erase that lift. The current
+     view is marked with Highlight instead, drawn as is, because the backplate forced colors put
+     behind its label would otherwise cover the HighlightText. */
+  .astryx-side-nav-item[data-selected='selected'] {
+    forced-color-adjust: none;
+    background-color: Highlight;
+    color: HighlightText;
+  }
+}

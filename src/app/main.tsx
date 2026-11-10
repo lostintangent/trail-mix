@@ -1,11 +1,14 @@
-import { StrictMode } from 'react';
-import { createRoot } from 'react-dom/client';
+import { StartClient } from '@tanstack/react-start/client';
+import { StrictMode, startTransition } from 'react';
+import { hydrateRoot } from 'react-dom/client';
 
-const root = document.getElementById('root');
-if (!root) throw new Error('index.html has no #root element');
-
-createRoot(root).render(
-  <StrictMode>
-    <h1>Trail Mix</h1>
-  </StrictMode>,
-);
+// The browser entry. The document is the prerendered shell, so React adopts it and the router
+// renders the app into it.
+startTransition(() => {
+  hydrateRoot(
+    document,
+    <StrictMode>
+      <StartClient />
+    </StrictMode>,
+  );
+});

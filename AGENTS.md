@@ -109,7 +109,7 @@ Conversation subjects in the reader are set in the system serif. Everything else
 - **The virtualized list.** Astryx has none, so the conversation list uses TanStack Virtual, with rows styled in StyleX.
 - **StyleX wiring.** The class name prefix is `tm`, so no class collides with the `x` classes Astryx ships precompiled. `useCSSLayers` is on, and lightningcss runs with `Features.LightDark` excluded. In development the HTML loads `/virtual:stylex.css` and `virtual:stylex:runtime`. A test compiles the app's styles and fails if any class name also appears in Astryx's stylesheet.
 - **Pinned versions.** Every `@astryxdesign/*` and `@stylexjs/*` package is pinned to an exact version, with core and theme on the same version. Upgrade them together, in a pull request that does nothing else and includes before-and-after screenshots of every screen.
-- **A single-page app.** No route is rendered on the server. A small inline script applies the saved theme mode and pane widths before first paint, so nothing flashes.
+- **A single-page app.** No route is rendered on the server. The Worker answers a page request with the document shell alone, rendered when it is requested rather than prerendered at build time, and a small inline script in that shell applies the saved theme mode and pane widths before first paint, so nothing flashes.
 - **Theme.** It follows the system by default. A manual Light or Dark choice is saved per device.
 - **Width picks the layout, pointer picks the size.** Below 768 pixels there is one pane at a time on a sliding track. On a coarse pointer, at any width, every target is at least 44 pixels.
 - **Side panels.** They have pixel widths, resize by drag and by arrow keys, snap to a rail when dragged below their midpoint, keep their widths across a reload, and expose `role="separator"`. Use Astryx's `useResizable` and `ResizeHandle` if they can do all of this. Otherwise the workbench owns a `SidePanel` that does.
@@ -126,9 +126,12 @@ src/
     main.tsx
     router.tsx
     global.css
+    root.tsx           the document shell, the one thing the Worker renders
+    workbench.tsx      the route that shows the workbench
     prepaint.ts        the inline script that runs before first paint
     theme/
       trail-mix.ts     the Astryx theme
+      built/           the theme compiled by `bun run theme`, which the app loads
       tokens.stylex.ts Trail Mix's own tokens
   features/
     mail/core/         the shared vocabulary: model, conversation linking, folder roles
@@ -192,8 +195,9 @@ Great code pursues simplicity by placing a rich domain model at the center, deco
 
 ### Toolchain
 
-- **Bun canary 1.4.4 or newer** owns install, format, lint, type-check and test. Install it with `bun upgrade --canary`. `bun fmt`, `bun lint` and `bun check` are built in, so there is no Prettier, ESLint or `typescript` package to install.
-- **Vite** runs the dev server and the build, under Bun. `bunfig.toml` sets `[run] bun = true`, so a package script never falls back to Node. The one exception is `wrangler deploy`, which runs on Node.
+- **Bun canary 1.4.4 or newer** owns install, format, lint, type-check, test and the production build, which Vite runs. Install it with `bun upgrade --canary`. `bun fmt`, `bun lint` and `bun check` are built in, so there is no Prettier, ESLint or `typescript` package to install.
+- **Node 22 or newer** runs two things: `wrangler deploy`, and whatever starts the local Workers runtime, which is the Vite dev server, `vite preview`, and tests that drive a Worker on workerd. Miniflare cannot reach workerd under Bun, because Bun's built-in `undici` ignores the dispatcher it routes requests through. They move back to Bun once oven-sh/bun#39247 is fixed.
+- **Scripts name their runtime.** `bun run build` runs `bun --bun vite build`. `bun run dev` and `bun run preview` run Vite's JS entry under `node`. `bunfig.toml` does not set `[run] bun = true`, because that would make `node` inside every script mean Bun.
 - **Setup.** `bun install`, then `bun run dev`.
 - **Dependencies are exact versions.** `bun add` pins what it installs, and CI installs from the frozen lockfile. An upgrade is a deliberate edit.
 - **Lint is strict.** Type-aware rules are on and a warning fails the run. To relax a rule, change `bunfig.toml` or add an `eslint-disable-next-line` comment, and say why in either place.

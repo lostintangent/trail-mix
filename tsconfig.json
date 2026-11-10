@@ -4,7 +4,7 @@
     "target": "ES2024",
     "lib": ["ES2024", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
-    "types": ["bun"],
+    "types": ["bun", "vite/client"],
 
     // Modules: Bun and Vite resolve and transpile, nothing is emitted
     "module": "Preserve",
