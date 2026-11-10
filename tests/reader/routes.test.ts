@@ -237,5 +237,5 @@ for (const type of BROWSERS) {
 }
 
 function stream(bytes: string | Uint8Array<ArrayBuffer>): ReadableStream<Uint8Array> {
-  return new Response(bytes).body ?? new ReadableStream();
+  return new Blob([bytes]).stream();
 }

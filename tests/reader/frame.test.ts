@@ -178,7 +178,7 @@ for (const type of BROWSERS) {
           const marker = document.createElement('p');
           marker.id = 'outside';
           marker.textContent = 'Outside the message';
-          document.body.prepend(marker);
+          document.body.insertBefore(marker, document.body.firstChild);
         });
         await show(page, [{ html: leaks, images: 'blocked' }], false);
         expect(await page.locator('#outside').isVisible()).toBe(true);

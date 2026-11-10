@@ -85,7 +85,7 @@ export async function serveHarness(answer: (call: Call) => unknown = () => null)
     async fetch(request) {
       const url = new URL(request.url);
       if (url.pathname === '/_serverFn') {
-        const call = (await request.json()) as Call;
+        const call = await request.json<Call>();
         calls.push(call);
         return Response.json(answer(call) ?? null);
       }
