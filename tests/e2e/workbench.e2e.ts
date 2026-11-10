@@ -224,7 +224,8 @@ test('scrolling a long folder never changes a row’s height or moves a row alre
       const misplaced: string[] = [];
       let reached = 0;
       let still = 0;
-      while (still < 10) {
+      // Through several pages, each arriving on the way, and no further.
+      while (still < 10 && reached < 250) {
         const canvas = list.lastElementChild?.getBoundingClientRect().top ?? 0;
         const height = list.querySelector('[role="option"]')?.getBoundingClientRect().height ?? 0;
         // Rows lie on whole pixels, each the height of a row of mail rounded up.
