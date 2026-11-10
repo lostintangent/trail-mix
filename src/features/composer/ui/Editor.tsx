@@ -7,7 +7,6 @@ import {
   typographyVars,
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import Image from '@tiptap/extension-image';
 import { Selection } from '@tiptap/pm/state';
 import { Placeholder } from '@tiptap/extensions';
 import { Markdown } from '@tiptap/markdown';
@@ -15,6 +14,7 @@ import { EditorContent, useEditor, type Editor as TiptapEditor } from '@tiptap/r
 import StarterKit from '@tiptap/starter-kit';
 import { useEffect, useRef } from 'react';
 import { tm } from '../../../app/theme/tokens.stylex.ts';
+import { DraftImage, DraftParagraph } from './draftImage.ts';
 import { editableHtml } from './editable.ts';
 
 /**
@@ -64,7 +64,7 @@ export function Editor({
     extensions: [
       StarterKit.configure({
         heading: { levels: [1, 2, 3], HTMLAttributes: { class: css(styles.heading) } },
-        paragraph: { HTMLAttributes: { class: css(styles.block) } },
+        paragraph: false,
         bulletList: { HTMLAttributes: { class: css(styles.block, styles.list, styles.bullets) } },
         orderedList: { HTMLAttributes: { class: css(styles.block, styles.list, styles.numbers) } },
         blockquote: { HTMLAttributes: { class: css(styles.block, styles.quote) } },
@@ -80,7 +80,9 @@ export function Editor({
       DraftImage.configure({
         imageUrl: (id) => latest.current.imageUrl(id),
         shown: images.current,
+        className: css(styles.image),
       }),
+      DraftParagraph.configure({ HTMLAttributes: { class: css(styles.block) } }),
       Placeholder.configure({
         placeholder: 'Write in Markdown, or use the toolbar',
         emptyEditorClass: css(styles.placeholder),
@@ -162,69 +164,6 @@ function focusAtEnd(editor: TiptapEditor) {
   editor.view.focus();
   editor.commands.scrollIntoView();
 }
-
-/**
- * An image node that shows only what the draft holds, as `imageUrl` resolves it. Its `src` stays
- * the `cid:` the Markdown saves, and only the page's `<img>` loads from where `imageUrl` says.
- *
- * Only an image the draft carries by `cid:` is taken in, so pasted HTML brings no remote image.
- * Wherever the editor writes an image out as HTML, as it does on copying and as it tears down, its
- * address goes in `data-draft-src`, which the page never loads.
- */
-const DraftImage = Image.extend<{
-  imageUrl: (contentId: string) => string | undefined;
-  /** Each image's way to look its source up again, while it is in the editor. */
-  shown: Set<() => void>;
-}>({
-  parseHTML() {
-    return [{ tag: 'img[data-draft-src^="cid:" i]' }, { tag: 'img[src^="cid:" i]' }];
-  },
-  addAttributes() {
-    return {
-      ...this.parent?.(),
-      src: {
-        default: null,
-        parseHTML: (element) =>
-          element.getAttribute('data-draft-src') ?? element.getAttribute('src'),
-        renderHTML: (attributes) => ({ 'data-draft-src': String(attributes['src'] ?? '') }),
-      },
-    };
-  },
-  addOptions() {
-    return { ...this.parent?.(), imageUrl: () => undefined, shown: new Set() };
-  },
-  addNodeView() {
-    return ({ node }) => {
-      const image = document.createElement('img');
-      image.className = css(styles.image);
-      let current = node;
-      const show = () => {
-        const src = String(current.attrs['src'] ?? '');
-        const contentId = /^cid:(.+)$/i.exec(src)?.[1];
-        const url = contentId
-          ? this.options.imageUrl(contentId)
-          : /^data:image\//i.test(src)
-            ? src
-            : undefined;
-        if (!url) image.removeAttribute('src');
-        else if (image.getAttribute('src') !== url) image.src = url;
-        image.alt = String(current.attrs['alt'] ?? '');
-      };
-      show();
-      this.options.shown.add(show);
-      return {
-        dom: image,
-        update: (updated) => {
-          if (updated.type !== current.type) return false;
-          current = updated;
-          show();
-          return true;
-        },
-        destroy: () => this.options.shown.delete(show),
-      };
-    };
-  },
-});
 
 /** StyleX classes for nodes the editor draws itself. */
 function css(...styles: stylex.StyleXStyles[]): string {
