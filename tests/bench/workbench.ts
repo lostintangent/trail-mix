@@ -258,7 +258,6 @@ async function keyMoves(page: Page, latency: InputLatency): Promise<number[]> {
   });
   const keys = await page.context().newCDPSession(page);
   const key = { key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 };
-  const since = await latency.now();
   const start = Date.now() / 1000;
   const sent: Promise<unknown>[] = [];
   for (let repeat = 0; repeat < REPEATS; repeat++) {
@@ -287,7 +286,8 @@ async function keyMoves(page: Page, latency: InputLatency): Promise<number[]> {
   if (seen.opened.length > 2) {
     throw new Error(`The reader opened ${seen.opened.length} conversations while a key was held.`);
   }
-  return latency.of('keydown', since, REPEATS);
+  // Each key by the page's own record of it, since its timestamp comes from this process's clock.
+  return latency.at('keydown', seen.keys);
 }
 
 /**

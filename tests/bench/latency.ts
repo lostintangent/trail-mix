@@ -3,6 +3,9 @@ import type { Page } from 'playwright';
 /** Event Timing reports only an input that took this long or longer, so a faster one counts as this. */
 const REPORTED_FROM = 16;
 
+/** How near an entry's start must be to an input's timestamp to be that input's, well under a key repeat. */
+const SAME_INPUT_MS = 1;
+
 type Timed = { name: string; start: number; duration: number };
 
 /**
@@ -38,6 +41,23 @@ export async function inputLatency(page: Page) {
         ...reported,
         ...Array<number>(Math.max(0, count - reported.length)).fill(REPORTED_FROM),
       ];
+    },
+    /**
+     * The latency of each input named `name` that the page saw at these timestamps, by its own
+     * record of each. Every one counts, even one whose timestamp, given from another clock, falls
+     * before a moment the page took earlier.
+     */
+    at: async (name: string, timestamps: readonly number[]): Promise<number[]> => {
+      const reported = await page.evaluate(
+        (name) =>
+          (window as unknown as { timed: Timed[] }).timed.filter((entry) => entry.name === name),
+        name,
+      );
+      return timestamps.map(
+        (at) =>
+          reported.find(({ start }) => Math.abs(start - at) < SAME_INPUT_MS)?.duration ??
+          REPORTED_FROM,
+      );
     },
   };
 }
