@@ -1,3 +1,4 @@
+import { Button } from '@astryxdesign/core/Button';
 import { Icon } from '@astryxdesign/core/Icon';
 import { IconButton } from '@astryxdesign/core/IconButton';
 import {
@@ -9,7 +10,16 @@ import {
 } from '@astryxdesign/core/theme/tokens.stylex';
 import { Tooltip } from '@astryxdesign/core/Tooltip';
 import * as stylex from '@stylexjs/stylex';
-import { File, FolderPlus, Inbox, Send, Star, type LucideIcon } from 'lucide-react';
+import {
+  File,
+  FolderPlus,
+  Inbox,
+  MailPlus,
+  Send,
+  Settings2,
+  Star,
+  type LucideIcon,
+} from 'lucide-react';
 import { memo, Suspense, type ReactNode } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, Folder, FolderRef, View } from '../../mail/core/index.ts';
@@ -51,6 +61,8 @@ export const Sidebar = memo(function Sidebar({
   editing,
   onEdited,
   folderMenu,
+  onEditAccount,
+  onAddAccount,
 }: {
   id: string;
   view: View;
@@ -70,6 +82,10 @@ export const Sidebar = memo(function Sidebar({
   onEdited: (name: string | undefined) => void;
   /** What can be done to the folder in view, at the end of its row. */
   folderMenu?: ReactNode;
+  /** Opens an account's page, from beside its name, where it is changed or removed. */
+  onEditAccount?: (account: Account) => void;
+  /** Starts adding an account, from the end of the accounts. */
+  onAddAccount?: () => void;
 }) {
   return (
     <nav id={id} aria-label="Mailboxes" {...stylex.props(styles.sidebar)}>
@@ -106,6 +122,16 @@ export const Sidebar = memo(function Sidebar({
                   size="sm"
                   onClick={() => onNewFolder(account)}
                 />
+                {onEditAccount && (
+                  <IconButton
+                    label={`Edit ${account.name}`}
+                    tooltip={`Edit ${account.name}`}
+                    icon={<Icon icon={Settings2} size="sm" />}
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onEditAccount(account)}
+                  />
+                )}
               </div>
               <FolderRows
                 nodes={folderTree(folders.filter((folder) => folder.account === account.id))}
@@ -123,6 +149,17 @@ export const Sidebar = memo(function Sidebar({
               />
             </section>
           ))}
+        {!isCollapsed && onAddAccount && (
+          <div {...stylex.props(styles.addAccount)}>
+            <Button
+              label="Add account"
+              icon={<Icon icon={MailPlus} size="sm" />}
+              variant="ghost"
+              size="sm"
+              onClick={onAddAccount}
+            />
+          </div>
+        )}
       </div>
       <div {...stylex.props(styles.footer, isCollapsed && styles.railFooter)}>{footer}</div>
     </nav>
@@ -348,6 +385,10 @@ const styles = stylex.create({
   account: {
     marginTop: spacingVars['--spacing-3'],
   },
+  addAccount: {
+    marginTop: spacingVars['--spacing-3'],
+    paddingInline: spacingVars['--spacing-1'],
+  },
   accountHeader: {
     display: 'flex',
     alignItems: 'center',
@@ -357,6 +398,7 @@ const styles = stylex.create({
   },
   accountName: {
     display: 'flex',
+    flexGrow: 1,
     alignItems: 'center',
     gap: spacingVars['--spacing-2'],
     marginBlock: 0,

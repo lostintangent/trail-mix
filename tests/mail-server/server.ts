@@ -564,7 +564,10 @@ export async function settled() {
   const deadline = Date.now() + 10_000;
   for (;;) {
     const response = await fetch(`http://127.0.0.1:${ports.identity}/filing`);
-    const { filing } = await response.json<{ filing: number }>();
+    // Read as unknown, since the browser's Response, which a browser test reaching this sees, takes
+    // no type for its body.
+    const body: unknown = await response.json();
+    const { filing } = body as { filing: number };
     if (filing === 0) return;
     if (Date.now() > deadline) throw new Error('The host never filed its copy in Sent.');
     await Bun.sleep(50);

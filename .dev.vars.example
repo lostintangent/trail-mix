@@ -10,7 +10,10 @@ DEV_MEMBER=dev@trailmix.test
 CREDENTIALS_KEY=development-only-not-a-secret-0123456789
 
 # Every new Mailroom gets the demo mailbox: Personal with this many messages in its Inbox, and Work
-# with a tenth as many.
+# with a tenth as many. A Mailroom with the demo mailbox never connects a real account. To add your
+# own, delete this line and `.wrangler/state`, give CREDENTIALS_KEY a value of your own, and add it
+# from the first-run screen. Its mail and
+# its sealed password stay in `.wrangler/state` on your machine.
 DEMO_MAILBOX=2000
 
 # Uncomment to date the demo mailbox from a fixed instant instead of when the Mailroom adds it.

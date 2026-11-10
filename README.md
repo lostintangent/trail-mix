@@ -18,6 +18,8 @@ bun run dev
 
 The dev server signs you in as the development member named in `.dev.vars` and fills a new Mailroom with the demo mailbox. No real mail is involved.
 
+To read your own mail on your machine instead, remove the `DEMO_MAILBOX` line from `.dev.vars`, give `CREDENTIALS_KEY` a long random value of your own (`openssl rand -base64 32` makes one), delete `.wrangler/state`, and start `bun run dev` again. The first-run screen adds a Zoho account, with the server names your Zoho settings list, or any IMAP and SMTP server with its password. Trail Mix tries the password before it keeps anything. Your mail's index and the sealed password stay in `.wrangler/state`, and anything you send leaves for real once its undo window closes.
+
 ## Who can read your mail
 
 The mail server stays the only authority for your mail. Trail Mix stores your account settings, your encrypted credentials and the messages waiting to be sent, all in the Cloudflare account it is deployed to. Whoever controls that Cloudflare account can read everything stored there, encryption included, because the key is theirs. If someone else runs Trail Mix for you, you are trusting them with your mail.

@@ -149,6 +149,7 @@ src/
     composer/          core/ renders Markdown to mail, ui/ is the editor
     outbox/            core/ is the state machine the Mailroom's alarm drives, ui/ lists what waits
     commands/          registry.ts and the palette
+    accounts/          core/ reads the add-account form, ui/ is the first-run screen and each account's page
     members/           server/ edits the Cloudflare Access list, ui/ is the Members page
   server/
     entry.ts           the Worker entry

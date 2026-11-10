@@ -83,6 +83,12 @@ import {
   type ViewCounts,
 } from '../../folders/index.ts';
 import { useMediaQuery } from '../../../shared/useMediaQuery.ts';
+import {
+  accountCommands,
+  AccountPage,
+  RemoveQuestion,
+  type AccountPageOf,
+} from '../../accounts/index.ts';
 import { usePanel } from './usePanel.ts';
 
 type Pane = 'sidebar' | 'list' | 'reader';
@@ -183,9 +189,13 @@ export function Workbench({
   // A new message is from the account the view holds, or else the first.
   const writeFrom = scope ?? accounts[0];
   const closeComposer = composing.close;
+  // An account's page lies where a new message's composer would, so writing one closes it.
+  const [accountPage, setAccountPage] = useState<AccountPageOf>();
+  const [removing, setRemoving] = useState<Account>();
   const write =
     writeFrom &&
     (() => {
+      setAccountPage(undefined);
       composing.write(writeFrom);
     });
   const [isSheetOpen, setSheetOpen] = useState(false);
@@ -314,11 +324,47 @@ export function Workbench({
     ),
     [folderEditing.commands],
   );
+  // An account's page takes the reader's place, from nothing selected, where a phone slides to it.
+  const openAccountPage = useCallback(
+    (page: AccountPageOf) => {
+      closeComposer();
+      setSelection(NOTHING_SELECTED);
+      setPicking(false);
+      setAccountPage(page);
+      setPhonePane('reader');
+    },
+    [closeComposer],
+  );
+  const closeAccountPage = useCallback(() => {
+    setAccountPage(undefined);
+    if (isPhone) setPhonePane('list');
+  }, [isPhone]);
+  const accountsCommands = useMemo(
+    () =>
+      accountCommands({
+        accounts,
+        add: () => openAccountPage({ as: 'add' }),
+        edit: (account) => openAccountPage({ as: 'edit', account: account.id }),
+        remove: setRemoving,
+      }),
+    [accounts, openAccountPage],
+  );
+  const addAccount = useCallback(() => openAccountPage({ as: 'add' }), [openAccountPage]);
+  const editAccount = useCallback(
+    (account: Account) => openAccountPage({ as: 'edit', account: account.id }),
+    [openAccountPage],
+  );
+  // A removed account's page closes, and so does a view of its folders.
+  const removed = (account: Account) => {
+    if (accountPage?.as === 'edit' && accountPage.account === account.id) closeAccountPage();
+    if (view.in === 'folder' && view.folder.account === account.id) onViewChange({ in: 'inbox' });
+  };
   const order = useRef<ConversationId[]>([]);
   useLayoutEffect(() => {
     order.current = conversations?.map(({ id }) => id) ?? [];
   }, [conversations]);
   const pick = useCallback((id: ConversationId, by: SelectBy) => {
+    setAccountPage(undefined);
     setSelection((current) => select(current, id, by, order.current));
     if (by === 'only') setPhonePane('reader');
   }, []);
@@ -402,15 +448,17 @@ export function Workbench({
     ...workbenchCommands({
       next: stepTo(anchorAt + 1),
       previous: anchorAt > 0 ? stepTo(anchorAt - 1) : undefined,
-      back: composing.compose
-        ? closeComposer
-        : isPhone
-          ? phonePane === 'list'
-            ? undefined
-            : () => setPhonePane('list')
-          : isMany
-            ? stopPicking
-            : undefined,
+      back: accountPage
+        ? closeAccountPage
+        : composing.compose
+          ? closeComposer
+          : isPhone
+            ? phonePane === 'list'
+              ? undefined
+              : () => setPhonePane('list')
+            : isMany
+              ? stopPicking
+              : undefined,
       // While a send can still be taken back, Undo takes it back first.
       undo: outbox.undoSend ?? (canUndo ? undoLast : undefined),
       focusSearch,
@@ -431,6 +479,7 @@ export function Workbench({
     ...viewCommands(accounts, folders, openView),
     ...outbox.commands,
     ...folderEditing.commands,
+    ...accountsCommands,
     ...writingCommands,
     ...extraCommands,
   ]);
@@ -506,6 +555,8 @@ export function Workbench({
                 editing={folderEditing.editing}
                 onEdited={folderEditing.onEdited}
                 folderMenu={rowMenu}
+                onEditAccount={editAccount}
+                onAddAccount={addAccount}
                 header={isFieldInSidebar ? SIDEBAR_HEADER : undefined}
                 footer={footer}
               />
@@ -610,13 +661,33 @@ export function Workbench({
                   writing={writing}
                   hidden={composing.hidden}
                   onOpenDraft={composing.openDraft}
-                  onBack={() => setPhonePane('list')}
+                  page={
+                    accountPage && (
+                      <AccountPage
+                        page={accountPage}
+                        accounts={accounts}
+                        onClose={closeAccountPage}
+                        onRemove={setRemoving}
+                      />
+                    )
+                  }
+                  onBack={accountPage ? closeAccountPage : () => setPhonePane('list')}
                 />
               )}
             </div>
           </div>
         </div>
       </SearchContext>
+      {removing && (
+        <Suspense>
+          <RemoveQuestion
+            account={removing}
+            waiting={(outgoing ?? []).filter(({ draft }) => draft.account === removing.id).length}
+            onRemoved={removed}
+            onClose={() => setRemoving(undefined)}
+          />
+        </Suspense>
+      )}
       {folderEditing.deleting && (
         <Suspense>
           <DeleteQuestion

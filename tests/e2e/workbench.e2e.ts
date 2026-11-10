@@ -73,6 +73,27 @@ test('every screen renders cleanly, with readable text, at both sizes in both th
           await openConversation(page, /Kernel Weekly/);
         },
       ]);
+      // Adding an account, from the sidebar, which in the demo says it serves only the demo mailbox.
+      screens.push([
+        'add-account',
+        async (page) => {
+          if (size === 'phone') {
+            await page
+              .getByRole('button', { name: 'Back', exact: true })
+              .locator('visible=true')
+              .click();
+            await page.getByRole('button', { name: 'Folders', exact: true }).click();
+          }
+          await page.getByRole('button', { name: 'Add account' }).click();
+          const form = page.getByRole('form', { name: 'Add an account' });
+          await form
+            .getByText(
+              'This Trail Mix serves only the demo mailbox, so it can’t connect an account of your own.',
+            )
+            .waitFor();
+          expect(await form.getByRole('button', { name: 'Add account' }).isDisabled()).toBe(true);
+        },
+      ]);
       // A search, whose matches the highlighter marks.
       screens.push(['search', (page) => searchFor(page, 'lunch thu')]);
       for (const [screen, reach] of screens) {

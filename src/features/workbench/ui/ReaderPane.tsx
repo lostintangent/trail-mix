@@ -55,6 +55,7 @@ export function ReaderPane({
   writing,
   hidden,
   onOpenDraft,
+  page,
   onBack,
 }: {
   selected: ConversationId | undefined;
@@ -88,6 +89,8 @@ export function ReaderPane({
   hidden?: readonly MessageRef[];
   /** Opens a draft in the conversation to go on writing it. */
   onOpenDraft?: (draft: Message, conversation: Message[]) => void;
+  /** A page that lies on the sheet in place of a conversation, such as an account's. */
+  page?: ReactNode;
   onBack: () => void;
 }) {
   const shown = useRestingSelection(selected);
@@ -112,7 +115,8 @@ export function ReaderPane({
     [reading, onOpenDraft],
   );
   const isDocked = writing?.place === 'docked';
-  const isFilled = writing?.place === 'filled';
+  // A page lies on the sheet as a new message's composer does, filling it.
+  const isFilled = writing?.place === 'filled' || page !== undefined;
   const announce = useEffectEvent((id: ConversationId) => onShown?.(id));
   useEffect(() => {
     if (shown !== undefined && isShowing) announce(shown);
@@ -132,15 +136,19 @@ export function ReaderPane({
           variant="ghost"
           onClick={onBack}
         />
-        {top && !writing ? (
+        {top && !writing && !page ? (
           <div role="toolbar" aria-label="Marks" {...stylex.props(styles.top)}>
             <Suspense>{top}</Suspense>
           </div>
         ) : null}
       </header>
-      {isFilled ? (
+      {page ? (
+        <div {...stylex.props(styles.scroll)}>
+          <Suspense>{page}</Suspense>
+        </div>
+      ) : isFilled ? (
         <div {...stylex.props(styles.scroll, styles.filled)}>
-          <div {...stylex.props(styles.writing, styles.filled)}>{writing.composer}</div>
+          <div {...stylex.props(styles.writing, styles.filled)}>{writing?.composer}</div>
         </div>
       ) : null}
       {/* A composer over everything lies outside the panes, wherever it is drawn. */}
@@ -177,7 +185,7 @@ export function ReaderPane({
           />
         </div>
       )}
-      {island && !writing ? (
+      {island && !writing && !page ? (
         <PhoneIsland label="Conversation" spans>
           <Suspense>{island}</Suspense>
         </PhoneIsland>

@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { createFileRoute } from '@tanstack/react-router';
-import { useCallback, useMemo, useState, type ReactNode } from 'react';
+import { Suspense, useCallback, useMemo, useState, type ReactNode } from 'react';
+import { FirstRun } from '../features/accounts/index.ts';
 import type { Command } from '../features/commands/index.ts';
 import { useTriagedList } from '../features/conversations/index.ts';
 import { useChangedFolders, viewCounts } from '../features/folders/index.ts';
@@ -36,12 +37,20 @@ export const Route = createFileRoute('/')({
 
 function App() {
   const [mode, setMode] = useThemeMode();
+  // A member with no accounts has no mail to show, and starts by adding one.
+  const isFirstRun = useQuery(accountsQuery).data?.length === 0;
   return (
     <AppTheme theme={trailMixTheme} mode={mode}>
-      <Desk
-        sidebarFooter={<ThemeChoice mode={mode} onChange={setMode} />}
-        extraCommands={themeCommands(mode, setMode)}
-      />
+      {isFirstRun ? (
+        <Suspense>
+          <FirstRun />
+        </Suspense>
+      ) : (
+        <Desk
+          sidebarFooter={<ThemeChoice mode={mode} onChange={setMode} />}
+          extraCommands={themeCommands(mode, setMode)}
+        />
+      )}
     </AppTheme>
   );
 }

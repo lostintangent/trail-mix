@@ -13,13 +13,13 @@
     "build": "bun --bun vite build",
     "check": "bun check --no-script -b",
     "preview": "node node_modules/vite/bin/vite.js preview",
-    "test:mail": "bun tests/mail-server/server.ts prepare && bun test --path-ignore-patterns=node_modules/** tests/mail-server tests/mail-check tests/contract tests/reader/demo.mail.test.ts tests/mail-clients src/features/mailroom",
+    "test:mail": "bun tests/mail-server/server.ts prepare && bun test --path-ignore-patterns=node_modules/** tests/mail-server tests/mail-check tests/contract tests/reader/demo.mail.test.ts tests/mail-clients tests/accounts src/features/mailroom",
     "mail-server": "bun tests/mail-server/server.ts",
     "mail-check": "bun tests/mail-check/check.ts",
     "types": "node node_modules/wrangler/bin/wrangler.js types --include-env=false",
     "theme": "bun --bun astryx theme build src/app/theme/trail-mix.ts --out src/app/theme/built/trail-mix.css",
     "bench": "bun tests/bench/run.ts",
-    "e2e": "bun test ./tests/e2e/workbench.e2e.ts ./tests/e2e/calls.e2e.ts ./tests/e2e/triage.e2e.ts ./tests/e2e/composer.e2e.ts ./tests/e2e/outbox.e2e.ts ./tests/e2e/folders.e2e.ts ./tests/e2e/reader.e2e.ts"
+    "e2e": "bun test ./tests/e2e/workbench.e2e.ts ./tests/e2e/calls.e2e.ts ./tests/e2e/triage.e2e.ts ./tests/e2e/composer.e2e.ts ./tests/e2e/outbox.e2e.ts ./tests/e2e/folders.e2e.ts ./tests/e2e/reader.e2e.ts ./tests/e2e/accounts.e2e.ts"
   },
   "dependencies": {
     "@astryxdesign/core": "0.7.11",
