@@ -34,7 +34,14 @@ const errors: string[] = [];
 /** Every browser a test opened, closed after it so the next starts with only its own. */
 const opened: BrowserContext[] = [];
 afterEach(async () => {
-  await Promise.all(opened.splice(0).map((context) => context.close()));
+  await Promise.all(
+    opened.splice(0).map((context) =>
+      // A test that timed out takes the browser down with its contexts, as the next one finds.
+      context.close().catch((error: unknown) => {
+        if (browser.isConnected()) throw error;
+      }),
+    ),
+  );
   expect(errors.splice(0)).toEqual([]);
 });
 
@@ -45,6 +52,8 @@ afterAll(async () => {
 
 /** A browser on the unified Inbox, once the Mailroom has filled it. */
 async function inbox(size: typeof DESKTOP | typeof PHONE = DESKTOP): Promise<Page> {
+  // So one test that hangs fails alone, a browser it took down is started again for the next.
+  if (!browser.isConnected()) browser = await chromium.launch();
   const context = await browser.newContext(size);
   opened.push(context);
   const page = await context.newPage();
@@ -432,31 +441,26 @@ test('folders are created, renamed and deleted, and a move to one deleted elsewh
     route.request().url().includes('%22folders%22') ? route.abort() : route.fallback();
   await here.route('**/_serverFn/**', stale);
   await folderRow(here, 'Inbox').click();
-  const options = here.getByRole('option');
-  await options.first().click();
-  // The row is known by its subject and preview, which a read mark doesn't change.
-  const [subject, preview] = await Promise.all(
-    [2, 3].map((line) =>
-      options.first().locator(`:scope > span:nth-child(2) > span:nth-child(${line})`).textContent(),
-    ),
-  );
+  // A row is known by its place and its text, less its read mark. The demo repeats stories, even
+  // within the rows on screen, but never two alike in a row.
+  const at = (place: number) => here.locator(`[role="option"][aria-posinset="${place}"]`);
+  const textAt = async (place: number) => (await at(place).textContent())?.replace('Unread', '');
+  await at(1).click();
+  const [moving, below] = await Promise.all([textAt(1), textAt(2)]);
 
   await folderRow(there, 'Journeys').click();
   await there.getByRole('button', { name: 'Delete Journeys' }).click();
   await there.getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click();
   await folderRow(there, 'Journeys').waitFor({ state: 'detached', timeout: ELSEWHERE_MS });
 
-  // The demo repeats some stories, so rows like this one are counted rather than singled out.
-  const alike = options.filter({ hasText: subject ?? '' }).filter({ hasText: preview ?? '' });
-  const count = await alike.count();
   await bar(here).getByRole('button', { name: 'Move to' }).click();
   // The command is held a moment, so the row is seen gone before the refusal brings it back.
   const release = await slowCommands(here);
   await here.getByRole('menuitem', { name: 'Journeys' }).click();
-  await until(async () => (await alike.count()) === count - 1, 1_000);
+  await until(async () => (await textAt(1)) === below, 1_000);
   await release();
   // The server refuses, so the conversation comes back and a toast says why.
-  await until(async () => (await alike.count()) === count, ELSEWHERE_MS);
+  await until(async () => (await textAt(1)) === moving, ELSEWHERE_MS);
   // The toast and its announcement both say it.
   const refusal = here.getByText(/Couldn't move to Journeys\. .*Journeys/).first();
   await refusal.waitFor({ timeout: ELSEWHERE_MS });
