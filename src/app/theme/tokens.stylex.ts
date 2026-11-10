@@ -16,7 +16,7 @@ export const media = stylex.defineConsts({
 
 export const tm = stylex.defineVars({
   // Geometry
-  deskGap: '6px', // desk showing between panes
+  deskGap: '8px', // the gutter between sheets, as in Toy Box
   paneRadius: '14px',
   sheetRadius: '12px', // a message, the composer
   target: { default: '32px', [COARSE]: '44px' },
@@ -44,6 +44,9 @@ export const tm = stylex.defineVars({
   // default accent, written out because StyleX can't evaluate an import.
   airmail: `repeating-linear-gradient(-45deg, ${VERMILION} 0 7px, #0000 7px 11px, ${INK_BLUE} 11px 18px, #0000 18px 22px)`,
   airmailHeight: '3px',
+  // A resize handle on hover or drag, as in Toy Box: a line of the accent that fades out toward
+  // both ends.
+  resizeAccent: 'linear-gradient(transparent, var(--color-accent) 20% 80%, transparent)',
 
   // Type and motion
   serif: 'ui-serif, "New York", "Iowan Old Style", Georgia, serif', // conversation subjects only

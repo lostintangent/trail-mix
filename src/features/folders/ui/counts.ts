@@ -1,5 +1,5 @@
 import type { Folder, Outgoing } from '../../mail/core/index.ts';
-import type { ViewCounts } from './Sidebar.tsx';
+import type { ViewCounts } from './views.ts';
 
 /**
  * What the unified views count across every account: unread mail in the Inboxes, the drafts, and

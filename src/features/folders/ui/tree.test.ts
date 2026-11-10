@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { Folder } from '../../mail/core/index.ts';
-import { folderTree, type FolderNode } from './tree.ts';
+import { folderTree, unreadInAccount, unreadWithin, type FolderNode } from './tree.ts';
 
 const folder = (path: string, extra: Partial<Folder> = {}): Folder => {
   const slash = path.lastIndexOf('/');
@@ -79,4 +79,27 @@ test('a folder with a role sits at the top wherever the server keeps it', () => 
   ];
 
   expect(outline(folderTree(folders))).toEqual(['Inbox', 'Sent Mail', '[Gmail]', '  Starred']);
+});
+
+test('a folded folder counts the unread mail in it and every folder inside it, however deep', () => {
+  const [projects] = folderTree([
+    folder('Projects', { unread: 1 }),
+    folder('Projects/Trail Mix', { unread: 2 }),
+    folder('Projects/Trail Mix/Design', { unread: 4 }),
+    folder('Projects/Toy Box'),
+  ]);
+
+  expect(unreadWithin(projects!)).toBe(7);
+});
+
+test('a folded account counts its unread mail outside Junk and Trash', () => {
+  const nodes = folderTree([
+    folder('INBOX', { name: 'Inbox', role: 'inbox', unread: 3 }),
+    folder('Projects', { unread: 1 }),
+    folder('Projects/Toy Box', { unread: 2 }),
+    folder('Junk', { role: 'junk', unread: 40 }),
+    folder('Trash', { role: 'trash', unread: 457 }),
+  ]);
+
+  expect(unreadInAccount(nodes)).toBe(6);
 });

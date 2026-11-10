@@ -99,9 +99,10 @@ const styles = stylex.create({
     gap: spacingVars['--spacing-1'],
     paddingInlineEnd: spacingVars['--spacing-1'],
   },
-  // It starts where a folder's name does in its row.
+  // Its text starts where a folder's name does in its row: after the line's padding, a chevron's
+  // column for each step in, and the folder's icon.
   depth: (depth: number) => ({
-    paddingInlineStart: `calc(${spacingVars['--spacing-2']} + 1rem + ${depth} * ${spacingVars['--spacing-3']})`,
+    paddingInlineStart: `calc(${spacingVars['--spacing-2']} + ${depth + 1} * (1rem + ${spacingVars['--spacing-1']}) + 1rem)`,
   }),
   // As Astryx draws an input: an edge in the accent, with a muted ring, since it has the focus.
   input: {

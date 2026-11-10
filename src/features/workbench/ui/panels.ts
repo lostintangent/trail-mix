@@ -18,7 +18,7 @@ export type PanelSpec = {
   width: number;
   min: number;
   max: number;
-  /** The width the panel collapses to. */
+  /** The width the panel collapses to, its rail. */
   rail: number;
 };
 
@@ -31,7 +31,9 @@ export const PANELS: Record<PanelName, PanelSpec> = {
     width: 240,
     min: 200,
     max: 360,
-    rail: 52,
+    // Twice the distance to the middle of the sidebar's icons (its 8px inset, a pixel, a row's 8px
+    // padding and half a 16px icon), so the fold button, centered on the rail, heads that column.
+    rail: 50,
   },
   list: {
     key: 'trail-mix.panel.list',

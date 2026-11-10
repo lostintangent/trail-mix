@@ -65,7 +65,8 @@ test('folders are made, nested and renamed in place, and show before the server 
   const page = await open({ ...DESKTOP, colorScheme: 'light' });
 
   // A name the folder can't take says why, and nothing is sent.
-  await page.getByRole('button', { name: 'New folder in Personal' }).click();
+  await page.getByRole('button', { name: 'More for Personal' }).click();
+  await page.getByRole('menuitem', { name: 'New folder in Personal' }).click();
   const field = page.getByRole('textbox', { name: 'Name of the new folder in Personal' });
   const sent: string[] = [];
   page.on('request', (request) => {
@@ -90,7 +91,7 @@ test('folders are made, nested and renamed in place, and show before the server 
   // Inside the folder in view, from the menu at the end of its row. An empty folder says so.
   await folderRow(page, 'Trips').click();
   await page.getByText('Trips is empty', { exact: true }).waitFor();
-  await page.getByRole('button', { name: 'More for this folder' }).click();
+  await page.getByRole('button', { name: 'More for Trips' }).click();
   await page.getByRole('menuitem', { name: 'New folder in Trips' }).click();
   await page.getByRole('textbox', { name: 'Name of the new folder in Trips' }).fill('Japan');
   await page.keyboard.press('Enter');
@@ -168,7 +169,7 @@ test('a delete asks first with what goes, comes back with the server’s reason,
 test('on a phone, folder controls are 44 pixels, and a folder is named in the sidebar', async () => {
   const page = await open({ ...PHONE, colorScheme: 'light' });
   await page.getByRole('button', { name: 'Folders', exact: true }).click();
-  const add = page.getByRole('button', { name: 'New folder in Work' });
+  const more = page.getByRole('button', { name: 'More for Work' });
   await folderRow(page, 'Archive').click();
   const header = page.getByRole('button', { name: 'Folder', exact: true });
   await header.waitFor();
@@ -180,7 +181,13 @@ test('on a phone, folder controls are 44 pixels, and a folder is named in the si
   await field.waitFor();
   await expect(field.getAttribute('placeholder')).resolves.toBe('Folder name');
   await expect(field.evaluate((input) => !input.closest('[inert]'))).resolves.toBe(true);
-  for (const control of [add, page.getByRole('button', { name: 'More for this folder' }), field]) {
+  const account = personal(page).getByRole('button', { name: /^Personal/ });
+  for (const control of [
+    more,
+    personal(page).getByRole('button', { name: 'More for Archive' }),
+    account,
+    field,
+  ]) {
     const box = (await control.boundingBox())!;
     expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(44);
   }

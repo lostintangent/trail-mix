@@ -12,6 +12,8 @@ export type Command = CommandLike & {
   icon?: LucideIcon;
   /** A toggle's state, such as whether the conversation is flagged. */
   isChecked?: boolean;
+  /** Whether it can't be taken back, as a delete can't, which a menu marks in the danger color. */
+  isDestructive?: boolean;
   run: () => unknown;
 };
 

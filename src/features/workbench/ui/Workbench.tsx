@@ -56,9 +56,11 @@ import {
 } from '../../conversations/index.ts';
 import { PickedActions, SelectionPane } from './SelectionPane.tsx';
 import { workbenchCommands } from './commands.ts';
+import { FoldToggle } from './FoldToggle.tsx';
 import {
   CommandButton,
   PrimaryCommandButton,
+  RegisteredCommandButton,
   Commands,
   focusSearch,
   runCommandKey,
@@ -74,6 +76,7 @@ import { isDocked, newestOf, useComposing } from './useComposing.ts';
 const NO_COMMANDS: readonly Command[] = [];
 import { StatusLine } from './StatusLine.tsx';
 import {
+  CREATE,
   folderName,
   Sidebar,
   UNIFIED_VIEWS,
@@ -81,11 +84,14 @@ import {
   FolderMenu,
   useFolderEditing,
   viewCommands,
+  type FooterPlace,
+  type SidebarRail,
   type ViewCounts,
 } from '../../folders/index.ts';
 import { useMediaQuery } from '../../../shared/useMediaQuery.ts';
 import {
   accountCommands,
+  isAccountCommand,
   AccountPage,
   RemoveQuestion,
   type AccountPageOf,
@@ -102,15 +108,17 @@ type Pane = 'sidebar' | 'list' | 'reader';
 const SEARCH_FIELD = <SearchField />;
 
 /**
- * The top of a desktop's sidebar: New message, then the search field. Each reads what it shows as
- * it renders, so the sidebar, memoized around this, doesn't render again with every key.
+ * New message, at the top of a desktop's sidebar. It reads its command as it renders, so the
+ * sidebar, memoized around it, doesn't render again with every key.
  */
-const SIDEBAR_HEADER = (
-  <>
-    <PrimaryCommandButton id="message.new" />
-    {SEARCH_FIELD}
-  </>
-);
+const NEW_MESSAGE = <PrimaryCommandButton id="message.new" />;
+
+/** How a desktop's sidebar folds: to its rail, led by New message, with a button that holds still. */
+const RAIL: SidebarRail = {
+  width: PANELS.sidebar.rail,
+  fold: <FoldToggle />,
+  top: <RegisteredCommandButton id="message.new" isAccent />,
+};
 
 /** Where a phone's toasts rise to: above the island, where the pane's actions float. */
 const ABOVE_ISLAND = { blockEnd: `calc(${tm.target} + ${spacingVars['--spacing-1']} * 2)` };
@@ -176,8 +184,8 @@ export function Workbench({
   const listId = useId();
   const { title, unread, scope } = describeView(view, accounts, folders, counts);
   const { search, marks, searchBodies } = useSearch(view, onViewChange);
-  // On a desktop New message and the search field top the sidebar. On a phone, or while the sidebar
-  // is a rail, the field sits above the list and New message in the list's header or island.
+  // On a desktop New message and the search field top the sidebar. Folded to its rail, New message
+  // leads the rail and the field sits above the list, as it does on a phone.
   const isFieldInSidebar = !isPhone && !sidebar.isCollapsed;
   // Panes off a phone's screen are inert, so focus and assistive tech stay on the one in view.
   const isOffscreen = (pane: Pane) => isPhone && pane !== phonePane;
@@ -338,14 +346,6 @@ export function Workbench({
     open: onViewChange,
     reveal: revealSidebar,
   });
-  const rowMenu = useMemo(
-    () => (
-      <Suspense>
-        <FolderMenu commands={folderEditing.commands} place="row" />
-      </Suspense>
-    ),
-    [folderEditing.commands],
-  );
   // An account's page takes the reader's place, from nothing selected, where a phone slides to it.
   const openPage = useCallback(
     (page: SheetPage) => {
@@ -391,10 +391,6 @@ export function Workbench({
   const openMembers = useMemo(
     () => (isOperator ? () => openPage({ as: 'members' }) : undefined),
     [isOperator, openPage],
-  );
-  const editAccount = useCallback(
-    (account: Account) => openPage({ as: 'edit', account: account.id }),
-    [openPage],
   );
   // A removed account's page closes, and so does a view of its folders.
   const removed = (account: Account) => {
@@ -509,6 +505,12 @@ export function Workbench({
       // While a send can still be taken back, Undo takes it back first.
       undo: outbox.undoSend ?? (canUndo ? undoLast : undefined),
       focusSearch,
+      fold: isPhone
+        ? undefined
+        : {
+            isFolded: sidebar.isCollapsed,
+            toggle: () => setSidebar({ ...sidebar, isCollapsed: !sidebar.isCollapsed }),
+          },
       showShortcuts: () => setSheetOpen(true),
     }),
     ...composerCommands({
@@ -532,15 +534,27 @@ export function Workbench({
     ...extraCommands,
   ]);
   useCommandKeys(commands);
-  const isSidebarRail = !isPhone && sidebar.isCollapsed;
-  const footer = useMemo(
-    () => (
+  const footer = useCallback(
+    (place: FooterPlace) => (
       <>
-        <StatusLine accounts={accounts} isCollapsed={isSidebarRail} />
+        <StatusLine accounts={accounts} isCollapsed={place === 'rail'} />
         {sidebarFooter}
       </>
     ),
-    [accounts, isSidebarRail, sidebarFooter],
+    [accounts, sidebarFooter],
+  );
+  // What an account's menu in the sidebar lists: a new folder at its top, then its own commands.
+  // It asks the registry as the menu opens, so the sidebar doesn't render again as that changes.
+  const latestCommands = useRef(commands);
+  useLayoutEffect(() => {
+    latestCommands.current = commands;
+  });
+  const accountActions = useCallback(
+    (account: Account) =>
+      latestCommands.current.filter(
+        (command) => command.id === `${CREATE}${account.id}` || isAccountCommand(command, account),
+      ),
+    [],
   );
 
   const newMessage = commands.find(({ id }) => id === 'message.new');
@@ -598,15 +612,18 @@ export function Workbench({
                 accounts={accounts}
                 folders={folders}
                 counts={counts}
-                isCollapsed={isSidebarRail}
-                onNewFolder={folderEditing.newFolderIn}
+                rail={isPhone ? undefined : RAIL}
+                isCollapsed={sidebar.isCollapsed}
+                // While its edge is dragged, the tree follows the edge.
+                expandedWidth={isPhone || isResizing ? undefined : sidebar.width}
                 editing={folderEditing.editing}
                 onEdited={folderEditing.onEdited}
-                folderMenu={rowMenu}
-                onEditAccount={editAccount}
+                folderActions={folderEditing.actionsFor}
+                accountActions={accountActions}
                 onAddAccount={addAccount}
                 onMembers={openMembers}
-                header={isFieldInSidebar ? SIDEBAR_HEADER : undefined}
+                header={isPhone ? undefined : NEW_MESSAGE}
+                search={isFieldInSidebar ? SEARCH_FIELD : undefined}
                 footer={footer}
               />
               <PanelEdge
@@ -675,11 +692,10 @@ export function Workbench({
                     {newMessage && <CommandButton command={newMessage} primary="Write" />}
                   </>
                 }
-                write={newMessage && !isFieldInSidebar && <CommandButton command={newMessage} />}
                 actions={
                   view.in === 'folder' && (
                     <Suspense>
-                      <FolderMenu commands={folderEditing.commands} place="header" />
+                      <FolderMenu commands={folderEditing.commands} />
                     </Suspense>
                   )
                 }

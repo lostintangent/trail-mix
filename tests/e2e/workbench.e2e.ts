@@ -106,6 +106,13 @@ for (const accent of ACCENTS) {
         ]);
         // A search, whose matches the highlighter marks.
         screens.push(['search', (page) => searchFor(page, 'lunch thu')]);
+        // The sidebar folded to its rail, which keeps the search above the list.
+        if (size === 'desktop') {
+          screens.push([
+            'rail',
+            (page) => page.getByRole('button', { name: 'Fold the sidebar' }).click(),
+          ]);
+        }
         for (const [screen, reach] of screens) {
           await reach(page);
           await page.waitForTimeout(400);
@@ -171,15 +178,16 @@ test('side panels resize by pointer and key, snap to a rail, and come back the s
 
   const start = await size(sidebar);
   const box = (await sidebar.boundingBox())!;
+  const moved = 60 - box.width / 2;
   await page.mouse.move(box.x + box.width / 2, box.y + 200);
   await page.mouse.down();
   await page.mouse.move(box.x + 60, box.y + 200, { steps: 6 });
   await page.mouse.up();
-  expect(await size(sidebar)).toBe(start + 57);
+  expect(await size(sidebar)).toBe(start + moved);
 
   await sidebar.focus();
   await page.keyboard.press('ArrowLeft');
-  expect(await size(sidebar)).toBe(start + 57 - 16);
+  expect(await size(sidebar)).toBe(start + moved - 16);
 
   const listBox = (await list.boundingBox())!;
   await page.mouse.move(listBox.x + listBox.width / 2, listBox.y + 200);
@@ -200,7 +208,7 @@ test('side panels resize by pointer and key, snap to a rail, and come back the s
         style.getPropertyValue('--workbench-list'),
       ];
     }),
-  ).toEqual([`${start + 41}px`, '52px']);
+  ).toEqual([`${start + moved - 16}px`, '52px']);
   await context.close();
 }, 30_000);
 

@@ -38,6 +38,7 @@ function registry(isUnread: boolean): Command[] {
       back: nothing,
       undo: nothing,
       focusSearch: nothing,
+      fold: { isFolded: false, toggle: nothing },
       showShortcuts: nothing,
     }),
     ...viewCommands(accounts, folders, nothing),

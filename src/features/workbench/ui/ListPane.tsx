@@ -55,7 +55,6 @@ export function ListPane({
   onExpand,
   onShowFolders,
   island,
-  write,
   actions,
 }: {
   id: string;
@@ -89,8 +88,6 @@ export function ListPane({
   onShowFolders: () => void;
   /** On a phone, what the island holds after the way to the folders: search, then Write. */
   island?: ReactNode;
-  /** Starts a new message, at the end of the title on a desktop. */
-  write?: ReactNode;
   /** What can be done to the view itself, such as renaming its folder, at the header's end. */
   actions?: ReactNode;
 }) {
@@ -125,7 +122,6 @@ export function ListPane({
             'All accounts'
           )}
         </span>
-        {write && <span {...stylex.props(styles.write)}>{write}</span>}
         {actions && (
           <span role="toolbar" aria-label={title} {...stylex.props(styles.actions)}>
             {actions}
@@ -266,14 +262,8 @@ const styles = stylex.create({
     },
     paddingInline: spacingVars['--spacing-4'],
   },
-  // The header's line keeps its height, so a button's extra size reaches into its padding.
-  write: {
-    display: { default: 'flex', [media.phone]: 'none' },
-    alignSelf: 'center',
-    marginInlineStart: 'auto',
-    marginBlock: `calc(-1 * ${spacingVars['--spacing-2']})`,
-  },
-  // They follow New message on a desktop, and the account's pill on a phone.
+  // The header's line keeps its height, so a button's extra size reaches into its padding. They
+  // follow the unread count on a desktop, and the account's pill on a phone.
   actions: {
     display: 'flex',
     alignSelf: 'center',

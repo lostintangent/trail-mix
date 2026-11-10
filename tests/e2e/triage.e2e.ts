@@ -510,7 +510,8 @@ test('folders are created, renamed and deleted, and a move to one deleted elsewh
   const folderRow = (page: Page, name: string) =>
     work(page).getByRole('button', { name: new RegExp(`^${name}`) });
 
-  await here.getByRole('button', { name: 'New folder in Work' }).click();
+  await here.getByRole('button', { name: 'More for Work' }).click();
+  await here.getByRole('menuitem', { name: 'New folder in Work' }).click();
   await here.getByLabel('Name of the new folder in Work').fill('Trips');
   await here.keyboard.press('Enter');
   await folderRow(here, 'Trips').waitFor({ timeout: ELSEWHERE_MS });

@@ -1,4 +1,5 @@
 import { useCallback, useLayoutEffect, useState } from 'react';
+import { deviceStorage } from '../../../shared/deviceStorage.ts';
 import { panelSize, readPanel, savePanel, type PanelSpec, type PanelState } from './panels.ts';
 
 /**
@@ -21,24 +22,3 @@ export function usePanel(spec: PanelSpec): [PanelState, (state: PanelState) => v
   );
   return [state, change];
 }
-
-/** This device's storage, or one that forgets on reload where storage is blocked. */
-function deviceStorage(): Storage {
-  try {
-    return localStorage;
-  } catch {
-    return forgetful;
-  }
-}
-
-const memory = new Map<string, string>();
-const forgetful: Storage = {
-  get length() {
-    return memory.size;
-  },
-  clear: () => memory.clear(),
-  getItem: (key) => memory.get(key) ?? null,
-  key: (index) => [...memory.keys()][index] ?? null,
-  removeItem: (key) => memory.delete(key),
-  setItem: (key, value) => memory.set(key, value),
-};

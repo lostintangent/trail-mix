@@ -7,6 +7,10 @@ const EDIT = 'account.edit:';
 const REMOVE = 'account.remove:';
 const SIGN_IN = 'account.sign-in:';
 
+/** Whether a command acts on one account, as the menu beside its name in the sidebar lists. */
+export const isAccountCommand = ({ id }: Command, account: Account) =>
+  [SIGN_IN, EDIT, REMOVE].some((prefix) => id === `${prefix}${account.id}`);
+
 /**
  * Adding an account, and editing or removing each one the member has. An account whose vendor wants
  * its member to sign in again offers that too.
@@ -51,6 +55,7 @@ export function accountCommands({
         title: `Remove the ${account.name} account`,
         group,
         icon: MailMinus,
+        isDestructive: true,
         run: () => remove(account),
       },
     ]),

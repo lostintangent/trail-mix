@@ -3,7 +3,7 @@ import type { Account, Folder, View } from '../../mail/core/index.ts';
 import { followed, type FolderChange } from '../core/changes.ts';
 import { childPath, renamedPath } from '../core/names.ts';
 import { useFolderChange } from './changes.ts';
-import { folderCommands, type FolderEdit } from './commands.ts';
+import { folderActions, folderCommands, type FolderEdit } from './commands.ts';
 
 const sameView = (a: View, b: View) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -87,7 +87,11 @@ export function useFolderEditing({
     () => folderCommands({ accounts, folders, view, edit, remove: setDeleting }),
     [accounts, folders, view, edit],
   );
-  const newFolderIn = useCallback((account: Account) => edit({ do: 'create', account }), [edit]);
+  // Each folder's own, for the menu on its row.
+  const actionsFor = useCallback(
+    (folder: Folder) => folderActions({ folder, accounts, folders, edit, remove: setDeleting }),
+    [accounts, folders, edit],
+  );
 
   return {
     editing,
@@ -99,6 +103,6 @@ export function useFolderEditing({
       [deleting, make],
     ),
     commands,
-    newFolderIn,
+    actionsFor,
   };
 }

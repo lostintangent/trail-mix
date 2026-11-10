@@ -1,4 +1,4 @@
-import { colorVars, durationVars } from '@astryxdesign/core/theme/tokens.stylex';
+import { durationVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { memo, useRef, useState, type PointerEvent } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
@@ -101,29 +101,32 @@ const styles = stylex.create({
       default: 'none',
       ':focus-visible': { default: 'none', [media.forcedColors]: '2px solid Highlight' },
     },
-    // The line that shows where the edge is, in the middle of the gap.
-    backgroundImage: {
-      default: null,
-      ':hover': `linear-gradient(${colorVars['--color-accent']}, ${colorVars['--color-accent']})`,
-      ':focus-visible': `linear-gradient(${colorVars['--color-accent']}, ${colorVars['--color-accent']})`,
-    },
-    backgroundSize: '2px 100%',
-    backgroundPosition: 'center',
-    backgroundRepeat: 'no-repeat',
-    transitionProperty: 'background-image',
-    transitionDuration: {
-      default: durationVars['--duration-fast'],
-      [media.reducedMotion]: '0s',
-    },
-    // Under a finger the edge takes presses across a full target's width.
+    // Under a finger the edge takes presses across a full target's width. A mouse takes it in the
+    // gutter alone, so the sheets either side keep their edges, and the list its scrollbar.
     '::before': {
-      content: '""',
+      content: { default: null, [media.coarse]: '""' },
       position: 'absolute',
       insetBlock: 0,
       insetInline: `calc((${tm.deskGap} - ${tm.target}) / 2)`,
     },
+    // Nothing shows at rest. On hover or drag a line of the accent runs down the gutter's middle,
+    // fading out toward both ends, as Toy Box's does, and twice as wide for the keyboard's focus.
+    '::after': {
+      content: '""',
+      position: 'absolute',
+      insetBlock: 0,
+      insetInlineStart: { default: '50%', ':focus-visible': 'calc(50% - 1px)' },
+      width: { default: '1px', ':focus-visible': '2px' },
+      backgroundImage: tm.resizeAccent,
+      opacity: { default: 0, ':hover': 1, ':focus-visible': 1 },
+      transitionProperty: 'opacity',
+      transitionDuration: {
+        default: durationVars['--duration-fast'],
+        [media.reducedMotion]: '0s',
+      },
+    },
   },
   dragging: {
-    backgroundImage: `linear-gradient(${colorVars['--color-accent']}, ${colorVars['--color-accent']})`,
+    '::after': { opacity: 1 },
   },
 });

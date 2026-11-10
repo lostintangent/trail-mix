@@ -40,3 +40,20 @@ export function folderTree(folders: readonly Folder[]): FolderNode[] {
 
 const rank = ({ role }: Folder) => (role ? ROLE_ORDER[role] : OWN);
 const byName = (a: Folder, b: Folder) => folderName(a).localeCompare(folderName(b));
+
+/** The unread mail in a folder and every folder inside it, which it shows while folded. */
+export const unreadWithin = ({ folder, children }: FolderNode): number =>
+  children.reduce((sum, child) => sum + unreadWithin(child), folder.unread);
+
+/**
+ * The unread mail in an account's tree, which it shows while folded. Junk and Trash stay out of
+ * it, since nothing in them waits to be read.
+ */
+export const unreadInAccount = (nodes: readonly FolderNode[]): number =>
+  nodes
+    .filter(({ folder }) => folder.role !== 'junk' && folder.role !== 'trash')
+    .reduce((sum, node) => sum + unreadWithin(node), 0);
+
+/** Whether a folder in an account's tree is this node or sits inside it. */
+export const holds = ({ folder, children }: FolderNode, path: string): boolean =>
+  folder.path === path || children.some((child) => holds(child, path));

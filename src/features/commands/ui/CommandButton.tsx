@@ -22,12 +22,15 @@ export const CommandButton = memo(function CommandButton({
   command,
   iconStyle,
   primary,
+  isAccent = false,
 }: {
   command: Command;
   /** How the icon looks, such as marked with the highlighter while a toggle is on. */
   iconStyle?: StyleXStyles;
   /** Draws it as the pane's main action, with this word, such as "Write" for New message. */
   primary?: string;
+  /** Draws its icon on the accent, as a pane's main action where there's no room for a word. */
+  isAccent?: boolean;
 }) {
   if (primary !== undefined) {
     return (
@@ -49,7 +52,7 @@ export const CommandButton = memo(function CommandButton({
       label={command.title}
       tooltip={tooltip}
       icon={command.icon && <Icon icon={command.icon} xstyle={iconStyle} />}
-      variant="ghost"
+      variant={isAccent ? 'primary' : 'ghost'}
       isDisabled={command.isEnabled === false}
       onClick={() => void command.run()}
     />
@@ -60,9 +63,9 @@ export const CommandButton = memo(function CommandButton({
  * The registry's command of one id as an icon button. It finds the command as it renders, so the
  * same element serves every render, and a pane memoized around it renders only when it must.
  */
-export function RegisteredCommandButton({ id }: { id: string }) {
+export function RegisteredCommandButton({ id, isAccent }: { id: string; isAccent?: boolean }) {
   const command = useCommands().find((each) => each.id === id);
-  return command ? <CommandButton command={command} /> : null;
+  return command ? <CommandButton command={command} isAccent={isAccent} /> : null;
 }
 
 /**
