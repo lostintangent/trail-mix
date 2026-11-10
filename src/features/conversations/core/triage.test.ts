@@ -4,6 +4,7 @@ import {
   changeMessages,
   changeRows,
   commandFor,
+  followMoves,
   isShown,
   overlaid,
   putBack,
@@ -157,6 +158,23 @@ test('Undo puts each moved message back in the folder it left', () => {
     { move: [ref('Trash', 41), ref('Trash', 43)], to: { account: 'personal', path: 'INBOX' } },
     { move: [ref('Trash', 42)], to: { account: 'personal', path: 'Projects' } },
   ]);
+});
+
+test('a moved message is known by the ref the move gave it, and the rest keep theirs', () => {
+  const [kept, moving, sent] = [message('INBOX'), message('INBOX'), message('Sent')];
+  const elsewhere = message('INBOX', { conversation: 'c2' });
+  const to = { account: 'personal', path: 'Archive', uidValidity: 7, uid: 900 };
+
+  const followed = followMoves(
+    [kept, moving, sent],
+    [
+      { from: moving, to },
+      { from: elsewhere, to: { ...to, uid: 901 } },
+    ],
+  );
+
+  expect(followed).toEqual([kept, { ...moving, ...to }, sent]);
+  expect(followMoves([kept, sent], [{ from: moving, to }])).toBeUndefined();
 });
 
 test('Undo of a read mark makes unread again only the messages it marked', () => {

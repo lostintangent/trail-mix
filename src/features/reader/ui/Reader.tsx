@@ -92,7 +92,9 @@ function Conversation({
     .toSorted((a, b) => a.date.localeCompare(b.date));
   const isDraft = (message: Message) => onOpenDraft !== undefined && message.flags.draft;
   const newest = messages.findLast((message) => !isDraft(message)) ?? messages.at(-1);
-  const [opened, setOpened] = useState(() => new Set(newest ? [refKey(newest)] : []));
+  // The newest opens, and the member opens earlier ones. A move gives a message a new ref, as an
+  // undone archive's moves do, so an opened one is known by what it keeps: its Message-ID.
+  const [opened, setOpened] = useState(() => new Set(newest ? [openedKey(newest)] : []));
   if (!newest) return null;
 
   return (
@@ -114,13 +116,13 @@ function Conversation({
             <span {...stylex.props(styles.foldedPreview)}>{message.preview}</span>
             <span>Go on writing</span>
           </button>
-        ) : opened.has(refKey(message)) ? (
+        ) : opened.has(openedKey(message)) ? (
           <MessageSheet key={refKey(message)} message={message} account={account} />
         ) : (
           <button
             key={refKey(message)}
             type="button"
-            onClick={() => setOpened(new Set([...opened, refKey(message)]))}
+            onClick={() => setOpened(new Set([...opened, openedKey(message)]))}
             {...stylex.props(styles.folded)}
           >
             <strong {...stylex.props(styles.foldedFrom)}>
@@ -136,6 +138,9 @@ function Conversation({
     </div>
   );
 }
+
+/** How the reader remembers an opened message: by its Message-ID, or its ref if it has none. */
+const openedKey = (message: Message) => message.messageId || refKey(message);
 
 /**
  * Fetches the newest body of each conversation the member may open next, and sanitizes it, one at

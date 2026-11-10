@@ -193,6 +193,23 @@ export function changeMessages(messages: readonly Message[], command: Command): 
 }
 
 /**
+ * A conversation's messages once some of them moved, or nothing when none of them did. A move gives
+ * a message a new ref and retires the old one, so each moved message is known by the ref it has
+ * now, in the folder it went to.
+ */
+export function followMoves(
+  messages: readonly Message[],
+  moved: readonly Moved[],
+): Message[] | undefined {
+  const now = new Map(moved.map(({ from, to }) => [keyOf(from), to]));
+  if (!messages.some((message) => now.has(keyOf(message)))) return undefined;
+  return messages.map((message) => {
+    const to = now.get(keyOf(message));
+    return to ? { ...message, ...refOf(to) } : message;
+  });
+}
+
+/**
  * Whether a view shows a message, so a move takes it out. A folder shows its own messages, Drafts
  * its drafts, and the other unified views the Inbox's. A search finds mail wherever it is, so it
  * shows every folder but Sent and Drafts, which hold what the member wrote.

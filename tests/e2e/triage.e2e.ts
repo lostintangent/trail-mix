@@ -1,5 +1,12 @@
 import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
-import { chromium, type Browser, type BrowserContext, type Page, type Route } from 'playwright';
+import {
+  chromium,
+  type Browser,
+  type BrowserContext,
+  type Page,
+  type Request,
+  type Route,
+} from 'playwright';
 import { startPreview, type Preview } from './preview.ts';
 
 /**
@@ -111,8 +118,61 @@ async function until(check: () => Promise<boolean>, ms: number) {
   }
 }
 
+/**
+ * Holds the asks this browser makes of its Mailroom that `which` picks until released, so what it
+ * shows meanwhile comes only from what it already had. The release lets them through, then stops
+ * holding.
+ */
+async function hold(page: Page, which: (request: Request) => boolean) {
+  let release = () => {};
+  const released = new Promise<void>((done) => (release = done));
+  const held: Promise<void>[] = [];
+  const holding = (route: Route) => {
+    if (!which(route.request())) return route.fallback();
+    const through = released.then(() =>
+      // An ask the app gave up on meanwhile, as a superseded refetch is, is already handled.
+      route.continue().catch((error: unknown) => {
+        if (!String(error).includes('already handled')) throw error;
+      }),
+    );
+    held.push(through);
+    return through;
+  };
+  await page.route('**/_serverFn/**', holding);
+  return async () => {
+    release();
+    await Promise.all(held);
+    await page.unroute('**/_serverFn/**', holding);
+  };
+}
+
+/** Waits until the reader shows `count` messages' HTML, each in its frame. */
+async function framesShown(page: Page, count: number) {
+  await page.waitForFunction(
+    (count) =>
+      [
+        ...document.querySelectorAll<HTMLIFrameElement>('section[aria-label="Reader"] iframe'),
+      ].filter((frame) => frame.style.visibility === 'visible').length === count,
+    count,
+    { timeout: ELSEWHERE_MS },
+  );
+}
+
+/** The subject the reader shows, once it shows the selected conversation. */
+async function shownSubject(page: Page): Promise<string> {
+  const shown = await page.waitForFunction(() => {
+    const title = document.querySelector('section[aria-label="Reader"] h1')?.textContent;
+    const selected = document.querySelector('[role="option"][aria-selected="true"]');
+    return title && selected?.textContent?.includes(title) ? title : undefined;
+  });
+  return (await shown.jsonValue()) as string;
+}
+
 const row = (page: Page, subject: RegExp) => page.getByRole('option').filter({ hasText: subject });
 const bar = (page: Page) => page.getByRole('toolbar', { name: 'Conversation' });
+const reader = (page: Page) => page.locator('section[aria-label="Reader"]');
+/** The toast's Undo. Its name is exact, since a folded message's preview can mention undoing. */
+const undoButton = (page: Page) => page.getByRole('button', { name: 'Undo', exact: true });
 
 /**
  * Clicks one of the reader's actions and says how many milliseconds pass until the list, in a
@@ -152,7 +212,7 @@ test('archiving shows at once, reaches another open browser, and Undo brings it 
   await release();
   await row(there, subject).waitFor({ state: 'detached', timeout: ELSEWHERE_MS });
 
-  await here.getByRole('button', { name: 'Undo' }).click();
+  await undoButton(here).click();
   await row(here, subject).waitFor({ timeout: 1_000 });
   await row(there, subject).waitFor({ timeout: ELSEWHERE_MS });
 }, 30_000);
@@ -168,7 +228,7 @@ test('a flag and a read mark show at once and in the other browser, and Undo tak
   await flagged(here).waitFor({ timeout: 500 });
   await release();
   await flagged(there).waitFor({ timeout: ELSEWHERE_MS });
-  await here.getByRole('button', { name: 'Undo' }).click();
+  await undoButton(here).click();
   await flagged(here).waitFor({ state: 'detached', timeout: 1_000 });
   await flagged(there).waitFor({ state: 'detached', timeout: ELSEWHERE_MS });
 
@@ -223,7 +283,7 @@ test('a selection made with Cmd and Shift is archived together, and Undo brings 
     await listed(here, text).waitFor({ state: 'detached', timeout: 1_000 });
     await listed(there, text).waitFor({ state: 'detached', timeout: ELSEWHERE_MS });
   }
-  await here.getByRole('button', { name: 'Undo' }).click();
+  await undoButton(here).click();
   for (const text of picked) await listed(there, text).waitFor({ timeout: ELSEWHERE_MS });
 }, 30_000);
 
@@ -268,7 +328,7 @@ test('on a phone, a row swiped far enough left is archived, and a short swipe sl
   const two = await centerOf(here, 2);
   await hand.swipeLeft(two.x, two.y, two.width * 0.6);
   await options.filter({ hasText: far ?? '' }).waitFor({ state: 'detached', timeout: 1_000 });
-  await here.getByRole('button', { name: 'Undo' }).click();
+  await undoButton(here).click();
   await options.filter({ hasText: far ?? '' }).waitFor({ timeout: ELSEWHERE_MS });
 }, 30_000);
 
@@ -284,33 +344,68 @@ test('keys run the registry’s commands: from the list, from inside a message, 
   await expect(place()).resolves.toBe('3');
   await here.keyboard.press('k');
   await expect(place()).resolves.toBe('2');
-  await here.waitForTimeout(300);
 
   // E archives the open conversation, and Z puts it back.
-  const subject = (await here.locator('section[aria-label="Reader"] h1').textContent()) ?? '';
-  const row = options.filter({ hasText: subject });
+  const archived = options.filter({ hasText: await shownSubject(here) });
   await here.keyboard.press('e');
-  await row.waitFor({ state: 'detached', timeout: 1_000 });
-  await here.getByRole('button', { name: 'Undo' }).waitFor();
+  await archived.waitFor({ state: 'detached', timeout: 1_000 });
+  await undoButton(here).waitFor();
   await here.keyboard.press('z');
-  await row.first().waitFor({ timeout: ELSEWHERE_MS });
+  await archived.waitFor({ timeout: ELSEWHERE_MS });
 
-  // After a click inside a message, focus is in its frame, and E still archives.
-  await row.first().click();
-  const shown = here.locator('section[aria-label="Reader"] iframe').last();
-  await here.waitForFunction(() =>
-    [...document.querySelectorAll<HTMLIFrameElement>('section[aria-label="Reader"] iframe')].some(
-      (frame) => frame.style.visibility === 'visible',
-    ),
-  );
-  await shown.contentFrame().locator('body').click();
+  // After a click inside a message, focus is in its frame, and E still archives. Every message in
+  // Toy Box is HTML, so it has a frame.
+  await here
+    .getByRole('region', { name: 'Personal' })
+    .getByRole('button', { name: /^Toy Box/ })
+    .click();
+  await options.first().click();
+  const framed = options.filter({ hasText: await shownSubject(here) });
+  await framesShown(here, 1);
+  await reader(here).locator('iframe').last().contentFrame().locator('body').click();
   await here.keyboard.press('e');
-  await row.waitFor({ state: 'detached', timeout: 1_000 });
+  await framed.waitFor({ state: 'detached', timeout: 1_000 });
 
   await here.keyboard.press('?');
   const sheet = here.getByRole('dialog');
   await sheet.getByRole('heading', { name: 'Keyboard shortcuts' }).waitFor();
   await expect(sheet.getByText('Archive', { exact: true }).isVisible()).resolves.toBe(true);
+}, 30_000);
+
+test('straight after Z, a conversation opens with its messages, under the refs Undo gave them', async () => {
+  const here = await inbox();
+  const subject = /Replayable stream cursors/;
+  const sheets = reader(here).locator('article');
+  const failed: string[] = [];
+  here.on('response', (response) => {
+    if (response.url().includes('%22body%22') && !response.ok()) failed.push(response.url());
+  });
+  await row(here, subject).click();
+  await framesShown(here, 1);
+
+  // The browser hears of the moves only from the Mailroom's answers to its own commands.
+  const refetches = await hold(here, (request) => request.url().includes('%22conversation%22'));
+  await here.keyboard.press('e');
+  await row(here, subject).waitFor({ state: 'detached', timeout: 1_000 });
+  await undoButton(here).waitFor();
+  // Undo is held, so the conversation opens while its messages are still in Archive.
+  const commands = await hold(here, (request) => request.method() === 'POST');
+  await here.keyboard.press('z');
+  await row(here, subject).click();
+  await framesShown(here, 1);
+  const before = await sheets.elementHandle();
+  await reader(here)
+    .getByRole('button', { name: /review was requested/ })
+    .click();
+  await framesShown(here, 2);
+
+  // Back in the Inbox, each message has a new ref, and both stay open under it.
+  await commands();
+  await before.waitForElementState('hidden', { timeout: ELSEWHERE_MS });
+  await framesShown(here, 2);
+  await expect(reader(here).getByRole('alert').count()).resolves.toBe(0);
+  await refetches();
+  expect(failed).toEqual([]);
 }, 30_000);
 
 test('folders are created, renamed and deleted, and a move to one deleted elsewhere returns with the reason', async () => {

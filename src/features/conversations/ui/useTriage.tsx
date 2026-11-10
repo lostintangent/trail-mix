@@ -1,8 +1,9 @@
-import { useQueryClient, type InfiniteData } from '@tanstack/react-query';
+import { useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query';
 import { useCallback, useRef, useState } from 'react';
 import { folderName } from '../../folders/index.ts';
 import type { ConversationId, Folder, Message, View } from '../../mail/core/index.ts';
 import {
+  bodyQuery,
   conversationQuery,
   conversationsQuery,
   mailroom,
@@ -12,6 +13,7 @@ import {
 import {
   changeMessages,
   commandFor,
+  followMoves,
   overlaid,
   rowChange,
   undoOf,
@@ -36,7 +38,8 @@ type Pages = InfiniteData<Page, PageCursor | undefined>;
  * Triage from the browser. The list shows the change at once, laid over its snapshot until the
  * Mailroom's own list shows it, and the open conversation shows a flag or read mark. Once the mail
  * server has it, a toast says what happened and offers Undo. If the server refuses, the overlay is
- * lifted, so the rows return as they were, and a toast says why.
+ * lifted, so the rows return as they were, and a toast says why. A move, and the Undo that moves
+ * back, give messages new refs, which the conversation takes as soon as the Mailroom reports them.
  */
 export function useTriage(
   view: View,
@@ -77,9 +80,10 @@ export function useTriage(
       const undo = async (command: Command, moved: readonly Moved[]) => {
         if (laid) overlays.lift(laid);
         const back = overlays.lay(view, { returning: earlierRows });
-        restoreMessages();
+        // The refs from before a move are retired, so a move back waits for the refs it gives.
+        if ('setFlags' in command) restoreMessages();
         try {
-          for (const step of undoOf(command, moved)) await send(step);
+          for (const step of undoOf(command, moved)) follow(queryClient, ids, await send(step));
           overlays.settle(back);
         } catch (error) {
           overlays.lift(back);
@@ -106,6 +110,7 @@ export function useTriage(
             );
           }
           const moved = await send(command);
+          follow(queryClient, ids, moved);
           if (laid) overlays.settle(laid);
           if (quietly) return;
           // The toast's Undo spends the key's undo too, so neither undoes it twice.
@@ -136,6 +141,24 @@ export function useTriage(
     [queryClient, view, folders],
   );
   return { triage, undoLast, canUndo };
+}
+
+/**
+ * Gives some conversations' snapshots the refs their messages moved to, so nothing asks for a
+ * message by a ref its move retired. A body is the same wherever its message is, so one already
+ * fetched is kept under the new ref too.
+ */
+function follow(queryClient: QueryClient, ids: readonly ConversationId[], moved: readonly Moved[]) {
+  for (const id of ids) {
+    const { queryKey } = conversationQuery(id);
+    const messages = queryClient.getQueryData(queryKey);
+    const followed = messages && followMoves(messages, moved);
+    if (followed) queryClient.setQueryData(queryKey, followed);
+  }
+  for (const { from, to } of moved) {
+    const body = queryClient.getQueryData(bodyQuery(from).queryKey);
+    if (body) queryClient.setQueryData(bodyQuery(to).queryKey, body);
+  }
 }
 
 /** Asks the Mailroom to carry out a command, and says where each moved message went. */
