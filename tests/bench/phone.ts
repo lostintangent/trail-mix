@@ -11,11 +11,11 @@ import type { Browser, BrowserContext, Page } from 'playwright';
 const PHONE_SLOWDOWN = 4;
 
 /**
- * The reference desktop's benchmark index: the Apple M4 Pro the budgets were set on, as the median
- * of three runs of `benchmarkIndex` below, three times over (4,146, 4,176 and 4,158). A run there
+ * The reference desktop's benchmark index: the Apple M4 Pro the budgets were set on, as the highest
+ * of three runs of `benchmarkIndex` below, three times over (4,358, 4,268 and 4,262). A run there
  * throttles at about 4x.
  */
-const REFERENCE_INDEX = 4_160;
+const REFERENCE_INDEX = 4_270;
 
 export type CpuProfile = { index: number; rate: number };
 
@@ -23,7 +23,9 @@ let measured: Promise<CpuProfile> | undefined;
 
 /**
  * This machine's benchmark index and the slowdown that makes it the phone, measured once a run
- * with nothing throttled, as the median of three, and printed above the budgets.
+ * with nothing throttled and printed above the budgets. It is the highest of three runs, since
+ * whatever else the machine is doing can only lower a run, so a low one says the machine was busy,
+ * not that it is slower.
  */
 export function cpuProfile(browser: Browser): Promise<CpuProfile> {
   measured ??= (async () => {
@@ -32,7 +34,7 @@ export function cpuProfile(browser: Browser): Promise<CpuProfile> {
     const runs: number[] = [];
     for (let run = 0; run < 3; run++) runs.push(await page.evaluate(benchmarkIndex));
     await context.close();
-    const index = runs.toSorted((a, b) => a - b)[1] ?? 0;
+    const index = Math.max(...runs);
     const rate = Math.max(1, (PHONE_SLOWDOWN * index) / REFERENCE_INDEX);
     const [cpu] = cpus();
     console.log(
