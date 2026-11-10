@@ -1,4 +1,5 @@
 import { Icon } from '@astryxdesign/core/Icon';
+import { IconButton } from '@astryxdesign/core/IconButton';
 import {
   colorVars,
   fontWeightVars,
@@ -8,7 +9,7 @@ import {
 } from '@astryxdesign/core/theme/tokens.stylex';
 import { Tooltip } from '@astryxdesign/core/Tooltip';
 import * as stylex from '@stylexjs/stylex';
-import { File, Inbox, Send, Star, type LucideIcon } from 'lucide-react';
+import { File, FolderPlus, Inbox, Send, Star, type LucideIcon } from 'lucide-react';
 import { memo, type ReactNode } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, Folder, FolderRef, View } from '../../mail/core/index.ts';
@@ -44,6 +45,7 @@ export const Sidebar = memo(function Sidebar({
   isCollapsed,
   header,
   footer,
+  onNewFolder,
 }: {
   id: string;
   view: View;
@@ -55,6 +57,8 @@ export const Sidebar = memo(function Sidebar({
   /** What sits above the mailboxes, such as the search field on a desktop. */
   header?: ReactNode;
   footer: ReactNode;
+  /** Asks for a new folder in an account, from the + beside its name. */
+  onNewFolder: (account: Account) => void;
 }) {
   return (
     <nav id={id} aria-label="Mailboxes" {...stylex.props(styles.sidebar)}>
@@ -78,10 +82,20 @@ export const Sidebar = memo(function Sidebar({
         {!isCollapsed &&
           accounts.map((account) => (
             <section key={account.id} aria-label={account.name} {...stylex.props(styles.account)}>
-              <h2 {...stylex.props(styles.accountName)}>
-                <StampDot stamp={account.stamp} />
-                {account.name}
-              </h2>
+              <div {...stylex.props(styles.accountHeader)}>
+                <h2 {...stylex.props(styles.accountName)}>
+                  <StampDot stamp={account.stamp} />
+                  {account.name}
+                </h2>
+                <IconButton
+                  label={`New folder in ${account.name}`}
+                  tooltip={`New folder in ${account.name}`}
+                  icon={<Icon icon={FolderPlus} size="sm" />}
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => onNewFolder(account)}
+                />
+              </div>
               <FolderRows
                 nodes={folderTree(folders.filter((folder) => folder.account === account.id))}
                 depth={0}
@@ -226,12 +240,18 @@ const styles = stylex.create({
   account: {
     marginTop: spacingVars['--spacing-3'],
   },
+  accountHeader: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacingVars['--spacing-0-5'],
+    paddingInlineEnd: spacingVars['--spacing-1'],
+  },
   accountName: {
     display: 'flex',
     alignItems: 'center',
     gap: spacingVars['--spacing-2'],
     marginBlock: 0,
-    marginBottom: spacingVars['--spacing-0-5'],
     paddingInline: spacingVars['--spacing-2'],
     color: tm.textQuiet,
     fontSize: typeScaleVars['--text-supporting-size'],

@@ -64,7 +64,10 @@ import {
   folderName,
   Sidebar,
   UNIFIED_VIEWS,
+  folderCommands,
+  FolderDialog,
   viewCommands,
+  type FolderQuestion,
   type ViewCounts,
 } from '../../folders/index.ts';
 import { useMediaQuery } from './useMediaQuery.ts';
@@ -154,6 +157,11 @@ export function Workbench({
       setPhonePane('reader');
     });
   const [isSheetOpen, setSheetOpen] = useState(false);
+  const [asking, setAsking] = useState<FolderQuestion>();
+  const askForNewFolder = useCallback(
+    (account: Account) => setAsking({ ask: 'create', account }),
+    [],
+  );
   // A conversation that leaves the list gives way to the one below it, or above it at the end. On a
   // phone, where the reader fills the screen, the list comes back instead. The list shows the
   // conversation gone at once, and the reader turns to the next one just after, so the frame that
@@ -318,6 +326,7 @@ export function Workbench({
     }),
     ...viewCommands(accounts, folders, openView),
     ...outbox.commands,
+    ...folderCommands({ accounts, folders, view, ask: setAsking }),
     ...extraCommands,
   ];
   useCommandKeys(commands);
@@ -378,6 +387,7 @@ export function Workbench({
                 folders={folders}
                 counts={counts}
                 isCollapsed={isSidebarRail}
+                onNewFolder={askForNewFolder}
                 header={isFieldInSidebar ? SEARCH_FIELD : undefined}
                 footer={footer}
               />
@@ -440,6 +450,7 @@ export function Workbench({
                 onExpand={() => setList({ ...list, isCollapsed: false })}
                 onShowFolders={() => setPhonePane('sidebar')}
                 write={newMessage && <CommandButton command={newMessage} />}
+                actions={folderActions(commands)}
               />
               <PanelEdge
                 spec={PANELS.list}
@@ -473,6 +484,23 @@ export function Workbench({
           </div>
         </div>
       </SearchContext>
+      {asking && (
+        <Suspense>
+          <FolderDialog
+            question={asking}
+            onClose={() => setAsking(undefined)}
+            onDeleted={({ account, path }) => {
+              if (
+                view.in === 'folder' &&
+                view.folder.account === account &&
+                view.folder.path === path
+              ) {
+                openView({ in: 'inbox' });
+              }
+            }}
+          />
+        </Suspense>
+      )}
       {isSheetOpen && (
         <Suspense>
           <ShortcutSheet isOpen onClose={() => setSheetOpen(false)} />
@@ -512,6 +540,16 @@ function useSearch(view: View, onViewChange: (view: View) => void) {
     [onViewChange, text],
   );
   return { search, marks, searchBodies };
+}
+
+/** Renaming and deleting the folder in view, as buttons in the list's header, when it's the member's own. */
+function folderActions(commands: readonly Command[]): ReactNode {
+  const own = ['folder.rename', 'folder.delete']
+    .map((id) => commands.find((command) => command.id === id))
+    .filter((command) => command !== undefined && command.isEnabled !== false);
+  return own.length > 0
+    ? own.map((command) => <CommandButton key={command!.id} command={command!} />)
+    : undefined;
 }
 
 /**

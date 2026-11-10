@@ -54,6 +54,7 @@ export function ListPane({
   onExpand,
   onShowFolders,
   write,
+  actions,
 }: {
   id: string;
   title: string;
@@ -86,6 +87,8 @@ export function ListPane({
   onShowFolders: () => void;
   /** Starts a new message: at the end of the title on a desktop, and in the island on a phone. */
   write?: ReactNode;
+  /** What can be done to the view itself, such as renaming its folder, at the header's end. */
+  actions?: ReactNode;
 }) {
   const titleId = useId();
   if (isCollapsed) {
@@ -119,6 +122,11 @@ export function ListPane({
           )}
         </span>
         {write && <span {...stylex.props(styles.write)}>{write}</span>}
+        {actions && (
+          <span role="toolbar" aria-label={title} {...stylex.props(styles.actions)}>
+            {actions}
+          </span>
+        )}
       </header>
       {below && <div {...stylex.props(styles.below)}>{below}</div>}
       <div {...stylex.props(styles.sheet, !list && conversations?.length === 0 && styles.empty)}>
@@ -223,11 +231,17 @@ const styles = stylex.create({
     },
     paddingInline: spacingVars['--spacing-4'],
   },
-  // The header's line keeps its height, so the button's extra size reaches into its padding.
+  // The header's line keeps its height, so a button's extra size reaches into its padding.
   write: {
     display: { default: 'flex', [media.phone]: 'none' },
     alignSelf: 'center',
     marginInlineStart: 'auto',
+    marginBlock: `calc(-1 * ${spacingVars['--spacing-2']})`,
+  },
+  // They follow New message on a desktop, and the account's pill on a phone.
+  actions: {
+    display: 'flex',
+    alignSelf: 'center',
     marginBlock: `calc(-1 * ${spacingVars['--spacing-2']})`,
   },
   below: {

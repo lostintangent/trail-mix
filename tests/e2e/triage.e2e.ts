@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, expect, test } from 'bun:test';
-import { chromium, type Browser, type Page, type Route } from 'playwright';
+import { chromium, type Browser, type BrowserContext, type Page, type Route } from 'playwright';
 import { startPreview, type Preview } from './preview.ts';
 
 /**
@@ -24,7 +24,10 @@ beforeAll(async () => {
 
 /** Every error a page threw during a test, which fails it. */
 const errors: string[] = [];
-afterEach(() => {
+/** Every browser a test opened, closed after it so the next starts with only its own. */
+const opened: BrowserContext[] = [];
+afterEach(async () => {
+  await Promise.all(opened.splice(0).map((context) => context.close()));
   expect(errors.splice(0)).toEqual([]);
 });
 
@@ -35,7 +38,9 @@ afterAll(async () => {
 
 /** A browser on the unified Inbox, once the Mailroom has filled it. */
 async function inbox(size: typeof DESKTOP | typeof PHONE = DESKTOP): Promise<Page> {
-  const page = await (await browser.newContext(size)).newPage();
+  const context = await browser.newContext(size);
+  opened.push(context);
+  const page = await context.newPage();
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(preview.url);
   await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
@@ -95,6 +100,15 @@ async function finger(page: Page) {
 async function centerOf(page: Page, at: number) {
   const box = (await page.getByRole('option').nth(at).boundingBox())!;
   return { x: box.x + box.width / 2, y: box.y + box.height / 2, width: box.width };
+}
+
+/** Waits until a check holds, or fails once `ms` have passed without it. */
+async function until(check: () => Promise<boolean>, ms: number) {
+  const by = Date.now() + ms;
+  while (!(await check())) {
+    if (Date.now() > by) throw new Error(`Still not so after ${ms} ms.`);
+    await new Promise((done) => setTimeout(done, 25));
+  }
 }
 
 const row = (page: Page, subject: RegExp) => page.getByRole('option').filter({ hasText: subject });
@@ -298,3 +312,59 @@ test('keys run the registry’s commands: from the list, from inside a message, 
   await sheet.getByRole('heading', { name: 'Keyboard shortcuts' }).waitFor();
   await expect(sheet.getByText('Archive', { exact: true }).isVisible()).resolves.toBe(true);
 }, 30_000);
+
+test('folders are created, renamed and deleted, and a move to one deleted elsewhere returns with the reason', async () => {
+  const [here, there] = await Promise.all([inbox(), inbox()]);
+  const work = (page: Page) => page.getByRole('region', { name: 'Work' });
+  const folderRow = (page: Page, name: string) =>
+    work(page).getByRole('button', { name: new RegExp(`^${name}`) });
+
+  await here.getByRole('button', { name: 'New folder in Work' }).click();
+  await here.getByRole('dialog').getByLabel('Name').fill('Trips');
+  await here.getByRole('dialog').getByRole('button', { name: 'Create' }).click();
+  await folderRow(here, 'Trips').waitFor({ timeout: ELSEWHERE_MS });
+  await folderRow(there, 'Trips').waitFor({ timeout: ELSEWHERE_MS });
+
+  await folderRow(here, 'Trips').click();
+  await here.getByRole('button', { name: 'Rename Trips' }).click();
+  await here.getByRole('dialog').getByLabel('Name').fill('Journeys');
+  await here.getByRole('dialog').getByRole('button', { name: 'Rename' }).click();
+  await folderRow(here, 'Journeys').waitFor({ timeout: ELSEWHERE_MS });
+  await folderRow(there, 'Journeys').waitFor({ timeout: ELSEWHERE_MS });
+
+  // This browser stops hearing about folders, so it still offers Journeys after it's gone.
+  const stale = (route: Route) =>
+    route.request().url().includes('%22folders%22') ? route.abort() : route.fallback();
+  await here.route('**/_serverFn/**', stale);
+  await folderRow(here, 'Inbox').click();
+  const options = here.getByRole('option');
+  await options.first().click();
+  // The row is known by its subject and preview, which a read mark doesn't change.
+  const [subject, preview] = await Promise.all(
+    [2, 3].map((line) =>
+      options.first().locator(`:scope > span:nth-child(2) > span:nth-child(${line})`).textContent(),
+    ),
+  );
+
+  await folderRow(there, 'Journeys').click();
+  await there.getByRole('button', { name: 'Delete Journeys' }).click();
+  await there.getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click();
+  await folderRow(there, 'Journeys').waitFor({ state: 'detached', timeout: ELSEWHERE_MS });
+
+  // The demo repeats some stories, so rows like this one are counted rather than singled out.
+  const alike = options.filter({ hasText: subject ?? '' }).filter({ hasText: preview ?? '' });
+  const count = await alike.count();
+  await bar(here).getByRole('button', { name: 'Move to' }).click();
+  // The command is held a moment, so the row is seen gone before the refusal brings it back.
+  const release = await slowCommands(here);
+  await here.getByRole('menuitem', { name: 'Journeys' }).click();
+  await until(async () => (await alike.count()) === count - 1, 1_000);
+  await release();
+  // The server refuses, so the conversation comes back and a toast says why.
+  await until(async () => (await alike.count()) === count, ELSEWHERE_MS);
+  // The toast and its announcement both say it.
+  const refusal = here.getByText(/Couldn't move to Journeys\. .*Journeys/).first();
+  await refusal.waitFor({ timeout: ELSEWHERE_MS });
+  await expect(refusal.textContent()).resolves.toContain('There is no folder "Journeys"');
+  await here.unroute('**/_serverFn/**', stale);
+}, 60_000);
