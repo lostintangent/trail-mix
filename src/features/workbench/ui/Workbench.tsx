@@ -58,7 +58,7 @@ export function Workbench({
   const isPhone = useMediaQuery(media.phone);
   const sidebarId = useId();
   const listId = useId();
-  const { title, unread } = describeView(view, folders, counts);
+  const { title, unread, scope } = describeView(view, accounts, folders, counts);
   // Panes off a phone's screen are inert, so focus and assistive tech stay on the one in view.
   const isOffscreen = (pane: Pane) => isPhone && pane !== phonePane;
 
@@ -105,6 +105,7 @@ export function Workbench({
             id={listId}
             title={title}
             unread={unread}
+            scope={scope}
             conversations={conversations}
             stamps={stamps}
             selected={selected}
@@ -154,17 +155,25 @@ function neighbors(
   return [conversations[at + 1], conversations[at - 1]].flatMap((row) => (row ? [row.id] : []));
 }
 
-/** A view's title, and the unread count its header shows: Inbox's across accounts, or a folder's. */
+/**
+ * A view's title, the unread count its header shows (Inbox's across accounts, or a folder's), and
+ * the one account it holds, if it holds only one.
+ */
 function describeView(
   view: View,
+  accounts: readonly Account[],
   folders: readonly Folder[],
   counts: ViewCounts,
-): { title: string; unread?: number } {
+): { title: string; unread?: number; scope?: Account } {
   switch (view.in) {
     case 'folder': {
       const { account, path } = view.folder;
       const folder = folders.find((each) => each.account === account && each.path === path);
-      return { title: folder ? folderName(folder) : path, unread: folder?.unread };
+      return {
+        title: folder ? folderName(folder) : path,
+        unread: folder?.unread,
+        scope: accounts.find(({ id }) => id === account),
+      };
     }
     case 'search':
       return { title: 'Search' };

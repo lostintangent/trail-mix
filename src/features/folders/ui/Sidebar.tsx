@@ -12,7 +12,7 @@ import { File, Inbox, Send, Star, type LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, Folder, FolderRef, View } from '../../mail/core/index.ts';
-import { stampStyles } from '../../../app/theme/stamps.ts';
+import { StampDot } from '../../../app/theme/StampDot.tsx';
 import { folderName } from './name.ts';
 import { folderTree, type FolderNode } from './tree.ts';
 
@@ -75,7 +75,7 @@ export function Sidebar({
           accounts.map((account) => (
             <section key={account.id} aria-label={account.name} {...stylex.props(styles.account)}>
               <h2 {...stylex.props(styles.accountName)}>
-                <span {...stylex.props(styles.stamp, stampStyles[account.stamp])} />
+                <StampDot stamp={account.stamp} />
                 {account.name}
               </h2>
               <FolderRows
@@ -230,13 +230,6 @@ const styles = stylex.create({
     lineHeight: typeScaleVars['--text-supporting-leading'],
     letterSpacing: '0.06em',
     textTransform: 'uppercase',
-  },
-  stamp: {
-    flexShrink: 0,
-    width: '8px',
-    height: '8px',
-    borderRadius: '3px',
-    forcedColorAdjust: 'none',
   },
   row: {
     display: 'flex',

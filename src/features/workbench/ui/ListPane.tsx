@@ -5,6 +5,8 @@ import { IconButton } from '@astryxdesign/core/IconButton';
 import {
   borderVars,
   colorVars,
+  fontWeightVars,
+  radiusVars,
   spacingVars,
   typeScaleVars,
 } from '@astryxdesign/core/theme/tokens.stylex';
@@ -14,7 +16,13 @@ import { useId } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { PhoneIsland } from './PhoneIsland.tsx';
 import { ConversationList } from '../../conversations/index.ts';
-import type { ConversationId, ConversationSummary, StampColor } from '../../mail/core/index.ts';
+import type {
+  Account,
+  ConversationId,
+  ConversationSummary,
+  StampColor,
+} from '../../mail/core/index.ts';
+import { StampDot } from '../../../app/theme/StampDot.tsx';
 
 /**
  * The conversation list's sheet, under the view's title and its unread count. On a desktop the
@@ -26,6 +34,7 @@ export function ListPane({
   id,
   title,
   unread,
+  scope,
   conversations,
   stamps,
   selected,
@@ -38,6 +47,8 @@ export function ListPane({
   id: string;
   title: string;
   unread: number | undefined;
+  /** The one account the view holds, or nothing when it gathers every account. */
+  scope: Account | undefined;
   /** Nothing until the view's first page arrives. */
   conversations: readonly ConversationSummary[] | undefined;
   stamps: ReadonlyMap<string, StampColor>;
@@ -69,6 +80,16 @@ export function ListPane({
           {title}
         </Heading>
         {unread ? <span {...stylex.props(styles.unread)}>{unread} unread</span> : null}
+        <span {...stylex.props(styles.scope)}>
+          {scope ? (
+            <>
+              <StampDot stamp={scope.stamp} />
+              {scope.name}
+            </>
+          ) : (
+            'All accounts'
+          )}
+        </span>
       </header>
       <div {...stylex.props(styles.sheet, conversations?.length === 0 && styles.empty)}>
         {conversations?.length === 0 ? (
@@ -162,6 +183,23 @@ const styles = stylex.create({
       default: typeScaleVars['--text-heading-3-leading'],
       [media.phone]: typeScaleVars['--text-heading-2-leading'],
     },
+  },
+  // On a phone, whose list is the whole screen, a chip at the header's end says whose mail it is.
+  scope: {
+    display: { default: 'none', [media.phone]: 'inline-flex' },
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: spacingVars['--spacing-1-5'],
+    marginInlineStart: 'auto',
+    paddingBlock: spacingVars['--spacing-0-5'],
+    paddingInline: spacingVars['--spacing-2'],
+    borderRadius: radiusVars['--radius-full'],
+    boxShadow: `0 0 0 1px ${colorVars['--color-border']}`,
+    outline: { default: null, [media.forcedColors]: '1px solid CanvasText' },
+    color: colorVars['--color-text-primary'],
+    fontSize: typeScaleVars['--text-supporting-size'],
+    fontWeight: fontWeightVars['--font-weight-semibold'],
+    whiteSpace: 'nowrap',
   },
   unread: {
     color: tm.textQuiet,
