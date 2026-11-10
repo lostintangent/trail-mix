@@ -71,11 +71,16 @@ export const reader: BenchArea = {
       // rest, so the reader shows nothing more until the key comes up.
       await page.waitForTimeout(IDLE_MS);
       await timed(page, () => press(page, 'ArrowDown'));
-      const next = (await rows.nth(at + 1).textContent()) ?? '';
+      // The list draws only the rows near the selection, so the next row is found by position.
+      const next = await page.evaluate(() => {
+        const selected = document.querySelector('[role="option"][aria-selected="true"]');
+        const position = Number(selected?.getAttribute('aria-posinset')) + 1;
+        return document.querySelector(`[role="option"][aria-posinset="${position}"]`)?.textContent;
+      });
       await page.waitForTimeout(REPEAT_DELAY_MS);
       const held = await heldKey(page);
       await page.context().close();
-      if (held.shown.length > 1 || !held.shown.every((subject) => next.includes(subject))) {
+      if (held.shown.length > 1 || !held.shown.every((subject) => next?.includes(subject))) {
         throw new Error(`While a key repeated, the reader showed: ${held.shown.join(', ')}`);
       }
 

@@ -92,7 +92,8 @@ jobs:
   # take minutes to install, so it runs beside the main job instead of inside it.
   webkit:
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    # WebKit's system packages come from apt on every run, and the mirror sometimes takes minutes.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
 
