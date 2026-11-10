@@ -1,6 +1,6 @@
 import { colorVars, durationVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { useRef, useState, type PointerEvent } from 'react';
+import { memo, useRef, useState, type PointerEvent } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { dragPanel, nudgePanel, panelSize, type PanelSpec, type PanelState } from './panels.ts';
 
@@ -12,7 +12,7 @@ import { dragPanel, nudgePanel, panelSize, type PanelSpec, type PanelState } fro
  * following the pointer re-renders only the edge. The panel's owner hears about a width when the
  * drag ends, and about collapsing the moment it happens, since the panel then changes form.
  */
-export function PanelEdge({
+export const PanelEdge = memo(function PanelEdge({
   spec,
   state,
   label,
@@ -83,7 +83,7 @@ export function PanelEdge({
       }}
     />
   );
-}
+});
 
 const styles = stylex.create({
   edge: {

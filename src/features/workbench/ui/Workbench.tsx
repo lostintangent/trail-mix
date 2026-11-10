@@ -1,6 +1,6 @@
 import { colorVars, durationVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { useId, useMemo, useState, type ReactNode } from 'react';
+import { useCallback, useId, useMemo, useState, type ReactNode } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type {
   Account,
@@ -62,6 +62,30 @@ export function Workbench({
   // Panes off a phone's screen are inert, so focus and assistive tech stay on the one in view.
   const isOffscreen = (pane: Pane) => isPhone && pane !== phonePane;
 
+  // Moving the selection re-renders only what shows it: the list, its two changed rows, and the
+  // reader. The sidebar and the panel edges are memoized, and what they're handed stays the same.
+  const openView = useCallback(
+    (next: View) => {
+      onViewChange(next);
+      setPhonePane('list');
+    },
+    [onViewChange],
+  );
+  const open = useCallback((id: ConversationId) => {
+    setSelected(id);
+    setPhonePane('reader');
+  }, []);
+  const isSidebarRail = !isPhone && sidebar.isCollapsed;
+  const footer = useMemo(
+    () => (
+      <>
+        <StatusLine accounts={accounts} isCollapsed={isSidebarRail} />
+        {sidebarFooter}
+      </>
+    ),
+    [accounts, isSidebarRail, sidebarFooter],
+  );
+
   return (
     <div {...stylex.props(styles.desk)}>
       <div
@@ -76,20 +100,12 @@ export function Workbench({
           <Sidebar
             id={sidebarId}
             view={view}
-            onSelect={(next) => {
-              onViewChange(next);
-              setPhonePane('list');
-            }}
+            onSelect={openView}
             accounts={accounts}
             folders={folders}
             counts={counts}
-            isCollapsed={!isPhone && sidebar.isCollapsed}
-            footer={
-              <>
-                <StatusLine accounts={accounts} isCollapsed={!isPhone && sidebar.isCollapsed} />
-                {sidebarFooter}
-              </>
-            }
+            isCollapsed={isSidebarRail}
+            footer={footer}
           />
           <PanelEdge
             spec={PANELS.sidebar}
@@ -109,10 +125,7 @@ export function Workbench({
             conversations={conversations}
             stamps={stamps}
             selected={selected}
-            onSelect={(id) => {
-              setSelected(id);
-              setPhonePane('reader');
-            }}
+            onSelect={open}
             onNearEnd={onListNearEnd}
             isCollapsed={!isPhone && list.isCollapsed}
             onExpand={() => setList({ ...list, isCollapsed: false })}

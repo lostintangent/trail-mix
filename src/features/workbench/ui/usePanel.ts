@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState } from 'react';
+import { useCallback, useLayoutEffect, useState } from 'react';
 import { panelSize, readPanel, savePanel, type PanelSpec, type PanelState } from './panels.ts';
 
 /**
@@ -12,10 +12,13 @@ export function usePanel(spec: PanelSpec): [PanelState, (state: PanelState) => v
     document.documentElement.style.setProperty(spec.variable, `${panelSize(spec, state)}px`);
   }, [spec, state]);
 
-  const change = (next: PanelState) => {
-    setState(next);
-    savePanel(spec, next, deviceStorage());
-  };
+  const change = useCallback(
+    (next: PanelState) => {
+      setState(next);
+      savePanel(spec, next, deviceStorage());
+    },
+    [spec],
+  );
   return [state, change];
 }
 

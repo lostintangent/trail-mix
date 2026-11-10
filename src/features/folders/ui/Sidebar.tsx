@@ -9,7 +9,7 @@ import {
 import { Tooltip } from '@astryxdesign/core/Tooltip';
 import * as stylex from '@stylexjs/stylex';
 import { File, Inbox, Send, Star, type LucideIcon } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { memo, type ReactNode } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, Folder, FolderRef, View } from '../../mail/core/index.ts';
 import { StampDot } from '../../../app/theme/StampDot.tsx';
@@ -34,7 +34,7 @@ export const UNIFIED_VIEWS = [
  * with its folders. The current view lifts onto a pane. Collapsed to its rail, the unified views
  * keep only their icons, and the accounts wait for it to open.
  */
-export function Sidebar({
+export const Sidebar = memo(function Sidebar({
   id,
   view,
   onSelect,
@@ -90,7 +90,7 @@ export function Sidebar({
       <div {...stylex.props(styles.footer, isCollapsed && styles.railFooter)}>{footer}</div>
     </nav>
   );
-}
+});
 
 /** An account's folders, each one followed by the folders inside it, a step further in. */
 function FolderRows({

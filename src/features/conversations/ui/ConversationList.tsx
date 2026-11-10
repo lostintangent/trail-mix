@@ -197,17 +197,35 @@ const Row = memo(function Row({
 
 /**
  * Every row is the same height, three lines of text and the row's padding, so the list places rows
- * by arithmetic. It measures one drawn row for that height, and again whenever the row changes
- * size, as when a finger makes the text and padding larger.
+ * by arithmetic. It watches one drawn row for that height, as when a finger makes the text and
+ * padding larger, and moves to another only when that row is no longer drawn. So a render neither
+ * measures nor, when the height stays the same, asks for another render.
  */
 function useRowHeight(scroller: RefObject<HTMLDivElement | null>): number {
   const [height, setHeight] = useState(FIRST_GUESS);
+  const watch = useRef<(row: Element | null) => void>(null);
   useLayoutEffect(() => {
-    const row = scroller.current?.querySelector('[role="option"]');
-    if (!row) return;
-    const observer = new ResizeObserver(() => setHeight(row.getBoundingClientRect().height));
-    observer.observe(row);
-    return () => observer.disconnect();
+    let measured = FIRST_GUESS;
+    let watched: Element | null = null;
+    const observer = new ResizeObserver(([entry]) => {
+      const next = entry?.borderBoxSize[0]?.blockSize;
+      if (next === undefined || next === measured) return;
+      measured = next;
+      setHeight(next);
+    });
+    watch.current = (row) => {
+      if (row === watched) return;
+      if (watched) observer.unobserve(watched);
+      if (row) observer.observe(row);
+      watched = row;
+    };
+    return () => {
+      observer.disconnect();
+      watch.current = null;
+    };
+  }, []);
+  useLayoutEffect(() => {
+    watch.current?.(scroller.current?.querySelector('[role="option"]') ?? null);
   });
   return height;
 }
