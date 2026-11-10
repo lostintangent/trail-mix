@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, expect, test } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { chromium, webkit, type Page } from 'playwright';
+import { chromium, webkit, type Locator, type Page } from 'playwright';
 import { SAVE_AFTER_MS, SAVE_AT_LEAST_EVERY_MS } from '../../src/features/composer/core/session.ts';
 import { suite } from './suite.ts';
 
@@ -110,6 +110,56 @@ test('a reply is saved as it is written, opens again with its words and files, a
   await page.waitForTimeout(2_000);
   await expect(draft.count()).resolves.toBe(0);
 }, 60_000);
+
+test('a pasted image shows as it is pasted, once its draft is saved, and when it opens again', async () => {
+  const page = await inbox();
+  await page.getByRole('option').nth(3).click();
+  await replyButton(page).click();
+  const composer = composerNamed(page, 'Reply');
+  const text = composer.getByRole('textbox', { name: 'Reply' });
+  await text.waitFor();
+  await page.keyboard.type('The chart: ');
+  await pasteImage(page);
+
+  // From the pasted bytes until the draft holds them, and from the draft once it does.
+  const image = text.locator('img');
+  await expect(shown(image, 'blob:')).resolves.toEqual([4, 3]);
+  await saved(page).waitFor({ timeout: 10_000 });
+  await expect(shown(image, '/messages/')).resolves.toEqual([4, 3]);
+  await composer.getByRole('button', { name: 'Close' }).click();
+  await composer.waitFor({ state: 'detached' });
+
+  const draft = reader(page).getByRole('button', { name: /^Draft/ });
+  await draft.waitFor({ timeout: 10_000 });
+  await draft.click();
+  const reopened = composerNamed(page, 'Reply');
+  const again = reopened.getByRole('textbox', { name: 'Reply' }).locator('img');
+  await expect(shown(again, '/messages/')).resolves.toEqual([4, 3]);
+  await reopened.getByRole('button', { name: 'Discard draft' }).click();
+}, 60_000);
+
+/** A 4 by 3 pixel PNG, pasted into the editor as a browser hands a pasted file to the page. */
+async function pasteImage(page: Page) {
+  await page.evaluate(() => {
+    const png =
+      'iVBORw0KGgoAAAANSUhEUgAAAAQAAAADCAIAAAA7ljmRAAAAGElEQVR4nGOQ91/86aA3hGSAs4AkA7IMAGQcEltTdKHYAAAAAElFTkSuQmCC';
+    const bytes = Uint8Array.from(atob(png), (char) => char.charCodeAt(0));
+    const pasted = new DataTransfer();
+    pasted.items.add(new File([bytes], 'chart.png', { type: 'image/png' }));
+    document.activeElement?.dispatchEvent(
+      new ClipboardEvent('paste', { clipboardData: pasted, bubbles: true, cancelable: true }),
+    );
+  });
+}
+
+/** The size of an image once it shows from where its `src` starts with `from`. */
+async function shown(image: Locator, from: 'blob:' | '/messages/') {
+  await image.and(image.page().locator(`img[src^="${from}"]`)).waitFor({ timeout: 10_000 });
+  return image.evaluate(async (img: HTMLImageElement) => {
+    await img.decode();
+    return [img.naturalWidth, img.naturalHeight];
+  });
+}
 
 test('⌘↵ sends what was written, and Undo brings the composer back as it was', async () => {
   const page = await inbox();

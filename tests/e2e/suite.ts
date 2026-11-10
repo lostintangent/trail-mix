@@ -25,8 +25,14 @@ export type Suite = {
  */
 export function suite({
   vars = {},
+  env = {},
   engine = chromium,
-}: { vars?: Record<string, string>; engine?: BrowserType } = {}): Suite {
+}: {
+  vars?: Record<string, string>;
+  /** Added to the app's environment, as `startPreview` takes it. */
+  env?: Record<string, string>;
+  engine?: BrowserType;
+} = {}): Suite {
   let preview: Preview | undefined;
   let launched: Promise<Browser> | undefined;
   const opened: BrowserContext[] = [];
@@ -43,13 +49,13 @@ export function suite({
   };
 
   beforeAll(async () => {
-    preview = await startPreview(vars);
+    preview = await startPreview(vars, env);
   }, 60_000);
 
   beforeEach(async () => {
     if (!preview || (await answers(preview.url))) return;
     await preview.stop();
-    preview = await startPreview(vars);
+    preview = await startPreview(vars, env);
   }, 60_000);
 
   afterEach(async () => {

@@ -10,10 +10,11 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ImapFlow } from 'imapflow';
-import { chromium, type Browser, type BrowserContext, type Page } from 'playwright';
+import type { Page } from 'playwright';
 import PostalMime from 'postal-mime';
 import { SAVE_AT_LEAST_EVERY_MS } from '../../src/features/composer/core/session.ts';
-import { serverFunctionIds, startPreview, type Preview } from '../e2e/preview.ts';
+import { serverFunctionIds } from '../e2e/preview.ts';
+import { suite } from '../e2e/suite.ts';
 import { caFile, empty, ports, start, stop, users } from '../mail-server/server.ts';
 import { missing } from './clients.ts';
 import { mutt } from './mutt.ts';
@@ -29,10 +30,9 @@ const NOTES = 'Bring a jacket, the terrace gets cold.\n';
 
 describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix', () => {
   let ca: string;
-  let app: Preview;
   let webmail: Roundcube;
-  let browser: Browser;
 
+  // The test mail server starts first, since it makes the certificate authority the app trusts.
   beforeAll(async () => {
     await start('full');
     ca = readFileSync(caFile, 'utf8');
@@ -61,25 +61,23 @@ describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix
         }),
       ),
     );
+  }, 120_000);
 
-    // The app as production serves it, without the demo mailbox, so it takes a real account.
-    [app, webmail, browser] = await Promise.all([
-      startPreview(
-        { DEMO_MAILBOX: '', DEV_MEMBER: `mail-clients-${Date.now()}@trailmix.test` },
-        { NODE_EXTRA_CA_CERTS: caFile },
-      ),
-      roundcube(ports.webmail),
-      chromium.launch(),
-    ]);
+  // The app as production serves it, without the demo mailbox, so it takes a real account.
+  const app = suite({
+    vars: { DEMO_MAILBOX: '', DEV_MEMBER: `mail-clients-${Date.now()}@trailmix.test` },
+    env: { NODE_EXTRA_CA_CERTS: caFile },
+  });
+
+  beforeAll(async () => {
+    webmail = await roundcube(ports.webmail);
     const page = await trailMix();
     await addAlice(page);
     await page.close();
   }, 120_000);
 
   afterAll(async () => {
-    await browser?.close();
     await webmail?.stop();
-    await app?.stop();
     await stop();
   });
 
@@ -314,9 +312,41 @@ describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix
     await again.context().close();
   }, 120_000);
 
-  /** Trail Mix in a desktop browser that may use the clipboard, once the Mailroom is up to date. */
+  test('a draft another client wrote, with an image in its HTML, opens in Trail Mix with the image shown', async () => {
+    const subject = `Floor plan ${Date.now()}`;
+    await withImap(alice, (client) =>
+      client.append('Drafts', htmlDraft(subject), ['\\Draft', '\\Seen']),
+    );
+    const page = await trailMix();
+    await page
+      .getByRole('button', { name: /^Drafts/ })
+      .first()
+      .click();
+    await page.getByRole('option').filter({ hasText: subject }).click({ timeout: 30_000 });
+    await page
+      .getByRole('region', { name: 'Reader' })
+      .getByRole('button', { name: /^Draft/ })
+      .click();
+    const words = page
+      .getByRole('region', { name: 'New message' })
+      .getByRole('textbox', { name: 'Message' });
+    const image = words.locator('img[src^="/messages/"]');
+    await image.waitFor();
+    expect(
+      await image.evaluate(async (img) => {
+        await (img as unknown as Picture).decode();
+        return [
+          (img as unknown as Picture).naturalWidth,
+          (img as unknown as Picture).naturalHeight,
+        ];
+      }),
+    ).toEqual([4, 3]);
+    await page.context().close();
+  }, 60_000);
+
+  /** Trail Mix in a desktop browser that may use the clipboard. */
   async function trailMix(): Promise<Page> {
-    const context: BrowserContext = await browser.newContext({
+    const context = await app.context({
       viewport: { width: 1440, height: 900 },
       permissions: ['clipboard-read', 'clipboard-write'],
     });
@@ -358,7 +388,7 @@ describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix
 
   /** A Roundcube page, signed in as `user`, on their Inbox. */
   async function signedIn(user: User): Promise<Page> {
-    const page = await (await browser.newContext()).newPage();
+    const page = await (await app.context()).newPage();
     await page.goto(webmail.url);
     await page.fill('#rcmloginuser', user.email);
     await page.fill('#rcmloginpwd', user.password);
@@ -451,6 +481,33 @@ type Clipboard = {
 
 /** An image in the page, as far as these tests read it. */
 type Picture = { decode(): Promise<void>; naturalWidth: number; naturalHeight: number };
+
+/** A draft as a client that writes HTML alone saves it, showing a PNG it carries by `cid:`. */
+function htmlDraft(subject: string): string {
+  return [
+    `Message-ID: <plan-${Date.now()}@example.com>`,
+    `Date: ${new Date().toUTCString()}`,
+    `From: Alice <alice@trailmix.test>`,
+    `To: Bob <bob@trailmix.test>`,
+    `Subject: ${subject}`,
+    'MIME-Version: 1.0',
+    'Content-Type: multipart/related; boundary="plan"',
+    '',
+    '--plan',
+    'Content-Type: text/html; charset=utf-8',
+    '',
+    '<p>Here is the <b>floor plan</b>:</p><p><img src="cid:plan@example.com" alt="plan"></p>',
+    '--plan',
+    'Content-Type: image/png; name="plan.png"',
+    'Content-Disposition: inline; filename="plan.png"',
+    'Content-ID: <plan@example.com>',
+    'Content-Transfer-Encoding: base64',
+    '',
+    PNG,
+    '--plan--',
+    '',
+  ].join('\r\n');
+}
 
 function raw(fields: {
   id: string;

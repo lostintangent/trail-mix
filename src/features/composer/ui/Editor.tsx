@@ -57,6 +57,9 @@ export function Editor({
     latest.current = { onChange, imageUrl, onFiles };
   });
   const known = useRef<string>(undefined);
+  // Every image's way to look up where it shows from again, since that changes as the composer
+  // takes a pasted file and as a save moves it into the draft.
+  const images = useRef(new Set<() => void>());
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -74,7 +77,10 @@ export function Editor({
         },
       }),
       Markdown,
-      DraftImage.configure({ imageUrl: (id) => latest.current.imageUrl(id) }),
+      DraftImage.configure({
+        imageUrl: (id) => latest.current.imageUrl(id),
+        shown: images.current,
+      }),
       Placeholder.configure({
         placeholder: 'Write in Markdown, or use the toolbar',
         emptyEditorClass: css(styles.placeholder),
@@ -138,6 +144,10 @@ export function Editor({
   useEffect(() => {
     if (editor) onEditor(editor);
   }, [editor, onEditor]);
+  // A file the composer took shows once the composer has it, and a saved one from its draft.
+  useEffect(() => {
+    for (const show of images.current) show();
+  });
 
   return <EditorContent editor={editor} {...stylex.props(styles.editor)} />;
 }
@@ -153,34 +163,46 @@ function focusAtEnd(editor: TiptapEditor) {
   editor.commands.scrollIntoView();
 }
 
-/** An image node that shows only what the draft holds, as `imageUrl` resolves it. */
-const DraftImage = Image.extend<{ imageUrl: (contentId: string) => string | undefined }>({
+/**
+ * An image node that shows only what the draft holds, as `imageUrl` resolves it. Its `src` stays
+ * the `cid:` the Markdown saves, and only the page's `<img>` loads from where `imageUrl` says.
+ */
+const DraftImage = Image.extend<{
+  imageUrl: (contentId: string) => string | undefined;
+  /** Each image's way to look its source up again, while it is in the editor. */
+  shown: Set<() => void>;
+}>({
   addOptions() {
-    return { ...this.parent?.(), imageUrl: () => undefined };
+    return { ...this.parent?.(), imageUrl: () => undefined, shown: new Set() };
   },
   addNodeView() {
     return ({ node }) => {
       const image = document.createElement('img');
       image.className = css(styles.image);
-      const show = (src: string, alt: string) => {
+      let current = node;
+      const show = () => {
+        const src = String(current.attrs['src'] ?? '');
         const contentId = /^cid:(.+)$/i.exec(src)?.[1];
         const url = contentId
           ? this.options.imageUrl(contentId)
           : /^data:image\//i.test(src)
             ? src
             : undefined;
-        if (url) image.src = url;
-        else image.removeAttribute('src');
-        image.alt = alt;
+        if (!url) image.removeAttribute('src');
+        else if (image.getAttribute('src') !== url) image.src = url;
+        image.alt = String(current.attrs['alt'] ?? '');
       };
-      show(String(node.attrs['src'] ?? ''), String(node.attrs['alt'] ?? ''));
+      show();
+      this.options.shown.add(show);
       return {
         dom: image,
         update: (updated) => {
-          if (updated.type !== node.type) return false;
-          show(String(updated.attrs['src'] ?? ''), String(updated.attrs['alt'] ?? ''));
+          if (updated.type !== current.type) return false;
+          current = updated;
+          show();
           return true;
         },
+        destroy: () => this.options.shown.delete(show),
       };
     };
   },
