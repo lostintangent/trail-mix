@@ -29,7 +29,7 @@ export function MessageFrame({ mail, quotes, title }: MessageFrameProps) {
   const sizer = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLIFrameElement>(null);
   const look = useLook(frame);
-  const document = useMemo(
+  const srcDoc = useMemo(
     () => (look ? frameDocument(mail, { ...look, quotes }) : undefined),
     [mail, look, quotes],
   );
@@ -43,7 +43,7 @@ export function MessageFrame({ mail, quotes, title }: MessageFrameProps) {
           title={title}
           sandbox={FRAME_SANDBOX}
           referrerPolicy="no-referrer"
-          srcDoc={document}
+          srcDoc={srcDoc}
           onLoad={onLoad}
           {...stylex.props(styles.frame, mail.ownColors ? styles.fixedPaper : styles.paper)}
         />

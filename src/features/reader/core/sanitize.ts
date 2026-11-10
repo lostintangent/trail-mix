@@ -37,7 +37,7 @@ export type SafeMail = {
   quote: boolean;
   /** The Content-IDs shown inline, which the list of attachments leaves out. */
   inlineParts: string[];
-  /** Every URL an image may load from. */
+  /** Every URL an image may load from, apart from `data:`. */
   sources: string[];
 };
 
@@ -62,7 +62,8 @@ export function sanitizeMail(html: string, images: Images): SafeMail {
       source = images.part(contentId);
       if (source) mail.inlineParts.add(contentId);
     } else if (url.protocol === 'data:') {
-      source = /^data:image\//i.test(url.href) ? url.href : undefined;
+      // The frame's policy allows every `data:` image, so these need no source of their own.
+      return /^data:image\//i.test(url.href) ? url.href : null;
     } else if (url.protocol === 'http:' || url.protocol === 'https:') {
       source = images.remote?.(url.href);
       if (!source) mail.blockedImages = true;
@@ -401,11 +402,10 @@ function parseSrcset(value: string): { url: string; descriptor: string }[] {
   return candidates;
 }
 
-/** An image URL as a content security policy source: its origin and path, or its scheme. */
+/** An image URL as a content security policy source: its origin and path. */
 function cspSource(url: string): string {
   const parsed = URL.parse(url);
   if (!parsed) return '';
-  if (parsed.protocol === 'data:') return 'data:';
   const path = parsed.pathname.replace(/[;,\s']/g, (c) => `%${c.charCodeAt(0).toString(16)}`);
   return `${parsed.origin}${path}`;
 }
