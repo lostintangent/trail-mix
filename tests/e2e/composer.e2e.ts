@@ -113,6 +113,11 @@ test('a reply is saved as it is written, opens again with its words and files, a
 
 test('a pasted image shows as it is pasted, once its draft is saved, and when it opens again', async () => {
   const page = await inbox();
+  // The page itself never asks for a `cid:` address, which only the draft can answer.
+  const asked: string[] = [];
+  page.on('request', (request) => {
+    if (/^cid:/i.test(request.url())) asked.push(request.url());
+  });
   await page.getByRole('option').nth(3).click();
   await replyButton(page).click();
   const composer = composerNamed(page, 'Reply');
@@ -136,6 +141,36 @@ test('a pasted image shows as it is pasted, once its draft is saved, and when it
   const again = reopened.getByRole('textbox', { name: 'Reply' }).locator('img');
   await expect(shown(again, '/messages/')).resolves.toEqual([4, 3]);
   await reopened.getByRole('button', { name: 'Discard draft' }).click();
+  await reopened.waitFor({ state: 'detached' });
+  expect(asked).toEqual([]);
+}, 60_000);
+
+test('pasted HTML brings no remote image, which never loads, even as the composer closes', async () => {
+  const page = await inbox();
+  const tracked: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('tracker.example')) tracked.push(request.url());
+  });
+  await page.keyboard.press('c');
+  const composer = composerNamed(page, 'New message');
+  const text = composer.getByRole('textbox', { name: 'Message' });
+  await text.click();
+  await page.evaluate(() => {
+    const pasted = new DataTransfer();
+    pasted.setData(
+      'text/html',
+      '<p>Pasted <b>words</b><img src="https://tracker.example/pixel.png" alt="pixel"></p>',
+    );
+    document.activeElement?.dispatchEvent(
+      new ClipboardEvent('paste', { clipboardData: pasted, bubbles: true, cancelable: true }),
+    );
+  });
+  await text.locator('strong').waitFor();
+  await expect(text.locator('img').count()).resolves.toBe(0);
+  await composer.getByRole('button', { name: 'Close' }).click();
+  await composer.waitFor({ state: 'detached' });
+  await page.waitForTimeout(500);
+  expect(tracked).toEqual([]);
 }, 60_000);
 
 /** A 4 by 3 pixel PNG, pasted into the editor as a browser hands a pasted file to the page. */

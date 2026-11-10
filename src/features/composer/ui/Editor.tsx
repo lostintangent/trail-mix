@@ -166,12 +166,30 @@ function focusAtEnd(editor: TiptapEditor) {
 /**
  * An image node that shows only what the draft holds, as `imageUrl` resolves it. Its `src` stays
  * the `cid:` the Markdown saves, and only the page's `<img>` loads from where `imageUrl` says.
+ *
+ * Only an image the draft carries by `cid:` is taken in, so pasted HTML brings no remote image.
+ * Wherever the editor writes an image out as HTML, as it does on copying and as it tears down, its
+ * address goes in `data-draft-src`, which the page never loads.
  */
 const DraftImage = Image.extend<{
   imageUrl: (contentId: string) => string | undefined;
   /** Each image's way to look its source up again, while it is in the editor. */
   shown: Set<() => void>;
 }>({
+  parseHTML() {
+    return [{ tag: 'img[data-draft-src^="cid:" i]' }, { tag: 'img[src^="cid:" i]' }];
+  },
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+      src: {
+        default: null,
+        parseHTML: (element) =>
+          element.getAttribute('data-draft-src') ?? element.getAttribute('src'),
+        renderHTML: (attributes) => ({ 'data-draft-src': String(attributes['src'] ?? '') }),
+      },
+    };
+  },
   addOptions() {
     return { ...this.parent?.(), imageUrl: () => undefined, shown: new Set() };
   },
