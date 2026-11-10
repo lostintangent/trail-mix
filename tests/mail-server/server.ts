@@ -37,6 +37,7 @@ export const ports = {
   submissions: base + 465, // implicit TLS
   lmtp: base + 24, // local delivery into Dovecot
   identity: base + 80, // the stand-in for Microsoft's sign-in
+  webmail: base + 880, // Roundcube, for tests that read mail as another client shows it
 };
 
 /** The stand-in for login.microsoftonline.com, for the device-code flow and XOAUTH2. */

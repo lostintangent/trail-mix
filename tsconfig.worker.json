@@ -11,7 +11,9 @@
     "tests/bench/mailroom",
     "tests/contract",
     "tests/mail-check",
+    "tests/mail-clients",
     "tests/mail-server",
+    "tests/mailrooms.ts",
     "tests/reader/worker.ts",
     "tests/workerd.ts"
   ]

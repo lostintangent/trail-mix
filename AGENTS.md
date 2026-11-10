@@ -217,6 +217,7 @@ Tests concentrate where a defect spreads.
 
 - Exhaustive `bun test` coverage of the pure core.
 - One provider contract suite that runs against the demo provider and against the IMAP provider talking to the test mail server.
+- Two other mail clients read what Trail Mix sends from the test mail server: Roundcube on PHP's own server, driven in Chromium, and mutt in a pseudo-terminal. CI installs both and sets `MAIL_CLIENTS=required`. On a Mac without `mutt` and `php` their tests skip and say why.
 - A Playwright smoke suite that drives the built app on the demo mailbox, at desktop and phone sizes in both themes, and attaches screenshots to the CI run.
 - The reader's corpus of hostile and real-world mail renders in Chromium and WebKit under `bun test`, proving that nothing in it runs or loads. A missing browser fails with the command that installs it. `READER_BROWSERS` narrows the run to one of them.
 - Tests that need the test mail server or workerd are named `*.mail.test.ts`. `bun test` skips them, and `bun run test:mail` runs them. Run it before pushing a change to mail I/O.
