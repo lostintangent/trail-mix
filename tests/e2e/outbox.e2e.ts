@@ -131,6 +131,42 @@ test('the countdown matches the time the Mailroom stored, and Undo leaves the dr
   await page.getByRole('option', { name: /Lunch Thursday/ }).waitFor();
 }, 60_000);
 
+test('a send straight after a cold load counts down, though toasts and their theme load only then', async () => {
+  const page = await (await app.context({ ...DESKTOP, colorScheme: 'dark' })).newPage();
+  page.on('pageerror', (error) => errors.push(error.message));
+  // Toasts, and Astryx's theme generator with them, are held back until the send has been answered,
+  // so the countdown is asked for before anything can show it.
+  let release = () => {};
+  const released = new Promise<void>((done) => (release = done));
+  let held = 0;
+  await page.route('**/assets/toast-host-*.js', async (route) => {
+    held++;
+    await released;
+    await route.continue();
+  });
+  await page.goto(app.url);
+  await openDraft(page, /Lunch Thursday/);
+  const stored = storedSendAt(page);
+  await send(page).click();
+  await stored;
+  await page.waitForTimeout(500);
+  release();
+
+  const counting = toast(page, /^Sending to Jonas in \d+s$/);
+  await counting.waitFor();
+  const shown = Number(/in (\d+)s/.exec(await counting.innerText())![1]);
+  const left = Math.ceil(((await stored) - Date.now()) / 1000);
+  expect(shown).toBeLessThanOrEqual(left);
+  expect(shown).toBeGreaterThanOrEqual(left - 1);
+  // Once it has slid into place, so its words are read where they stay.
+  await counting.click({ trial: true });
+  await readable(page, 'desktop-dark-first-toast');
+  expect(held).toBeGreaterThan(0);
+
+  await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
+  await toast(page, /^Undone\. Nothing was sent to Jonas\.$/).waitFor();
+}, 60_000);
+
 test('an Undo that reaches the Mailroom after the send’s time is refused, and says so', async () => {
   const page = await open({ ...PHONE, colorScheme: 'dark' });
   await openDraft(page, /Lunch Thursday/);
