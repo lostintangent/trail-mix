@@ -69,7 +69,8 @@ const MORE_ICON = <Icon icon={Ellipsis} />;
 
 /**
  * A menu behind an icon button, which renders again only when its items change. Its items are drawn
- * only while it is open, so a conversation opened while the menu is closed costs it nothing.
+ * only while it is open, so a conversation opened while the menu is closed costs it nothing. With no
+ * items, as while nothing is open, its button is disabled.
  */
 const Menu = memo(function Menu({
   label,
@@ -83,7 +84,14 @@ const Menu = memo(function Menu({
   const [isOpen, setOpen] = useState(false);
   return (
     <DropdownMenu
-      button={{ label, tooltip: label, icon, isIconOnly: true, variant: 'ghost' }}
+      button={{
+        label,
+        tooltip: label,
+        icon,
+        isIconOnly: true,
+        variant: 'ghost',
+        isDisabled: items.length === 0,
+      }}
       hasChevron={false}
       items={isOpen ? items : CLOSED}
       isMenuOpen={isOpen}

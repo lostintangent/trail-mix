@@ -291,9 +291,9 @@ async function keyMoves(page: Page, latency: InputLatency): Promise<number[]> {
 }
 
 /**
- * The latency of each click on the reader's Archive, from the click to the next frame painted. Each
- * archive opens the next conversation, whose own Archive comes next once the reader shows it and
- * the last one's hints and read mark have landed.
+ * The latency of each click on Archive at the head of the list, from the click to the next frame
+ * painted. Each archive opens the next conversation, which is archived next once the reader shows it
+ * and the last one's hints and read mark have landed.
  */
 async function archives(page: Page, watching: Watch, latency: InputLatency): Promise<number[]> {
   const archive = page

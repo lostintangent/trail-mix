@@ -75,6 +75,15 @@ import { Composer, composerCommands, type Sender, type Writing } from '../../com
 import { isDocked, newestOf, useComposing } from './useComposing.ts';
 
 const NO_COMMANDS: readonly Command[] = [];
+
+/** The triage buttons as they're drawn while nothing is open or selected: all disabled. */
+const NOTHING_TO_TRIAGE = triageCommands({
+  accounts: [],
+  folders: [],
+  isFlagged: false,
+  isUnread: false,
+  onTriage: () => {},
+}).map((command) => ({ ...command, isEnabled: false }));
 import { StatusLine } from './StatusLine.tsx';
 import {
   CREATE,
@@ -85,6 +94,7 @@ import {
   FolderMenu,
   useFolderEditing,
   viewCommands,
+  viewIcon,
   type FooterPlace,
   type SidebarRail,
   type ViewCounts,
@@ -272,10 +282,15 @@ export function Workbench({
   const { replyIn, replyTo } = composing;
   // A desktop's bar files and marks the conversation, and each of its messages holds its own Reply.
   // On a phone the marks sit at the top of the screen, and the island files it beside a Reply.
+  // While the list shows, its header carries the open conversation's buttons, so the reader's bar
+  // holds only its place. The reader takes them when it stands alone: on a phone, or with the list
+  // folded to its rail.
+  const isReaderAlone = isPhone || list.isCollapsed;
   const readerActions = useCallback(
     ({ id, conversation, account }: Reading, place: ActionsPlace) => {
       // A desktop shows the bar, and a phone the top and the island, so only those are drawn.
       if (isPhone === (place === 'bar')) return null;
+      if (place === 'bar' && !isReaderAlone) return null;
       const triage = (
         <TriageActions
           commands={triageCommands({
@@ -301,7 +316,7 @@ export function Workbench({
         </>
       );
     },
-    [folders, replyIn, isPhone],
+    [folders, replyIn, isPhone, isReaderAlone],
   );
   // The reader's place renders again only as the list or the conversation shown changes.
   const readerPlace = useCallback(
@@ -447,6 +462,20 @@ export function Workbench({
   const selectionActions = (place: 'bar' | 'island') => (
     <TriageActions commands={selectedCommands} isCompact={place === 'island'} />
   );
+  // At the head of the list on a desktop: what can be done to the open conversation or the
+  // selection, drawn disabled while there's neither, so nothing in the header moves.
+  const listTriage = isReaderAlone
+    ? undefined
+    : {
+        label: isMany ? 'Selected conversations' : 'Conversation',
+        actions: (
+          <Suspense>
+            <TriageActions
+              commands={selectedCommands.length > 0 ? selectedCommands : NOTHING_TO_TRIAGE}
+            />
+          </Suspense>
+        ),
+      };
 
   const outbox = useOutboxCommands();
 
@@ -650,6 +679,7 @@ export function Workbench({
             <div inert={isOffscreen('list')} {...stylex.props(styles.pane)}>
               <ListPane
                 id={listId}
+                icon={viewIcon(view, folders)}
                 title={title}
                 unread={unread}
                 scope={scope}
@@ -711,6 +741,7 @@ export function Workbench({
                     </Suspense>
                   )
                 }
+                triage={listTriage}
               />
               <PanelEdge
                 spec={PANELS.list}
@@ -724,7 +755,7 @@ export function Workbench({
             <div inert={isOffscreen('reader')} {...stylex.props(styles.pane)}>
               {isMany && !isPhone ? (
                 <SelectionPane count={selection.ids.length} onClear={stopPicking}>
-                  <Suspense>{selectionActions('bar')}</Suspense>
+                  {isReaderAlone && <Suspense>{selectionActions('bar')}</Suspense>}
                 </SelectionPane>
               ) : (
                 <ReaderPane

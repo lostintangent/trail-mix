@@ -11,7 +11,7 @@ import {
   typeScaleVars,
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { ChevronRight, File, FolderOpen, Inbox, Menu, SearchX, Star } from 'lucide-react';
+import { ChevronRight, Menu, type LucideIcon } from 'lucide-react';
 import { memo, useId, type ReactNode } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { PhoneIsland } from './PhoneIsland.tsx';
@@ -27,13 +27,15 @@ import type {
 import { StampDot } from '../../../app/theme/StampDot.tsx';
 
 /**
- * The conversation list's sheet, under the view's title and its unread count. On a desktop the
- * whole pane is the sheet, and collapsed to its rail it keeps only a way to open it again. On a
- * phone the title sits on the desk, the sheet starts below it, and the way back to the folders
- * floats at the bottom with the pane's other actions.
+ * The conversation list's sheet, under the view's icon, title and unread count. On a desktop the
+ * whole pane is the sheet, the header ends with what can be done to the open conversation or the
+ * selection, and collapsed to its rail it keeps only a way to open it again. On a phone the title
+ * sits on the desk, the sheet starts below it, and the way back to the folders floats at the bottom
+ * with the pane's other actions.
  */
 export function ListPane({
   id,
+  icon,
   title,
   unread,
   scope,
@@ -56,8 +58,11 @@ export function ListPane({
   onShowFolders,
   island,
   actions,
+  triage,
 }: {
   id: string;
+  /** The view's icon, the one the sidebar shows for it. */
+  icon: LucideIcon;
   title: string;
   unread: number | undefined;
   /** The one account the view holds, or nothing when it gathers every account. */
@@ -88,8 +93,14 @@ export function ListPane({
   onShowFolders: () => void;
   /** On a phone, what the island holds after the way to the folders: search, then Write. */
   island?: ReactNode;
-  /** What can be done to the view itself, such as renaming its folder, at the header's end. */
+  /** What can be done to the view itself, such as renaming its folder, beside its title. */
   actions?: ReactNode;
+  /**
+   * On a desktop, what can be done to the open conversation or the selection, at the header's end,
+   * and what its toolbar is called. It stays drawn while nothing is open, disabled, so nothing in
+   * the header moves.
+   */
+  triage?: { label: string; actions: ReactNode };
 }) {
   const titleId = useId();
   if (isCollapsed) {
@@ -108,6 +119,7 @@ export function ListPane({
   return (
     <section id={id} aria-labelledby={titleId} {...stylex.props(styles.pane)}>
       <header {...stylex.props(styles.header)}>
+        <Icon icon={icon} size="md" xstyle={styles.icon} />
         <Heading level={2} id={titleId} xstyle={styles.title}>
           {title}
         </Heading>
@@ -127,13 +139,22 @@ export function ListPane({
             {actions}
           </span>
         )}
+        {triage && (
+          <span
+            role="toolbar"
+            aria-label={triage.label}
+            {...stylex.props(styles.actions, styles.triage)}
+          >
+            {triage.actions}
+          </span>
+        )}
       </header>
       {below && <div {...stylex.props(styles.below)}>{below}</div>}
       <div {...stylex.props(styles.sheet, !list && conversations?.length === 0 && styles.empty)}>
         {list ? (
           list
         ) : conversations?.length === 0 ? (
-          <Empty viewIn={viewIn} title={title} />
+          <Empty viewIn={viewIn} icon={icon} title={title} />
         ) : conversations ? (
           <ConversationList
             label={title}
@@ -169,41 +190,36 @@ const FoldersButton = memo(function FoldersButton({ onClick }: { onClick: () => 
   return <IconButton label="Folders" icon={FOLDERS_ICON} variant="ghost" onClick={onClick} />;
 });
 
-/** What an empty list says, for the kind of view it is. */
+/** What an empty list says, for the kind of view it is, under the view's icon. */
 const EMPTY = {
   inbox: {
-    icon: Inbox,
     title: () => 'No mail yet',
     description: 'Mail from the accounts you connect will gather here, newest first.',
   },
   flagged: {
-    icon: Star,
     title: () => 'Nothing flagged',
     description: 'Mail you flag gathers here, from every account.',
   },
   drafts: {
-    icon: File,
     title: () => 'No drafts',
     description: 'Messages you start and haven’t sent gather here.',
   },
   folder: {
-    icon: FolderOpen,
     title: (name: string) => `${name} is empty`,
     description: 'Mail you move here will show up in this folder.',
   },
   search: {
-    icon: SearchX,
     title: () => 'No matches',
     description: 'Nothing in any account matches every word you typed.',
   },
 } satisfies Record<Exclude<View['in'], 'outbox'>, unknown>;
 
-function Empty({ viewIn, title }: { viewIn: View['in']; title: string }) {
+function Empty({ viewIn, icon, title }: { viewIn: View['in']; icon: LucideIcon; title: string }) {
   // The Outbox lists its own sends, and says when there are none.
   const empty = EMPTY[viewIn === 'outbox' ? 'inbox' : viewIn];
   return (
     <EmptyState
-      icon={<Icon icon={empty.icon} size="lg" color="secondary" />}
+      icon={<Icon icon={icon} size="lg" color="secondary" />}
       title={empty.title(title)}
       description={empty.description}
     />
@@ -211,6 +227,9 @@ function Empty({ viewIn, title }: { viewIn: View['in']; title: string }) {
 }
 
 const focusRing = `2px solid ${colorVars['--color-accent']}`;
+
+/** A header too narrow for its title, its unread count and the conversation's buttons together. */
+const NARROW = '@container (width < 20rem)';
 
 const styles = stylex.create({
   pane: {
@@ -247,11 +266,14 @@ const styles = stylex.create({
     alignItems: 'center',
     paddingBlock: spacingVars['--spacing-2'],
   },
+  // A narrow list's header gives up its unread count, then truncates its title, so the
+  // conversation's buttons keep their place at its end.
   header: {
     flexShrink: 0,
     display: 'flex',
     alignItems: 'baseline',
     gap: spacingVars['--spacing-2'],
+    containerType: 'inline-size',
     paddingTop: {
       default: spacingVars['--spacing-3'],
       [media.phone]: `calc(${tm.safeTop} + ${spacingVars['--spacing-2']})`,
@@ -262,12 +284,25 @@ const styles = stylex.create({
     },
     paddingInline: spacingVars['--spacing-4'],
   },
+  // The view's icon, level with its title, in the tone of the sidebar's.
+  icon: {
+    flexShrink: 0,
+    alignSelf: 'center',
+    color: colorVars['--color-text-secondary'],
+  },
   // The header's line keeps its height, so a button's extra size reaches into its padding. They
   // follow the unread count on a desktop, and the account's pill on a phone.
   actions: {
     display: 'flex',
     alignSelf: 'center',
     marginBlock: `calc(-1 * ${spacingVars['--spacing-2']})`,
+  },
+  // The conversation's buttons end the header, on a desktop, where the reader shares the screen.
+  triage: {
+    display: { default: 'flex', [media.phone]: 'none' },
+    flexShrink: 0,
+    gap: spacingVars['--spacing-0-5'],
+    marginInlineStart: 'auto',
   },
   below: {
     flexShrink: 0,
@@ -289,6 +324,10 @@ const styles = stylex.create({
       [media.phone]: typeScaleVars['--text-heading-1-leading'],
     },
     fontWeight: { default: null, [media.phone]: fontWeightVars['--font-weight-bold'] },
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   // On a phone, whose list is the whole screen, a chip at the header's end says whose mail it is.
   scope: {
@@ -308,8 +347,10 @@ const styles = stylex.create({
     whiteSpace: 'nowrap',
   },
   unread: {
+    display: { default: null, [NARROW]: 'none' },
     color: tm.textQuiet,
     fontSize: typeScaleVars['--text-supporting-size'],
+    whiteSpace: 'nowrap',
   },
   sheet: {
     flexGrow: 1,

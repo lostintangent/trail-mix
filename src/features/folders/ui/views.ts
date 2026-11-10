@@ -5,6 +5,7 @@ import {
   File,
   Folder as FolderIcon,
   Inbox,
+  Search,
   Send,
   Star,
   Trash2,
@@ -14,7 +15,7 @@ import type { Folder, FolderRole, View } from '../../mail/core/index.ts';
 
 /**
  * The views the sidebar offers, and the one icon each shows wherever it is named: in the sidebar,
- * on its rail and in the palette.
+ * on its rail, at the head of the list and in the palette.
  */
 
 type UnifiedView = Exclude<View['in'], 'folder' | 'search'>;
@@ -42,3 +43,20 @@ const ROLE_ICONS: Record<FolderRole, LucideIcon> = {
 
 /** A folder's icon: its role's, or a folder's. */
 export const folderIcon = ({ role }: Folder): LucideIcon => (role ? ROLE_ICONS[role] : FolderIcon);
+
+/** A view's icon: the unified view's, its folder's, or a search's. */
+export function viewIcon(view: View, folders: readonly Folder[]): LucideIcon {
+  switch (view.in) {
+    case 'folder': {
+      const { account, path } = view.folder;
+      const folder = folders.find((each) => each.account === account && each.path === path);
+      return folder ? folderIcon(folder) : FolderIcon;
+    }
+    case 'search':
+      return Search;
+    default: {
+      const unified = view.in;
+      return UNIFIED_VIEWS.find((each) => each.in === unified)?.icon ?? Inbox;
+    }
+  }
+}

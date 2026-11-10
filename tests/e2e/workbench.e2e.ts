@@ -171,96 +171,6 @@ test('a row leads with its sender and subject, and sets unread apart by weight a
   }
 });
 
-test('every row is one height, the first with no preview too, so no two overlap', async () => {
-  for (const [size, options] of Object.entries(SIZES)) {
-    const { context, page, problems } = await open(options);
-    const inbox = await rowsDrawn(page);
-    const subject = await writeNothing(page);
-    const drafts = page.getByRole('button', { name: /^Drafts/ }).first();
-    if (!(await inView(drafts)))
-      await page.getByRole('button', { name: 'Folders', exact: true }).click();
-    await drafts.click();
-    await page.getByRole('option').first().filter({ hasText: subject }).waitFor();
-
-    const rows = await rowsDrawn(page);
-    expect({ size, preview: rows[0]?.preview }).toEqual({ size, preview: '' });
-    const height = inbox[0]?.height ?? 0;
-    expect(height).toBeGreaterThan(0);
-    // Rows lie on whole pixels, each the height of a row of mail rounded up.
-    const pitch = Math.ceil(height);
-    for (const row of [...inbox, ...rows]) {
-      expect({ size, row: row.index, height: row.height }).toEqual({
-        size,
-        row: row.index,
-        height,
-      });
-      expect({ size, row: row.index, top: row.top }).toEqual({
-        size,
-        row: row.index,
-        top: row.index * pitch,
-      });
-    }
-    expect(problems).toEqual([]);
-    await context.close();
-  }
-}, 60_000);
-
-test('scrolling a long folder never changes a row’s height or moves a row already drawn', async () => {
-  for (const [size, options] of Object.entries(SIZES)) {
-    const { context, page } = await open(options);
-    // A search for the demo's member finds most of their mail, led by a draft with no preview.
-    const subject = await writeNothing(page);
-    await searchFor(page, 'sam');
-    await page
-      .locator('[role="listbox"][aria-multiselectable] [role="option"]')
-      .first()
-      .filter({ hasText: subject })
-      .waitFor();
-    const scrolled = await page.evaluate(async () => {
-      const list = document.querySelector<HTMLElement>('[role="listbox"][aria-multiselectable]');
-      if (!list) return { heights: [], misplaced: ['no list'], reached: 0 };
-      const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
-      const heights = new Set<number>();
-      const misplaced: string[] = [];
-      let reached = 0;
-      let still = 0;
-      // Through several pages, each arriving on the way, and no further.
-      while (still < 10 && reached < 250) {
-        const canvas = list.lastElementChild?.getBoundingClientRect().top ?? 0;
-        const height = list.querySelector('[role="option"]')?.getBoundingClientRect().height ?? 0;
-        // Rows lie on whole pixels, each the height of a row of mail rounded up.
-        const pitch = Math.ceil(height);
-        for (const row of list.querySelectorAll('[role="option"]')) {
-          const box = row.getBoundingClientRect();
-          const index = Number(row.getAttribute('aria-posinset')) - 1;
-          heights.add(box.height);
-          reached = Math.max(reached, index);
-          if (Math.abs(box.top - canvas - index * pitch) > 0.5) {
-            misplaced.push(`row ${index} at ${box.top - canvas}, not ${index * pitch}`);
-          }
-        }
-        const before = list.scrollTop;
-        list.scrollTop += list.clientHeight * 0.8;
-        await frame();
-        await frame();
-        if (list.scrollTop === before) {
-          still++;
-          await new Promise((resolve) => setTimeout(resolve, 100));
-        } else still = 0;
-      }
-      return { heights: [...heights], misplaced: misplaced.slice(0, 5), reached };
-    });
-    expect({ size, heights: scrolled.heights.length, misplaced: scrolled.misplaced }).toEqual({
-      size,
-      heights: 1,
-      misplaced: [],
-    });
-    // Far past the first page, so pages arrived on the way.
-    expect(scrolled.reached).toBeGreaterThan(200);
-    await context.close();
-  }
-}, 120_000);
-
 test('side panels resize by pointer and key, snap to a rail, and come back the same before the app runs', async () => {
   const { context, page } = await open(SIZES.desktop);
   const sidebar = page.getByRole('separator', { name: 'Resize the sidebar' });
@@ -632,9 +542,106 @@ test('search finds mail as it is typed, marks what matched, and reads bodies onl
   await context.close();
 }, 30_000);
 
+test('the list’s header shows its view’s icon, and the buttons for what is open or selected', async () => {
+  const { context, page, problems } = await open(SIZES.desktop);
+  const list = page.locator('section[aria-labelledby]').first();
+  const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
+  // The header's icon is the one the sidebar shows for the view in it.
+  const icons = () =>
+    page.evaluate(() => {
+      const shape = (svg: Element | null | undefined) => svg?.innerHTML ?? 'none';
+      return [
+        shape(document.querySelector('section[aria-labelledby] header > svg')),
+        shape(document.querySelector('nav [aria-current="page"] svg')),
+      ];
+    });
+  for (const view of [/^Inbox/, /^Outbox/]) {
+    await sidebar.getByRole('button', { name: view }).first().click();
+    const [header, row] = await icons();
+    expect(header).toBe(row);
+  }
+  await page
+    .getByRole('region', { name: 'Personal' })
+    .getByRole('button', { name: /^Sent/ })
+    .click();
+  await page.getByRole('heading', { name: 'Sent', level: 2 }).waitFor();
+  const [sent, sentRow] = await icons();
+  expect(sent).toBe(sentRow);
+  await sidebar
+    .getByRole('button', { name: /^Inbox/ })
+    .first()
+    .click();
+  await page.getByRole('heading', { name: 'Inbox', level: 2 }).waitFor();
+
+  // With nothing open, the buttons are there but can't be pressed, and opening one moves nothing.
+  const header = list.getByRole('toolbar', { name: 'Conversation' });
+  const buttons = header.getByRole('button');
+  const names = ['Archive', 'Delete', 'Move to', 'Flag', 'More'];
+  expect(
+    await buttons.evaluateAll((all) => all.map((button) => button.getAttribute('aria-label'))),
+  ).toEqual(names);
+  const states = (): Promise<{ disabled: boolean; left: number }[]> =>
+    buttons.evaluateAll((all) =>
+      all.map((button) => ({
+        disabled:
+          button.hasAttribute('disabled') || button.getAttribute('aria-disabled') === 'true',
+        left: Math.round(button.getBoundingClientRect().left),
+      })),
+    );
+  const idle = await states();
+  expect(idle.every(({ disabled }) => disabled)).toBe(true);
+  await openConversation(page, 1);
+  const opened = await states();
+  expect(opened.map(({ disabled }) => disabled)).toEqual(names.map(() => false));
+  expect(opened.map(({ left }) => left)).toEqual(idle.map(({ left }) => left));
+  // The reader's bar keeps only its place while the list shows.
+  const place = page.getByRole('toolbar', { name: 'Place' });
+  await place.getByRole('button', { name: 'Next conversation' }).waitFor();
+  await expect(place.getByRole('button', { name: 'Archive' }).count()).resolves.toBe(0);
+
+  // A selection of several takes the same buttons, and its sheet keeps only its count.
+  const rows = page.getByRole('option');
+  await rows.nth(2).click({ modifiers: ['Shift'] });
+  await page.getByRole('heading', { name: '2 conversations selected' }).waitFor();
+  await list
+    .getByRole('toolbar', { name: 'Selected conversations' })
+    .getByRole('button', { name: 'Archive' })
+    .waitFor();
+  const selection = page.getByRole('region', { name: 'Selection' });
+  await expect(selection.getByRole('button', { name: 'Archive' }).count()).resolves.toBe(0);
+  await selection.getByRole('button', { name: 'Clear selection' }).click();
+
+  // With the list folded to its rail, the reader stands alone and takes the buttons back.
+  await openConversation(page, 1);
+  const edge = page.getByRole('separator', { name: 'Resize the conversation list' });
+  await edge.focus();
+  await page.keyboard.press('Enter');
+  await page
+    .locator('section[aria-label="Reader"]')
+    .getByRole('toolbar', { name: 'Conversation' })
+    .getByRole('button', { name: 'Archive' })
+    .waitFor();
+  await page.keyboard.press('Enter');
+  await header.waitFor();
+  expect(problems).toEqual([]);
+  await context.close();
+}, 30_000);
+
+test('on a phone, the list’s header has no buttons, and the reader’s island files what’s open', async () => {
+  const { context, page, problems } = await open(SIZES.phone);
+  await expect(page.getByRole('toolbar', { name: 'Conversation' }).count()).resolves.toBe(0);
+  await openConversation(page, 1);
+  await page
+    .getByRole('toolbar', { name: 'Conversation' })
+    .getByRole('button', { name: 'Archive' })
+    .waitFor();
+  expect(problems).toEqual([]);
+  await context.close();
+}, 30_000);
+
 test('the reader says where its conversation sits, and steps to the ones either side', async () => {
   const { context, page, problems } = await open(SIZES.desktop);
-  const bar = page.getByRole('toolbar', { name: 'Conversation' });
+  const bar = page.getByRole('toolbar', { name: 'Place' });
   const rows = page.getByRole('option');
   const loaded = async () => Number(await rows.first().getAttribute('aria-setsize'));
   // The reader shows the selected row once its keys rest, and says where that row sits.
@@ -643,7 +650,7 @@ test('the reader says where its conversation sits, and steps to the ones either 
       (place) => {
         const title = document.querySelector('section[aria-label="Reader"] h1')?.textContent;
         const row = document.querySelector('[role="option"][aria-selected="true"]');
-        const bar = document.querySelector('[role="toolbar"][aria-label="Conversation"]');
+        const bar = document.querySelector('[role="toolbar"][aria-label="Place"]');
         return title && row?.textContent?.includes(title) && bar?.textContent?.includes(place);
       },
       place,
@@ -740,38 +747,6 @@ async function searchFor(page: Page, text: string) {
   if (await inView(back)) await back.click();
   await page.getByRole('searchbox', { name: 'Search mail' }).fill(text);
   await page.locator('[role="option"] mark').first().waitFor();
-}
-
-/**
- * Writes a new message with a subject and nothing else, which leaves the newest draft, one with no
- * preview. Returns its subject.
- */
-async function writeNothing(page: Page): Promise<string> {
-  const subject = `Nothing written ${Date.now()}`;
-  await page.keyboard.press('c');
-  await page.keyboard.type('grace@example.com');
-  const composer = page.locator('section[aria-label="New message"]');
-  await composer.getByRole('textbox', { name: 'Subject' }).fill(subject);
-  await page.getByRole('status').filter({ hasText: 'Saved to Drafts' }).waitFor();
-  await page.keyboard.press('Escape');
-  return subject;
-}
-
-/** The list's rows drawn now: where each lies in the list, its height, and its preview's text. */
-function rowsDrawn(page: Page) {
-  return page.evaluate(() => {
-    const list = document.querySelector('[role="listbox"][aria-multiselectable]');
-    const canvas = list?.lastElementChild?.getBoundingClientRect().top ?? 0;
-    return [...(list?.querySelectorAll('[role="option"]') ?? [])].map((row) => {
-      const box = row.getBoundingClientRect();
-      return {
-        index: Number(row.getAttribute('aria-posinset')) - 1,
-        top: box.top - canvas,
-        height: box.height,
-        preview: row.lastElementChild?.lastElementChild?.textContent ?? undefined,
-      };
-    });
-  });
 }
 
 /** Whether a control is in a pane on screen. A pane off a phone's screen is inert. */

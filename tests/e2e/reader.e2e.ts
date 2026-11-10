@@ -81,7 +81,7 @@ test('each message answers and shows the source of its own, and the palette the 
   await row(page, 'Q4 planning').click();
   const newest = reader(page).getByRole('article');
   const newestName = (await newest.getAttribute('aria-label'))!.replace('Message from ', '');
-  // The bar files and marks the conversation, and each message holds its own Reply.
+  // The list's header files and marks the conversation, and each message holds its own Reply.
   const bar = page.getByRole('toolbar', { name: 'Conversation' });
   await bar.getByRole('button', { name: 'Archive' }).waitFor();
   await expect(bar.getByRole('button', { name: /^Reply/ }).count()).resolves.toBe(0);

@@ -15,8 +15,9 @@ import type { ReactNode } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 
 /**
- * On a desktop, the reader's sheet while several conversations are selected: how many, what can be
- * done to them together, and a way to let them go.
+ * On a desktop, the reader's sheet while several conversations are selected: how many, and a way to
+ * let them go. The list's header has what can be done to them together, and so does this sheet when
+ * the list is folded to its rail.
  */
 export function SelectionPane({
   count,
@@ -25,8 +26,8 @@ export function SelectionPane({
 }: {
   count: number;
   onClear: () => void;
-  /** The actions for the selection. */
-  children: ReactNode;
+  /** The actions for the selection, where the list's header doesn't show them. */
+  children?: ReactNode;
 }) {
   return (
     <section aria-label="Selection" {...stylex.props(styles.sheet)}>
@@ -34,9 +35,11 @@ export function SelectionPane({
         <Heading level={1} xstyle={styles.count}>
           {count} conversations selected
         </Heading>
-        <div role="toolbar" aria-label="Selected conversations" {...stylex.props(styles.bar)}>
-          {children}
-        </div>
+        {children && (
+          <div role="toolbar" aria-label="Selected conversations" {...stylex.props(styles.bar)}>
+            {children}
+          </div>
+        )}
         <Button label="Clear selection" variant="ghost" onClick={onClear} />
       </div>
     </section>

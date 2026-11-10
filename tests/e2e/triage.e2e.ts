@@ -182,21 +182,22 @@ const at = (page: Page, place: number) => page.locator(`[role="option"][aria-pos
  */
 const textAt = async (page: Page, place: number) =>
   (await at(page, place).textContent())?.replace('Unread', '');
+/** The list header's buttons for the open conversation. */
 const bar = (page: Page) => page.getByRole('toolbar', { name: 'Conversation' });
 const reader = (page: Page) => page.locator('section[aria-label="Reader"]');
 /** The toast's Undo. Its name is exact, since a folded message's preview can mention undoing. */
 const undoButton = (page: Page) => page.getByRole('button', { name: 'Undo', exact: true });
 
 /**
- * Clicks one of the reader's actions and says how many milliseconds pass until the list, in a
- * painted frame, no longer holds the conversation.
+ * Clicks one of the open conversation's actions, at the head of the list, and says how many
+ * milliseconds pass until the list, in a painted frame, no longer holds the conversation.
  */
 function msUntilGone(page: Page, action: string, subject: string): Promise<number> {
   return page.evaluate(
     ([action, subject]) =>
       new Promise<number>((resolve) => {
         const button = document.querySelector<HTMLElement>(
-          `section[aria-label="Reader"] [role="toolbar"] button[aria-label="${action}"]`,
+          `[role="toolbar"][aria-label="Conversation"] button[aria-label="${action}"]`,
         )!;
         const isListed = () =>
           [...document.querySelectorAll('[role="option"]')].some((row) =>
@@ -217,8 +218,7 @@ function msUntilGone(page: Page, action: string, subject: string): Promise<numbe
 test('archiving shows at once, reaches another open browser, and Undo brings it back to both', async () => {
   const [here, there] = await Promise.all([inbox(), inbox()]);
   const subject = /Invoice for October/;
-  // The bar's controls stay as they were drawn for the conversation above, which the reader has
-  // prepared the next one beside, and act on the one J opens.
+  // The header's controls act on the one J opens, which the reader prepared beside the one above.
   const place = Number(await row(here, subject).getAttribute('aria-posinset'));
   const above = await textAt(here, place - 1);
   await at(here, place - 1).click();
@@ -239,33 +239,36 @@ test('archiving shows at once, reaches another open browser, and Undo brings it 
   await row(there, subject).waitFor({ timeout: ELSEWHERE_MS });
 }, 30_000);
 
-test('the frame that shows a conversation archived from the reader keeps its place, its moves and its actions', async () => {
+test('the frame that shows a conversation archived from the list’s header keeps its place, its moves and its actions', async () => {
   const page = await inbox();
   await at(page, 3).click();
   const archived = await shownSubject(page);
   const third = await textAt(page, 3);
   await bar(page).getByRole('button', { name: 'Archive' }).waitFor();
-  // Every state of the reader's bar, as each change to it lands, from the click until the reader
-  // shows the next conversation. Until a row is selected again, it is what the click's frame shows.
+  // Every state of the reader's place and the header's buttons, as each change to them lands, from
+  // the click until the reader shows the next conversation. Until a row is selected again, it is
+  // what the click's frame shows.
   const states = await page.evaluate(
     (archived) =>
       new Promise<
         { title: string; place?: string; previous?: boolean; archive: boolean; moved: boolean }[]
       >((resolve) => {
         const reader = document.querySelector('section[aria-label="Reader"]')!;
+        const header = document.querySelector('[role="toolbar"][aria-label="Conversation"]')!;
+        const isEnabled = (button: Element | null | undefined) =>
+          button
+            ? !button.hasAttribute('disabled') && button.getAttribute('aria-disabled') !== 'true'
+            : undefined;
         const look = () => {
-          const toolbar = reader.querySelector('[role="toolbar"][aria-label="Conversation"]');
+          const toolbar = reader.querySelector('[role="toolbar"][aria-label="Place"]');
           const previous = toolbar?.querySelector('button[aria-label="Previous conversation"]');
           return {
             title: reader.querySelector('h1')?.textContent ?? '',
             place: [...(toolbar?.querySelectorAll('span') ?? [])]
               .map(({ textContent }) => textContent ?? '')
               .find((text) => /^\d+ of \d+\+?$/.test(text)),
-            previous: previous
-              ? !previous.hasAttribute('disabled') &&
-                previous.getAttribute('aria-disabled') !== 'true'
-              : undefined,
-            archive: Boolean(toolbar?.querySelector('button[aria-label="Archive"]')),
+            previous: isEnabled(previous),
+            archive: isEnabled(header.querySelector('button[aria-label="Archive"]')) === true,
             moved: Boolean(document.querySelector('[role="option"][aria-selected="true"]')),
           };
         };
@@ -277,13 +280,15 @@ test('the frame that shows a conversation archived from the reader keeps its pla
             resolve(seen);
           }
         });
-        watching.observe(reader, {
-          subtree: true,
-          childList: true,
-          attributes: true,
-          characterData: true,
-        });
-        reader.querySelector<HTMLElement>('[role="toolbar"] button[aria-label="Archive"]')!.click();
+        for (const watched of [reader, header]) {
+          watching.observe(watched, {
+            subtree: true,
+            childList: true,
+            attributes: true,
+            characterData: true,
+          });
+        }
+        header.querySelector<HTMLElement>('button[aria-label="Archive"]')!.click();
       }),
     archived,
   );

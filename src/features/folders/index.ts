@@ -1,5 +1,5 @@
 export { Sidebar, type FooterPlace, type SidebarRail } from './ui/Sidebar.tsx';
-export { folderIcon, UNIFIED_VIEWS, type ViewCounts } from './ui/views.ts';
+export { folderIcon, UNIFIED_VIEWS, viewIcon, type ViewCounts } from './ui/views.ts';
 export { viewCounts } from './ui/counts.ts';
 export { folderName } from './ui/name.ts';
 export { CREATE, folderCommands, viewCommands, type FolderEdit } from './ui/commands.ts';
