@@ -1,6 +1,7 @@
 import {
   borderVars,
   colorVars,
+  focusVars,
   fontWeightVars,
   radiusVars,
   spacingVars,
@@ -121,6 +122,8 @@ function subjectOf(messages: Message[]): string {
   return subject || '(no subject)';
 }
 
+const FOCUS_RING = `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`;
+
 const styles = stylex.create({
   thread: {
     display: 'flex',
@@ -178,7 +181,9 @@ const styles = stylex.create({
     outline: {
       default: null,
       [media.forcedColors]: `${borderVars['--border-width']} solid CanvasText`,
+      ':focus-visible': FOCUS_RING,
     },
+    outlineOffset: focusVars['--focus-outline-offset'],
   },
   foldedFrom: {
     color: colorVars['--color-text-secondary'],

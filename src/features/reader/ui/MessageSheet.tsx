@@ -4,6 +4,7 @@ import { IconButton } from '@astryxdesign/core/IconButton';
 import {
   borderVars,
   colorVars,
+  focusVars,
   fontWeightVars,
   radiusVars,
   spacingVars,
@@ -34,7 +35,7 @@ export type MessageSheetProps = { message: Message; account: Account };
 /** One open message, on its own sheet of paper: who sent it, what it says, and what it carries. */
 export function MessageSheet({ message, account }: MessageSheetProps) {
   const ref = refOf(message);
-  const { data: body } = useQuery(bodyQuery(ref));
+  const { data: body, isError, refetch } = useQuery(bodyQuery(ref));
   const [showOnce, setShowOnce] = useState(false);
   const allowed = showOnce || imagesAllowed(message, account.allowImagesFrom);
   const allowImages = useAllowImages(account);
@@ -106,6 +107,11 @@ export function MessageSheet({ message, account }: MessageSheetProps) {
         />
       ) : text ? (
         <PlainText text={text.text} />
+      ) : isError ? (
+        <p role="alert" {...stylex.props(styles.quiet)}>
+          This message could not be opened.{' '}
+          <Button label="Try again" variant="ghost" size="sm" onClick={() => void refetch()} />
+        </p>
       ) : (
         <p {...stylex.props(styles.quiet)}>{body ? 'This message is empty.' : 'Opening…'}</p>
       )}
@@ -226,6 +232,8 @@ function size(bytes: number): string {
   return `${(bytes / 1_000_000).toFixed(1)} MB`;
 }
 
+const FOCUS_RING = `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`;
+
 const styles = stylex.create({
   sheet: {
     display: 'flex',
@@ -314,6 +322,8 @@ const styles = stylex.create({
     fontFamily: typographyVars['--font-family-body'],
     fontSize: typeScaleVars['--text-supporting-size'],
     cursor: 'pointer',
+    outline: { default: null, ':focus-visible': FOCUS_RING },
+    outlineOffset: focusVars['--focus-outline-offset'],
   },
   attachments: {
     display: 'flex',
@@ -335,6 +345,8 @@ const styles = stylex.create({
     color: colorVars['--color-text-primary'],
     textDecoration: 'none',
     backgroundColor: { default: 'transparent', ':hover': colorVars['--color-overlay-hover'] },
+    outline: { default: null, ':focus-visible': FOCUS_RING },
+    outlineOffset: focusVars['--focus-outline-offset'],
   },
   attachmentName: {
     overflow: 'hidden',
