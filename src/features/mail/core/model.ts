@@ -128,8 +128,14 @@ export type Outgoing = {
   id: string;
   /** Stays in Drafts until the mail server accepts the send. */
   draft: MessageRef;
+  /** The draft's, so a missing draft counts as sent only if Sent holds it. */
+  messageId: string;
+  /** When the next attempt is due: the member's chosen time, then each automatic retry's. */
   sendAt: string;
-  state: 'waiting' | 'sending' | 'failed';
+  /** `accepted`: the host took it, and only filing its copy in Sent remains. */
+  state: 'waiting' | 'sending' | 'accepted' | 'failed';
+  /** The attempts at the current step that failed. */
   attempts: number;
+  /** Why the last attempt failed. */
   error?: string;
 };

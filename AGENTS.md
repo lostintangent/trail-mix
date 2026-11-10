@@ -26,7 +26,7 @@ flowchart LR
 - **Mailroom.** One Durable Object per member, created on first sign-in, with private storage. It is the only writer of anything Trail Mix stores for that member and the only thing that opens a mail connection.
 - **Envelope index.** SQLite inside the Mailroom, with a full-text table over senders, recipients, subjects and previews. Lists, conversations and search read it.
 - **Body cache.** Raw messages in object storage, keyed by `MessageRef`. A body is fetched from the mail server the first time it is opened and kept after that.
-- **Outbox.** A schedule of drafts to send, driven by the Mailroom's alarm. Undo send and send later are the same mechanism.
+- **Outbox.** A schedule of drafts to send, driven by the Mailroom's alarm. Undo send and send later are the same mechanism. It records that the host accepted a message before filing it, so a retry after a failure or a restart only files. A send that fails for a passing reason, such as no connection or an SMTP 4xx, retries after 1, 2, 4, 8, 16 and 32 minutes and then hourly, until its retries have waited a day. A refusal, or a connection lost after the message went out, waits for Retry, and so does a send a restart cut short before its acceptance was recorded, which says it may have gone.
 - **MailProvider.** The one contract every mail host is reached through. It has two implementations: IMAP with SMTP, of which Zoho and Outlook are presets, and a seeded demo mailbox that tests, agents, previews and the public demo all use.
 - **Browser.** TanStack Query holds snapshots and applies changes optimistically. Each tab holds one WebSocket to its Mailroom.
 
@@ -147,7 +147,7 @@ src/
     conversations/ui/
     reader/            core/ sanitizes and folds quotes, ui/ renders the sandboxed frame
     composer/          core/ renders Markdown to mail, ui/ is the editor
-    outbox/ui/
+    outbox/            core/ is the state machine the Mailroom's alarm drives, ui/ lists what waits
     commands/          registry.ts and the palette
     members/           server/ edits the Cloudflare Access list, ui/ is the Members page
   server/

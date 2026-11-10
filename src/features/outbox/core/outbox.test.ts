@@ -1,0 +1,307 @@
+import { expect, test } from 'bun:test';
+import type { MessageRef, Outgoing } from '../../mail/core/index.ts';
+import {
+  MISSING,
+  RESTARTED,
+  begin,
+  cancel,
+  due,
+  filed,
+  nextWake,
+  recover,
+  retry,
+  schedule,
+  submitted,
+  type Failure,
+} from './outbox.ts';
+
+const T0 = Date.parse('2026-11-10T09:00:00.000Z');
+/** The time `minutes` after nine. */
+const at = (minutes: number) => new Date(T0 + minutes * 60_000).toISOString();
+
+const draft: MessageRef = { account: 'personal', path: 'Drafts', uidValidity: 7, uid: 42 };
+const send = (id = 'one', sendAt = at(0)) =>
+  schedule({ id, draft, messageId: `<${id}@trailmix.invalid>`, sendAt });
+
+const refused: Failure = { error: '550 5.1.1 No such user here', passing: false };
+const offline: Failure = { error: 'The connection to smtp.example.com timed out.', passing: true };
+
+test('a send waits for its time, then submits, files, and leaves the Outbox', () => {
+  const waiting = send('one', at(0.25));
+  expect(waiting).toMatchObject({ state: 'waiting', attempts: 0, sendAt: at(0.25) });
+  expect(nextWake([waiting])).toBe(at(0.25));
+  expect(due([waiting], at(0.2))).toEqual([]);
+  expect(due([waiting], at(0.25))).toEqual([{ step: 'submit', outgoing: waiting }]);
+
+  const sending = begin(waiting);
+  expect(sending.state).toBe('sending');
+  expect(due([sending], at(1))).toEqual([]);
+
+  const accepted = submitted(sending, 'sent', at(0.3));
+  expect(accepted).toEqual({ ...waiting, state: 'accepted', sendAt: at(0.3), attempts: 0 });
+  expect(due([accepted], at(0.3))).toEqual([{ step: 'file', outgoing: accepted }]);
+
+  expect(filed(accepted, 'filed', at(0.3))).toBe('done');
+});
+
+test('undo inside the window gives back the draft untouched', () => {
+  expect(cancel(send('now', at(0.25)))).toBe(draft);
+  expect(cancel(send('tomorrow', at(24 * 60)))).toBe(draft);
+});
+
+test('once a send has begun, it cannot be undone', () => {
+  const sending = begin(send());
+  expect(() => cancel(sending)).toThrow('It is being sent, so it can’t be undone.');
+  expect(() => cancel(submitted(sending, 'sent', at(0)))).toThrow('It has been sent.');
+});
+
+test('scheduled sends come due at their time, soonest first, with no one watching', () => {
+  const nine = send('nine', at(0));
+  const eight = send('eight', at(-60));
+  const alsoNine = send('also-nine', at(0));
+  const outbox = [nine, eight, alsoNine];
+  expect(nextWake(outbox)).toBe(at(-60));
+  expect(due(outbox, at(-30)).map(({ outgoing }) => outgoing.id)).toEqual(['eight']);
+  expect(due(outbox, at(0)).map(({ outgoing }) => outgoing.id)).toEqual([
+    'eight',
+    'also-nine',
+    'nine',
+  ]);
+});
+
+test('a send the server refuses keeps its reason and waits for Retry, then succeeds', () => {
+  const rejected = submitted(begin(send()), refused, at(0));
+  expect(rejected).toMatchObject({ state: 'failed', attempts: 1, error: refused.error });
+  expect(due([rejected], at(7 * 24 * 60))).toEqual([]);
+  expect(nextWake([rejected])).toBeUndefined();
+  expect(cancel(rejected)).toBe(rejected.draft);
+
+  const again = retry(rejected, at(5));
+  expect(again).toEqual({ ...send(), sendAt: at(5) });
+  const accepted = submitted(begin(again), 'sent', at(5));
+  expect(accepted.state).toBe('accepted');
+  expect(filed(accepted, 'filed', at(5))).toBe('done');
+});
+
+test('a passing failure retries on its own after 1, 2, 4, 8, 16 and 32 minutes, then hourly, for a day', () => {
+  let outgoing = send();
+  let now = 0;
+  const waits: number[] = [];
+  while (outgoing.state === 'waiting') {
+    outgoing = submitted(begin(outgoing), offline, at(now));
+    if (outgoing.state !== 'waiting') break;
+    expect(outgoing.error).toBe(offline.error);
+    const next = (Date.parse(outgoing.sendAt) - Date.parse(at(now))) / 60_000;
+    waits.push(next);
+    now += next + 0.5;
+  }
+  expect(waits).toEqual([1, 2, 4, 8, 16, 32, ...Array<number>(22).fill(60)]);
+  expect(waits.reduce((sum, wait) => sum + wait, 0)).toBeLessThanOrEqual(24 * 60);
+  expect(outgoing).toMatchObject({ state: 'failed', attempts: 29, error: offline.error });
+});
+
+test('a send accepted after failing files with a clean slate', () => {
+  const retried = submitted(begin(send()), offline, at(0));
+  const accepted = submitted(begin(retried), 'sent', at(1));
+  expect(accepted).toEqual({ ...send(), state: 'accepted', sendAt: at(1), attempts: 0 });
+  expect(filed(accepted, offline, at(1))).toMatchObject({ attempts: 1, sendAt: at(2) });
+});
+
+test('Retry on a send that is retrying on its own, or filing, tries it now', () => {
+  const retrying = submitted(begin(send()), offline, at(0));
+  expect(retry(retrying, at(0.5))).toEqual({ ...retrying, sendAt: at(0.5) });
+  const filing = filed(submitted(begin(send()), 'sent', at(0)), offline, at(0)) as Outgoing;
+  expect(retry(filing, at(0.5))).toEqual({ ...filing, sendAt: at(0.5) });
+  expect(() => retry(begin(send()), at(0))).toThrow('It is being sent.');
+});
+
+test('a draft that is gone, and not in Sent, fails saying so and never counts as sent', () => {
+  const gone = submitted(begin(send()), 'missing', at(0));
+  expect(gone).toMatchObject({ state: 'failed', error: MISSING });
+  expect(due([gone], at(60))).toEqual([]);
+});
+
+test('filing that fails retries on its own however long it takes, and never submits again', () => {
+  let outgoing = submitted(begin(send()), 'sent', at(0));
+  let now = 0;
+  for (let failure = 1; failure <= 40; failure++) {
+    const [next] = due([outgoing], at(now));
+    expect(next?.step).toBe('file');
+    outgoing = filed(outgoing, refused, at(now)) as Outgoing;
+    expect(outgoing).toMatchObject({ state: 'accepted', attempts: failure, error: refused.error });
+    now = (Date.parse(outgoing.sendAt) - T0) / 60_000;
+  }
+  expect(Date.parse(outgoing.sendAt) - Date.parse(at(now - 60))).toBe(60 * 60_000);
+  expect(filed(outgoing, 'filed', at(now))).toBe('done');
+});
+
+test('a send cut short by a restart is held as failed, saying it may have gone', () => {
+  const waiting = send('waiting', at(10));
+  const sending = begin(send('sending'));
+  const accepted = submitted(begin(send('accepted')), 'sent', at(0));
+  const rejected = submitted(begin(send('rejected')), refused, at(0));
+  const [a, b, c, d] = recover([waiting, sending, accepted, rejected]);
+  expect(a).toBe(waiting);
+  expect(b).toEqual({ ...sending, state: 'failed', attempts: 1, error: RESTARTED });
+  expect(c).toBe(accepted);
+  expect(d).toBe(rejected);
+});
+
+test('each step happens only from its own state', () => {
+  const sending = begin(send());
+  const accepted = submitted(sending, 'sent', at(0));
+  expect(() => begin(sending)).toThrow('A sending send cannot begin.');
+  expect(() => begin(accepted)).toThrow('A accepted send cannot begin.');
+  expect(() => submitted(send(), 'sent', at(0))).toThrow('A waiting send did not submit.');
+  expect(() => filed(sending, 'filed', at(0))).toThrow('A sending send cannot be filed.');
+});
+
+// A Mailroom and a host, cut short at every point a restart can land.
+
+/** The points where a Mailroom can stop, in the order a send passes them. */
+const POINTS = [
+  'before it begins',
+  'once it has begun',
+  'once the host has accepted it',
+  'once the Outbox has recorded that',
+  'once Sent has its copy',
+  'once the draft is gone',
+] as const;
+type Point = (typeof POINTS)[number];
+
+class Restart extends Error {}
+
+/**
+ * A host as the provider contract describes it. `submit` checks Sent for the Message-ID before it
+ * hands the host anything, and `file` appends a copy only if Sent lacks one, then removes the draft.
+ * A host that files its own copy does so a moment after it accepts.
+ */
+function host(filesItsOwn: boolean, messageId: string) {
+  const world = { drafts: new Set([messageId]), sent: [] as string[], delivered: 0 };
+  let filing = false;
+  return {
+    world,
+    /** Time passes, and a host that files its own copy has done so. */
+    settle() {
+      if (filing) world.sent.push(messageId);
+      filing = false;
+    },
+    submit(stop: (point: Point) => void): 'sent' | 'missing' {
+      if (world.sent.includes(messageId)) return 'sent';
+      if (!world.drafts.has(messageId)) return 'missing';
+      world.delivered++;
+      filing = filesItsOwn;
+      stop('once the host has accepted it');
+      return 'sent';
+    },
+    file(stop: (point: Point) => void, fail: boolean): 'filed' | Failure {
+      if (fail) return { error: 'NO [OVERQUOTA] Sent is full', passing: false };
+      if (!filesItsOwn && !world.sent.includes(messageId)) world.sent.push(messageId);
+      stop('once Sent has its copy');
+      world.drafts.delete(messageId);
+      stop('once the draft is gone');
+      return 'filed';
+    },
+  };
+}
+
+/** One wake of the Mailroom, driving the Outbox the way its documentation says to. */
+function wake(
+  outbox: Map<string, Outgoing>,
+  server: ReturnType<typeof host>,
+  now: string,
+  stop: (point: Point) => void,
+  failFiling: { once: boolean },
+) {
+  for (
+    let next = due([...outbox.values()], now)[0];
+    next;
+    next = due([...outbox.values()], now)[0]
+  ) {
+    const { id } = next.outgoing;
+    if (next.step === 'submit') {
+      stop('before it begins');
+      outbox.set(id, begin(next.outgoing));
+      stop('once it has begun');
+      outbox.set(id, submitted(outbox.get(id)!, server.submit(stop), now));
+      stop('once the Outbox has recorded that');
+    } else {
+      const outcome = server.file(stop, failFiling.once);
+      failFiling.once = false;
+      const result = filed(next.outgoing, outcome, now);
+      if (result === 'done') outbox.delete(id);
+      else outbox.set(id, result);
+    }
+  }
+}
+
+/** Sends one message, restarting the Mailroom once at `point`, and runs every wake that follows. */
+function sendThrough(point: Point | undefined, filesItsOwn: boolean, failFiling = false) {
+  const scheduled = send();
+  const server = host(filesItsOwn, scheduled.messageId);
+  let outbox = new Map([[scheduled.id, scheduled]]);
+  let stopped = false;
+  const stop = (reached: Point) => {
+    if (reached === point && !stopped) {
+      stopped = true;
+      throw new Restart(reached);
+    }
+  };
+  const failing = { once: failFiling };
+  let minute = 0;
+  for (let wakes = 0; wakes < 5; wakes++, minute += 2) {
+    try {
+      wake(outbox, server, at(minute), stop, failing);
+    } catch (error) {
+      if (!(error instanceof Restart)) throw error;
+      outbox = new Map(recover([...outbox.values()]).map((entry) => [entry.id, entry]));
+    }
+    server.settle();
+    // Never twice, and never a draft gone without its message having left.
+    expect(server.world.delivered).toBeLessThanOrEqual(1);
+    if (!server.world.drafts.has(scheduled.messageId)) expect(server.world.delivered).toBe(1);
+  }
+  return { outbox, server, entry: outbox.get(scheduled.id), minute };
+}
+
+for (const filesItsOwn of [false, true]) {
+  const kind = filesItsOwn ? 'a host that files its own copy' : 'a host Trail Mix files for';
+
+  test(`on ${kind}, a restart before a send begins, or once its acceptance is recorded, still sends it once`, () => {
+    for (const point of [undefined, ...POINTS]) {
+      if (point === 'once the host has accepted it' || point === 'once it has begun') continue;
+      const { entry, server } = sendThrough(point, filesItsOwn);
+      expect({ point, entry }).toEqual({ point, entry: undefined });
+      expect({ point, ...server.world }).toEqual({
+        point,
+        drafts: new Set(),
+        sent: [send().messageId],
+        delivered: 1,
+      });
+    }
+  });
+
+  test(`on ${kind}, a restart while it submits holds the send as failed, draft and all`, () => {
+    for (const point of ['once it has begun', 'once the host has accepted it'] as const) {
+      const { entry, server } = sendThrough(point, filesItsOwn);
+      expect(entry).toMatchObject({ state: 'failed', error: RESTARTED });
+      expect(server.world.drafts.has(send().messageId)).toBe(true);
+      expect(server.world.delivered).toBe(point === 'once it has begun' ? 0 : 1);
+    }
+  });
+
+  test(`on ${kind}, a failed filing after acceptance files later and delivers nothing again`, () => {
+    const { entry, server } = sendThrough(undefined, filesItsOwn, true);
+    expect(entry).toBeUndefined();
+    expect(server.world).toEqual({ drafts: new Set(), sent: [send().messageId], delivered: 1 });
+  });
+}
+
+test('after a restart cut it short, Retry finds the copy a host filed itself and does not send again', () => {
+  const { outbox, server, minute } = sendThrough('once the host has accepted it', true);
+  const held = [...outbox.values()][0]!;
+  outbox.set(held.id, retry(held, at(minute)));
+  wake(outbox, server, at(minute), () => {}, { once: false });
+  expect(outbox.size).toBe(0);
+  expect(server.world).toEqual({ drafts: new Set(), sent: [send().messageId], delivered: 1 });
+});

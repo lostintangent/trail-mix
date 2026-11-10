@@ -20,6 +20,7 @@ const folder = (
 const waiting = (id: string): Outgoing => ({
   id,
   draft: { account: 'personal', path: 'Drafts', uidValidity: 1, uid: 9 },
+  messageId: `<${id}@trailmix.invalid>`,
   sendAt: '2026-11-10T09:00:00Z',
   state: 'waiting',
   attempts: 0,
