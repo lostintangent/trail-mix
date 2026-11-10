@@ -96,5 +96,9 @@ async function harness(profile: Profile): Promise<Harness> {
 }
 
 for (const profile of Object.keys(profiles) as Profile[]) {
-  describeContract(`The IMAP provider on the ${profile} profile`, () => harness(profile));
+  // Over TLS to a real server, a case such as filling a folder with 520 messages takes about
+  // 5 seconds on a CI runner, Bun's whole default.
+  describeContract(`The IMAP provider on the ${profile} profile`, () => harness(profile), {
+    timeout: 30_000,
+  });
 }

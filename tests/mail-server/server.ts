@@ -97,13 +97,21 @@ async function launch(binaries: Dovecot, profile: Profile) {
   writeFileSync(join(state, 'profile'), profile);
 
   rmSync(join(state, 'serve.ready'), { force: true });
-  const log = openSync(join(state, 'serve.log'), 'a');
-  const child = spawn(process.execPath, [import.meta.path, 'serve'], {
-    detached: true,
-    stdio: ['ignore', log, log],
-  });
-  writeFileSync(join(state, 'serve.pid'), String(child.pid));
-  child.unref();
+  // Started by a shell that exits at once, so that, as Dovecot does, the server runs on its own and
+  // records its own pid. When a test times out, Bun ends the processes its tests and hooks
+  // started, and a server started from a harness's hook would go with them.
+  const launcher = spawn(
+    '/bin/sh',
+    [
+      '-c',
+      '"$0" "$1" serve >>"$2" 2>&1 </dev/null &',
+      process.execPath,
+      import.meta.path,
+      join(state, 'serve.log'),
+    ],
+    { detached: true, stdio: 'ignore' },
+  );
+  await new Promise((resolve) => launcher.once('exit', resolve));
 
   // Dovecot daemonizes, and its children would hold any pipe open, so its output goes to a file.
   const startup = join(state, 'startup.log');
@@ -338,6 +346,9 @@ const patched = {
   prefix: join(root, 'dovecot-2.4.5-macos'),
 };
 
+let building: Promise<void> | undefined;
+
+/** Dovecot's binaries, built first on a Mac that has no Dovecot with the TLS fix. */
 async function dovecot(): Promise<Dovecot> {
   const installed = [
     'dovecot',
@@ -353,7 +364,10 @@ async function dovecot(): Promise<Dovecot> {
 
   if (process.platform === 'darwin') {
     if (installed && version && atLeast(version, [2, 4, 6])) return binaries(installed);
-    if (!existsSync(join(patched.prefix, 'built'))) await buildPatched();
+    // One build at a time: a start that gave up waiting must not begin a second over the first.
+    if (!existsSync(join(patched.prefix, 'built'))) {
+      await (building ??= buildPatched().finally(() => (building = undefined)));
+    }
     return binaries(join(patched.prefix, 'sbin/dovecot'));
   }
   if (installed && version && atLeast(version, [2, 4, 0])) return binaries(installed);
@@ -468,6 +482,7 @@ async function buildPatched() {
 // The Bun half: submission and the stand-in for Microsoft's sign-in, run detached by `start`
 
 async function serve() {
+  writeFileSync(join(state, 'serve.pid'), String(process.pid));
   const { SMTPServer } = await import('smtp-server');
   const nodemailer = (await import('nodemailer')).default;
   const lmtp = nodemailer.createTransport({
@@ -648,6 +663,10 @@ if (import.meta.main) {
       );
       break;
     }
+    case 'prepare':
+      // `bun run test:mail` prepares first, so no test waits on a build.
+      await dovecot();
+      break;
     case 'serve':
       await serve();
       break;

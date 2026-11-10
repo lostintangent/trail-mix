@@ -2,6 +2,7 @@
 // through a harness that plays the rest of the world, meaning mail arriving, other clients and the
 // host itself. A provider passes when the index it feeds would mirror the mailbox.
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import type { Envelope, MessageRef, SyncEvent } from '../../src/features/mail/core/index.ts';
 import type { Cursor, MailProvider } from '../../src/features/providers/index.ts';
 
@@ -24,18 +25,45 @@ export type Harness = {
 
 const WINDOW = { since: '2000-01-01T00:00:00Z' };
 
-export function describeContract(name: string, harness: () => Promise<Harness>) {
+/**
+ * Describes the contract for one provider. `timeout` is how long each case may take, which a
+ * provider talking to a real server needs more of than Bun's default.
+ */
+export function describeContract(
+  name: string,
+  harness: () => Promise<Harness>,
+  { timeout }: { timeout?: number } = {},
+) {
   describe(`${name} meets the provider contract`, () => {
     let h: Harness | undefined;
     let provider: MailProvider;
+
+    // Bun moves on from a case that runs out of time while its work carries on. So each case runs
+    // in its own async context, and the world refuses one that is no longer the current case, which
+    // stops it at its next call instead of letting it fill the next case's mailbox.
+    const cases = new AsyncLocalStorage<string>();
+    let current: string | undefined;
+    const it = (title: string, body: () => Promise<void>) =>
+      test(
+        title,
+        () => {
+          current = title;
+          return cases.run(title, body);
+        },
+        timeout,
+      );
+
+    // The first one starts the harness's server, which can take a while.
     beforeEach(async () => {
       h ??= await harness();
       provider = h.provider;
       await h.reset();
-    });
+    }, 60_000);
     afterAll(() => h?.close());
     const world = () => {
       if (!h) throw new Error('no harness');
+      const running = cases.getStore();
+      if (running !== current) throw new Error(`“${running}” ran out of time, so it stops here.`);
       return h;
     };
 
@@ -66,12 +94,12 @@ export function describeContract(name: string, harness: () => Promise<Harness>) 
       return folder.path;
     }
 
-    test('lists every folder, each standard role on exactly one', async () => {
+    it('lists every folder, each standard role on exactly one', async () => {
       const roles = (await provider.folders()).flatMap((f) => (f.role ? [f.role] : []));
       expect(roles.sort()).toEqual(['archive', 'drafts', 'inbox', 'junk', 'sent', 'trash']);
     });
 
-    test('reports a folder newest first, as envelopes a list and a conversation need', async () => {
+    it('reports a folder newest first, as envelopes a list and a conversation need', async () => {
       await world().deliver(message({ id: 'first', subject: 'First', minutesAgo: 30 }));
       await world().deliver(
         message({
@@ -104,7 +132,7 @@ export function describeContract(name: string, harness: () => Promise<Harness>) 
       });
     });
 
-    test('reports a large folder in bounded batches that together hold every message once', async () => {
+    it('reports a large folder in bounded batches that together hold every message once', async () => {
       for (let i = 0; i < 520; i++) {
         await world().deliver(message({ id: `bulk-${i}`, subject: `Bulk ${i}` }));
       }
@@ -115,7 +143,7 @@ export function describeContract(name: string, harness: () => Promise<Harness>) 
       expect(new Set(ids).size).toBe(520);
     });
 
-    test('reports only what changed since the cursor, and nothing when nothing did', async () => {
+    it('reports only what changed since the cursor, and nothing when nothing did', async () => {
       await world().deliver(message({ id: 'old', subject: 'Old' }));
       const { cursor } = await syncAll('INBOX');
       await world().deliver(message({ id: 'new', subject: 'New' }));
@@ -124,7 +152,7 @@ export function describeContract(name: string, harness: () => Promise<Harness>) 
       expect((await syncAll('INBOX', next.cursor)).events).toEqual([]);
     });
 
-    test('changes flags, reports each change once, and setting them again changes nothing', async () => {
+    it('changes flags, reports each change once, and setting them again changes nothing', async () => {
       await world().deliver(message({ id: 'flag-me', subject: 'Flag me' }));
       const first = await syncAll('INBOX');
       const ref = refOf(arrived(first.events)[0]!);
@@ -145,7 +173,7 @@ export function describeContract(name: string, harness: () => Promise<Harness>) 
       ]);
     });
 
-    test('reports a message another client removed as gone', async () => {
+    it('reports a message another client removed as gone', async () => {
       await world().deliver(message({ id: 'keep', subject: 'Keep' }));
       await world().deliver(message({ id: 'remove', subject: 'Remove' }));
       const { events, cursor } = await syncAll('INBOX');
@@ -156,7 +184,7 @@ export function describeContract(name: string, harness: () => Promise<Harness>) 
       ]);
     });
 
-    test('starts a folder over when its UIDVALIDITY changes', async () => {
+    it('starts a folder over when its UIDVALIDITY changes', async () => {
       await world().deliver(message({ id: 'renumbered', subject: 'Renumbered' }));
       const before = await syncAll('INBOX');
       await world().resetUidValidity('INBOX');
@@ -167,7 +195,7 @@ export function describeContract(name: string, harness: () => Promise<Harness>) 
       expect(again?.uidValidity).not.toBe(arrived(before.events)[0]?.uidValidity);
     });
 
-    test('moves messages to another folder, and moving them again does nothing', async () => {
+    it('moves messages to another folder, and moving them again does nothing', async () => {
       await world().deliver(message({ id: 'move-me', subject: 'Move me' }));
       const { events, cursor } = await syncAll('INBOX');
       const ref = refOf(arrived(events)[0]!);
@@ -179,7 +207,7 @@ export function describeContract(name: string, harness: () => Promise<Harness>) 
       expect(await count(archive, '<move-me@example.com>')).toBe(1);
     });
 
-    test('saves a draft, and a new version replaces the old one', async () => {
+    it('saves a draft, and a new version replaces the old one', async () => {
       const drafts = await role('drafts');
       const draft = (subject: string) =>
         bytes(message({ id: 'draft', subject, to: world().address }));
@@ -195,7 +223,7 @@ export function describeContract(name: string, harness: () => Promise<Harness>) 
       expect(arrived((await syncAll(drafts)).events)).toHaveLength(2);
     });
 
-    test('sends a draft once, with one copy in Sent and the draft gone, however often it is sent', async () => {
+    it('sends a draft once, with one copy in Sent and the draft gone, however often it is sent', async () => {
       const { address } = world();
       const id = '<send-me@example.com>';
       const draft = await provider.saveDraft(
@@ -208,7 +236,7 @@ export function describeContract(name: string, harness: () => Promise<Harness>) 
       expect(await count(await role('drafts'), id)).toBe(0);
     });
 
-    test('a send cut short after the host accepted it delivers again, but files one copy', async () => {
+    it('a send cut short after the host accepted it delivers again, but files one copy', async () => {
       const { address } = world();
       const id = '<interrupted@example.com>';
       const raw = message({
@@ -226,7 +254,7 @@ export function describeContract(name: string, harness: () => Promise<Harness>) 
       expect(await count(await role('drafts'), id)).toBe(0);
     });
 
-    test('keeps Bcc recipients out of what it delivers and files', async () => {
+    it('keeps Bcc recipients out of what it delivers and files', async () => {
       const { address } = world();
       const raw = message({
         id: 'blind',
@@ -244,7 +272,7 @@ export function describeContract(name: string, harness: () => Promise<Harness>) 
       }
     });
 
-    test('returns the raw message', async () => {
+    it('returns the raw message', async () => {
       await world().deliver(message({ id: 'raw', subject: 'Raw', text: 'Exactly these words.' }));
       const envelope = await only('INBOX', 'Raw');
       const text = await new Response(await provider.body(refOf(envelope))).text();
@@ -252,7 +280,7 @@ export function describeContract(name: string, harness: () => Promise<Harness>) 
       expect(text).toContain('Exactly these words.');
     });
 
-    test('reading a message leaves it unread', async () => {
+    it('reading a message leaves it unread', async () => {
       await world().deliver(message({ id: 'unread', subject: 'Unread' }));
       const { events, cursor } = await syncAll('INBOX');
       await new Response(await provider.body(refOf(arrived(events)[0]!))).text();
@@ -260,7 +288,7 @@ export function describeContract(name: string, harness: () => Promise<Harness>) 
       expect((await only('INBOX', 'Unread')).flags.seen).toBe(false);
     });
 
-    test('finds a phrase that appears only inside a message', async () => {
+    it('finds a phrase that appears only inside a message', async () => {
       await world().deliver(
         message({ id: 'needle', subject: 'Plain', text: 'A periwinkle teapot.' }),
       );
@@ -269,7 +297,7 @@ export function describeContract(name: string, harness: () => Promise<Harness>) 
       expect(await provider.search('INBOX', 'periwinkle')).toEqual([envelope.uid]);
     });
 
-    test('tells a watcher about new mail until it stops watching', async () => {
+    it('tells a watcher about new mail until it stops watching', async () => {
       let changes = 0;
       const stop = provider.watch('INBOX', () => changes++);
       await Bun.sleep(1000);
@@ -282,7 +310,7 @@ export function describeContract(name: string, harness: () => Promise<Harness>) 
       expect(changes).toBe(seen);
     });
 
-    test('creates, renames and deletes nested folders, each safe to repeat', async () => {
+    it('creates, renames and deletes nested folders, each safe to repeat', async () => {
       await provider.createFolder('Projects');
       await provider.createFolder('Projects/Toy Box');
       await provider.createFolder('Projects/Toy Box');
