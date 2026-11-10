@@ -23,8 +23,9 @@ export type Key =
 
 /**
  * Whether a hint leaves a snapshot out of date. A change to a folder's mail changes its counts and
- * its list, every view across accounts, which may hold its mail, and any open conversation, which
- * the hint can't name. A body never changes for its message, so no hint touches one.
+ * its list, every view across accounts, which may hold its mail, any open conversation, which the
+ * hint can't name, and the Outbox, which names the conversation each draft on its way is in. A body
+ * never changes for its message, so no hint touches one.
  */
 export function isStale(key: Key, hint: Hint): boolean {
   switch (hint.changed) {
@@ -33,11 +34,12 @@ export function isStale(key: Key, hint: Hint): boolean {
     case 'folders':
       return key[0] === 'folders';
     case 'outbox':
-      return key[0] === 'outbox' || (key[0] === 'conversations' && key[1].in === 'outbox');
+      return key[0] === 'outbox';
     case 'conversations':
       return (
         key[0] === 'folders' ||
         key[0] === 'conversation' ||
+        key[0] === 'outbox' ||
         (key[0] === 'conversations' &&
           (key[1].in !== 'folder' || isSameFolder(key[1].folder, hint.folder)))
       );

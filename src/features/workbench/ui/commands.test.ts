@@ -3,6 +3,7 @@ import { themeCommands } from '../../../app/theme/commands.ts';
 import { commandFor, matching, problemsOf, type Command } from '../../commands/index.ts';
 import { triageCommands } from '../../conversations/index.ts';
 import { viewCommands } from '../../folders/index.ts';
+import { sendCommands } from '../../outbox/index.ts';
 import type { Account, Folder } from '../../mail/core/index.ts';
 import { workbenchCommands } from './commands.ts';
 
@@ -40,6 +41,7 @@ function registry(isUnread: boolean): Command[] {
       showShortcuts: nothing,
     }),
     ...viewCommands(accounts, folders, nothing),
+    ...sendCommands({ onSend: nothing }),
     ...themeCommands('system', nothing),
   ];
 }

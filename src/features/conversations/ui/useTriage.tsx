@@ -19,6 +19,7 @@ import {
   type Command,
   type Moved,
 } from '../core/triage.ts';
+import { reasonOf } from '../../../shared/reasons.ts';
 import { toast } from '../../../shared/toasts.tsx';
 import { overlaysOf } from './overlays.ts';
 
@@ -176,11 +177,4 @@ function doingOf(action: Action, folders: readonly Folder[]): string {
 function destinationName(to: { account: string; path: string }, folders: readonly Folder[]) {
   const folder = folders.find(({ account, path }) => account === to.account && path === to.path);
   return folder ? folderName(folder) : to.path;
-}
-
-/** The server's own reason, which the Mailroom passes on as the error's message. */
-function reasonOf(error: unknown): string {
-  const reason = error instanceof Error ? error.message.trim() : '';
-  if (!reason) return 'The mail server gave no reason.';
-  return /[.!?]$/.test(reason) ? reason : `${reason}.`;
 }

@@ -14,7 +14,6 @@ const views: View[] = [
   { in: 'inbox' },
   { in: 'flagged' },
   { in: 'drafts' },
-  { in: 'outbox' },
   { in: 'search', text: 'lunch' },
 ];
 
@@ -35,14 +34,14 @@ const staleAfter = (hint: Hint) =>
   snapshots.filter(([, key]) => isStale(key, hint)).map(([name]) => name);
 
 // The work Inbox shares the path "INBOX", so only the account tells the two lists apart.
-test('a change to a folder’s mail refetches its counts, its list, every view across accounts and the open conversation', () => {
+test('a change to a folder’s mail refetches its counts, its list, every view across accounts, the open conversation and the Outbox', () => {
   expect(staleAfter({ changed: 'conversations', folder: inbox })).toEqual([
     'folders',
+    'outbox',
     'list of personal INBOX',
     'list of inbox',
     'list of flagged',
     'list of drafts',
-    'list of outbox',
     'list of search',
     'open conversation',
   ]);
@@ -51,7 +50,7 @@ test('a change to a folder’s mail refetches its counts, its list, every view a
 test('accounts, folders and the Outbox each refetch only what shows them', () => {
   expect(staleAfter({ changed: 'accounts' })).toEqual(['accounts']);
   expect(staleAfter({ changed: 'folders', account: 'personal' })).toEqual(['folders']);
-  expect(staleAfter({ changed: 'outbox' })).toEqual(['outbox', 'list of outbox']);
+  expect(staleAfter({ changed: 'outbox' })).toEqual(['outbox']);
 });
 
 test('a body never changes, so no hint refetches one', () => {

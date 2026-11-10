@@ -1,6 +1,6 @@
 import { colorVars, durationVars, spacingVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   startTransition,
   Suspense,
@@ -21,9 +21,11 @@ import {
   type ConversationId,
   type ConversationSummary,
   type Folder,
+  type Message,
   type View,
 } from '../../mail/core/index.ts';
-import { conversationsQuery } from '../../mailroom/client/index.ts';
+import { conversationQuery, conversationsQuery } from '../../mailroom/client/index.ts';
+import { draftIn, OutboxList, SendDraft, useOutboxCommands } from '../../outbox/index.ts';
 import { ListPane } from './ListPane.tsx';
 import { PanelEdge } from './PanelEdge.tsx';
 import { PANELS } from './panels.ts';
@@ -196,6 +198,7 @@ export function Workbench({
         write: undefined,
         reply: (all) => replyIn(conversation, all),
       });
+      const draft = draftIn(conversation, folders);
       return (
         <>
           {reply && <CommandButton command={reply} />}
@@ -210,6 +213,7 @@ export function Workbench({
             })}
             isCompact={place === 'island'}
           />
+          {draft && <SendDraft draft={draft} isCompact={place === 'island'} />}
         </>
       );
     },
@@ -273,6 +277,15 @@ export function Workbench({
     <TriageActions commands={selectedCommands} isCompact={place === 'island'} />
   );
 
+  // The open conversation's draft, if it has one, which Send sends. Only a change of draft redraws.
+  const selectDraft = useCallback((messages: Message[]) => draftIn(messages, folders), [folders]);
+  const { data: openDraft } = useQuery({
+    ...conversationQuery(selected ?? ''),
+    enabled: selected !== undefined,
+    select: selectDraft,
+  });
+  const outbox = useOutboxCommands(selected === undefined ? undefined : openDraft);
+
   // The registry: every command the workbench can run now, gathered from each feature, which binds
   // their keys and feeds the palette and the shortcut sheet.
   const anchorAt = conversations?.findIndex(({ id }) => id === selection.anchor) ?? -1;
@@ -294,7 +307,8 @@ export function Workbench({
           : isMany
             ? stopPicking
             : undefined,
-      undo: canUndo ? undoLast : undefined,
+      // While a send can still be taken back, Undo takes it back first.
+      undo: outbox.undoSend ?? (canUndo ? undoLast : undefined),
       focusSearch,
       showShortcuts: () => setSheetOpen(true),
     }),
@@ -303,6 +317,7 @@ export function Workbench({
       reply: selected !== undefined && !isMany ? (all) => void composing.reply(all) : undefined,
     }),
     ...viewCommands(accounts, folders, openView),
+    ...outbox.commands,
     ...extraCommands,
   ];
   useCommandKeys(commands);
@@ -392,6 +407,18 @@ export function Workbench({
                       />
                     )}
                   </>
+                }
+                list={
+                  view.in === 'outbox' && (
+                    <Suspense>
+                      <OutboxList
+                        label={title}
+                        stamps={stamps}
+                        selected={selected}
+                        onOpen={(id) => pick(id, 'only')}
+                      />
+                    </Suspense>
+                  )
                 }
                 isSearch={view.in === 'search'}
                 conversations={conversations}

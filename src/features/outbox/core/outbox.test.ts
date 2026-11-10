@@ -69,14 +69,22 @@ test('a send scheduled ahead goes at its time, and never before the undo window 
 });
 
 test('undo inside the window gives back the draft untouched', () => {
-  expect(cancel(send('now', at(0.25)))).toBe(draft);
-  expect(cancel(send('tomorrow', at(24 * 60)))).toBe(draft);
+  expect(cancel(send('now', at(0.25)), at(0.2))).toBe(draft);
+  expect(cancel(send('tomorrow', at(24 * 60)), at(0))).toBe(draft);
 });
 
 test('once a send has begun, it cannot be undone', () => {
   const sending = begin(send());
-  expect(() => cancel(sending)).toThrow('It is being sent, so it can’t be undone.');
-  expect(() => cancel(submitted(sending, 'sent', at(0)))).toThrow('It has been sent.');
+  expect(() => cancel(sending, at(0))).toThrow('It is being sent, so it can’t be undone.');
+  expect(() => cancel(submitted(sending, 'sent', at(0)), at(0))).toThrow('It has been sent.');
+});
+
+test('the undo window closes when a send comes due, before the Mailroom wakes to begin it', () => {
+  const waiting = send('now', at(0.25));
+  expect(() => cancel(waiting, at(0.25))).toThrow('It is being sent, so it can’t be undone.');
+  const retrying = submitted(begin(waiting), offline, at(0.25));
+  expect(cancel(retrying, at(1))).toBe(draft);
+  expect(() => cancel(retrying, retrying.sendAt)).toThrow('It is being sent');
 });
 
 test('scheduled sends come due at their time, soonest first, with no one watching', () => {
@@ -98,7 +106,7 @@ test('a send the server refuses keeps its reason and waits for Retry, then succe
   expect(rejected).toMatchObject({ state: 'failed', attempts: 1, error: refused.error });
   expect(due([rejected], at(7 * 24 * 60))).toEqual([]);
   expect(nextWake([rejected])).toBeUndefined();
-  expect(cancel(rejected)).toBe(rejected.draft);
+  expect(cancel(rejected, at(7 * 24 * 60))).toBe(rejected.draft);
 
   const again = retry(rejected, at(5));
   expect(again).toEqual({ ...send(), sendAt: at(5) });

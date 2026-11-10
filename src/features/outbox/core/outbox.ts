@@ -69,12 +69,16 @@ export function schedule(
 }
 
 /**
- * Undo, or giving up on a send: the draft it would have sent, untouched. Refused once the send has
- * begun, since the host may already have the message.
+ * Undo, or giving up on a send: the draft it would have sent, untouched. Refused once the send is
+ * due, whether or not the Mailroom has woken to begin it, so the undo window closes when a
+ * countdown reaches zero and a send that leaves the Outbox after its time has gone. A failed send
+ * can always be given up.
  */
-export function cancel(outgoing: Outgoing): MessageRef {
-  if (outgoing.state === 'sending') throw new Error('It is being sent, so it can’t be undone.');
+export function cancel(outgoing: Outgoing, now: string): MessageRef {
   if (outgoing.state === 'accepted') throw new Error('It has been sent.');
+  const isDue = outgoing.state === 'waiting' && Date.parse(now) >= Date.parse(outgoing.sendAt);
+  if (outgoing.state === 'sending' || isDue)
+    throw new Error('It is being sent, so it can’t be undone.');
   return outgoing.draft;
 }
 

@@ -399,7 +399,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   }
 
   cancelSend(id: string): Promise<MessageRef> {
-    return Promise.resolve(this.sending.cancel(input.sendOf(id)));
+    return Promise.resolve(this.sending.cancel(input.sendOf(id), new Date().toISOString()));
   }
 
   async retrySend(id: string): Promise<Outgoing> {

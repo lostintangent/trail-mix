@@ -64,6 +64,8 @@ function Desk({
   const counts = useMemo(() => viewCounts(folders, outbox), [folders, outbox]);
   const { data, hasNextPage, isFetching, isFetchingNextPage, fetchNextPage } = useInfiniteQuery({
     ...conversationsQuery(view),
+    // The Outbox lists sends, not conversations.
+    enabled: view.in !== 'outbox',
     // While a search is typed, the results so far stay until the next arrive, so the list doesn't
     // blink between keystrokes.
     placeholderData: (previous, previousQuery) =>

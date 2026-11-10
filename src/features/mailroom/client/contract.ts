@@ -55,7 +55,7 @@ export interface Commands {
   saveDraft(draft: DraftInput, replaces?: MessageRef): Promise<MessageRef>;
   /** At now plus the undo window, unless given a time. */
   send(draft: MessageRef, at?: string): Promise<Outgoing>;
-  /** Returns the draft, untouched. */
+  /** Returns the draft, untouched. Refused once the send is due, unless it failed. */
   cancelSend(id: string): Promise<MessageRef>;
   /** A failed send, tried again now. */
   retrySend(id: string): Promise<Outgoing>;

@@ -16,7 +16,7 @@ import type {
   Outgoing,
   View,
 } from '../../mail/core/index.ts';
-import { RESTARTED, UNDO_SECONDS } from '../../outbox/index.ts';
+import { RESTARTED, UNDO_SECONDS } from '../../outbox/core/index.ts';
 import PostalMime from 'postal-mime';
 import { sendable, type AccountSetup, type Page } from '../client/contract.ts';
 import {

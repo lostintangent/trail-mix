@@ -19,7 +19,7 @@
     "types": "node node_modules/wrangler/bin/wrangler.js types --include-env=false",
     "theme": "bun --bun astryx theme build src/app/theme/trail-mix.ts --out src/app/theme/built/trail-mix.css",
     "bench": "bun tests/bench/run.ts",
-    "e2e": "bun test ./tests/e2e/workbench.e2e.ts ./tests/e2e/calls.e2e.ts ./tests/e2e/triage.e2e.ts ./tests/e2e/composer.e2e.ts"
+    "e2e": "bun test ./tests/e2e/workbench.e2e.ts ./tests/e2e/calls.e2e.ts ./tests/e2e/triage.e2e.ts ./tests/e2e/composer.e2e.ts ./tests/e2e/outbox.e2e.ts"
   },
   "dependencies": {
     "@astryxdesign/core": "0.7.11",

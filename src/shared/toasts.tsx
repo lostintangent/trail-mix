@@ -12,10 +12,16 @@ const LOAD_AFTER_MS = 1_000;
 
 /** A toast: what it says, whether it reports an error, and the one thing it offers to do. */
 export type Toast = {
+  /** What the toast says, and what assistive tech announces as it appears. */
   body: ReactNode;
   type?: 'info' | 'error';
   /** A button at the toast's end, such as Undo, which also dismisses the toast. */
   action?: { label: string; onAction: () => void };
+  /**
+   * Draws the whole card in place of `body` and `action`, for a toast that changes as it shows.
+   * `body` is still what's announced. Such a toast stays until it calls `dismiss`.
+   */
+  render?: (dismiss: () => void) => ReactNode;
 };
 
 export type Show = (toast: Toast) => ToastDismissFn;

@@ -1,5 +1,6 @@
 export * from './model.ts';
 export { addressesIn } from './addresses.ts';
+export { sameRef } from './refs.ts';
 export { linkIdsOf, messageIdOf, referencesOf } from './conversations.ts';
 export {
   applySyncEvent,

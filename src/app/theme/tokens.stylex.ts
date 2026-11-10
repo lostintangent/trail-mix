@@ -1,12 +1,9 @@
 import * as stylex from '@stylexjs/stylex';
 
-/**
- * Every value Astryx has no name for. Components use these or Astryx's tokens, never a literal.
- *
- * The airmail stripe is 3px tall at -45 degrees: vermilion 7px, a 4px gap, ink blue 7px, a 4px gap.
- */
+/** Every value Astryx has no name for. Components use these or Astryx's tokens, never a literal. */
 
 const COARSE = '@media (pointer: coarse)';
+const VERMILION = 'oklch(0.64 0.19 30)';
 
 /** Width picks the layout and pointer picks the size. Each component declares its own motion. */
 export const media = stylex.defineConsts({
@@ -34,12 +31,16 @@ export const tm = stylex.defineVars({
   shade: 'light-dark(#0000002b, #00000000)', // sheets cast a shadow in light mode only
   // A sheet's edge: a ring in the border color, and the shade below it.
   sheetEdge: '0 0 0 1px var(--color-border), 0 10px 28px -16px light-dark(#0000002b, #00000000)',
-  stampVermilion: 'oklch(0.64 0.19 30)', // account colors, assigned in this order
+  stampVermilion: VERMILION, // account colors, assigned in this order
   stampTeal: 'oklch(0.7 0.11 190)',
   stampViolet: 'oklch(0.62 0.17 300)',
   stampAmber: 'oklch(0.76 0.15 75)',
   stampGreen: 'oklch(0.68 0.15 150)',
   stampSlate: 'oklch(0.6 0.03 250)',
+  // Airmail: this message is leaving. A stripe 3px tall at -45 degrees: vermilion 7px, a 4px gap,
+  // ink blue 7px, a 4px gap.
+  airmail: `repeating-linear-gradient(-45deg, ${VERMILION} 0 7px, #0000 7px 11px, var(--color-accent) 11px 18px, #0000 18px 22px)`,
+  airmailHeight: '3px',
 
   // Type and motion
   serif: 'ui-serif, "New York", "Iowan Old Style", Georgia, serif', // conversation subjects only

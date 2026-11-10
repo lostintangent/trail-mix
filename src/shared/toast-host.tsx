@@ -3,20 +3,36 @@ import { ToastViewport, useToast, type ToastViewportProps } from '@astryxdesign/
 import { useCallback, useEffect } from 'react';
 import type { Show } from './toasts.tsx';
 
+type Ready = { onReady: (show: Show) => void };
+
 /**
- * Astryx's toast viewport, which hands the way to show a toast to `toast` once it's mounted. A
- * toast's action becomes a button at its end, which dismisses the toast as it acts.
+ * Astryx's toast viewport, which hands the way to show a toast to `toast` once it's mounted. The
+ * viewport provides the toasts its children show, so they render in the app's own tree, with its
+ * contexts and the viewport's inset. Outside it, Astryx would mount a detached viewport of its own.
  */
 export default function ToastHost({
   layerInset,
   onReady,
-}: Pick<ToastViewportProps, 'layerInset'> & { onReady: (show: Show) => void }) {
+}: Pick<ToastViewportProps, 'layerInset'> & Ready) {
+  return (
+    <ToastViewport layerInset={layerInset}>
+      <Shows onReady={onReady} />
+    </ToastViewport>
+  );
+}
+
+/**
+ * Shows a toast in the viewport above it. Its action becomes a button at its end, which dismisses
+ * the toast as it acts, and a toast that draws itself is Astryx's custom content.
+ */
+function Shows({ onReady }: Ready) {
   const showToast = useToast();
   const show = useCallback<Show>(
-    ({ body, type, action }) => {
+    ({ body, type, action, render }) => {
       const dismiss = showToast({
         body,
         type,
+        ...(render && { renderContent: ({ dismiss }) => render(dismiss), isAutoHide: false }),
         endContent: action && (
           <Button
             label={action.label}
@@ -34,5 +50,5 @@ export default function ToastHost({
     [showToast],
   );
   useEffect(() => onReady(show), [show, onReady]);
-  return <ToastViewport layerInset={layerInset} />;
+  return null;
 }

@@ -1,5 +1,11 @@
-import type { AccountId, Hint, MessageRef, Outgoing } from '../../mail/core/index.ts';
-import * as outbox from '../../outbox/index.ts';
+import {
+  sameRef,
+  type AccountId,
+  type Hint,
+  type MessageRef,
+  type Outgoing,
+} from '../../mail/core/index.ts';
+import * as outbox from '../../outbox/core/index.ts';
 import { SendFailure, type MailProvider } from '../../providers/index.ts';
 import type { Sql } from './schema.ts';
 import { WAKE } from './sync.ts';
@@ -112,8 +118,8 @@ export function outboxQueue(sending: Sending) {
     },
 
     /** Undo: the send is gone and its draft, untouched, is returned. */
-    cancel(id: string): MessageRef {
-      const draft = outbox.cancel(owned(id));
+    cancel(id: string, now: string): MessageRef {
+      const draft = outbox.cancel(owned(id), now);
       sql.run(`DELETE FROM outbox WHERE id = ?`, id);
       changed();
       return draft;
@@ -202,9 +208,3 @@ async function attempt<T>(work: () => Promise<T>): Promise<T | outbox.Failure> {
     return { error: reason, passing: error instanceof SendFailure && error.passing };
   }
 }
-
-const sameRef = (a: MessageRef, b: MessageRef) =>
-  a.account === b.account &&
-  a.path === b.path &&
-  a.uidValidity === b.uidValidity &&
-  a.uid === b.uid;

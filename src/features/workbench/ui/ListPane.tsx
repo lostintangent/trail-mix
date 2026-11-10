@@ -37,6 +37,7 @@ export function ListPane({
   unread,
   scope,
   below,
+  list,
   isSearch,
   conversations,
   isUpdating,
@@ -61,6 +62,8 @@ export function ListPane({
   scope: Account | undefined;
   /** What sits under the title, such as the search field on a phone and what a search covers. */
   below?: ReactNode;
+  /** A list of the view's own in place of its conversations, as the Outbox lists its sends. */
+  list?: ReactNode;
   /** Whether the list holds a search's results. */
   isSearch: boolean;
   /** Nothing until the view's first page arrives. */
@@ -118,8 +121,10 @@ export function ListPane({
         {write && <span {...stylex.props(styles.write)}>{write}</span>}
       </header>
       {below && <div {...stylex.props(styles.below)}>{below}</div>}
-      <div {...stylex.props(styles.sheet, conversations?.length === 0 && styles.empty)}>
-        {conversations?.length === 0 ? (
+      <div {...stylex.props(styles.sheet, !list && conversations?.length === 0 && styles.empty)}>
+        {list ? (
+          list
+        ) : conversations?.length === 0 ? (
           isSearch ? (
             <EmptyState
               icon={<Icon icon={SearchX} size="lg" color="secondary" />}
