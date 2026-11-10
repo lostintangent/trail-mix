@@ -741,9 +741,9 @@ function newsletterText(topic: string): string {
 }
 
 /**
- * A newsletter of about 300 KB, as the heaviest real ones are: a style sheet, nested tables,
- * inline styles on every element, and a remote image per article. The reader's budget is
- * measured on it.
+ * A newsletter with a style sheet, nested tables, inline styles on every element and a remote
+ * image per article. The newest issue runs to about 300 KB, as the heaviest real ones do, since the
+ * reader's budget is measured on it. Older issues run to about 10 KB.
  */
 function newsletterHtml(topic: string, cycle: number): string {
   const random = seededRandom(cycle + 1);
@@ -776,7 +776,8 @@ ${body.map((sentences) => `<p style="${paragraph}">${escape(sentences)}</p>`).jo
       1,
     ),
   ];
-  for (let i = 2, size = 0; size < 294_000; i++) {
+  const length = cycle === 0 ? 294_000 : 8_000;
+  for (let i = 2, size = 0; size < length; i++) {
     const body = Array.from({ length: 3 }, () =>
       Array.from({ length: 4 }, () => pick(SENTENCES)).join(' '),
     );
