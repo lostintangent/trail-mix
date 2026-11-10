@@ -29,7 +29,7 @@ env:
   USER_AGENT: trail-mix-deploy (+https://github.com/${{ github.repository }})
 
 jobs:
-  # Whether this repository can deploy, and whether its Access settings would let anyone sign in.
+  # Whether this repository can deploy, and whether its Access and Members settings are usable.
   settings:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -63,6 +63,20 @@ jobs:
           if ! [[ "$ACCESS_AUD" =~ ^[0-9a-f]{64}$ ]]; then
             echo "::error::ACCESS_AUD is the 64-character Application Audience (AUD) tag of the Trail Mix application."
             exit 1
+          fi
+
+      # The Members page needs both: the operator who may use it, and the token it edits Access with.
+      - name: Check the Members settings
+        env:
+          OPERATOR_EMAIL: ${{ vars.OPERATOR_EMAIL }}
+          HAS_TOKEN: ${{ secrets.ACCESS_API_TOKEN != '' }}
+        run: |
+          if [ -n "$OPERATOR_EMAIL" ] && ! [[ "$OPERATOR_EMAIL" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]; then
+            echo "::error::OPERATOR_EMAIL is one email address, the one you sign in to Access with."
+            exit 1
+          fi
+          if [ -z "$OPERATOR_EMAIL" ] || [ "$HAS_TOKEN" != true ]; then
+            echo "::notice::The Members page needs both OPERATOR_EMAIL and ACCESS_API_TOKEN. Until then it says it isn't set up."
           fi
 
   production:
@@ -170,24 +184,40 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           ACCESS_TEAM_DOMAIN: ${{ vars.ACCESS_TEAM_DOMAIN }}
           ACCESS_AUD: ${{ vars.ACCESS_AUD }}
+          OPERATOR_EMAIL: ${{ vars.OPERATOR_EMAIL }}
+          ACCESS_API_TOKEN: ${{ secrets.ACCESS_API_TOKEN }}
           KEY: ${{ steps.account.outputs.key }}
           REPORTED: ${{ inputs.rollback_drill && 'a version that is not this commit' || github.sha }}
         run: |
-          args=(--var "VERSION:$REPORTED" --message "Commit $COMMIT")
+          args=(--var "VERSION:$REPORTED" --var "CLOUDFLARE_ACCOUNT_ID:$CLOUDFLARE_ACCOUNT_ID")
+          args+=(--message "Commit $COMMIT")
           if [ -n "$ACCESS_TEAM_DOMAIN" ]; then
             args+=(--var "ACCESS_TEAM_DOMAIN:$ACCESS_TEAM_DOMAIN" --var "ACCESS_AUD:$ACCESS_AUD")
           fi
-          # The key is made here once, goes to Cloudflare as a secret, and is never shown or kept.
-          # A deploy without it keeps the one production has.
+          if [ -n "$OPERATOR_EMAIL" ]; then
+            args+=(--var "OPERATOR_EMAIL:$OPERATOR_EMAIL")
+          fi
+
+          # Secrets reach the Worker in a file only the runner's user can read, which jq writes from
+          # the environment, so no secret is ever an argument or printed. A deploy adds to the
+          # secrets production has and removes none.
+          # - CREDENTIALS_KEY is made here once, when production has none, and never replaced.
+          # - ACCESS_API_TOKEN goes with every deploy while the repository has it, so a token
+          #   replaced in GitHub reaches the Worker on the next deploy.
+          umask 077
+          secrets="$RUNNER_TEMP/secrets.json"
+          trap 'rm -f "$secrets"' EXIT
           if [ "$KEY" = missing ]; then
-            umask 077
-            secrets="$RUNNER_TEMP/secrets.json"
-            trap 'rm -f "$secrets"' EXIT
-            key=$(openssl rand -base64 48 | tr -d '\n')
-            printf '{"CREDENTIALS_KEY":"%s"}' "$key" > "$secrets"
-            unset key
-            args+=(--secrets-file "$secrets")
+            NEW_KEY=$(openssl rand -base64 48 | tr -d '\n')
+            export NEW_KEY
             echo "Production has no CREDENTIALS_KEY yet, so this deploy gives it one."
+          fi
+          jq -n '{}
+            + if env.NEW_KEY then {CREDENTIALS_KEY: env.NEW_KEY} else {} end
+            + if (env.ACCESS_API_TOKEN // "") != "" then {ACCESS_API_TOKEN: env.ACCESS_API_TOKEN} else {} end' > "$secrets"
+          unset NEW_KEY
+          if [ "$(jq length "$secrets")" -gt 0 ]; then
+            args+=(--secrets-file "$secrets")
           fi
           $WRANGLER deploy "${args[@]}"
 
@@ -294,8 +324,9 @@ jobs:
             esac
           done
 
-      # A preview takes nothing from production, so it gets the Access settings here, and never
-      # CREDENTIALS_KEY. Its own settings are the `previews` block of wrangler.jsonc.
+      # A preview takes nothing from production, so it gets the Access settings here, and never a
+      # secret: no CREDENTIALS_KEY, no ACCESS_API_TOKEN. Its own settings are the `previews` block of
+      # wrangler.jsonc.
       - name: Deploy the preview
         id: deploy
         env:
