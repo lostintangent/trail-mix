@@ -61,10 +61,12 @@ export function phone(browser: Browser): Promise<BrowserContext> {
 }
 
 /**
- * Lighthouse's CPU benchmark index, as `computeBenchmarkIndex` in its page functions computes it
- * (Apache License 2.0, Google LLC): the mean of a garbage-heavy string build and a garbage-free
- * array copy, each run for half a second and counted per second over ten. It runs in the page, so
- * it must stay self-contained.
+ * Lighthouse's CPU benchmark index, as `computeBenchmarkIndex` in its page functions computes it:
+ * the mean of a garbage-heavy string build and a garbage-free array copy, each run for half a
+ * second and counted per second over ten. It runs in the page, so it must stay self-contained.
+ *
+ * Copyright 2017 The Lighthouse Authors
+ * SPDX-License-Identifier: Apache-2.0
  */
 function benchmarkIndex(): number {
   function benchmarkIndexGC() {
