@@ -82,7 +82,7 @@ export const versions: readonly (readonly string[])[] = [
   ],
   [
     // Search: each message's senders, recipients, subject and preview, by the message's rowid.
-    // Tokens lose their accents, and the prefix indexes answer each keystroke as it is typed.
+    // Tokens lose their accents.
     `CREATE VIRTUAL TABLE search USING fts5(
       senders, recipients, subject, preview,
       tokenize = 'unicode61 remove_diacritics 2',
@@ -91,6 +91,20 @@ export const versions: readonly (readonly string[])[] = [
     // Search results, like the folder views, read newest first, but across every conversation.
     `CREATE INDEX conversations_by_date ON conversations (date DESC, id DESC)`,
     // The index rebuilds from the servers with search filled in, since everything in it can.
+    `DELETE FROM messages`,
+    `DELETE FROM links`,
+    `DELETE FROM conversations`,
+    `DELETE FROM placements`,
+    `UPDATE folders SET cursor = NULL`,
+  ],
+  [
+    // The same search without prefix indexes. They wrote every word four times for a few
+    // milliseconds of a search that typed one letter, and a word typed so far matches without them.
+    `DROP TABLE search`,
+    `CREATE VIRTUAL TABLE search USING fts5(
+      senders, recipients, subject, preview,
+      tokenize = 'unicode61 remove_diacritics 2'
+    )`,
     `DELETE FROM messages`,
     `DELETE FROM links`,
     `DELETE FROM conversations`,

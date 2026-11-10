@@ -64,24 +64,38 @@ export function envelopeIndex(sql: Sql) {
   };
 
   /**
-   * Writes one change: its removals, then its messages, each with its links and its search row.
-   * Returns the conversations it touched.
+   * Writes one change: its removals, then its messages. A message already held changes in place,
+   * since only its flags or its conversation can change, so its links and search row stand. A new
+   * one arrives with them. Returns the conversations it touched.
    */
   function write(change: ReturnType<typeof applySyncEvent>, touched: Set<ConversationId>) {
-    for (const ref of [...change.remove, ...change.put]) {
-      const [held] = sql.all<{ rowid: number; conversation: string }>(
+    const held = (ref: MessageRef) =>
+      sql.all<{ rowid: number; conversation: string }>(
         `SELECT rowid, conversation FROM messages WHERE ${BY_REF}`,
         ...keyOf(ref),
-      );
-      if (!held) continue;
-      touched.add(held.conversation);
-      sql.run(`DELETE FROM search WHERE rowid = ?`, held.rowid);
-      sql.run(`DELETE FROM messages WHERE rowid = ?`, held.rowid);
+      )[0];
+    for (const ref of change.remove) {
+      const gone = held(ref);
+      if (!gone) continue;
+      touched.add(gone.conversation);
+      sql.run(`DELETE FROM search WHERE rowid = ?`, gone.rowid);
+      sql.run(`DELETE FROM messages WHERE rowid = ?`, gone.rowid);
       sql.run(`DELETE FROM links WHERE ${BY_REF}`, ...keyOf(ref));
     }
     for (const message of change.put) {
       touched.add(message.conversation);
       const { conversation, ...envelope } = message;
+      const before = held(message);
+      if (before) {
+        touched.add(before.conversation);
+        sql.run(
+          `UPDATE messages SET conversation = ?, message = ? WHERE rowid = ?`,
+          conversation,
+          JSON.stringify(envelope),
+          before.rowid,
+        );
+        continue;
+      }
       const [inserted] = sql.all<{ rowid: number }>(
         `INSERT INTO messages (account, path, uid_validity, uid, conversation, message)
          VALUES (?, ?, ?, ?, ?, ?) RETURNING rowid`,
