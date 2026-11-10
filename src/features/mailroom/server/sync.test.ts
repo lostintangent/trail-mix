@@ -97,6 +97,29 @@ test('a check that finds nothing new hints nothing, and new mail hints its folde
   ]);
 });
 
+test('a folder that goes while its sync is owed leaves the rest of the account to sync', async () => {
+  const room = mailroom(100);
+  const { provider } = room.servers.personal;
+  await provider.createFolder('Receipts');
+  room.queue.check('personal');
+  await room.queue.run(ALL);
+  room.settled.length = 0;
+
+  // A move into the folder owed its sync, and then it was renamed, as a member can do in a breath.
+  room.queue.folder({ account: 'personal', path: 'Receipts' });
+  await provider.renameFolder('Receipts', 'Receipts 2026');
+  room.queue.check('personal');
+  await room.queue.run(ALL);
+
+  expect(room.queue.owing()).toBe(false);
+  const paths = room.store.folders('personal').map(({ path }) => path);
+  expect(paths).toContain('Receipts 2026');
+  expect(paths).not.toContain('Receipts');
+  expect(room.settled).toEqual([
+    { account: 'personal', messages: room.messages('personal'), error: undefined },
+  ]);
+});
+
 test('a step under way when its account goes lands nothing', async () => {
   let release = () => {};
   let waiting = () => {};

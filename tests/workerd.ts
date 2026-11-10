@@ -37,10 +37,17 @@ export async function startWorker(
     }),
   );
   const port = await freePort();
-  // Node starts workerd, because Miniflare cannot reach it under Bun (oven-sh/bun#39247).
+  // Node starts workerd, because Miniflare cannot reach it under Bun (oven-sh/bun#39247). A shell
+  // that exits at once starts Node, so the Worker runs on its own: when a test times out, Bun ends
+  // the processes its tests and hooks started, and a Worker started from a hook would go with it.
+  // Everything stays in the shell's process group, which `stop` ends.
   const workerd = spawn(
-    'node',
+    '/bin/sh',
     [
+      '-c',
+      '"$@" &',
+      'sh',
+      'node',
       join(import.meta.dir, '../node_modules/wrangler/bin/wrangler.js'),
       'dev',
       '--config',

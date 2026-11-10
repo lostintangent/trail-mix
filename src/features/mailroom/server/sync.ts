@@ -71,6 +71,8 @@ export function syncQueue(syncing: Syncing) {
   let running = false;
   /** The job whose step is under way. It stays owed until its step finishes it. */
   let flying: Job | undefined;
+  /** Folders whose sync failed during an account's check, with why, so the check skips them. */
+  const failed = new Map<AccountId, Map<string, unknown>>();
 
   function owe(job: Omit<Job, 'again' | 'changed' | 'cancelled'>) {
     const at = jobs.findIndex((held) => held.rank > job.rank);
@@ -115,7 +117,9 @@ export function syncQueue(syncing: Syncing) {
     const folders = await list(job, provider);
     if (!folders) return;
     drop(job);
+    const skip = failed.get(job.account);
     for (const folder of folders) {
+      if (skip?.has(folder.path)) continue;
       if (jobs.some((held) => held.account === job.account && held.path === folder.path)) continue;
       owe({ account: job.account, path: folder.path, rank: rankOf(folder), recount: false });
     }
@@ -152,15 +156,41 @@ export function syncQueue(syncing: Syncing) {
       else await batch(job, job.path, provider);
     } catch (error) {
       if (job.cancelled) return;
-      forget(job.account);
-      syncing.settled(job.account, error);
+      if (job.path === undefined) {
+        // Without its folders, nothing of the account can sync until the next check.
+        forget(job.account);
+        syncing.settled(job.account, error);
+        return;
+      }
+      // The folder may be gone, renamed or deleted since it was owed. A listing settles that,
+      // and the rest of the account syncs meanwhile.
+      drop(job);
+      failed.set(
+        job.account,
+        (failed.get(job.account) ?? new Map<string, unknown>()).set(job.path, error),
+      );
+      check(job.account);
       return;
     } finally {
       flying = undefined;
     }
     if (job.cancelled || owes(job.account) || !checking.has(job.account)) return;
     checking.delete(job.account);
-    syncing.settled(job.account);
+    // A failure counts only if its folder is still there.
+    const still = new Set(store.folders(job.account).map(({ path }) => path));
+    const failure = [...(failed.get(job.account) ?? [])].find(([path]) => still.has(path));
+    failed.delete(job.account);
+    syncing.settled(job.account, failure?.[1]);
+  }
+
+  /** Owes a check of an account: its folders, then each folder in turn, Inbox first. */
+  function check(account: AccountId) {
+    checking.add(account);
+    // A listing under way may have heard from the server before what prompted this check.
+    const listed = (job: Job) => job.account === account && job.path === undefined;
+    if (!jobs.some((job) => listed(job) && job !== flying)) {
+      owe({ account, rank: LIST, recount: false });
+    }
   }
 
   /** Forgets everything owed for an account. A step of it under way lands nothing. */
@@ -168,18 +198,11 @@ export function syncQueue(syncing: Syncing) {
     for (const job of jobs) if (job.account === account) job.cancelled = true;
     jobs = jobs.filter((job) => job.account !== account);
     checking.delete(account);
+    failed.delete(account);
   }
 
   return {
-    /** Owes a check of an account: its folders, then each folder in turn, Inbox first. */
-    check(account: AccountId) {
-      checking.add(account);
-      // A listing under way may have heard from the server before what prompted this check.
-      const listed = (job: Job) => job.account === account && job.path === undefined;
-      if (!jobs.some((job) => listed(job) && job !== flying)) {
-        owe({ account, rank: LIST, recount: false });
-      }
-    },
+    check,
 
     /** Owes a folder's sync, as a watcher or a command does, ahead of any check. */
     folder({ account, path }: FolderRef) {
