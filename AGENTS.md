@@ -207,6 +207,7 @@ Great code pursues simplicity by placing a rich domain model at the center, deco
 - **Setup.** `bun install`, copy `.dev.vars.example` to `.dev.vars`, then `bun run dev`.
 - **Dependencies are exact versions.** `bun add` pins what it installs, and CI installs from the frozen lockfile. An upgrade is a deliberate edit.
 - **The Workers runtime's types** are `worker-configuration.d.ts`, which `bun run types` generates from the compatibility date and flags. CI fails when it is stale, so regenerate it with any change to either.
+- **Two type programs.** The browser and the Worker run against different globals, so `bun check` runs the `check` script, which checks both. `tsconfig.browser.json` checks the app and its tests against the DOM. `tsconfig.worker.json` checks the Worker, each feature's `server`, the providers and the tests that drive them against `worker-configuration.d.ts`, with no DOM. A module both import, such as `mail/core` or `mailroom/client/contract.ts`, has to check in each, so Worker code reads the client contract from `contract.ts`, not the browser's `client/index.ts`.
 - **Lint is strict.** Type-aware rules are on and a warning fails the run. To relax a rule, change `bunfig.toml` or add an `eslint-disable-next-line` comment, and say why in either place.
 
 ### Tests

@@ -148,7 +148,7 @@ test('a sheet that sets its own color scheme takes the theme’s colors for that
       const sheet = document.createElement('div');
       sheet.style.colorScheme = scheme;
       sheet.style.color = 'var(--color-text-primary)';
-      document.body.appendChild(sheet);
+      document.body.append(sheet);
       const ink = getComputedStyle(sheet).color;
       sheet.remove();
       return ink;

@@ -9,7 +9,7 @@ import type {
   View,
 } from '../../mail/core/index.ts';
 import type { Endpoint } from '../../providers/index.ts';
-import type { AccountSetup, PageCursor } from '../client/index.ts';
+import type { AccountSetup, PageCursor } from '../client/contract.ts';
 import { STAMPS } from './accounts.ts';
 
 /**

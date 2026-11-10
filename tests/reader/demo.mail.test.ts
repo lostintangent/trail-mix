@@ -130,7 +130,7 @@ async function call<T>(name: string, ...args: unknown[]): Promise<T> {
     method: 'POST',
     body: JSON.stringify({ name, args }),
   });
-  const result = await response.json<{ value?: T; error?: string }>();
+  const result = (await response.json()) as { value?: T; error?: string };
   if (result.error !== undefined) throw new Error(result.error);
   return result.value as T;
 }

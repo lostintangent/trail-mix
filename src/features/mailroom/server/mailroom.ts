@@ -28,7 +28,7 @@ import {
   type Moved,
   type SyncWindow,
 } from '../../providers/index.ts';
-import type { AccountSetup, DraftInput, Mailroom as Contract, Page } from '../client/index.ts';
+import type { AccountSetup, DraftInput, Mailroom as Contract, Page } from '../client/contract.ts';
 import {
   accountBook,
   demoSettings,
@@ -335,7 +335,8 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
         ? new TextEncoder().encode(attachment.content)
         : new Uint8Array(attachment.content);
     return {
-      body: new Blob([content]).stream(),
+      // The Workers runtime types a Blob's stream loosely, as ReadableStream<any>, so it's named here.
+      body: new Blob([content]).stream() as ReadableStream<Uint8Array>,
       type: attachment.mimeType,
       name: attachment.filename ?? `Attachment ${index + 1}`,
     };

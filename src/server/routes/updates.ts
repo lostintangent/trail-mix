@@ -1,4 +1,4 @@
-import type { Mailroom } from '../../features/mailroom/client/index.ts';
+import type { Mailroom } from '../../features/mailroom/client/contract.ts';
 
 /**
  * The hint socket. The upgrade goes to the signed-in member's Mailroom, which holds the socket and

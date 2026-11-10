@@ -14,7 +14,7 @@ import type {
   MessageRef,
   View,
 } from '../../mail/core/index.ts';
-import type { AccountSetup, Page } from '../client/index.ts';
+import type { AccountSetup, Page } from '../client/contract.ts';
 import { caFile, empty, ports, start, stop, users } from '../../../../tests/mail-server/server.ts';
 import { startWorker, type LocalWorker } from '../../../../tests/workerd.ts';
 import { WAKE } from './sync.ts';

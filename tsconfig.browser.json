@@ -1,0 +1,18 @@
+// What runs in the browser, and the tests and tools around it, against the DOM.
+{
+  "extends": "./tsconfig.json",
+  "include": ["src", "tests", "*.ts"],
+  "exclude": [
+    "worker-configuration.d.ts",
+    "src/server",
+    "src/features/*/server",
+    "src/features/providers",
+    "tests/bench/mailroom.ts",
+    "tests/bench/mailroom",
+    "tests/contract",
+    "tests/mail-check",
+    "tests/mail-server",
+    "tests/reader/worker.ts",
+    "tests/workerd.ts"
+  ]
+}

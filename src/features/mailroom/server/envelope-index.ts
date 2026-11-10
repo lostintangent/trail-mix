@@ -12,7 +12,7 @@ import {
   type SyncEvent,
   type View,
 } from '../../mail/core/index.ts';
-import type { Page, PageCursor } from '../client/index.ts';
+import type { Page, PageCursor } from '../client/contract.ts';
 import type { Sql, SqlValue } from './schema.ts';
 
 /**

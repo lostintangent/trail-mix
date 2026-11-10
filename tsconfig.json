@@ -1,4 +1,10 @@
+// Two programs, since the browser and the Worker run against different globals. `bun check`
+// checks both: the browser's against the DOM, and the Worker's against the Workers runtime that
+// `bun run types` describes in `worker-configuration.d.ts`. A module both import, such as
+// `mail/core` or the client contract, has to type-check in each.
 {
+  "files": [],
+  "references": [{ "path": "./tsconfig.browser.json" }, { "path": "./tsconfig.worker.json" }],
   "compilerOptions": {
     // Environment
     "target": "ES2024",
@@ -22,6 +28,5 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "skipLibCheck": true
-  },
-  "include": ["src", "tests", "*.ts"]
+  }
 }

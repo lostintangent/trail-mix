@@ -14,6 +14,8 @@ import type {
   Outgoing,
   View,
 } from '../../mail/core/index.ts';
+// Brings Start's `Register` in, so the declaration below can add to it in either program.
+import type {} from '@tanstack/react-start';
 
 /**
  * What a browser can ask its Mailroom. Queries return snapshots. Commands return once the Mailroom
@@ -107,6 +109,15 @@ export type DraftInput = {
 
 /** The Mailroom as the Worker reaches it: its queries and commands, and the hint socket by `fetch`. */
 export type Mailroom = Queries & Commands & { fetch(request: Request): Promise<Response> };
+
+declare module '@tanstack/react-start' {
+  interface Register {
+    server: {
+      /** The Worker hands each request its signed-in member's Mailroom, and nothing that names them. */
+      requestContext: { mailroom: Mailroom };
+    };
+  }
+}
 
 /**
  * The names a browser may call, and nothing else. A Durable Object stub forwards any public method,

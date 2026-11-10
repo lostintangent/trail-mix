@@ -11,6 +11,7 @@
   "scripts": {
     "dev": "node node_modules/vite/bin/vite.js dev",
     "build": "bun --bun vite build",
+    "check": "bun check --no-script -b",
     "preview": "node node_modules/vite/bin/vite.js preview",
     "test:mail": "bun tests/mail-server/server.ts prepare && bun test --path-ignore-patterns=node_modules/** tests/mail-server tests/mail-check tests/contract tests/reader/demo.mail.test.ts src/features/mailroom",
     "mail-server": "bun tests/mail-server/server.ts",

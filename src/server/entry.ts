@@ -1,20 +1,12 @@
 import start from '@tanstack/react-start/server-entry';
-import { readMessagePath, type Mailroom } from '../features/mailroom/client/index.ts';
+import type { Mailroom } from '../features/mailroom/client/contract.ts';
+import { readMessagePath } from '../features/mailroom/client/urls.ts';
 import { signInFor, type SignInConfig } from './access.ts';
 import { proxyImage } from './routes/images.ts';
 import { serveMessageBytes, type MessageBytes } from './routes/messages.ts';
 import { updates } from './routes/updates.ts';
 
 export { Mailroom } from '../features/mailroom/server/index.ts';
-
-declare module '@tanstack/react-start' {
-  interface Register {
-    server: {
-      /** Each request's signed-in member's Mailroom, which server functions call. */
-      requestContext: { mailroom: Mailroom };
-    };
-  }
-}
 
 export type Env = SignInConfig & {
   /** One Mailroom per member, named by their verified email address. */

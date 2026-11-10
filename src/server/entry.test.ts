@@ -1,6 +1,6 @@
 import { expect, mock, spyOn, test } from 'bun:test';
 import { generateKeyPair, SignJWT } from 'jose';
-import type { Mailroom } from '../features/mailroom/client/index.ts';
+import type { Mailroom } from '../features/mailroom/client/contract.ts';
 import type { MessageBytes } from './routes/messages.ts';
 
 /**
