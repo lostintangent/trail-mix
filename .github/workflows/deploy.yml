@@ -19,6 +19,11 @@ permissions:
 
 # Wrangler runs on Node, from the version the lockfile pins. workers.dev turns away requests with
 # some libraries' default user agents before the Worker runs, so the checks of /health name theirs.
+#
+# The checks reach /health through an Access application that lets everyone through. Access matches
+# its path as a prefix, so it lets through /health/anything too. That is safe only because the Worker
+# checks every request's sign-in itself and answers /health alone without one: keep that check.
+# Removing the Access bypass instead would make every deploy roll back.
 env:
   WRANGLER: node node_modules/wrangler/bin/wrangler.js
   USER_AGENT: trail-mix-deploy (+https://github.com/${{ github.repository }})
