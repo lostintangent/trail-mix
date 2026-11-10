@@ -60,11 +60,18 @@ jobs:
       - name: Check the Worker starts
         run: node node_modules/wrangler/bin/wrangler.js check startup
 
+      - name: Install Chromium for Playwright
+        run: bunx playwright install --with-deps chromium
+
+      # Drives the built app on workerd at both sizes in both themes, and saves a screenshot of each.
+      - name: Smoke test
+        run: bun run e2e
+
       # Measures every performance budget in AGENTS.md, and fails when one is over.
       - name: Benchmark
         run: bun run bench
 
-      - name: Upload the benchmark numbers
+      - name: Upload the screenshots and benchmark numbers
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
         with:

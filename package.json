@@ -17,7 +17,8 @@
     "mail-check": "bun tests/mail-check/check.ts",
     "types": "node node_modules/wrangler/bin/wrangler.js types --include-env=false",
     "theme": "bun --bun astryx theme build src/app/theme/trail-mix.ts --out src/app/theme/built/trail-mix.css",
-    "bench": "bun tests/bench/run.ts"
+    "bench": "bun tests/bench/run.ts",
+    "e2e": "bun test ./tests/e2e/workbench.e2e.ts"
   },
   "dependencies": {
     "@astryxdesign/core": "0.7.11",
@@ -45,6 +46,7 @@
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.3.0",
     "lightningcss": "1.33.0",
+    "playwright": "1.65.0",
     "smtp-server": "3.21.3",
     "vite": "8.3.5",
     "wrangler": "4.157.0"
