@@ -14,7 +14,14 @@ import * as stylex from '@stylexjs/stylex';
 import { Search, X } from 'lucide-react';
 import { createContext, Suspense, use, useEffect, useId, useRef, useState } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
-import { CommandMatches, registerSearchFocus, type PaletteKeys } from '../../commands/index.ts';
+import {
+  CommandMatches,
+  isApple,
+  registerSearchFocus,
+  shortcutLabel,
+  type PaletteKeys,
+} from '../../commands/index.ts';
+import { useMediaQuery } from '../../../shared/useMediaQuery.ts';
 import { highlight, type Marks } from '../../mail/core/index.ts';
 import type { SearchScopeProps } from './SearchScope.tsx';
 
@@ -36,6 +43,8 @@ export const SearchContext = createContext<SearchState>({ text: '', onSearch: ()
 export function SearchField() {
   const { text, onSearch } = use(SearchContext);
   const input = useRef<HTMLInputElement>(null);
+  // On a desktop the field is the way to the commands too, and says so, with its key.
+  const isPhone = useMediaQuery(media.phone);
   // The commands show while the member works in the field: at once when ⌘K opened it, and
   // otherwise for whatever typed text names one.
   const [commands, setCommands] = useState<'closed' | 'typed' | 'all'>('closed');
@@ -86,7 +95,7 @@ export function SearchField() {
           ref={input}
           type="search"
           aria-label="Search mail"
-          placeholder="Search mail"
+          placeholder={isPhone ? 'Search mail' : 'Search and commands'}
           value={text}
           aria-controls={isOpen ? listId : undefined}
           aria-activedescendant={isOpen ? active : undefined}
@@ -97,6 +106,11 @@ export function SearchField() {
           spellCheck={false}
           {...stylex.props(styles.input)}
         />
+        {!text && (
+          <kbd aria-hidden {...stylex.props(styles.hint)}>
+            {shortcutLabel('Mod+K', isApple)}
+          </kbd>
+        )}
         {text && (
           <IconButton
             label="Clear search"
@@ -220,6 +234,13 @@ const styles = stylex.create({
     '::placeholder': { color: colorVars['--color-text-secondary'] },
     // The clear button is the field's own, the same in every browser.
     '::-webkit-search-cancel-button': { appearance: 'none' },
+  },
+  hint: {
+    display: { default: 'inline', [media.phone]: 'none' },
+    color: colorVars['--color-text-secondary'],
+    fontFamily: typographyVars['--font-family-body'],
+    fontSize: typeScaleVars['--text-supporting-size'],
+    whiteSpace: 'nowrap',
   },
   mark: {
     backgroundColor: { default: tm.highlight, [media.forcedColors]: 'Mark' },

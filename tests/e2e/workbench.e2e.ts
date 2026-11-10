@@ -277,10 +277,14 @@ test('the search field is the palette: ⌘K, a click or the phone’s island ope
   const commands = page.getByRole('listbox', { name: 'Commands' });
   const heading = (name: string) => page.getByRole('heading', { name, level: 2 });
 
-  // ⌘K lists every command, and typing part of a title highlights the best match for Enter.
+  // ⌘K lists every command but its own, and typing part of a title highlights the best match.
+  await expect(field.getAttribute('placeholder')).resolves.toBe('Search and commands');
   await page.keyboard.press('ControlOrMeta+k');
   await expect(field.evaluate((node) => node === document.activeElement)).resolves.toBe(true);
   await commands.getByRole('option').first().waitFor();
+  await expect(
+    commands.getByRole('option', { name: /^Search and commands/ }).count(),
+  ).resolves.toBe(0);
   await page.screenshot({ path: join(SHOTS, 'desktop-light-palette.png') });
   await page.keyboard.type('go to drafts');
   await page.keyboard.press('Enter');

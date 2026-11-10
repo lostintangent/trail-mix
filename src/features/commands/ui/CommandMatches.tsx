@@ -9,7 +9,7 @@ import * as stylex from '@stylexjs/stylex';
 import { useEffect, useLayoutEffect, useState } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { matching } from '../core/registry.ts';
-import { useCommands, type Command } from '../registry.ts';
+import { focusSearch, useCommands, type Command } from '../registry.ts';
 
 /** How many commands the palette shows at once, best first. */
 const SHOWN = 8;
@@ -40,7 +40,10 @@ export function CommandMatches({
   /** The highlighted option's id, for the field's `aria-activedescendant`. */
   onActive: (option: string | undefined) => void;
 }) {
-  const found = matching(useCommands(), text).slice(0, SHOWN);
+  // The command that opens the palette does nothing from inside it.
+  const found = matching(useCommands(), text)
+    .filter(({ run }) => run !== focusSearch)
+    .slice(0, SHOWN);
   // The best match is highlighted again whenever the text changes.
   const [highlight, setHighlight] = useState({ text, at: 0 });
   const at =
