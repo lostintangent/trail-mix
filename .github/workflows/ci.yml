@@ -146,7 +146,7 @@ jobs:
           node-version: 24
 
       - name: Composer in WebKit at a phone's size
-        run: bun test tests/e2e/composer.e2e.ts
+        run: bun test ./tests/e2e/composer.e2e.ts
         env:
           E2E_ENGINE: webkit
           E2E_SIZE: phone
