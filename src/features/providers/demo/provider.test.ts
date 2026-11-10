@@ -154,8 +154,12 @@ test('whatever happens to the mailbox, syncing keeps up, and reopening what was 
       else if (roll < 0.4)
         await server.deliver(message(`delivered ${step}`, pick(held)), pick(paths));
       else if (roll < 0.5) {
-        const draft = await provider.saveDraft(message(`draft ${step}`, pick(held)), pick(drafts));
-        if (random() < 0.5) await provider.send(draft);
+        const subject = `draft ${step}`;
+        const draft = await provider.saveDraft(message(subject, pick(held)), pick(drafts));
+        if (random() < 0.5) {
+          await provider.submit(draft, messageIdOf(subject));
+          await provider.file(draft, messageIdOf(subject));
+        }
       } else if (roll < 0.55) await server.resetUidValidity(pick(paths) ?? 'INBOX');
       else if (roll < 0.6) await provider.createFolder(`Folder ${Math.floor(random() * 3)}`);
       else if (roll < 0.65)
@@ -241,11 +245,13 @@ class Mailroom {
 }
 
 /** A message from outside, replying to `answering` when given. */
+const messageIdOf = (subject: string) => `<${subject.replace(/\W/g, '.')}@example.com>`;
+
 function message(subject: string, answering?: Message): Uint8Array {
   return new TextEncoder().encode(
     writeMime({
       date: CREATED,
-      messageId: `<${subject.replace(/\W/g, '.')}@example.com>`,
+      messageId: messageIdOf(subject),
       from: { name: 'Ada Park', email: 'ada@example.com' },
       to: [DEMO_ACCOUNTS.personal.me],
       subject,

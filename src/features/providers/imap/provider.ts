@@ -12,6 +12,8 @@ import PostalMime from 'postal-mime';
 import type { AccountId, Flags, Folder, FolderRole, MessageRef } from '../../mail/core/index.ts';
 import {
   SEARCH_LIMIT,
+  SendFailure,
+  beforeSending,
   type Cursor,
   type MailProvider,
   type Moved,
@@ -20,6 +22,7 @@ import {
 } from '../provider.ts';
 import { envelopeOf, previewPartOf, type ImapMessage } from './core/envelope.ts';
 import { flagsOf, planSync, type SyncPlan } from './core/sync.ts';
+import { submitFailure } from './core/send.ts';
 
 /** Where a host listens. Implicit TLS when `secure`, STARTTLS otherwise. */
 export type Endpoint = { host: string; port: number; secure: boolean };
@@ -260,7 +263,12 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
     };
   }
 
-  async function submit(raw: Uint8Array, from: string, to: string[]) {
+  /**
+   * Hands a message to the host over SMTP, and rejects with what a failure means for trying again.
+   * The transaction log says when the server gave the go-ahead for the body, after which a lost
+   * connection may have delivered it.
+   */
+  async function deliver(raw: Uint8Array, from: string, to: string[]) {
     const auth =
       'accessToken' in account.auth
         ? {
@@ -269,18 +277,50 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
             accessToken: account.auth.accessToken,
           }
         : { user: account.auth.user, pass: account.auth.pass };
+    let bodySent = false;
     const transport = nodemailer.createTransport({
       ...account.smtp,
       requireTLS: !account.smtp.secure,
       auth,
       getSocket: smtpSocket(account.smtp),
       ...(network.ca ? { tls: { ca: [toText(network.ca)] } } : {}),
+      transactionLog: true,
+      logger: {
+        debug(entry: { tnx?: string } | undefined, line: unknown) {
+          if (entry?.tnx === 'server' && /^354\b/.test(String(line))) bodySent = true;
+        },
+      },
     });
     try {
       await transport.sendMail({ envelope: { from, to }, raw: Buffer.from(raw) });
+    } catch (error) {
+      const { error: reason, passing } = submitFailure(
+        error as Parameters<typeof submitFailure>[0],
+        bodySent,
+        account.smtp.host,
+      );
+      throw new SendFailure(reason, passing);
     } finally {
       transport.close();
     }
+  }
+
+  /** The raw draft a ref names, or nothing once it is gone. */
+  function draftSource(draft: MessageRef) {
+    return inFolder(draft.path, async (connection, mailbox) => {
+      const [uid] = current([draft], mailbox);
+      if (uid === undefined) return undefined;
+      const message = await connection.fetchOne(String(uid), { source: true }, { uid: true });
+      return message && message.source?.length ? new Uint8Array(message.source) : undefined;
+    });
+  }
+
+  /** Whether Sent holds a message with this Message-ID. */
+  async function inSent(messageId: string) {
+    if (!messageId) return false;
+    return inFolder(await folderFor('sent'), async (connection) => {
+      return (await uidOf(connection, messageId)) !== undefined;
+    });
   }
 
   const provider: MailProvider = {
@@ -440,46 +480,34 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
       return filed;
     },
 
-    async send(draft: MessageRef) {
-      const source = await inFolder(draft.path, async (connection, mailbox) => {
-        const [uid] = current([draft], mailbox);
-        if (uid === undefined) return undefined;
-        const message = await connection.fetchOne(String(uid), { source: true }, { uid: true });
-        return message ? new Uint8Array(message.source ?? []) : undefined;
-      });
-      // A draft that is gone was sent, or removed, already.
-      if (!source?.length) return;
-
+    async submit(draft: MessageRef, messageId: string) {
+      const source = await beforeSending(async () =>
+        (await inSent(messageId)) ? ('sent' as const) : ((await draftSource(draft)) ?? 'missing'),
+      );
+      if (typeof source === 'string') return source;
       const parsed = await PostalMime.parse(source);
-      const messageId = parsed.messageId ?? '';
-      const sent = await folderFor('sent');
-      const filed = messageId
-        ? await inFolder(sent, async (connection) => {
-            const found = await connection.search(
-              { header: { 'message-id': messageId } },
-              { uid: true },
-            );
-            return Array.isArray(found) && found.length > 0;
-          })
-        : false;
+      const recipients = [
+        ...(parsed.to ?? []),
+        ...(parsed.cc ?? []),
+        ...(parsed.bcc ?? []),
+      ].flatMap((a) => (a.group ? a.group.map((m) => m.address) : [a.address]));
+      const from = parsed.from && !parsed.from.group ? parsed.from.address : account.auth.user;
+      // Bcc recipients get the message, but no copy says who they were.
+      await deliver(withoutHeader(source, 'bcc'), from, recipients);
+      return 'sent';
+    },
 
-      if (!filed) {
-        const recipients = [
-          ...(parsed.to ?? []),
-          ...(parsed.cc ?? []),
-          ...(parsed.bcc ?? []),
-        ].flatMap((a) => (a.group ? a.group.map((m) => m.address) : [a.address]));
-        const from = parsed.from && !parsed.from.group ? parsed.from.address : account.auth.user;
-        // Bcc recipients get the message, but no copy says who they were.
-        const outgoing = withoutHeader(source, 'bcc');
-        await submit(outgoing, from, recipients);
-        if (!account.filesSent) {
-          await connected((connection) =>
-            connection.append(sent, Buffer.from(outgoing), ['\\Seen']),
-          );
+    async file(draft: MessageRef, messageId: string) {
+      await beforeSending(async () => {
+        const source = await draftSource(draft);
+        if (!source) return;
+        if (!account.filesSent && !(await inSent(messageId))) {
+          const sent = await folderFor('sent');
+          const copy = Buffer.from(withoutHeader(source, 'bcc'));
+          await connected((connection) => connection.append(sent, copy, ['\\Seen']));
         }
-      }
-      await remove(draft);
+        await remove(draft);
+      });
     },
 
     async search(path: string, text: string) {

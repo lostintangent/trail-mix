@@ -11,7 +11,7 @@ import {
 } from '../../mail/core/index.ts';
 import { previewOf } from '../imap/core/envelope.ts';
 import { planSync } from '../imap/core/sync.ts';
-import { SEARCH_LIMIT, type MailProvider, type Moved } from '../provider.ts';
+import { SEARCH_LIMIT, beforeSending, type MailProvider, type Moved } from '../provider.ts';
 import * as server from './mailbox.ts';
 import { DEMO_ACCOUNTS, type DemoKind } from './stories.ts';
 
@@ -34,6 +34,8 @@ export type DemoServer = {
   resetUidValidity(folder: string): Promise<void>;
   /** Has the host accept a message for delivery, without the provider. */
   submit(raw: Uint8Array): Promise<void>;
+  /** Lets a moment pass, in which a host that files its own copy in Sent files what it accepted. */
+  settle(): Promise<void>;
   /** Removes every message, and every folder the mailbox did not start with. */
   empty(): Promise<void>;
 };
@@ -41,13 +43,20 @@ export type DemoServer = {
 export { DEMO_ACCOUNTS, type DemoKind };
 export { demoMailbox, type DemoMailbox } from './mailbox.ts';
 
+/**
+ * `filesSent` makes the host file its own copy of what it accepts in Sent, as Outlook's does, so the
+ * provider leaves Sent to it.
+ */
 export function demoServer(
   account: AccountId,
   initial: server.DemoMailbox,
   save: (mailbox: server.DemoMailbox) => void | Promise<void>,
+  { filesSent = false }: { filesSent?: boolean } = {},
 ): DemoServer {
   let mailbox = initial;
   const watchers = new Map<string, Set<() => void>>();
+  /** What a host that files its own copy in Sent has accepted and not yet filed. */
+  const unfiled: server.Written[] = [];
 
   /** Makes the next mailbox the current one, keeps it, and tells whoever watches what changed. */
   async function commit(next: server.DemoMailbox, changed: readonly string[]) {
@@ -93,6 +102,7 @@ export function demoServer(
   }
 
   function messageIdIn(path: string, messageId: string): number | undefined {
+    if (!messageId) return undefined;
     return server
       .uidsIn(mailbox, path)
       .find((uid) => server.messageAt(mailbox, path, uid)!.content().messageId === messageId);
@@ -190,25 +200,35 @@ export function demoServer(
       return refOf(drafts, uid);
     },
 
-    async send(draft) {
-      const found = find(draft);
-      if (!found) return;
-      const { messageId } = found.message.content();
-      const raw = bytesOf(found.message.raw());
-      const sent = roleFolder('sent');
-      const filed = messageId ? messageIdIn(sent, messageId) !== undefined : false;
-      const outgoing = filed ? undefined : await written(withoutBcc(raw));
-      const recipients = filed ? [] : await recipientsOf(raw);
-      // The draft may have changed while the message was read, so it is found again.
-      const still = find(draft);
-      if (!still) return;
-      let next = mailbox;
-      if (outgoing) {
-        next = submitted(next, outgoing, recipients);
-        [next] = server.append(next, sent, outgoing, SENT);
-      }
-      await commit(server.expunge(next, still.path, [still.uid]), [still.path, sent, 'INBOX']);
-    },
+    submit: (draft, messageId) =>
+      beforeSending(async () => {
+        if (messageIdIn(roleFolder('sent'), messageId) !== undefined) return 'sent' as const;
+        const found = find(draft);
+        if (!found) return 'missing' as const;
+        const raw = bytesOf(found.message.raw());
+        const outgoing = await written(withoutBcc(raw));
+        const recipients = await recipientsOf(raw);
+        await commit(accepted(mailbox, outgoing, recipients), ['INBOX']);
+        return 'sent' as const;
+      }),
+
+    file: (draft, messageId) =>
+      beforeSending(async () => {
+        const found = find(draft);
+        if (!found) return;
+        const copy = filesSent
+          ? undefined
+          : await written(withoutBcc(bytesOf(found.message.raw())));
+        // The draft may have changed while its copy was read, so it is found again.
+        const still = find(draft);
+        if (!still) return;
+        const sent = roleFolder('sent');
+        let next = mailbox;
+        if (copy && messageIdIn(sent, messageId) === undefined) {
+          [next] = server.append(next, sent, copy, SENT);
+        }
+        await commit(server.expunge(next, still.path, [still.uid]), [still.path, sent]);
+      }),
 
     search: (path, text) =>
       settle(() => {
@@ -249,14 +269,16 @@ export function demoServer(
   };
 
   /**
-   * What the host does with a message it accepted: delivers it to each recipient. The only one
-   * this server holds mail for is the account itself, so mail to yourself arrives.
+   * What the host does with a message it accepted: delivers it to each recipient, and later files a
+   * copy in Sent if it files its own. The only recipient this server holds mail for is the account
+   * itself, so mail to yourself arrives.
    */
-  function submitted(
+  function accepted(
     current: server.DemoMailbox,
     message: server.Written,
     recipients: readonly string[],
   ): server.DemoMailbox {
+    if (filesSent) unfiled.push(message);
     const me = DEMO_ACCOUNTS[current.kind].me.email;
     return recipients.includes(me) ? server.append(current, 'INBOX', message, NEW)[0] : current;
   }
@@ -277,7 +299,15 @@ export function demoServer(
     },
     async submit(raw) {
       const message = await written(withoutBcc(raw));
-      await commit(submitted(mailbox, message, await recipientsOf(raw)), ['INBOX']);
+      await commit(accepted(mailbox, message, await recipientsOf(raw)), ['INBOX']);
+    },
+    async settle() {
+      const sent = server.folderWithRole(mailbox, 'sent');
+      let next = mailbox;
+      for (const message of unfiled.splice(0)) {
+        if (sent) [next] = server.append(next, sent.path, message, SENT);
+      }
+      await commit(next, sent ? [sent.path] : []);
     },
     async empty() {
       await commit(server.emptied(mailbox), [...watchers.keys()]);

@@ -45,10 +45,11 @@ export const identity = { authority: `http://127.0.0.1:${ports.identity}/consume
 /**
  * Capabilities each profile withholds, so code cannot lean on what Zoho and Outlook lack. Zoho also
  * marks no folder with a role, so roles must be found some other way. `plain` is any IMAP server,
- * with IDLE and none of the extensions Trail Mix can do without.
+ * with IDLE and none of the extensions Trail Mix can do without. Outlook files its own copy of what
+ * it accepts in Sent, so its submission does too.
  */
 export const profiles = {
-  full: { withhold: [], roleFlags: true },
+  full: { withhold: [], roleFlags: true, filesSent: false },
   zoho: {
     withhold: [
       'QRESYNC',
@@ -60,8 +61,9 @@ export const profiles = {
       'THREAD=ORDEREDSUBJECT',
     ],
     roleFlags: false,
+    filesSent: false,
   },
-  outlook: { withhold: ['CONDSTORE', 'QRESYNC'], roleFlags: true },
+  outlook: { withhold: ['CONDSTORE', 'QRESYNC'], roleFlags: true, filesSent: true },
   plain: {
     withhold: [
       'UIDPLUS',
@@ -76,6 +78,7 @@ export const profiles = {
       'THREAD=ORDEREDSUBJECT',
     ],
     roleFlags: false,
+    filesSent: false,
   },
 } as const;
 export type Profile = keyof typeof profiles;
@@ -526,8 +529,32 @@ async function buildPatched() {
 
 // The Bun half: submission and the stand-in for Microsoft's sign-in, run detached by `start`
 
+/** How long a host that files its own copy in Sent takes to file it. */
+const FILING_DELAY_MS = 250;
+
+/** Waits until a host that files its own copy in Sent has filed every message it accepted. */
+export async function settled() {
+  const deadline = Date.now() + 10_000;
+  for (;;) {
+    const response = await fetch(`http://127.0.0.1:${ports.identity}/filing`);
+    const { filing } = await response.json<{ filing: number }>();
+    if (filing === 0) return;
+    if (Date.now() > deadline) throw new Error('The host never filed its copy in Sent.');
+    await Bun.sleep(50);
+  }
+}
+
+/** The header that has submission take a message and then drop the connection without a reply. */
+export const DROP_AFTER_DATA_HEADER = 'X-Trail-Mix-Test: drop-after-data';
+const DROP_AFTER_DATA = new RegExp(`^${DROP_AFTER_DATA_HEADER}\\r?$`, 'im');
+type Dropping = { id: string; close(): void };
+
 async function serve() {
   writeFileSync(join(state, 'serve.pid'), String(process.pid));
+  const { filesSent } = profiles[readFileSync(join(state, 'profile'), 'utf8').trim() as Profile];
+  const { doveadm } = await dovecot();
+  /** The copies a host that files its own has accepted and not yet filed in Sent. */
+  let filing = 0;
   const { SMTPServer } = await import('smtp-server');
   const nodemailer = (await import('nodemailer')).default;
   const lmtp = nodemailer.createTransport({
@@ -583,8 +610,26 @@ async function serve() {
         stream.on('end', () => {
           const from = session.envelope.mailFrom ? session.envelope.mailFrom.address : '';
           const to = session.envelope.rcptTo.map((r) => r.address);
-          lmtp.sendMail({ envelope: { from, to }, raw: Buffer.concat(chunks) }).then(
-            () => callback(),
+          const raw = Buffer.concat(chunks);
+          lmtp.sendMail({ envelope: { from, to }, raw }).then(
+            () => {
+              // Outlook files its copy a moment after it accepts, so it isn't in Sent at once.
+              if (filesSent) {
+                filing++;
+                setTimeout(() => {
+                  const save = Bun.spawn([doveadm, '-c', conf, 'save', '-u', from, '-m', 'Sent'], {
+                    stdin: raw,
+                  });
+                  void save.exited.finally(() => filing--);
+                }, FILING_DELAY_MS);
+              }
+              // A test can have the connection drop after the message was taken, before the reply.
+              if (!DROP_AFTER_DATA.test(raw.toString('latin1'))) return callback();
+              for (const connection of (server as unknown as { connections: Set<Dropping> })
+                .connections) {
+                if (connection.id === session.id) connection.close();
+              }
+            },
             (error: Error) => callback(error),
           );
         });
@@ -598,7 +643,14 @@ async function serve() {
     return server;
   });
 
-  const http = Bun.serve({ hostname: '127.0.0.1', port: ports.identity, fetch: signIn.fetch });
+  const http = Bun.serve({
+    hostname: '127.0.0.1',
+    port: ports.identity,
+    fetch: (request) =>
+      new URL(request.url).pathname === '/filing'
+        ? Response.json({ filing })
+        : signIn.fetch(request),
+  });
   process.on('SIGTERM', () => {
     for (const server of servers) server.close();
     void http.stop(true);

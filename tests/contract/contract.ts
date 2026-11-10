@@ -24,6 +24,10 @@ export type Harness = {
   resetUidValidity(folder: string): Promise<void>;
   /** Has the host accept a message for delivery without the provider, as a send cut short would. */
   submit(raw: string): Promise<void>;
+  /** Whether the host files its own copy of what it accepts in Sent, a moment later, as Outlook does. */
+  filesSent: boolean;
+  /** Waits until a host that files its own copy in Sent has filed everything it accepted. */
+  settle(): Promise<void>;
   close(): Promise<void>;
 };
 
@@ -260,50 +264,94 @@ export function describeContract(
       expect(arrived((await syncAll(drafts)).events)).toHaveLength(2);
     });
 
-    it('sends a draft once, with one copy in Sent and the draft gone, however often it is sent', async () => {
+    // Sending is two steps, and the Outbox records the host's acceptance between them. A restart can
+    // land before either step, inside either, or after both, so each case below is one of those
+    // points: the steps that ran before it, then the steps that run again.
+    /** A draft to the account itself, saved, with its Message-ID. */
+    async function drafted(id: string, fields: { bcc?: string } = {}) {
       const { address } = world();
-      const id = '<send-me@example.com>';
-      const draft = await provider.saveDraft(
-        bytes(message({ id: 'send-me', subject: 'Send me', from: address, to: address })),
-      );
-      await provider.send(draft);
-      await provider.send(draft);
-      expect(await count('INBOX', id)).toBe(1);
-      expect(await count(await role('sent'), id)).toBe(1);
-      expect(await count(await role('drafts'), id)).toBe(0);
+      const raw = message({ id, subject: id, from: address, to: address, ...fields });
+      return { raw, id: `<${id}@example.com>`, draft: await provider.saveDraft(bytes(raw)) };
+    }
+    /**
+     * Where one Message-ID is, once the host has filed what it files: how many times it arrived, its
+     * copies in Sent, and its drafts.
+     */
+    async function whereIs(id: string) {
+      await world().settle();
+      return {
+        delivered: await count('INBOX', id),
+        sent: await count(await role('sent'), id),
+        drafts: await count(await role('drafts'), id),
+      };
+    }
+
+    it('submits a draft and files one copy, and once it is filed neither step delivers again', async () => {
+      const { id, draft } = await drafted('send-me');
+      expect(await provider.submit(draft, id)).toBe('sent');
+      await provider.file(draft, id);
+      expect(await whereIs(id)).toEqual({ delivered: 1, sent: 1, drafts: 0 });
+      await provider.file(draft, id);
+      expect(await provider.submit(draft, id)).toBe('sent');
+      expect(await whereIs(id)).toEqual({ delivered: 1, sent: 1, drafts: 0 });
     });
 
-    it('a send cut short after the host accepted it delivers again, but files one copy', async () => {
-      const { address } = world();
-      const id = '<interrupted@example.com>';
-      const raw = message({
-        id: 'interrupted',
-        subject: 'Interrupted',
-        from: address,
-        to: address,
-      });
-      const draft = await provider.saveDraft(bytes(raw));
-      // The host accepted the message, then the provider stopped before filing it in Sent.
+    it('files after a restart or a failed filing, and delivers nothing again', async () => {
+      const { id, draft } = await drafted('accepted');
+      await provider.submit(draft, id);
+      // A failed APPEND stores nothing, so filing that failed leaves what a restart before it does.
+      expect(await whereIs(id)).toMatchObject({ delivered: 1, drafts: 1 });
+      await provider.file(draft, id);
+      expect(await whereIs(id)).toEqual({ delivered: 1, sent: 1, drafts: 0 });
+    });
+
+    it('files no second copy after a restart between filing the copy and removing the draft', async () => {
+      const { raw, id, draft } = await drafted('half-filed');
+      await provider.submit(draft, id);
+      // Filing had appended its copy, unless the host files its own, when the restart came.
+      if (!world().filesSent) await world().deliver(raw, await role('sent'));
+      await provider.file(draft, id);
+      expect(await whereIs(id)).toEqual({ delivered: 1, sent: 1, drafts: 0 });
+    });
+
+    it('submits again after the host accepted it unseen only if Sent holds no copy', async () => {
+      const { raw, id, draft } = await drafted('unrecorded');
+      // The host accepted the message and the Outbox never heard, so a while later the member
+      // chose Retry.
       await world().submit(raw);
-      await provider.send(draft);
-      expect(await count('INBOX', id)).toBe(2);
-      expect(await count(await role('sent'), id)).toBe(1);
-      expect(await count(await role('drafts'), id)).toBe(0);
+      await world().settle();
+      expect(await provider.submit(draft, id)).toBe('sent');
+      await provider.file(draft, id);
+      const { filesSent } = world();
+      expect(await whereIs(id)).toEqual({ delivered: filesSent ? 1 : 2, sent: 1, drafts: 0 });
+    });
+
+    it('says a draft that is gone is missing, and sends nothing', async () => {
+      const { id, draft } = await drafted('withdrawn');
+      await world().expunge(await role('drafts'), id);
+      expect(await provider.submit(draft, id)).toBe('missing');
+      await provider.file(draft, id);
+      expect(await whereIs(id)).toEqual({ delivered: 0, sent: 0, drafts: 0 });
+    });
+
+    it('counts a draft as sent once Sent holds its Message-ID, and delivers nothing', async () => {
+      const { raw, id, draft } = await drafted('sent-elsewhere');
+      await world().deliver(raw, await role('sent'));
+      expect(await provider.submit(draft, id)).toBe('sent');
+      await world().expunge(await role('drafts'), id);
+      expect(await provider.submit(draft, id)).toBe('sent');
+      expect(await whereIs(id)).toEqual({ delivered: 0, sent: 1, drafts: 0 });
     });
 
     it('keeps Bcc recipients out of what it delivers and files', async () => {
       const { address } = world();
-      const raw = message({
-        id: 'blind',
-        subject: 'Blind',
-        from: address,
-        to: address,
-        bcc: address,
-      });
-      await provider.send(await provider.saveDraft(bytes(raw)));
+      const { id, draft } = await drafted('blind', { bcc: address });
+      await provider.submit(draft, id);
+      await provider.file(draft, id);
+      await world().settle();
       for (const folder of ['INBOX', await role('sent')]) {
         const text = await new Response(
-          await provider.body(refOf(await only(folder, 'Blind'))),
+          await provider.body(refOf(await only(folder, 'blind'))),
         ).text();
         expect(text).not.toMatch(/^bcc:/im);
       }

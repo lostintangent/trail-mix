@@ -5,20 +5,24 @@ import { afterAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { ImapFlow } from 'imapflow';
 import nodemailer from 'nodemailer';
+import { SendFailure } from '../../src/features/providers/index.ts';
 import { imapProvider } from '../../src/features/providers/imap/provider.ts';
 import {
+  DROP_AFTER_DATA_HEADER,
   caFile,
+  count,
   empty,
   kick,
   ports,
   profiles,
   resetUidValidity,
+  settled,
   start,
   stop,
   users,
   type Profile,
 } from '../mail-server/server.ts';
-import { describeContract, type Harness } from './contract.ts';
+import { describeContract, message, type Harness } from './contract.ts';
 
 const { alice } = users;
 const auth = { user: alice.email, pass: alice.password };
@@ -33,6 +37,7 @@ async function harness(profile: Profile): Promise<Harness> {
       imap: { host: 'localhost', port: ports.imaps, secure: true },
       smtp: { host: 'localhost', port: ports.submissions, secure: true },
       auth,
+      filesSent: profiles[profile].filesSent,
     },
     { ca },
   );
@@ -58,6 +63,8 @@ async function harness(profile: Profile): Promise<Harness> {
   return {
     provider,
     address: alice.email,
+    filesSent: profiles[profile].filesSent,
+    settle: () => (profiles[profile].filesSent ? settled() : Promise.resolve()),
     reset: () => empty(alice.email),
     async deliver(raw, folder = 'INBOX') {
       await (await elsewhere()).append(folder, raw);
@@ -105,6 +112,71 @@ for (const profile of Object.keys(profiles) as Profile[]) {
 }
 
 describe('The IMAP provider', () => {
+  const bytes = (raw: string) => new TextEncoder().encode(raw);
+  const provider = (smtpPort = ports.submissions) =>
+    imapProvider(
+      {
+        account: 'test',
+        imap: { host: 'localhost', port: ports.imaps, secure: true },
+        smtp: { host: 'localhost', port: smtpPort, secure: true },
+        auth,
+      },
+      { ca: readFileSync(caFile, 'utf8') },
+    );
+  /** Saves a draft, submits it, and says how the submit failed and how often it arrived. */
+  async function failedSubmit(fields: { id: string; to?: string; extra?: string }, port?: number) {
+    await start('full');
+    await empty(alice.email);
+    const sending = provider(port);
+    const raw = message({
+      id: fields.id,
+      subject: fields.id,
+      from: alice.email,
+      to: fields.to ?? alice.email,
+    });
+    const draft = await sending.saveDraft(bytes(fields.extra ? `${fields.extra}\r\n${raw}` : raw));
+    const failure = await sending.submit(draft, `<${fields.id}@example.com>`).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    await sending.close();
+    return {
+      failure,
+      delivered: await count(alice.email, 'INBOX'),
+      drafts: await count(alice.email, 'Drafts'),
+    };
+  }
+
+  test('a submit the host refuses fails for good, and delivers nothing', async () => {
+    const { failure, delivered, drafts } = await failedSubmit({
+      id: 'refused',
+      to: 'someone@example.com',
+    });
+    expect(failure).toBeInstanceOf(SendFailure);
+    expect(failure).toMatchObject({ passing: false });
+    expect((failure as SendFailure).message).toMatch(/^localhost refused it: 550 /);
+    expect({ delivered, drafts }).toEqual({ delivered: 0, drafts: 1 });
+  }, 30_000);
+
+  test('a submit that cannot reach the host fails for now, and delivers nothing', async () => {
+    const { failure, delivered } = await failedSubmit({ id: 'unreachable' }, ports.lmtp + 1);
+    expect(failure).toBeInstanceOf(SendFailure);
+    expect(failure).toMatchObject({ passing: true });
+    expect((failure as SendFailure).message).toMatch(/^Couldn’t reach localhost: /);
+    expect(delivered).toBe(0);
+  }, 30_000);
+
+  test('a submit whose connection drops after the message went out says it may have gone', async () => {
+    const { failure, delivered } = await failedSubmit({
+      id: 'dropped',
+      extra: DROP_AFTER_DATA_HEADER,
+    });
+    expect(failure).toBeInstanceOf(SendFailure);
+    expect(failure).toMatchObject({ passing: false });
+    expect((failure as SendFailure).message).toContain('so it may have been delivered');
+    expect(delivered).toBe(1);
+  }, 30_000);
+
   test('watches again after the server drops it, and reports what it may have missed', async () => {
     await start('full');
     await empty(alice.email);

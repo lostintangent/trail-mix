@@ -1,5 +1,5 @@
 export type { Cursor, MailProvider, Moved, SyncBatch, SyncEvent, SyncWindow } from './provider.ts';
-export { SEARCH_LIMIT } from './provider.ts';
+export { SEARCH_LIMIT, SendFailure } from './provider.ts';
 export {
   DEMO_ACCOUNTS,
   demoMailbox,

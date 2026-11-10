@@ -40,13 +40,21 @@ export interface MailProvider {
   saveDraft(message: Uint8Array, replaces?: MessageRef): Promise<MessageRef>;
 
   /**
-   * Submits a draft, files exactly one copy in Sent unless the host files its own, then removes
-   * the draft. A draft whose Message-ID is already in Sent is only removed, so sending again does
-   * not deliver again. The one case that can deliver twice is a crash after the host accepted the
-   * message and before Sent has its copy: a retry submits again, with the same Message-ID, rather
-   * than risk a message that never left.
+   * Sending is two steps, each safe to repeat, and the Outbox records the host's acceptance between
+   * them, so nothing after it can deliver again. `submit` hands the draft to the host, Bcc and all
+   * but with no Bcc header, unless Sent already holds `messageId`, and resolves once the host has
+   * accepted it: `sent` if it left now or before, `missing` if the draft is gone and Sent does not
+   * hold it. A missing draft is never reported as sent. It rejects with a `SendFailure`.
    */
-  send(draft: MessageRef): Promise<void>;
+  submit(draft: MessageRef, messageId: string): Promise<'sent' | 'missing'>;
+
+  /**
+   * Leaves exactly one copy of a submitted draft in Sent, appending one unless the host files its
+   * own or Sent already holds `messageId`, then removes the draft. It never submits, so repeating
+   * it cannot deliver twice. With the draft already gone there is nothing left to do. It rejects
+   * with a `SendFailure`.
+   */
+  file(draft: MessageRef, messageId: string): Promise<void>;
 
   /**
    * A folder's messages whose headers or body contain `text`, searched by the server across the
@@ -75,6 +83,33 @@ export type { SyncEvent };
 /** Where a folder's sync stopped. It belongs to the provider and is opaque to the Mailroom. */
 /** How many messages one folder's search reports at most. */
 export const SEARCH_LIMIT = 100;
+
+/**
+ * Why a step of sending failed. `passing` when it cannot have delivered anything and the same step
+ * may well succeed later, such as no connection or an SMTP 4xx. A refusal is not passing, and
+ * neither is a connection lost after the message went out, which may have delivered it.
+ */
+export class SendFailure extends Error {
+  readonly passing: boolean;
+  constructor(message: string, passing: boolean) {
+    super(message);
+    this.name = 'SendFailure';
+    this.passing = passing;
+  }
+}
+
+/**
+ * Runs a step of sending that cannot deliver anything, such as reading the draft or filing its copy,
+ * so whatever it throws is a passing `SendFailure`.
+ */
+export async function beforeSending<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (error) {
+    if (error instanceof SendFailure) throw error;
+    throw new SendFailure(error instanceof Error ? error.message : String(error), true);
+  }
+}
 
 /** Where a moved message was, and where it is now. */
 export type Moved = { from: MessageRef; to: MessageRef };
