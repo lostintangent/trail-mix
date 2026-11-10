@@ -127,11 +127,26 @@ export function Workbench({
           />
         </div>
         <div inert={isOffscreen('reader')} {...stylex.props(styles.pane)}>
-          <ReaderPane onBack={() => setPhonePane('list')} />
+          <ReaderPane
+            selected={selected}
+            accounts={accounts}
+            upcoming={neighbors(conversations, selected)}
+            onBack={() => setPhonePane('list')}
+          />
         </div>
       </div>
     </div>
   );
+}
+
+/** The conversations just below and above the selected one, which the reader prepares ahead. */
+function neighbors(
+  conversations: readonly ConversationSummary[] | undefined,
+  selected: ConversationId | undefined,
+): ConversationId[] {
+  const at = conversations?.findIndex(({ id }) => id === selected) ?? -1;
+  if (!conversations || at < 0) return [];
+  return [conversations[at + 1], conversations[at - 1]].flatMap((row) => (row ? [row.id] : []));
 }
 
 /** A view's title, and the unread count its header shows: Inbox's across accounts, or a folder's. */

@@ -42,7 +42,8 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-chromium-${{ hashFiles('bun.lock') }}
 
-      # The reader's tests render hostile mail in Chromium here, and in WebKit in their own job.
+      # The reader's tests render hostile mail in Chromium here, and in WebKit in their own job. The
+      # smoke suite and the bench below drive the built app in it too.
       - name: Install Chromium
         run: bunx playwright install --with-deps chromium
 
@@ -70,9 +71,6 @@ jobs:
       # Starts the built Worker on workerd and profiles it against Cloudflare's one-second limit.
       - name: Check the Worker starts
         run: node node_modules/wrangler/bin/wrangler.js check startup
-
-      - name: Install Chromium for Playwright
-        run: bunx playwright install --with-deps chromium
 
       # Drives the built app on workerd at both sizes in both themes, and saves a screenshot of each.
       - name: Smoke test

@@ -1,7 +1,13 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { chromium, type Browser, type BrowserContextOptions, type Page } from 'playwright';
+import {
+  chromium,
+  type Browser,
+  type BrowserContextOptions,
+  type Locator,
+  type Page,
+} from 'playwright';
 import { startPreview, type Preview } from './preview.ts';
 
 /**
@@ -58,6 +64,9 @@ test('every screen renders cleanly, with readable text, at both sizes in both th
       if (size === 'phone') {
         screens.push(['folders', (page) => page.getByRole('button', { name: 'Folders' }).click()]);
       }
+      // The newest conversation, a thread, then the newsletter, which sets its own colors.
+      screens.push(['reader', (page) => openConversation(page, 0)]);
+      screens.push(['newsletter', (page) => openConversation(page, /Kernel Weekly/)]);
       for (const [screen, reach] of screens) {
         await reach(page);
         await page.waitForTimeout(400);
@@ -148,6 +157,30 @@ test('a sheet that sets its own color scheme takes the theme’s colors for that
   expect(await inkIn('light')).not.toBe(await inkIn('dark'));
   await context.close();
 });
+
+/**
+ * Opens a conversation from the unified Inbox and waits for its mail. On a phone it first goes back
+ * to the list, from the reader or the folders.
+ */
+async function openConversation(page: Page, which: number | RegExp) {
+  // A pane off a phone's screen is inert, so only the pane in view can be used.
+  const inView = async (locator: Locator) =>
+    (await locator.count()) > 0 && locator.evaluate((element) => !element.closest('[inert]'));
+  const back = page.getByRole('button', { name: 'Back' });
+  if (await inView(back)) await back.click();
+  const inbox = page.getByRole('button', { name: /^Inbox/ }).first();
+  if (await inView(inbox)) await inbox.click();
+  const rows = page.getByRole('option');
+  await (
+    typeof which === 'number' ? rows.nth(which) : rows.filter({ hasText: which }).first()
+  ).click();
+  await page.waitForFunction(() => {
+    const frames = [
+      ...document.querySelectorAll<HTMLIFrameElement>('section[aria-label="Reader"] iframe'),
+    ];
+    return frames.length > 0 && frames.every((frame) => frame.style.visibility === 'visible');
+  });
+}
 
 /** Every visible text node whose contrast against what lies behind it falls under 4.5:1. */
 function unreadableText(page: Page): Promise<string[]> {

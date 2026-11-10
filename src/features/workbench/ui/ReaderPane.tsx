@@ -3,14 +3,35 @@ import { Icon } from '@astryxdesign/core/Icon';
 import { IconButton } from '@astryxdesign/core/IconButton';
 import { borderVars, colorVars, spacingVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
+import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, MailOpen } from 'lucide-react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
+import type { Account, ConversationId } from '../../mail/core/index.ts';
+import { conversationQuery } from '../../mailroom/client/index.ts';
+import { Reader } from '../../reader/index.ts';
 
 /**
  * The reader's sheet, where an open conversation lies. On a phone it fills the screen, with a way
  * back to the list at its top.
  */
-export function ReaderPane({ onBack }: { onBack: () => void }) {
+export function ReaderPane({
+  selected,
+  accounts,
+  upcoming,
+  onBack,
+}: {
+  selected: ConversationId | undefined;
+  accounts: readonly Account[];
+  /** The conversations the member may open next, which the reader prepares while idle. */
+  upcoming: ConversationId[];
+  onBack: () => void;
+}) {
+  const { data: conversation } = useQuery({
+    ...conversationQuery(selected ?? ''),
+    enabled: selected !== undefined,
+  });
+  const account = accounts.find(({ id }) => id === conversation?.[0]?.account);
+
   return (
     <section aria-label="Reader" {...stylex.props(styles.sheet)}>
       <header {...stylex.props(styles.phoneHeader)}>
@@ -21,13 +42,19 @@ export function ReaderPane({ onBack }: { onBack: () => void }) {
           onClick={onBack}
         />
       </header>
-      <div {...stylex.props(styles.empty)}>
-        <EmptyState
-          icon={<Icon icon={MailOpen} size="lg" color="secondary" />}
-          title="No conversation open"
-          description="Choose one from the list to read it here."
-        />
-      </div>
+      {selected && conversation?.length && account ? (
+        <div {...stylex.props(styles.scroll)}>
+          <Reader conversation={conversation} account={account} upcoming={upcoming} />
+        </div>
+      ) : (
+        <div {...stylex.props(styles.empty)}>
+          <EmptyState
+            icon={<Icon icon={MailOpen} size="lg" color="secondary" />}
+            title="No conversation open"
+            description="Choose one from the list to read it here."
+          />
+        </div>
+      )}
     </section>
   );
 }
@@ -55,6 +82,13 @@ const styles = stylex.create({
     display: { default: 'none', [media.phone]: 'flex' },
     paddingTop: tm.safeTop,
     paddingInline: spacingVars['--spacing-2'],
+  },
+  scroll: {
+    flexGrow: 1,
+    minHeight: 0,
+    overflowY: 'auto',
+    overscrollBehavior: 'contain',
+    paddingTop: { default: spacingVars['--spacing-6'], [media.phone]: spacingVars['--spacing-1'] },
   },
   empty: {
     flexGrow: 1,
