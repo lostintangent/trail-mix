@@ -81,7 +81,11 @@ export const reader: BenchArea = {
       const held = await heldKey(page);
       await page.context().close();
       if (held.shown.length > 1 || !held.shown.every((subject) => next?.includes(subject))) {
-        throw new Error(`While a key repeated, the reader showed: ${held.shown.join(', ')}`);
+        throw new Error(
+          `While a key repeated, the reader showed ${held.shown.join(', ')}. The row after ` +
+            `the newsletter was ${next?.slice(0, 80)}, and the longest repeat took ` +
+            `${Math.max(...held.times).toFixed(0)} ms, against the reader's 150 ms rest.`,
+        );
       }
 
       console.log(
