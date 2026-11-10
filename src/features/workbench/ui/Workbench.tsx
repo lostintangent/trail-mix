@@ -2,6 +2,7 @@ import { colorVars, durationVars } from '@astryxdesign/core/theme/tokens.stylex'
 import * as stylex from '@stylexjs/stylex';
 import { useId, useState, type ReactNode } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
+import type { ConversationId, ConversationSummary, StampColor } from '../../mail/core/index.ts';
 import { ListPane } from './ListPane.tsx';
 import { PanelEdge } from './PanelEdge.tsx';
 import { PANELS } from './panels.ts';
@@ -20,8 +21,17 @@ const COLUMNS = `var(${PANELS.sidebar.variable}) var(${PANELS.list.variable}) mi
  * On a desktop the sidebar and the list are side panels, resized by their edges. Below 768 pixels
  * the three panes ride a horizontal track, and one shows at a time.
  */
-export function Workbench({ sidebarFooter }: { sidebarFooter: ReactNode }) {
+export function Workbench({
+  conversations,
+  stamps,
+  sidebarFooter,
+}: {
+  conversations: readonly ConversationSummary[];
+  stamps: ReadonlyMap<string, StampColor>;
+  sidebarFooter: ReactNode;
+}) {
   const [view, setView] = useState<UnifiedView>('inbox');
+  const [selected, setSelected] = useState<ConversationId>();
   const [phonePane, setPhonePane] = useState<Pane>('list');
   const [sidebar, setSidebar] = usePanel(PANELS.sidebar);
   const [list, setList] = usePanel(PANELS.list);
@@ -67,6 +77,13 @@ export function Workbench({ sidebarFooter }: { sidebarFooter: ReactNode }) {
           <ListPane
             id={listId}
             title={title}
+            conversations={conversations}
+            stamps={stamps}
+            selected={selected}
+            onSelect={(id) => {
+              setSelected(id);
+              setPhonePane('reader');
+            }}
             isCollapsed={!isPhone && list.isCollapsed}
             onExpand={() => setList({ ...list, isCollapsed: false })}
             onShowFolders={() => setPhonePane('sidebar')}

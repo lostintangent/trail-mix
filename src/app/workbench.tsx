@@ -7,11 +7,19 @@ import { useThemeMode } from './theme/useThemeMode.ts';
 
 export const Route = createFileRoute('/')({ component: App });
 
+// Until the Mailroom serves them.
+const NONE = [] as const;
+const NO_STAMPS = new Map<string, never>();
+
 function App() {
   const [mode, setMode] = useThemeMode();
   return (
     <AppTheme theme={trailMixTheme} mode={mode}>
-      <Workbench sidebarFooter={<ThemeChoice mode={mode} onChange={setMode} />} />
+      <Workbench
+        conversations={NONE}
+        stamps={NO_STAMPS}
+        sidebarFooter={<ThemeChoice mode={mode} onChange={setMode} />}
+      />
     </AppTheme>
   );
 }

@@ -7,6 +7,8 @@ import * as stylex from '@stylexjs/stylex';
 import { ChevronRight, Inbox, Menu } from 'lucide-react';
 import { useId } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
+import { ConversationList } from '../../conversations/index.ts';
+import type { ConversationId, ConversationSummary, StampColor } from '../../mail/core/index.ts';
 
 /**
  * The conversation list's sheet. On a desktop the whole pane is the sheet, and collapsed to its rail
@@ -16,12 +18,20 @@ import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 export function ListPane({
   id,
   title,
+  conversations,
+  stamps,
+  selected,
+  onSelect,
   isCollapsed,
   onExpand,
   onShowFolders,
 }: {
   id: string;
   title: string;
+  conversations: readonly ConversationSummary[];
+  stamps: ReadonlyMap<string, StampColor>;
+  selected: ConversationId | undefined;
+  onSelect: (id: ConversationId) => void;
   isCollapsed: boolean;
   onExpand: () => void;
   onShowFolders: () => void;
@@ -55,12 +65,22 @@ export function ListPane({
           {title}
         </Heading>
       </header>
-      <div {...stylex.props(styles.sheet)}>
-        <EmptyState
-          icon={<Icon icon={Inbox} size="lg" color="secondary" />}
-          title="No mail yet"
-          description="Mail from the accounts you connect will gather here, newest first."
-        />
+      <div {...stylex.props(styles.sheet, conversations.length === 0 && styles.empty)}>
+        {conversations.length === 0 ? (
+          <EmptyState
+            icon={<Icon icon={Inbox} size="lg" color="secondary" />}
+            title="No mail yet"
+            description="Mail from the accounts you connect will gather here, newest first."
+          />
+        ) : (
+          <ConversationList
+            label={title}
+            conversations={conversations}
+            stamps={stamps}
+            selected={selected}
+            onSelect={onSelect}
+          />
+        )}
       </div>
     </section>
   );
@@ -86,6 +106,11 @@ const styles = stylex.create({
       },
     },
   },
+  empty: {
+    display: 'grid',
+    placeItems: 'center',
+    padding: spacingVars['--spacing-6'],
+  },
   rail: {
     alignItems: 'center',
     paddingBlock: spacingVars['--spacing-2'],
@@ -106,9 +131,7 @@ const styles = stylex.create({
   sheet: {
     flexGrow: 1,
     minHeight: 0,
-    display: 'grid',
-    placeItems: 'center',
-    padding: spacingVars['--spacing-6'],
+    paddingBottom: { default: null, [media.phone]: tm.safeBottom },
     backgroundColor: { default: null, [media.phone]: colorVars['--color-background-surface'] },
     borderStartStartRadius: { default: null, [media.phone]: tm.paneRadius },
     borderStartEndRadius: { default: null, [media.phone]: tm.paneRadius },
