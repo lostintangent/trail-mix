@@ -4,6 +4,7 @@ import { createSocketsTransport } from 'imapflow';
 import PostalMime from 'postal-mime';
 import { messageOf } from '../../composer/index.ts';
 import {
+  messageIdOf,
   writeMime,
   type Account,
   type AccountId,
@@ -44,6 +45,7 @@ import { memberKey, open, seal } from './credentials.ts';
 import { envelopeIndex, pageAfter, type EnvelopeIndex } from './envelope-index.ts';
 import * as input from './input.ts';
 import { upgrade, type Sql, type SqlValue } from './schema.ts';
+import { outboxQueue, type OutboxQueue } from './outbox.ts';
 import { foundOf, opened, sameRef, type Found } from './search.ts';
 import { syncQueue, type SyncQueue } from './sync.ts';
 
@@ -84,6 +86,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   private readonly providers = new Map<AccountId, Promise<MailProvider>>();
   private readonly watchers = new Map<AccountId, () => void>();
   protected readonly queue: SyncQueue;
+  protected readonly sending: OutboxQueue;
   /** When every account was last owed a check. A cold start checks at its first wake. */
   private checkedAt = 0;
   private key: Promise<CryptoKey> | undefined;
@@ -111,6 +114,20 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
         this.setStatus(account, error ? 'error' : 'ready');
       },
     });
+    this.sending = outboxQueue({
+      sql: this.sql,
+      provider: (account) => this.provider(account),
+      hint: (hint) => this.hint(hint),
+      sent: ({ draft }) => {
+        this.queue.folder({ account: draft.account, path: draft.path });
+        const sent = this.store.folders(draft.account).find((folder) => folder.role === 'sent');
+        if (sent) this.queue.folder(folderRef(sent));
+      },
+      accepted: () => this.accepted(),
+    });
+    // Every wake is a cold start, and this is where one begins: a send found mid-submit was cut
+    // short by whatever ended the last instance.
+    this.sending.recover();
     if (found === 0 && this.demo) {
       this.addDemo();
       this.addDemo();
@@ -166,7 +183,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   }
 
   outbox(): Promise<Outgoing[]> {
-    return Promise.resolve([]);
+    return Promise.resolve(this.sending.list());
   }
 
   // Commands
@@ -241,6 +258,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     this.sql.transaction(() => {
       this.book.remove(account);
       this.store.forget(account);
+      this.sending.forget(account);
     });
     this.found = undefined;
     this.hint({ changed: 'accounts' });
@@ -315,6 +333,9 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     if (older && older.account !== account.id) {
       throw new TypeError('A draft replaces only a draft of the account it is from.');
     }
+    if (older && this.sending.holds(older)) {
+      throw new Error('That draft is on its way. Undo the send to change it.');
+    }
     const parent = checked.inReplyTo && this.known(checked.inReplyTo);
     if (checked.inReplyTo && !parent) throw new Error('The message this replies to is gone.');
     const attachments: MimeAttachment[] = [];
@@ -359,12 +380,29 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     return saved;
   }
 
-  send(_draft: MessageRef, _at?: string): Promise<Outgoing> {
-    return Promise.reject(new Error('Sending arrives with the Outbox.'));
+  /**
+   * Schedules a draft to send when the undo window closes, or at a later time. The draft stays in
+   * Drafts, as it is, until the host accepts it.
+   */
+  async send(draft: MessageRef, at?: string): Promise<Outgoing> {
+    const ref = input.refOf(draft);
+    const when = at === undefined ? undefined : input.instantOf(at);
+    if (!this.book.get(ref.account)) throw new Error('There is no such account.');
+    if (this.store.reads.role(ref) !== 'drafts') throw new Error('Only a draft can be sent.');
+    const messageId = await this.messageIdOf(ref);
+    const outgoing = this.sending.send(ref, messageId, new Date().toISOString(), when);
+    await this.wakeBy(Date.parse(outgoing.sendAt));
+    return outgoing;
   }
 
-  cancelSend(_id: string): Promise<MessageRef> {
-    return Promise.reject(new Error('Sending arrives with the Outbox.'));
+  cancelSend(id: string): Promise<MessageRef> {
+    return Promise.resolve(this.sending.cancel(input.sendOf(id)));
+  }
+
+  async retrySend(id: string): Promise<Outgoing> {
+    const retried = this.sending.retry(input.sendOf(id), new Date().toISOString());
+    await this.wakeBy(Date.parse(retried.sendAt));
+    return retried;
   }
 
   async createFolder(folder: FolderRef): Promise<void> {
@@ -454,13 +492,18 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     if (accounts.length === 0) return 0;
     const open = this.devices() > 0;
     // If this wake ends early, as an eviction would end it, the next one is already set.
-    await this.ctx.storage.setAlarm(Date.now() + (open ? WATCHING_MS : CHECKING_MS));
+    const poll = Date.now() + (open ? WATCHING_MS : CHECKING_MS);
+    await this.ctx.storage.setAlarm(Math.min(poll, this.sending.nextWake() ?? poll));
+    // A send that is due goes before sync, which can wait.
+    await this.sending.run(() => new Date().toISOString());
     if (Date.now() - this.checkedAt >= CHECKING_MS) this.checkAll();
     await this.watchAll(open);
     const landed = await this.queue.run();
     // A new account's Inbox is known only once its folders are.
     await this.watchAll(this.devices() > 0);
-    if (this.queue.owing()) await this.ctx.storage.setAlarm(Date.now());
+    const sendAt = this.sending.nextWake() ?? poll;
+    if (this.queue.owing() || sendAt <= Date.now()) await this.ctx.storage.setAlarm(Date.now());
+    else await this.ctx.storage.setAlarm(Math.min(poll, sendAt));
     return landed;
   }
 
@@ -468,6 +511,15 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     this.checkedAt = Date.now();
     for (const { id } of this.book.all()) this.queue.check(id);
   }
+
+  /** Has the alarm come by `at`, unless it is already set to come sooner. */
+  private async wakeBy(at: number) {
+    const set = await this.ctx.storage.getAlarm();
+    if (set === null || set > at) await this.ctx.storage.setAlarm(at);
+  }
+
+  /** Runs once the host has accepted a message and before the Outbox records it. */
+  protected accepted(): void {}
 
   /** Owes sync, and has the next wake land it at once. */
   private async owe(owing: () => void) {
@@ -639,6 +691,16 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 
   private bodyKey(ref: MessageRef) {
     return `${this.member}/${ref.account}/${encodeURIComponent(ref.path)}/${ref.uidValidity}/${ref.uid}`;
+  }
+
+  /** A draft's Message-ID, which a send needs to find its copy in Sent. */
+  private async messageIdOf(draft: MessageRef): Promise<string> {
+    const held = this.store.reads.message(draft)?.messageId;
+    const bytes = held ? undefined : await this.bytes(draft);
+    if (!held && !bytes) throw new Error('That draft is gone.');
+    const id = held || messageIdOf((await PostalMime.parse(bytes!)).messageId);
+    if (!id) throw new Error('That draft has no Message-ID, so it can’t be sent safely.');
+    return id;
   }
 
   /** A message the index holds, or the last full-text search found. */

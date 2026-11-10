@@ -3,8 +3,8 @@
  * Each version is applied once, in order, when a Mailroom wakes. Versions are only ever appended,
  * so any Mailroom moves forward from whatever version it last ran.
  *
- * Only `accounts`, `credentials`, `demo` and, later, the Outbox hold what Trail Mix owns. Every
- * other table is the envelope index, which sync rebuilds from the mail servers.
+ * Only `accounts`, `credentials`, `demo` and `outbox` hold what Trail Mix owns. Every other table is
+ * the envelope index, which sync rebuilds from the mail servers.
  */
 
 /** What a Mailroom reads and writes through, on either runtime. */
@@ -116,6 +116,11 @@ export const versions: readonly (readonly string[])[] = [
     // Sam Rivera, so one made before now says so. An IMAP account has none until the member sets it.
     `UPDATE accounts SET account = json_set(account, '$.fromName', 'Sam Rivera')
       WHERE json_extract(connection, '$.provider') = 'demo'`,
+  ],
+  [
+    // The Outbox: each send the member scheduled, as the Outbox's state machine left it. Trail Mix
+    // owns it, so nothing rebuilds it.
+    `CREATE TABLE outbox (id TEXT PRIMARY KEY, account TEXT NOT NULL, outgoing TEXT NOT NULL)`,
   ],
 ];
 

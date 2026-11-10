@@ -38,6 +38,35 @@ export class TestMailroom extends Mailroom {
     return Promise.resolve();
   }
 
+  private restartOnAcceptance = false;
+
+  /**
+   * Ends this instance the next time a host accepts a message, before the Outbox can record it:
+   * the one instant a restart leaves a send's fate unknown.
+   */
+  restartWhenAccepted(): Promise<void> {
+    this.restartOnAcceptance = true;
+    return Promise.resolve();
+  }
+
+  protected override accepted(): void {
+    if (this.restartOnAcceptance) this.ctx.abort('A test restarted the Mailroom mid-send.');
+  }
+
+  /**
+   * Has an account's provider leave Sent to the host, as Outlook's preset does, and restarts so the
+   * provider is made again. Setup can't say so for a host it names itself.
+   */
+  async hostFilesSent(account: string): Promise<void> {
+    this.sql.run(
+      `UPDATE accounts SET connection = json_set(connection, '$.filesSent', json('true')) WHERE id = ?`,
+      account,
+    );
+    // A restart drops writes not yet on disk.
+    await this.ctx.storage.sync();
+    await this.restart();
+  }
+
   /** Erases the envelope index and the body cache, which sync rebuilds from the servers. */
   async eraseIndex(): Promise<void> {
     for (const { id } of await this.accounts()) this.store.forget(id);

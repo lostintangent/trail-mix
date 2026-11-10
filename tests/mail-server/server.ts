@@ -118,6 +118,7 @@ async function launch(binaries: Dovecot, profile: Profile) {
   writeFileSync(join(state, 'profile'), profile);
 
   rmSync(join(state, 'serve.ready'), { force: true });
+  rmSync(join(state, 'paused'), { recursive: true, force: true });
   // Started by a shell that exits at once, so that, as Dovecot does, the server runs on its own and
   // records its own pid. When a test times out, Bun ends the processes its tests and hooks
   // started, and a server started from a harness's hook would go with them.
@@ -529,6 +530,18 @@ async function buildPatched() {
 
 // The Bun half: submission and the stand-in for Microsoft's sign-in, run detached by `start`
 
+/**
+ * Pauses a user's sending, or resumes it, as a host does when an account is over its sending limit.
+ * While paused, submission refuses the user's mail with a 554.
+ */
+export function pauseSending(user: string, paused: boolean) {
+  mkdirSync(join(state, 'paused'), { recursive: true });
+  if (paused) writeFileSync(pausedFile(user), '');
+  else rmSync(pausedFile(user), { force: true });
+}
+
+const pausedFile = (user: string) => join(state, 'paused', user.toLowerCase());
+
 /** How long a host that files its own copy in Sent takes to file it. */
 const FILING_DELAY_MS = 250;
 
@@ -594,6 +607,9 @@ async function serve() {
       onMailFrom(address, session, callback) {
         if (address.address.toLowerCase() !== String(session.user).toLowerCase()) {
           return callback(reject(553, 'Sender must be the signed-in user'));
+        }
+        if (existsSync(pausedFile(address.address))) {
+          return callback(reject(554, '5.7.1 Sending is paused for this account'));
         }
         callback();
       },

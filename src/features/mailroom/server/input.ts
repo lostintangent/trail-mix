@@ -95,6 +95,25 @@ export function conversationOf(value: unknown): ConversationId {
   return value;
 }
 
+/** A time to send at: an ISO 8601 instant with its offset, read as UTC. */
+export function instantOf(value: unknown): string {
+  const instant =
+    typeof value === 'string' &&
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/.test(value)
+      ? Date.parse(value)
+      : Number.NaN;
+  if (Number.isNaN(instant)) throw new TypeError('That isn’t a time, with its offset.');
+  return new Date(instant).toISOString();
+}
+
+/** An Outbox entry's id. */
+export function sendOf(value: unknown): string {
+  if (typeof value !== 'string' || !value || value.length > 100) {
+    throw new TypeError('That isn’t a send.');
+  }
+  return value;
+}
+
 const FLAGS: readonly (keyof Flags)[] = ['seen', 'flagged', 'answered', 'draft'];
 
 export function flagsOf(value: unknown): Partial<Flags> {

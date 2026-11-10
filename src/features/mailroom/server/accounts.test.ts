@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { DEMO_ACCOUNTS, demoMailbox } from '../../providers/index.ts';
 import { accountBook, demoSettings, type Connection } from './accounts.ts';
-import { upgrade, versions } from './schema.ts';
+import { upgrade } from './schema.ts';
 import { testSql } from './test-sql.ts';
 
 const imap: Connection = {
@@ -72,7 +72,8 @@ test('the demo is a size and an optional instant, and anything else is refused',
 });
 
 test('a demo account from before From names writes as its demo person, and IMAP ones wait for one', () => {
-  const sql = testSql(versions.length - 1);
+  // Version 4 gave accounts their From names, so this Mailroom stops at the version before it.
+  const sql = testSql(3);
   const book = accountBook(sql);
   book.add(named('mail'), imap, sealed);
   const demo = demoMailbox('personal', 10, '2026-11-09T12:00:00.000Z');

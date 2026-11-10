@@ -13,11 +13,23 @@ import type {
   Hint,
   Message,
   MessageRef,
+  Outgoing,
   View,
 } from '../../mail/core/index.ts';
+import { RESTARTED, UNDO_SECONDS } from '../../outbox/index.ts';
 import PostalMime from 'postal-mime';
 import { sendable, type AccountSetup, type Page } from '../client/contract.ts';
-import { caFile, empty, ports, start, stop, users } from '../../../../tests/mail-server/server.ts';
+import {
+  caFile,
+  empty,
+  pauseSending,
+  ports,
+  settled,
+  start,
+  stop,
+  users,
+  type Profile,
+} from '../../../../tests/mail-server/server.ts';
 import { startWorker, type LocalWorker } from '../../../../tests/workerd.ts';
 import { WAKE } from './sync.ts';
 import type { Wake } from './test-worker.ts';
@@ -563,6 +575,131 @@ describe('The Mailroom with the demo mailbox', () => {
 });
 
 /** A member's Mailroom, reached as the test worker names it. */
+for (const profile of ['full', 'outlook'] as const satisfies Profile[]) {
+  const filesSent = profile === 'outlook';
+  const host = filesSent ? 'a host that files its own copy in Sent' : 'a host Trail Mix files for';
+
+  describe(`The Outbox, on ${host}`, () => {
+    let worker: LocalWorker;
+    let account: Account;
+    // No device of this member's ever opens, so only the alarm sends.
+    const cal = member('cal', () => worker);
+
+    beforeAll(async () => {
+      await start(profile);
+      ca = readFileSync(caFile, 'utf8');
+      await Promise.all([empty(alice.email), empty(bob.email)]);
+      worker = await mailrooms();
+      account = await cal.call<Account>('addAccount', setup);
+      await cal.until(async () => (await cal.call<Account[]>('accounts'))[0]?.status === 'ready');
+      if (filesSent) await cal.call('hostFilesSent', account.id).catch(() => {});
+    }, 120_000);
+
+    afterAll(async () => {
+      worker?.stop();
+      await stop();
+    });
+
+    /** A draft from Alice to Bob, as the composer saves it. */
+    const draftOf = (subject: string) => ({
+      account: account.id,
+      to: [{ name: 'Bob', email: bob.email }],
+      cc: [],
+      bcc: [],
+      subject,
+      markdown: `About ${subject}.\n`,
+      attachments: [],
+    });
+    const drafted = (subject: string) => cal.call<MessageRef>('saveDraft', draftOf(subject));
+    const outbox = () => cal.call<Outgoing[]>('outbox');
+    /** How many times a subject is in Bob's Inbox, Alice's Sent and Alice's Drafts. */
+    async function whereIs(subject: string) {
+      await settled();
+      const count = async (user: { email: string; password: string }, path: string) =>
+        (await subjectsIn(user, path)).filter((held) => held === subject).length;
+      return {
+        delivered: await count(bob, 'INBOX'),
+        sent: await count(alice, 'Sent'),
+        drafts: await count(alice, 'Drafts'),
+      };
+    }
+
+    test('an undo inside the window delivers nothing and leaves the draft as it was', async () => {
+      const saved = await drafted('Undone');
+      const before = (await draftOnServer(saved)).source;
+      const pressed = Date.now();
+      const sending = await cal.call<Outgoing>('send', saved);
+      expect(sending).toMatchObject({ draft: saved, state: 'waiting', attempts: 0 });
+      expect(Date.parse(sending.sendAt) - pressed).toBeGreaterThanOrEqual(UNDO_SECONDS * 1000 - 50);
+      expect(await outbox()).toEqual([sending]);
+
+      expect(await cal.call<MessageRef>('cancelSend', sending.id)).toEqual(saved);
+      expect(await outbox()).toEqual([]);
+      await Bun.sleep(UNDO_SECONDS * 1000 + 2000);
+      expect(await whereIs('Undone')).toEqual({ delivered: 0, sent: 0, drafts: 1 });
+      expect((await draftOnServer(saved)).source).toEqual(before);
+    }, 60_000);
+
+    test('a draft on its way can’t be replaced until its send is undone', async () => {
+      const saved = await drafted('Steady');
+      const { id } = await cal.call<Outgoing>('send', saved);
+      await expect(cal.call('saveDraft', draftOf('Steady'), saved)).rejects.toThrow(
+        'That draft is on its way. Undo the send to change it.',
+      );
+      await cal.call('cancelSend', id);
+      await cal.call('saveDraft', draftOf('Steady, changed'), saved);
+      expect(await whereIs('Steady')).toMatchObject({ delivered: 0, drafts: 0 });
+    }, 60_000);
+
+    test('a send scheduled ahead goes at its time, with no device open', async () => {
+      const saved = await drafted('Scheduled');
+      const at = new Date(Date.now() + 20_000).toISOString();
+      const sending = await cal.call<Outgoing>('send', saved, at);
+      expect(sending.sendAt).toBe(at);
+      // Saving another draft wakes the Mailroom to sync it, and that wake keeps the send's time.
+      await drafted('Meanwhile');
+      await cal.until(async () => (await outbox()).length === 0, 60_000);
+      expect(Date.now()).toBeGreaterThanOrEqual(Date.parse(at));
+      expect(await whereIs('Scheduled')).toEqual({ delivered: 1, sent: 1, drafts: 0 });
+    }, 90_000);
+
+    test('a send the server refuses stays failed with its reason, and goes on Retry', async () => {
+      pauseSending(alice.email, true);
+      const saved = await drafted('Refused');
+      const { id } = await cal.call<Outgoing>('send', saved);
+      await cal.until(async () => (await outbox())[0]?.state === 'failed', 60_000);
+      const [failed] = await outbox();
+      expect(failed).toMatchObject({ id, state: 'failed', attempts: 1 });
+      expect(failed!.error).toMatch(/^localhost refused it: 554 5\.7\.1 Sending is paused/);
+      expect(await whereIs('Refused')).toEqual({ delivered: 0, sent: 0, drafts: 1 });
+
+      pauseSending(alice.email, false);
+      expect(await cal.call<Outgoing>('retrySend', id)).toMatchObject({ state: 'waiting' });
+      await cal.until(async () => (await outbox()).length === 0, 60_000);
+      expect(await whereIs('Refused')).toEqual({ delivered: 1, sent: 1, drafts: 0 });
+    }, 90_000);
+
+    test('a restart before the Outbox records acceptance holds the send, saying it may have gone', async () => {
+      const saved = await drafted('Interrupted');
+      await cal.call('restartWhenAccepted');
+      const { id } = await cal.call<Outgoing>('send', saved);
+      await cal.until(async () => (await outbox())[0]?.state === 'failed', 60_000);
+      expect((await outbox())[0]).toMatchObject({ id, state: 'failed', error: RESTARTED });
+      // The host had the message, and the draft waits as it was.
+      expect(await whereIs('Interrupted')).toEqual({
+        delivered: 1,
+        sent: filesSent ? 1 : 0,
+        drafts: 1,
+      });
+      if (!filesSent) return;
+      // Retry finds the copy the host filed in Sent, and delivers nothing again.
+      await cal.call('retrySend', id);
+      await cal.until(async () => (await outbox()).length === 0, 60_000);
+      expect(await whereIs('Interrupted')).toEqual({ delivered: 1, sent: 1, drafts: 0 });
+    }, 90_000);
+  });
+}
+
 function member(name: string, worker: () => LocalWorker) {
   const call = async <T = unknown>(method: string, ...args: unknown[]): Promise<T> => {
     // As a browser sends it: a call carrying files goes as form data.
@@ -682,6 +819,34 @@ async function draftOnServer(ref: MessageRef): Promise<{ source: Uint8Array; fla
       lock.release();
     }
   });
+}
+
+/** The subjects in a folder of a user's, one for each message, as the server holds them. */
+async function subjectsIn(user: { email: string; password: string }, path: string) {
+  const client = new ImapFlow({
+    host: 'localhost',
+    port: ports.imaps,
+    secure: true,
+    auth: { user: user.email, pass: user.password },
+    tls: { ca: [ca] },
+    logger: false,
+  });
+  await client.connect();
+  try {
+    const lock = await client.getMailboxLock(path);
+    try {
+      if (!client.mailbox || client.mailbox.exists === 0) return [];
+      const subjects: string[] = [];
+      for await (const message of client.fetch('1:*', { envelope: true })) {
+        subjects.push(message.envelope?.subject ?? '');
+      }
+      return subjects;
+    } finally {
+      lock.release();
+    }
+  } finally {
+    await client.logout();
+  }
 }
 
 /** Alice's folders, as the server lists them. */

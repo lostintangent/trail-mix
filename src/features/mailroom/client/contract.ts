@@ -57,6 +57,8 @@ export interface Commands {
   send(draft: MessageRef, at?: string): Promise<Outgoing>;
   /** Returns the draft, untouched. */
   cancelSend(id: string): Promise<MessageRef>;
+  /** A failed send, tried again now. */
+  retrySend(id: string): Promise<Outgoing>;
   createFolder(folder: FolderRef): Promise<void>;
   renameFolder(folder: FolderRef, to: string): Promise<void>;
   deleteFolder(folder: FolderRef): Promise<void>;
@@ -163,6 +165,7 @@ export const COMMANDS = [
   'saveDraft',
   'send',
   'cancelSend',
+  'retrySend',
   'createFolder',
   'renameFolder',
   'deleteFolder',
