@@ -74,6 +74,12 @@ for (const [size, options] of Object.entries(SIZES)) {
       return page.getByRole('navigation', { name: 'Mailboxes' });
     }
 
+    /** An account's page, from the menu beside its name in the sidebar. */
+    async function editAccount(page: Page, name: string) {
+      await (await sidebar(page)).getByRole('button', { name: `More for ${name}` }).click();
+      await page.getByRole('menuitem', { name: `Edit the ${name} account` }).click();
+    }
+
     const firstRun = (page: Page) => page.getByRole('heading', { name: 'Welcome to Trail Mix' });
     const cabinKeys = (page: Page) =>
       page.getByRole('option').filter({ hasText: 'The cabin keys' });
@@ -147,7 +153,7 @@ for (const [size, options] of Object.entries(SIZES)) {
     test('an account’s name, stamp, From name and signature change from its page', async () => {
       const page = await open({ colorScheme: 'light' });
       await cabinKeys(page).waitFor({ timeout: 30_000 });
-      await (await sidebar(page)).getByRole('button', { name: 'Edit trailmix.test' }).click();
+      await editAccount(page, 'trailmix.test');
 
       const form = page.getByRole('form', { name: 'Edit trailmix.test' });
       await form.getByRole('textbox', { name: 'Name', exact: true }).fill('Alice');
@@ -183,7 +189,7 @@ for (const [size, options] of Object.entries(SIZES)) {
     test('removing an account says what goes first, and leaves the first-run screen', async () => {
       const page = await open({ colorScheme: 'dark' });
       await cabinKeys(page).waitFor({ timeout: 30_000 });
-      await (await sidebar(page)).getByRole('button', { name: 'Edit Alice' }).click();
+      await editAccount(page, 'Alice');
       await page.getByRole('button', { name: 'Remove account…' }).click();
 
       const question = page.getByRole('alertdialog', { name: 'Remove Alice?' });
