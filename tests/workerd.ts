@@ -63,6 +63,11 @@ export async function startWorker(
         // Wrangler otherwise keeps a debug log of every run in its own folder.
         WRANGLER_WRITE_LOGS: 'false',
         WRANGLER_SEND_METRICS: 'false',
+        // Wrangler's local explorer, and the collector behind it that records a span for every SQL
+        // statement and socket read in a database of its own, on the Worker's thread. A deployed
+        // Worker has neither, and with them on they cost as much CPU as the Mailroom itself.
+        X_LOCAL_EXPLORER: 'false',
+        X_LOCAL_OBSERVABILITY: 'false',
         ...env,
       },
     },

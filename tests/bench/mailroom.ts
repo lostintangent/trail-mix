@@ -111,10 +111,27 @@ async function firstSync({ url, group }: LocalWorker) {
     }
     // The first batch counts from the folder list, so connecting and signing in are not in it.
     const batches = inboxBatches.map((cpu, i) => cpu - (inboxBatches[i - 1] ?? listed!));
-    return { total, slowest: Math.max(...batches) };
+    const slowest = Math.max(...batches);
+    console.log(
+      `Inbox batches, CPU: p50 ${percentile(batches, 0.5)} ms, p95 ${percentile(batches, 0.95)} ms,` +
+        ` max ${slowest} ms in batch ${batches.indexOf(slowest) + 1} of ${batches.length}.` +
+        ` By tenths: ${tenths(batches).join(', ')} ms.`,
+    );
+    return { total, slowest };
   } finally {
     device.close();
   }
+}
+
+/** The mean of each tenth of a sync's batches, in order, which shows whether batches slow as the index grows. */
+function tenths(batches: readonly number[]): number[] {
+  return Array.from({ length: 10 }, (_, tenth) => {
+    const slice = batches.slice(
+      Math.floor((tenth * batches.length) / 10),
+      Math.floor(((tenth + 1) * batches.length) / 10),
+    );
+    return Math.round(slice.reduce((sum, cpu) => sum + cpu, 0) / slice.length);
+  });
 }
 
 /** Times the two reads where the Mailroom runs them, once the index holds the whole Inbox. */
