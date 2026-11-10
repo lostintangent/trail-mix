@@ -42,3 +42,16 @@ jobs:
 
       - name: Build
         run: bun run build
+
+      # Wrangler runs on Node, as everything that starts the local Workers runtime does.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      # Builds the exact upload without an account, so a Worker that would not deploy fails here.
+      - name: Check the Worker deploys
+        run: node node_modules/wrangler/bin/wrangler.js deploy --dry-run
+
+      # Starts the built Worker on workerd and profiles it against Cloudflare's one-second limit.
+      - name: Check the Worker starts
+        run: node node_modules/wrangler/bin/wrangler.js check startup

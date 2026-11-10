@@ -222,7 +222,7 @@ Tests concentrate where a defect spreads.
 
 ### Pipeline
 
-- **CI** runs on every pull request and every push to main: install from the frozen lockfile, format check, lint, type-check, test and build, then the provider contract suite against the test mail server and the Playwright smoke suite against the built app.
+- **CI** runs on every pull request and every push to main: install from the frozen lockfile, format check, lint, type-check, test and build, then a check under Node that the built Worker deploys (`wrangler deploy --dry-run`) and starts within Cloudflare's limit (`wrangler check startup`), then the provider contract suite against the test mail server and the Playwright smoke suite against the built app.
 - **Preview** runs on every pull request, after CI. It deploys the branch to an isolated environment with its own storage that enables only the demo provider, and posts the address on the pull request.
 - **Production** runs on every push to main, after CI. It deploys with the commit as its version and then calls the health endpoint. If the endpoint does not report that commit, the workflow rolls back and fails.
 - **Demo** runs after production. It deploys the public demo: no sign-in, demo provider only, one Mailroom per visitor that erases itself after a day.
