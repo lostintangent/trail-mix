@@ -25,6 +25,13 @@ export type EnvelopeIndex = ReturnType<typeof envelopeIndex>;
 
 const PAGE_SIZE = 50;
 
+/**
+ * A message's rowid is the second its date names times this, plus a count of those before it in
+ * that second, so rowids order by date and the full-text table, which shares them, reads its
+ * matches newest first.
+ */
+const SECOND = 2 ** 20;
+
 export function envelopeIndex(sql: Sql) {
   /** Folder roles by folder, read once for each fold, since nothing in a fold changes them. */
   let roles: Map<string, FolderRole | undefined> | undefined;
@@ -36,6 +43,13 @@ export function envelopeIndex(sql: Sql) {
         )
         .map((row) => [placeOf(row), (row.role ?? undefined) as FolderRole | undefined]),
     );
+
+  /**
+   * A fold's new search rows, written together in rowid order as it ends. FTS5 starts a new segment
+   * whenever a rowid comes lower than the last, and sync reads mail newest first, so written as
+   * they arrived every message would make a segment of its own.
+   */
+  const unwritten = new Map<number, SqlValue[]>();
 
   const reads: Index = {
     message: (ref) =>
@@ -79,7 +93,7 @@ export function envelopeIndex(sql: Sql) {
       const gone = held(ref);
       if (!gone) continue;
       touched.add(gone.conversation);
-      sql.run(`DELETE FROM search WHERE rowid = ?`, gone.rowid);
+      if (!unwritten.delete(gone.rowid)) sql.run(`DELETE FROM search WHERE rowid = ?`, gone.rowid);
       sql.run(`DELETE FROM messages WHERE rowid = ?`, gone.rowid);
       sql.run(`DELETE FROM links WHERE ${BY_REF}`, ...keyOf(ref));
     }
@@ -97,22 +111,29 @@ export function envelopeIndex(sql: Sql) {
         );
         continue;
       }
+      const first = firstRowidOf(message.date);
+      const [{ last } = { last: null }] = sql.all<{ last: number | null }>(
+        `SELECT MAX(rowid) AS last FROM messages WHERE rowid >= ? AND rowid < ?`,
+        first,
+        first + SECOND,
+      );
+      // A second that is somehow full leaves SQLite to number the message.
+      const rowid = last === null ? first : last + 1 < first + SECOND ? last + 1 : null;
       const [inserted] = sql.all<{ rowid: number }>(
-        `INSERT INTO messages (account, path, uid_validity, uid, conversation, message)
-         VALUES (?, ?, ?, ?, ?, ?) RETURNING rowid`,
+        `INSERT INTO messages (rowid, account, path, uid_validity, uid, conversation, message)
+         VALUES (?, ?, ?, ?, ?, ?, ?) RETURNING rowid`,
+        rowid,
         ...keyOf(message),
         conversation,
         JSON.stringify(envelope),
       );
       const { senders, recipients } = searchTextOf(message);
-      sql.run(
-        `INSERT INTO search (rowid, senders, recipients, subject, preview) VALUES (?, ?, ?, ?, ?)`,
-        inserted!.rowid,
+      unwritten.set(inserted!.rowid, [
         searchable(senders),
         searchable(recipients),
         searchable(message.subject),
         searchable(message.preview),
-      );
+      ]);
       for (const id of linkIdsOf(message)) {
         sql.run(
           `INSERT OR IGNORE INTO links (account, id, path, uid_validity, uid) VALUES (?, ?, ?, ?, ?)`,
@@ -178,6 +199,13 @@ export function envelopeIndex(sql: Sql) {
       try {
         const touched = new Set<ConversationId>();
         for (const event of events) write(applySyncEvent(reads, event), touched);
+        for (const rowid of [...unwritten.keys()].sort((a, b) => a - b)) {
+          sql.run(
+            `INSERT INTO search (rowid, senders, recipients, subject, preview) VALUES (?, ?, ?, ?, ?)`,
+            rowid,
+            ...unwritten.get(rowid)!,
+          );
+        }
         const changed = new Map<string, FolderRef>();
         const note = ({ account, path }: FolderRef) =>
           changed.set(placeOf({ account, path }), { account, path });
@@ -191,6 +219,7 @@ export function envelopeIndex(sql: Sql) {
         return [...changed.values()];
       } finally {
         roles = undefined;
+        unwritten.clear();
       }
     },
 
@@ -280,24 +309,52 @@ export function envelopeIndex(sql: Sql) {
 
     /**
      * One page of the conversations with a message whose senders, recipients, subject or preview
-     * hold every word of `text`, each word as typed so far, newest first across every account.
+     * hold every word of `text`, each word as typed so far, across every account. They come newest
+     * first by the newest message that matches, and each row shows that message. Matches stream
+     * newest first, so a page reads only as far as it needs, however many messages match.
      */
     search(text: string, after?: PageCursor, size = PAGE_SIZE): Page {
       const match = matchOf(text);
       if (!match) return { items: [] };
-      const { before, bound } = from(after);
-      const rows = sql.all<{ summary: string; date: string; id: string }>(
-        `SELECT summary, date, id FROM conversations
-         WHERE id IN (
-           SELECT m.conversation FROM search JOIN messages m ON m.rowid = search.rowid
-           WHERE search MATCH ?
-         ) ${before}
-         ORDER BY date DESC, id DESC LIMIT ?`,
+      // Earlier pages showed every conversation with a match at or above where they ended.
+      const below = after === undefined ? undefined : streamPositionOf(after);
+      const shownBefore = (conversation: string) =>
+        below !== undefined &&
+        sql.all(
+          `SELECT 1 FROM messages m WHERE m.conversation = ? AND m.rowid >= ?
+             AND EXISTS (SELECT 1 FROM search WHERE search MATCH ? AND rowid = m.rowid) LIMIT 1`,
+          conversation,
+          below,
+          match,
+        ).length > 0;
+      const matches = sql.each<{ rowid: number; conversation: string; message: string }>(
+        `SELECT m.rowid, m.conversation, m.message FROM search JOIN messages m ON m.rowid = search.rowid
+         WHERE search MATCH ? ${below === undefined ? '' : 'AND search.rowid < ?'}
+         ORDER BY search.rowid DESC`,
         match,
-        ...bound,
-        size + 1,
+        ...(below === undefined ? [] : [below]),
       );
-      return pageOf(rows, size);
+      const items: ConversationSummary[] = [];
+      const seen = new Set<string>();
+      let end: number | undefined;
+      for (const row of matches) {
+        if (seen.has(row.conversation)) continue;
+        seen.add(row.conversation);
+        if (shownBefore(row.conversation)) continue;
+        if (items.length === size) {
+          return { items, next: btoa(JSON.stringify([end])) };
+        }
+        const [conversation] = sql.all<{ summary: string }>(
+          `SELECT summary FROM conversations WHERE id = ?`,
+          row.conversation,
+        );
+        if (!conversation) continue;
+        items.push(
+          matchedRow(JSON.parse(conversation.summary) as ConversationSummary, messageOf(row)),
+        );
+        end = row.rowid;
+      }
+      return { items };
     },
 
     conversation: (id: ConversationId): Message[] =>
@@ -346,6 +403,14 @@ export function summaryOf(
   };
 }
 
+/** A search's row: its conversation, shown by the newest message in it that matched. */
+export function matchedRow(
+  conversation: ConversationSummary,
+  { subject, preview, date }: Pick<Message, 'subject' | 'preview' | 'date'>,
+): ConversationSummary {
+  return { ...conversation, subject, preview, date };
+}
+
 /** One page of rows already in order, newest first, as the index pages its own. */
 export function pageAfter(
   rows: readonly ConversationSummary[],
@@ -392,6 +457,26 @@ function pageOf(rows: { summary: string; date: string; id: string }[], size: num
 export function matchOf(text: string): string | undefined {
   const words = searchWords(text).slice(0, 16);
   return words.length ? words.map((word) => `"${word}"*`).join(' ') : undefined;
+}
+
+/** Where a search's page cursor says the next page starts: below this rowid. */
+function streamPositionOf(cursor: PageCursor): number {
+  try {
+    const position: unknown = JSON.parse(atob(cursor));
+    if (Array.isArray(position) && position.length === 1 && Number.isSafeInteger(position[0])) {
+      return position[0] as number;
+    }
+  } catch {
+    // Not base64 JSON, so not a cursor this index wrote.
+  }
+  throw new TypeError('That is not a page cursor.');
+}
+
+/** The first rowid of the second a message's date names, within what a rowid can count to. */
+function firstRowidOf(date: string): number {
+  const seconds = Math.floor(Date.parse(date) / 1000);
+  const second = Number.isFinite(seconds) ? Math.min(Math.max(seconds, 0), 2 ** 33 - 1) : 0;
+  return second * SECOND;
 }
 
 /** Where a page cursor says the next page starts: after this date and conversation. */

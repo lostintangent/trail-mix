@@ -61,6 +61,27 @@ test('a hit outside the index opens in the conversation it belongs to, and write
   expect(everything(sql)).toEqual(before);
 });
 
+test('ranks a conversation by its newest hit and shows that hit, as the index’s search does', () => {
+  const plans = envelope('Plans', {
+    date: '2026-10-01T08:00:00.000Z',
+    preview: 'Periwinkle walls.',
+  });
+  const reply = envelope('Re: Plans', {
+    references: [plans.messageId],
+    date: '2026-11-09T08:00:00.000Z',
+  });
+  const paint = envelope('Paint', { date: '2026-11-01T08:00:00.000Z' });
+  const { store } = indexed(plans, reply, paint);
+  // Only the server's search reads bodies, and it found the word in the old message and in Paint.
+  const found = foundOf('periwinkle', [plans, paint], store);
+  expect(
+    found.rows.map(({ subject, preview, date, count }) => [subject, preview, date, count]),
+  ).toEqual([
+    ['Paint', 'Paint', '2026-11-01T08:00:00.000Z', 1],
+    ['Plans', 'Periwinkle walls.', '2026-10-01T08:00:00.000Z', 2],
+  ]);
+});
+
 test('keeps only the newest hits, each lone one its own row, newest first', () => {
   const { store } = indexed();
   const hits = Array.from({ length: FOUND_LIMIT + 5 }, (_, i) =>

@@ -326,6 +326,95 @@ describe('search', () => {
     ]);
   });
 
+  test('ranks a conversation by its newest message that matches, and shows that message', () => {
+    const store = fresh();
+    const budget = envelope('Budget review', {
+      date: '2026-10-01T08:00:00.000Z',
+      preview: 'The budget for next year.',
+    });
+    store.fold(
+      arrive(
+        budget,
+        // This morning's reply doesn't say the word, so it doesn't lift the conversation.
+        envelope('Sounds good', {
+          references: [budget.messageId],
+          date: '2026-11-09T08:00:00.000Z',
+          preview: 'See you then.',
+        }),
+        envelope('Budget numbers', { date: '2026-11-05T08:00:00.000Z' }),
+      ),
+    );
+    const rows = store.search('budget').items;
+    expect(
+      rows.map(({ subject, preview, date, count }) => [subject, preview, date, count]),
+    ).toEqual([
+      ['Budget numbers', 'Budget numbers', '2026-11-05T08:00:00.000Z', 1],
+      ['Budget review', 'The budget for next year.', '2026-10-01T08:00:00.000Z', 2],
+    ]);
+    // The rest of the row is still the conversation's.
+    expect(rows[1]!.senders).toEqual(store.page({ in: 'inbox' }).items[0]!.senders);
+  });
+
+  test('pages through every matching conversation exactly once, by its newest match', () => {
+    const store = fresh();
+    const day = (n: number) => new Date(Date.UTC(2026, 10, n, 8)).toISOString();
+    // Kiwi pie matches on day 10 and again on day 5, and Fig, which ends the first page, on day 9
+    // and again on day 2, so each matches on both sides of a page boundary.
+    const kiwi = envelope('Kiwi pie', { date: day(10) });
+    const fig = envelope('Fig kiwi jam', { date: day(9) });
+    store.fold(
+      arrive(
+        kiwi,
+        fig,
+        envelope('Re: Kiwi pie', { references: [kiwi.messageId], date: day(5) }),
+        envelope('Re: Fig kiwi jam', { references: [fig.messageId], date: day(2) }),
+        ...[8, 7, 6, 4, 3, 1].map((n) => envelope(`Kiwi ${n}`, { date: day(n) })),
+        envelope('Plum tart', { date: day(11) }),
+      ),
+    );
+    const rows: string[] = [];
+    for (let after: string | undefined, pages = 0; pages === 0 || after; pages++) {
+      const page = store.search('kiwi', after, 2);
+      rows.push(...page.items.map(({ subject }) => subject));
+      after = page.next;
+    }
+    expect(rows).toEqual([
+      'Kiwi pie',
+      'Fig kiwi jam',
+      'Kiwi 8',
+      'Kiwi 7',
+      'Kiwi 6',
+      'Kiwi 4',
+      'Kiwi 3',
+      'Kiwi 1',
+    ]);
+  });
+
+  test('a message re-flagged or re-linked keeps its place', () => {
+    const store = fresh();
+    const day = (n: number) => new Date(Date.UTC(2026, 10, n, 8)).toISOString();
+    const pie = envelope('Kiwi pie', { date: day(8) });
+    const tart = envelope('Kiwi tart', { date: day(4) });
+    store.fold(arrive(pie, tart, envelope('Kiwi jam', { date: day(6) })));
+    const before = store.search('kiwi').items.map(({ subject, date }) => [subject, date]);
+    expect(before.map(([subject]) => subject)).toEqual(['Kiwi pie', 'Kiwi jam', 'Kiwi tart']);
+
+    store.fold([{ type: 'flags', ref: tart, flags: { ...tart.flags, seen: true, flagged: true } }]);
+    expect(store.search('kiwi').items.map(({ subject, date }) => [subject, date])).toEqual(before);
+
+    // A reply to both pie and tart joins them, so the tart moves into the pie's conversation.
+    store.fold(
+      arrive(envelope('Recipes', { references: [pie.messageId, tart.messageId], date: day(9) })),
+    );
+    const rows = store.search('kiwi', undefined, 1);
+    expect(rows.items.map(({ subject, date, count }) => [subject, date, count])).toEqual([
+      ['Kiwi pie', day(8), 3],
+    ]);
+    const rest = store.search('kiwi', rows.next, 1);
+    expect(rest.items.map(({ subject }) => subject)).toEqual(['Kiwi jam']);
+    expect(rest.next).toBeUndefined();
+  });
+
   test('forgets a message the moment the index does', () => {
     const store = fresh();
     const gone = envelope('Periwinkle');
@@ -334,6 +423,14 @@ describe('search', () => {
     expect(found(store, 'periwinkle')).toEqual(['Kept']);
     store.forget('work');
     expect(found(store, 'periwinkle')).toEqual([]);
+  });
+
+  test('a message that arrives and goes in one fold leaves no search row', () => {
+    const sql = testSql();
+    const store = envelopeIndex(sql);
+    const brief = envelope('Fleeting');
+    store.fold([...arrive(brief, envelope('Kept')), { type: 'gone', ref: brief }]);
+    expect(sql.all(`SELECT subject FROM search`)).toEqual([{ subject: 'Kept' }]);
   });
 
   test('keeps no word of an account it forgot anywhere on disk', () => {

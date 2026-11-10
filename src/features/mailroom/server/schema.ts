@@ -10,6 +10,8 @@
 /** What a Mailroom reads and writes through, on either runtime. */
 export type Sql = {
   all<Row = Record<string, SqlValue>>(query: string, ...params: SqlValue[]): Row[];
+  /** Rows one at a time, read only as far as the caller goes. */
+  each<Row = Record<string, SqlValue>>(query: string, ...params: SqlValue[]): Iterable<Row>;
   run(query: string, ...params: SqlValue[]): void;
   /** Runs `work` so that every write in it lands, or none does. */
   transaction<T>(work: () => T): T;
@@ -128,6 +130,22 @@ export const versions: readonly (readonly string[])[] = [
     `CREATE VIRTUAL TABLE search USING fts5(
       senders, recipients, subject, preview,
       tokenize = 'unicode61 remove_diacritics 2'
+    )`,
+    `DELETE FROM messages`,
+    `DELETE FROM links`,
+    `DELETE FROM conversations`,
+    `DELETE FROM placements`,
+    `UPDATE folders SET cursor = NULL`,
+  ],
+  [
+    // A message's rowid now orders by its date, so a search reads its matches newest first and
+    // stops at a page, and a one-letter prefix index answers a first letter at once. The index
+    // rebuilds with its rows numbered that way.
+    `DROP TABLE search`,
+    `CREATE VIRTUAL TABLE search USING fts5(
+      senders, recipients, subject, preview,
+      tokenize = 'unicode61 remove_diacritics 2',
+      prefix = '1'
     )`,
     `DELETE FROM messages`,
     `DELETE FROM links`,

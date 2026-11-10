@@ -77,7 +77,10 @@ export type Envelope = MessageRef & {
  */
 export type Message = Envelope & { conversation: ConversationId };
 
-/** One row of a list. Rows are one fixed height, so a list virtualizes without measuring. */
+/**
+ * One row of a list. Rows are one fixed height, so a list virtualizes without measuring. In a
+ * search, subject, preview and date are the newest matching message's, and rank the row.
+ */
 export type ConversationSummary = {
   id: ConversationId;
   account: AccountId;

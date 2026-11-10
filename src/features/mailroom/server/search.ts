@@ -6,7 +6,7 @@ import {
   type Message,
   type MessageRef,
 } from '../../mail/core/index.ts';
-import { summaryOf, type EnvelopeIndex } from './envelope-index.ts';
+import { matchedRow, summaryOf, type EnvelopeIndex } from './envelope-index.ts';
 
 /**
  * Full-text search: what the mail servers found, as rows a list shows. It reads the index to place
@@ -16,7 +16,10 @@ import { summaryOf, type EnvelopeIndex } from './envelope-index.ts';
  */
 export type Found = {
   text: string;
-  /** Newest first, one per conversation. */
+  /**
+   * One per conversation, newest first by its newest hit and shown by that hit, as the index's own
+   * search rows are.
+   */
   rows: ConversationSummary[];
   /** The hits the index doesn't hold, each in the conversation it would join. */
   outside: Message[];
@@ -34,11 +37,12 @@ export function foundOf(
     .sort((a, b) => b.date.localeCompare(a.date) || b.uid - a.uid)
     .slice(0, FOUND_LIMIT);
   const outside: Message[] = [];
-  const conversations = new Set<ConversationId>();
+  // Each conversation's newest hit, since the hits are newest first.
+  const shownBy = new Map<ConversationId, Envelope>();
   for (const hit of newest) {
     const held = store.reads.message(hit);
     if (held) {
-      conversations.add(held.conversation);
+      if (!shownBy.has(held.conversation)) shownBy.set(held.conversation, hit);
       continue;
     }
     // The conversation the hit would join, worked out as the fold would and then set aside.
@@ -46,10 +50,13 @@ export function foundOf(
     const placed = change.put.find((message) => sameRef(message, hit));
     if (!placed) continue;
     outside.push(placed);
-    conversations.add(placed.conversation);
+    if (!shownBy.has(placed.conversation)) shownBy.set(placed.conversation, hit);
   }
-  const rows = [...conversations]
-    .flatMap((id) => summaryOf(id, opened(id, store, outside)) ?? [])
+  const rows = [...shownBy]
+    .flatMap(([id, hit]) => {
+      const summary = summaryOf(id, opened(id, store, outside));
+      return summary ? [matchedRow(summary, hit)] : [];
+    })
     .sort((a, b) => b.date.localeCompare(a.date) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
   return { text, rows, outside };
 }

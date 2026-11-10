@@ -807,6 +807,8 @@ function durableSql(storage: DurableObjectStorage): Sql {
   return {
     all: <Row>(query: string, ...params: SqlValue[]) =>
       storage.sql.exec(query, ...bind(params)).toArray() as Row[],
+    each: <Row>(query: string, ...params: SqlValue[]) =>
+      storage.sql.exec(query, ...bind(params)) as Iterable<Row>,
     run: (query, ...params) => void storage.sql.exec(query, ...bind(params)).toArray(),
     transaction: (work) => storage.transactionSync(work),
   };

@@ -9,6 +9,8 @@ export function testSql(version?: number): Sql {
   const db = new Database(':memory:');
   const sql: Sql = {
     all: <Row>(query: string, ...params: SqlValue[]) => db.query(query).all(...params) as Row[],
+    each: <Row>(query: string, ...params: SqlValue[]) =>
+      db.query(query).iterate(...params) as Iterable<Row>,
     run: (query, ...params) => void db.query(query).run(...params),
     transaction: (work) => db.transaction(work)(),
   };
