@@ -11,8 +11,9 @@ import * as stylex from '@stylexjs/stylex';
 import { File, Inbox, Send, Star, type LucideIcon } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
-import type { Account, Folder, FolderRole, View } from '../../mail/core/index.ts';
+import type { Account, Folder, FolderRef, View } from '../../mail/core/index.ts';
 import { stampStyles } from '../../../app/theme/stamps.ts';
+import { folderTree, type FolderNode } from './tree.ts';
 
 type UnifiedView = Exclude<View['in'], 'folder' | 'search'>;
 
@@ -26,17 +27,6 @@ export const UNIFIED_VIEWS = [
   { in: 'drafts', label: 'Drafts', icon: File },
   { in: 'outbox', label: 'Outbox', icon: Send },
 ] as const satisfies readonly { in: UnifiedView; label: string; icon: LucideIcon }[];
-
-/** An account's folders in this order: the roles a person visits most, then their own, then bins. */
-const ROLE_ORDER: Record<FolderRole, number> = {
-  inbox: 0,
-  archive: 1,
-  sent: 2,
-  drafts: 3,
-  junk: 5,
-  trash: 6,
-};
-const order = (folder: Folder) => (folder.role ? ROLE_ORDER[folder.role] : 4);
 
 /**
  * The sidebar, lying directly on the desk: the unified views, then each account under its stamp,
@@ -87,32 +77,12 @@ export function Sidebar({
                 <span {...stylex.props(styles.stamp, stampStyles[account.stamp])} />
                 {account.name}
               </h2>
-              <ul {...stylex.props(styles.rows)}>
-                {folders
-                  .filter((folder) => folder.account === account.id)
-                  .toSorted((a, b) => order(a) - order(b) || a.name.localeCompare(b.name))
-                  .map((folder) => (
-                    <li key={folder.path}>
-                      <Row
-                        label={folder.name}
-                        count={folder.unread}
-                        isCountUnread={folder.role === 'inbox'}
-                        isSelected={
-                          view.in === 'folder' &&
-                          view.folder.account === folder.account &&
-                          view.folder.path === folder.path
-                        }
-                        isCollapsed={false}
-                        onSelect={() =>
-                          onSelect({
-                            in: 'folder',
-                            folder: { account: account.id, path: folder.path },
-                          })
-                        }
-                      />
-                    </li>
-                  ))}
-              </ul>
+              <FolderRows
+                nodes={folderTree(folders.filter((folder) => folder.account === account.id))}
+                depth={0}
+                view={view}
+                onSelect={onSelect}
+              />
             </section>
           ))}
       </div>
@@ -121,9 +91,49 @@ export function Sidebar({
   );
 }
 
+/** An account's folders, each one followed by the folders inside it, a step further in. */
+function FolderRows({
+  nodes,
+  depth,
+  view,
+  onSelect,
+}: {
+  nodes: FolderNode[];
+  depth: number;
+  view: View;
+  onSelect: (view: View) => void;
+}) {
+  return (
+    <ul {...stylex.props(styles.rows, depth > 0 && styles.inside)}>
+      {nodes.map(({ folder, children }) => (
+        <li key={folder.path}>
+          <Row
+            label={folder.name}
+            depth={depth}
+            count={folder.unread}
+            isCountUnread={folder.role === 'inbox'}
+            isSelected={view.in === 'folder' && isFolder(view.folder, folder)}
+            isCollapsed={false}
+            onSelect={() =>
+              onSelect({ in: 'folder', folder: { account: folder.account, path: folder.path } })
+            }
+          />
+          {children.length > 0 && (
+            <FolderRows nodes={children} depth={depth + 1} view={view} onSelect={onSelect} />
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+const isFolder = (ref: FolderRef, folder: Folder) =>
+  ref.account === folder.account && ref.path === folder.path;
+
 function Row({
   label,
   icon,
+  depth = 0,
   count,
   isCountUnread,
   isSelected,
@@ -133,6 +143,8 @@ function Row({
   label: string;
   /** A folder has none, and lines its name up with the views' labels. */
   icon?: LucideIcon;
+  /** How many folders a folder sits inside. */
+  depth?: number;
   count: number | undefined;
   /** Unread mail in an Inbox counts in ink blue. Every other count is quiet. */
   isCountUnread: boolean;
@@ -148,7 +160,7 @@ function Row({
       onClick={onSelect}
       {...stylex.props(
         styles.row,
-        !icon && styles.folderRow,
+        !icon && styles.folderRow(depth),
         isSelected && styles.selected,
         isCollapsed && styles.railRow,
       )}
@@ -198,6 +210,9 @@ const styles = stylex.create({
     padding: 0,
     listStyle: 'none',
   },
+  inside: {
+    marginTop: spacingVars['--spacing-0-5'],
+  },
   account: {
     marginTop: spacingVars['--spacing-3'],
   },
@@ -242,10 +257,11 @@ const styles = stylex.create({
     cursor: 'pointer',
     outlineOffset: '-2px',
   },
-  // A folder's name starts where a view's label does, after the icon and its gap.
-  folderRow: {
-    paddingInlineStart: `calc(${spacingVars['--spacing-2']} * 2 + 1rem)`,
-  },
+  // A folder's name starts where a view's label does, after the icon and its gap, and a step
+  // further in for each folder it sits inside.
+  folderRow: (depth: number) => ({
+    paddingInlineStart: `calc(${spacingVars['--spacing-2']} * 2 + 1rem + ${depth} * ${spacingVars['--spacing-3']})`,
+  }),
   // Selection lifts instead of tinting: the current view rises from the desk onto a pane.
   selected: {
     backgroundColor: {
