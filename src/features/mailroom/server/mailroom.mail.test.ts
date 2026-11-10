@@ -288,11 +288,13 @@ describe('The Mailroom', () => {
 
     test('writes the Markdown, a pasted image and a file as one message in Drafts, joined to its reply', async () => {
       const lunch = await held('Re: Lunch');
+      const markdown =
+        'Thursday works,  \n**café** at noon 🙂\n\n![chart](cid:chart@trailmix.invalid)\n';
       const saved = await ada.call<MessageRef>(
         'saveDraft',
         draft({
           subject: 'Re: Lunch',
-          markdown: 'Thursday works.\n\n![chart](cid:chart@trailmix.invalid)\n',
+          markdown,
           inReplyTo: lunch,
           attachments: [
             {
@@ -317,7 +319,9 @@ describe('The Mailroom', () => {
       });
       expect(written.messageId).toMatch(/^<[\w-]+@trailmix\.test>$/);
       expect(written.html).toContain('src="cid:chart@trailmix.invalid"');
-      expect(written.text).toContain('Thursday works.');
+      // Its plain text is the Markdown exactly as typed, which is how the composer reopens it.
+      expect(written.text).toBe(markdown);
+      expect(written.html).toContain('<strong>café</strong>');
       expect(
         written.attachments.map((part) => ({
           name: part.filename,
@@ -342,6 +346,16 @@ describe('The Mailroom', () => {
           content: [...new TextEncoder().encode('Bring a jacket.')],
         },
       ]);
+
+      // Once sync reads Drafts, the reply waits under its conversation.
+      const [thread] = (await ada.page({ in: 'inbox' })).filter(
+        (row) => row.subject === 'Re: Lunch',
+      );
+      await ada.until(async () =>
+        (await ada.call<Message[]>('conversation', thread!.id)).some(
+          (message) => refOf(message).uid === saved.uid && message.path === 'Drafts',
+        ),
+      );
       await ada.call('move', [saved], 'trash');
     }, 30_000);
 
