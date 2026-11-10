@@ -62,7 +62,7 @@ export function ListPane({
   return (
     <section id={id} aria-labelledby={titleId} {...stylex.props(styles.pane)}>
       <header {...stylex.props(styles.header)}>
-        <Heading level={2} id={titleId}>
+        <Heading level={2} id={titleId} xstyle={styles.title}>
           {title}
         </Heading>
         {unread ? <span {...stylex.props(styles.unread)}>{unread} unread</span> : null}
@@ -130,12 +130,25 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'baseline',
     gap: spacingVars['--spacing-2'],
-    minHeight: tm.target,
-    paddingBlock: spacingVars['--spacing-3'],
-    paddingInline: spacingVars['--spacing-4'],
     paddingTop: {
-      default: null,
+      default: spacingVars['--spacing-3'],
       [media.phone]: `calc(${tm.safeTop} + ${spacingVars['--spacing-2']})`,
+    },
+    paddingBottom: {
+      default: spacingVars['--spacing-2'],
+      [media.phone]: spacingVars['--spacing-3'],
+    },
+    paddingInline: spacingVars['--spacing-4'],
+  },
+  // The view's name stays modest beside the list on a desktop, and leads the screen on a phone.
+  title: {
+    fontSize: {
+      default: typeScaleVars['--text-heading-3-size'],
+      [media.phone]: typeScaleVars['--text-heading-2-size'],
+    },
+    lineHeight: {
+      default: typeScaleVars['--text-heading-3-leading'],
+      [media.phone]: typeScaleVars['--text-heading-2-leading'],
     },
   },
   unread: {
@@ -151,8 +164,11 @@ const styles = stylex.create({
       [media.phone]: `calc(${tm.target} + ${spacingVars['--spacing-1']} * 2 + ${spacingVars['--spacing-3']} + ${tm.safeBottom})`,
     },
     backgroundColor: { default: null, [media.phone]: colorVars['--color-background-surface'] },
-    borderStartStartRadius: { default: null, [media.phone]: tm.paneRadius },
-    borderStartEndRadius: { default: null, [media.phone]: tm.paneRadius },
+    // On a desktop the sheet is the pane's lower part, and on a phone it rises from the bottom.
+    borderStartStartRadius: { default: 0, [media.phone]: tm.paneRadius },
+    borderStartEndRadius: { default: 0, [media.phone]: tm.paneRadius },
+    borderEndStartRadius: { default: tm.paneRadius, [media.phone]: 0 },
+    borderEndEndRadius: { default: tm.paneRadius, [media.phone]: 0 },
     boxShadow: { default: null, [media.phone]: tm.sheetEdge },
     outline: {
       default: null,

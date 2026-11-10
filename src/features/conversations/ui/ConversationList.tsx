@@ -214,6 +214,8 @@ const styles = stylex.create({
     overflowY: 'auto',
     overscrollBehavior: 'contain',
     paddingInline: spacingVars['--spacing-1-5'],
+    // The focus ring follows the shape of the sheet the list lies on.
+    borderRadius: 'inherit',
     outline: {
       default: 'none',
       ':focus-visible': `2px solid ${colorVars['--color-accent']}`,

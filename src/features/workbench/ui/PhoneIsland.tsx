@@ -19,7 +19,8 @@ const styles = stylex.create({
   island: {
     display: { default: 'none', [media.phone]: 'flex' },
     position: 'absolute',
-    insetInline: spacingVars['--spacing-3'],
+    // It hugs what it holds, from the start edge.
+    insetInlineStart: spacingVars['--spacing-3'],
     bottom: tm.safeBottom,
     alignItems: 'center',
     gap: spacingVars['--spacing-1'],
