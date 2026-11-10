@@ -67,16 +67,17 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
       secure,
       doSTARTTLS: secure ? undefined : true,
       auth: account.auth,
-      // imapflow logs some refusals instead of throwing them. What the server said is kept.
+      // imapflow logs some refusals instead of throwing them. What the server said is kept. It
+      // builds an entry only for a level the logger has, and debug entries, which spell out each
+      // response, cost a sync batch half its CPU again. So there is no debug or info here, though
+      // imapflow's type asks for both.
       logger: {
-        debug: quiet,
-        info: quiet,
         error: quiet,
         warn: (entry: { err?: { response?: unknown } }) => {
           const said = entry.err?.response;
           if (typeof said === 'string' && said) refusals.set(connection, said);
         },
-      },
+      } as Partial<ImapLogger> as ImapLogger,
       ...(watching ? { autoIdleDelay: 100, maxIdleTime: 4 * 60_000 } : {}),
       ...(network.imapTransport ? { transport: network.imapTransport } : {}),
       ...(network.ca ? { tls: { ca: [toText(network.ca)] } } : {}),
@@ -633,6 +634,11 @@ const ROLES: Record<string, FolderRole> = {
   '\\Junk': 'junk',
 };
 const roleOf = (specialUse: string | undefined) => (specialUse ? ROLES[specialUse] : undefined);
+
+type ImapLogger = Exclude<
+  NonNullable<NonNullable<ConstructorParameters<typeof ImapFlow>[0]>['logger']>,
+  false
+>;
 
 /** Ascending UIDs as an IMAP sequence set, with runs collapsed, so a long list stays short. */
 /** What each connection's server said when it last refused a command. */
