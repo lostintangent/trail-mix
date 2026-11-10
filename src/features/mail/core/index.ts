@@ -8,3 +8,4 @@ export {
   type MemoryIndex,
   type SyncEvent,
 } from './fold.ts';
+export { writeMime, type MimeAttachment, type MimeMessage } from './mime.ts';
