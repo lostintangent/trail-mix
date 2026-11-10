@@ -164,6 +164,7 @@ tests/
   reader/              the hostile-mail corpus and the tests that render it in real browsers
   mail-server/         server.ts starts and stops the native test mail server
   mail-check/          the mail check: check.ts, and worker.ts, the Durable Object it runs in
+  workerd.ts           runs a Worker on the local Workers runtime, for the mail check and tests
 .github/workflows/     ci.yml and deploy.yml
 ```
 
@@ -205,6 +206,7 @@ Great code pursues simplicity by placing a rich domain model at the center, deco
 - **Scripts name their runtime.** `bun run build` runs `bun --bun vite build`. `bun run dev` and `bun run preview` run Vite's JS entry under `node`. `bunfig.toml` does not set `[run] bun = true`, because that would make `node` inside every script mean Bun.
 - **Setup.** `bun install`, copy `.dev.vars.example` to `.dev.vars`, then `bun run dev`.
 - **Dependencies are exact versions.** `bun add` pins what it installs, and CI installs from the frozen lockfile. An upgrade is a deliberate edit.
+- **The Workers runtime's types** are `worker-configuration.d.ts`, which `bun run types` generates from the compatibility date and flags. CI fails when it is stale, so regenerate it with any change to either.
 - **Lint is strict.** Type-aware rules are on and a warning fails the run. To relax a rule, change `bunfig.toml` or add an `eslint-disable-next-line` comment, and say why in either place.
 
 ### Tests
@@ -215,6 +217,7 @@ Tests concentrate where a defect spreads.
 - One provider contract suite that runs against the demo provider and against the IMAP provider talking to the test mail server.
 - A Playwright smoke suite that drives the built app on the demo mailbox, at desktop and phone sizes in both themes, and attaches screenshots to the CI run.
 - Tests that need the test mail server or workerd are named `*.mail.test.ts`. `bun test` skips them, and `bun run test:mail` runs them. Run it before pushing a change to mail I/O.
+- The Mailroom's own tests run it on workerd through `mailroom/server/test-worker.ts`, which names the member by the request's path in place of sign-in, and adds what a test needs to look inside. Nothing in the production Worker serves it.
 - A test earns its place by catching a defect someone can name. Tests that restate the implementation, check constants or defaults, or mock Trail Mix's own modules are removed in review. Fakes stand in only for things outside Trail Mix.
 
 ### Performance budgets
@@ -235,7 +238,7 @@ Tests concentrate where a defect spreads.
 ### Mail safety
 
 - Never touch anyone's real mail. Development, tests and previews use the demo provider and the test mail server. Only an operator connects real accounts.
-- One Worker variable, `DEMO_MAILBOX`, gives every new Mailroom the demo account with that many messages. Development, the smoke suite and the benchmarks start that way. The demo provider is a mail server held as one value, a base mailbox computed from each message's number and the account's creation time plus the member's changes. The Mailroom stores it apart from the index and the body cache, so erasing those rebuilds the same lists.
+- One Worker variable, `DEMO_MAILBOX`, gives every new Mailroom the demo's two accounts, Personal with that many messages in its Inbox and Work with a tenth as many. Development, the smoke suite and the benchmarks start that way. The demo provider is a mail server held as one value, a base mailbox computed from each message's number and the account's creation time plus the member's changes. The Mailroom stores it apart from the index and the body cache, so erasing those rebuilds the same lists.
 - The test mail server runs natively, with no Docker or other container. One Bun script starts and stops it, on a laptop and in CI alike: `bun run mail-server start`, with `--profile zoho` or `--profile outlook` to withhold what those hosts lack. Dovecot 2.4 serves IMAP. A Bun process serves submission on implicit TLS and STARTTLS, delivers only to `trailmix.test`, and stands in for Microsoft's sign-in. Everything binds to loopback, on ports 3000 above the standard ones, or above `MAIL_SERVER_PORTS` when a second checkout needs its own server.
 - On a Mac, the script builds Dovecot 2.4.5 with the upstream fix for TLS logins once, into `.mail-server/`, until Homebrew has 2.4.6. It needs Xcode's command line tools and `brew install openssl@4 pkgconf`. On Ubuntu, Dovecot comes from repo.dovecot.org, as CI installs it.
 - The mail check, `bun run mail-check`, is how an operator tests a real account. A password comes from a prompt with echo off or from a pipe, never from an argument or environment variable, and nothing writes it to disk or prints it. Outlook signs in with Microsoft's device-code flow.
@@ -243,6 +246,7 @@ Tests concentrate where a defect spreads.
 ### A public repository
 
 - The repository holds no secret, account name, personal address or local path. Secrets live in Worker secrets and GitHub secrets.
+- `CREDENTIALS_KEY` is the Worker secret each member's credentials key is derived from, at least 32 characters. The one in `.dev.vars.example` is for development only.
 - Workflows that deploy run only where the Cloudflare secrets exist, so forks and outside pull requests build and test but never deploy.
 
 ### Pipeline

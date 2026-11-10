@@ -5,4 +5,9 @@
   "compatibility_date": "2026-11-03",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
+  // One Mailroom per member, each with its own SQLite storage.
+  "durable_objects": { "bindings": [{ "name": "MAILROOM", "class_name": "Mailroom" }] },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Mailroom"] }],
+  // The body cache: the raw messages members have opened.
+  "r2_buckets": [{ "binding": "BODIES", "bucket_name": "trail-mix-bodies" }],
 }

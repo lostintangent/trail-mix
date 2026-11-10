@@ -48,7 +48,7 @@ export default {
  */
 export class Check {
   async fetch(request: Request): Promise<Response> {
-    const check = (await request.json()) as CheckRequest;
+    const check = await request.json<CheckRequest>();
     const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
     const writer = writable.getWriter();
     const encoder = new TextEncoder();
@@ -180,7 +180,10 @@ function imap(check: CheckRequest) {
         ? { user: check.user, accessToken: check.secret }
         : { user: check.user, pass: check.secret },
     logger: false,
-    transport: createSocketsTransport(connect),
+    // workerd's types require `allowHalfOpen` once options are given, and imapflow may leave it out.
+    transport: createSocketsTransport((address, options) =>
+      connect(address, options && { ...options, allowHalfOpen: options.allowHalfOpen ?? false }),
+    ),
   });
 }
 

@@ -9,7 +9,7 @@ exact = true
 printWidth = 100
 singleQuote = true
 # Generated: the route tree by TanStack Start, the theme by `bun run theme`.
-ignorePatterns = ["src/app/routeTree.gen.ts", "src/app/theme/built/"]
+ignorePatterns = ["src/app/routeTree.gen.ts", "src/app/theme/built/", "worker-configuration.d.ts"]
 
 [test]
 preload = ["./tests/preload.ts"]
@@ -21,4 +21,4 @@ pathIgnorePatterns = ["**/*.mail.test.ts"]
 typeAware = true
 # A warning fails the run, so `bun lint` either passes or it does not.
 maxWarnings = 0
-ignorePatterns = ["src/app/routeTree.gen.ts", "src/app/theme/built/"]
+ignorePatterns = ["src/app/routeTree.gen.ts", "src/app/theme/built/", "worker-configuration.d.ts"]

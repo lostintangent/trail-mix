@@ -16,6 +16,8 @@ await mock.module('@tanstack/react-start/server-entry', () => ({
     },
   },
 }));
+// The Mailroom runs only on workerd, and the Worker here only names it.
+await mock.module('../features/mailroom/server/index.ts', () => ({ Mailroom: class {} }));
 const { default: worker } = await import('./entry.ts');
 
 /** Mailrooms by name, recording each one the Worker opened and each socket it was handed. */

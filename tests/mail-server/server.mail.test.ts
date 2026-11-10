@@ -70,9 +70,11 @@ function submit(
 async function tokenFor(user: string) {
   const post = (path: string, form: Record<string, string>) =>
     fetch(`${identity.authority}${path}`, { method: 'POST', body: new URLSearchParams(form) });
-  const code = (await (
-    await post('/oauth2/v2.0/devicecode', { client_id: 'server-test', scope: 'imap' })
-  ).json()) as Record<string, string>;
+  const started = await post('/oauth2/v2.0/devicecode', {
+    client_id: 'server-test',
+    scope: 'imap',
+  });
+  const code = await started.json<Record<string, string>>();
   await fetch(`http://127.0.0.1:${ports.identity}/devicelogin`, {
     method: 'POST',
     body: new URLSearchParams({ user_code: code.user_code ?? '', login_hint: user }),
@@ -82,10 +84,8 @@ async function tokenFor(user: string) {
     client_id: 'server-test',
     device_code: code.device_code ?? '',
   };
-  return (
-    ((await (await post('/oauth2/v2.0/token', grant)).json()) as Record<string, string>)
-      .access_token ?? ''
-  );
+  const token = await (await post('/oauth2/v2.0/token', grant)).json<Record<string, string>>();
+  return token.access_token ?? '';
 }
 
 describe('profiles', () => {

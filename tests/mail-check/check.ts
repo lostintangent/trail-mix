@@ -11,17 +11,11 @@
 // an argument or an environment variable, so it stays out of shell history and process listings.
 // Outlook signs in with Microsoft's device-code flow instead, and no refresh token is requested.
 // The secret reaches workerd in one request body over loopback, and nothing writes it to disk.
-import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { createServer } from 'node:net';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
-import shellConfig from '../../wrangler.jsonc';
 import { caFile, identity, ports } from '../mail-server/server.ts';
+import { startWorker } from '../workerd.ts';
 import type { CheckRequest, CheckResult, Endpoint } from './worker.ts';
-
-const shell = shellConfig as { compatibility_date: string; compatibility_flags: string[] };
 
 type Preset = {
   imap: Endpoint;
@@ -85,7 +79,7 @@ export async function signInWithDeviceCode(options: {
       method: 'POST',
       body: new URLSearchParams(form),
     });
-    return { ok: response.ok, body: (await response.json()) as Record<string, unknown> };
+    return { ok: response.ok, body: await response.json<Record<string, unknown>>() };
   };
 
   const code = await post('devicecode', { client_id: clientId, scope: scopes.join(' ') });
@@ -174,53 +168,17 @@ if (import.meta.main) {
 }
 
 async function runInWorkerd(request: CheckRequest, preset: Preset): Promise<number> {
-  const scratch = mkdtempSync(join(tmpdir(), 'trail-mix-check-'));
-  // The check runs with the shell's own compatibility date and flags, so it tests the same runtime.
-  writeFileSync(
-    join(scratch, 'wrangler.json'),
-    JSON.stringify({
+  const workerd = await startWorker(
+    {
       name: 'trail-mix-mail-check',
       main: join(import.meta.dir, 'worker.ts'),
-      compatibility_date: shell.compatibility_date,
-      compatibility_flags: shell.compatibility_flags,
       durable_objects: { bindings: [{ name: 'CHECK', class_name: 'Check' }] },
       migrations: [{ tag: 'v1', new_sqlite_classes: ['Check'] }],
-    }),
-  );
-  const port = await freePort();
-  // Node starts workerd, because Miniflare cannot reach it under Bun (oven-sh/bun#39247).
-  const workerd = spawn(
-    'node',
-    [
-      join(import.meta.dir, '../../node_modules/wrangler/bin/wrangler.js'),
-      'dev',
-      '--config',
-      join(scratch, 'wrangler.json'),
-      '--port',
-      String(port),
-      '--ip',
-      '127.0.0.1',
-      '--persist-to',
-      join(scratch, 'state'),
-      '--log-level',
-      'error',
-    ],
-    {
-      cwd: scratch,
-      detached: true,
-      stdio: 'ignore',
-      env: {
-        ...process.env,
-        // Wrangler otherwise keeps a debug log of every run in its own folder.
-        WRANGLER_WRITE_LOGS: 'false',
-        WRANGLER_SEND_METRICS: 'false',
-        ...(preset.test ? { NODE_EXTRA_CA_CERTS: caFile } : {}),
-      },
     },
+    { env: preset.test ? { NODE_EXTRA_CA_CERTS: caFile } : {} },
   );
   try {
-    await until(`http://127.0.0.1:${port}/`);
-    const response = await fetch(`http://127.0.0.1:${port}/run`, {
+    const response = await fetch(`${workerd.url}/run`, {
       method: 'POST',
       body: JSON.stringify(request),
     });
@@ -259,8 +217,7 @@ async function runInWorkerd(request: CheckRequest, preset: Preset): Promise<numb
     }
     return failed ? 1 : 0;
   } finally {
-    if (workerd.pid) process.kill(-workerd.pid, 'SIGKILL');
-    rmSync(scratch, { recursive: true, force: true });
+    workerd.stop();
   }
 }
 
@@ -301,26 +258,4 @@ async function readSecret(prompt: string): Promise<string> {
     };
     process.stdin.on('data', onData);
   });
-}
-
-function freePort(): Promise<number> {
-  return new Promise((resolve) => {
-    const server = createServer().listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      server.close(() => resolve(typeof address === 'object' && address ? address.port : 0));
-    });
-  });
-}
-
-async function until(url: string) {
-  const deadline = Date.now() + 60_000;
-  for (;;) {
-    try {
-      await fetch(url);
-      return;
-    } catch (error) {
-      if (Date.now() > deadline) throw new Error('workerd did not start', { cause: error });
-      await Bun.sleep(250);
-    }
-  }
 }

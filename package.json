@@ -8,9 +8,10 @@
     "dev": "node node_modules/vite/bin/vite.js dev",
     "build": "bun --bun vite build",
     "preview": "node node_modules/vite/bin/vite.js preview",
-    "test:mail": "bun tests/mail-server/server.ts prepare && bun test --path-ignore-patterns=node_modules/** tests/mail-server tests/mail-check tests/contract",
+    "test:mail": "bun tests/mail-server/server.ts prepare && bun test --path-ignore-patterns=node_modules/** tests/mail-server tests/mail-check tests/contract src/features/mailroom",
     "mail-server": "bun tests/mail-server/server.ts",
     "mail-check": "bun tests/mail-check/check.ts",
+    "types": "node node_modules/wrangler/bin/wrangler.js types --include-env=false",
     "theme": "bun --bun astryx theme build src/app/theme/trail-mix.ts --out src/app/theme/built/trail-mix.css",
     "bench": "bun tests/bench/run.ts"
   },

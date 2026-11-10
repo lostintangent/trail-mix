@@ -3,6 +3,8 @@ import type { Mailroom } from '../features/mailroom/client/index.ts';
 import { signInFor, type SignInConfig } from './access.ts';
 import { updates } from './routes/updates.ts';
 
+export { Mailroom } from '../features/mailroom/server/index.ts';
+
 declare module '@tanstack/react-start' {
   interface Register {
     server: {
