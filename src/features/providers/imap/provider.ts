@@ -22,6 +22,7 @@ import {
 } from '../provider.ts';
 import { envelopeOf, previewPartOf, type ImapMessage } from './core/envelope.ts';
 import { flagsOf, planSync, type SyncPlan } from './core/sync.ts';
+import { subtree } from './core/folders.ts';
 import { submitFailure } from './core/send.ts';
 
 /** Where a host listens. Implicit TLS when `secure`, STARTTLS otherwise. */
@@ -366,6 +367,8 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
             path: folder.path,
             name: folder.name,
             ...(folder.parentPath ? { parent: folder.parentPath } : {}),
+            // A server whose folders can't nest lists NIL.
+            ...(folder.delimiter ? { delimiter: folder.delimiter } : {}),
             ...(role ? { role } : {}),
             unread: folder.status?.unseen ?? 0,
             total: folder.status?.messages ?? 0,
@@ -616,8 +619,16 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
 
     async deleteFolder(path: string) {
       await connected(async (connection) => {
-        if (!(await connection.list()).some((folder) => folder.path === path)) return;
-        await connection.mailboxDelete(path);
+        const listed = await connection.list();
+        const delimiter = listed.find((folder) => folder.path === path)?.delimiter;
+        for (const doomed of subtree(listed, path, delimiter))
+          await connection.mailboxDelete(doomed);
+        // Some servers answer a parent's delete with OK and keep it, as Dovecot does while a folder
+        // is inside it, so only a listing without them says they're gone.
+        const [left] = subtree(await connection.list(), path, delimiter);
+        if (left !== undefined) {
+          throw new Error(`The server still has “${left}”, so “${path}” wasn’t deleted.`);
+        }
       });
       roles = undefined;
     },

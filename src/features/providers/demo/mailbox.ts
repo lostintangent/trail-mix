@@ -32,7 +32,10 @@ export type DemoMailbox = {
   moved: number[];
   /** Every message that is not where the seed put it. */
   stored: Stored[];
-  /** The Message-IDs the host has turned away once, so their next try goes. */
+  /**
+   * What the server has turned away once, so the next try goes: a message by its Message-ID, or a
+   * folder's delete as `DELETE` and its path.
+   */
   refused?: string[];
 };
 
@@ -267,17 +270,15 @@ export function renameFolder(mailbox: DemoMailbox, path: string, to: string): De
   };
 }
 
-/** Deletes a folder and its messages. As on IMAP servers, a folder with folders inside stays. */
+/** Deletes a folder, every folder inside it, and their messages. */
 export function deleteFolder(mailbox: DemoMailbox, path: string): DemoMailbox {
   if (path === 'INBOX') throw new Error('The Inbox cannot be deleted.');
   if (!folderOf(mailbox, path)) return mailbox;
-  if (mailbox.folders.some((folder) => folder.path.startsWith(`${path}/`))) {
-    throw new Error(`"${path}" has folders inside it. Delete those first.`);
-  }
+  const goes = (held: string) => held === path || held.startsWith(`${path}/`);
   return {
     ...mailbox,
-    folders: mailbox.folders.filter((folder) => folder.path !== path),
-    stored: mailbox.stored.filter((entry) => entry.path !== path),
+    folders: mailbox.folders.filter((folder) => !goes(folder.path)),
+    stored: mailbox.stored.filter((entry) => !goes(entry.path)),
   };
 }
 

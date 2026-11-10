@@ -249,6 +249,9 @@ type Step = {
 /** The domain the demo's mail server can't reach on a message's first try. */
 export const UNREACHABLE = 'unreachable.example';
 
+/** The seeded folder the demo's server won't delete on the first try, as if another session had it open. */
+export const BUSY_FOLDER = 'Projects';
+
 const PEOPLE: Address[] = [
   { name: 'Ada Park', email: 'ada@example.com' },
   { name: 'Mina Okafor', email: 'mina@example.org' },

@@ -30,7 +30,7 @@ import {
 import { mailrooms, member } from '../../../../tests/mailrooms.ts';
 import type { LocalWorker } from '../../../../tests/workerd.ts';
 import { WAKE } from './sync.ts';
-import type { Wake } from './test-worker.ts';
+import type { Synced, Wake } from './test-worker.ts';
 
 const { alice, bob } = users;
 const AT = '2026-11-09T12:00:00.000Z';
@@ -258,6 +258,95 @@ describe('The Mailroom', () => {
         (await ada.call<Folder[]>('folders')).every(({ path }) => !path.startsWith('Receipts')),
       );
     }, 30_000);
+
+    test('creates, renames and deletes nested folders, and every open browser hears of each', async () => {
+      const elsewhere = ada.device();
+      await elsewhere.opened;
+      const folders = () => ada.call<Folder[]>('folders');
+      const paths = async () => (await folders()).map(({ path }) => path);
+      /** Runs a command, and resolves once the other browser has heard the folders changed. */
+      const heard = async (command: () => Promise<unknown>) => {
+        const hint = elsewhere.next((hint) => hint.changed === 'folders');
+        await command();
+        await hint;
+      };
+      const at = (path: string) => ({ account: account.id, path });
+
+      await heard(() => ada.call('createFolder', at('Trips')));
+      await heard(() => ada.call('createFolder', at('Trips/Japan')));
+      expect((await folders()).find(({ path }) => path === 'Trips/Japan')).toMatchObject({
+        name: 'Japan',
+        parent: 'Trips',
+        delimiter: '/',
+      });
+      await expect(ada.call('createFolder', at('Trips/japan'))).rejects.toThrow(
+        'There’s already a folder called “japan” here.',
+      );
+      await expect(ada.call('createFolder', at('Nowhere/Japan'))).rejects.toThrow(
+        'A folder’s name can’t hold “/”.',
+      );
+
+      // A message in Trips/Japan, which a check finds, as opening a browser asks for.
+      await asAlice((client) =>
+        client.append('Trips/Japan', raw({ id: 'ryokan', subject: 'Ryokan', minutesAgo: 10 })),
+      );
+      await ada.device().opened;
+      await ada.until(async () => (await ada.page({ in: 'search', text: 'ryokan' })).length === 1);
+      const [before] = (await ada.page({ in: 'folder', folder: at('Trips/Japan') })).map(
+        (row) => row.id,
+      );
+      const [kept] = await ada.call<Message[]>('conversation', before!);
+
+      // A rename keeps a folder in its parent, and never touches one with a role.
+      await expect(ada.call('renameFolder', at('Trips/Japan'), 'Japan')).rejects.toThrow(
+        'A rename keeps a folder where it is.',
+      );
+      await expect(ada.call('renameFolder', at('Archive'), 'Old')).rejects.toThrow(
+        'The account’s own folders, such as Inbox and Archive, stay as they are.',
+      );
+
+      // Renamed, the message moves to its new path at the same UID, and nothing downloads it again.
+      const synced = (await ada.call<Synced[]>('syncLog')).length;
+      await heard(() => ada.call('renameFolder', at('Trips'), 'Travel'));
+      expect((await foldersOnServer()).filter((path) => /^(Trips|Travel)/.test(path))).toEqual([
+        'Travel',
+        'Travel/Japan',
+      ]);
+      await ada.until(async () =>
+        (await ada.call<Synced[]>('syncLog'))
+          .slice(synced)
+          .some(({ path }) => path === 'Travel/Japan'),
+      );
+      expect(await paths()).not.toContain('Trips/Japan');
+      const [row] = await ada.page({ in: 'folder', folder: at('Travel/Japan') });
+      const [moved] = await ada.call<Message[]>('conversation', row!.id);
+      expect(moved).toMatchObject({
+        path: 'Travel/Japan',
+        uid: kept!.uid,
+        uidValidity: kept!.uidValidity,
+      });
+      const downloads = (await ada.call<Synced[]>('syncLog'))
+        .slice(synced)
+        .filter(({ path }) => path.startsWith('Travel'));
+      expect(downloads.reduce((sum, { messages }) => sum + messages, 0)).toBe(0);
+
+      // Deleted, the folder goes with the one inside it, and the index forgets their mail at once.
+      await heard(() => ada.call('deleteFolder', at('Travel')));
+      expect((await foldersOnServer()).filter((path) => path.startsWith('Travel'))).toEqual([]);
+      expect((await paths()).filter((path) => path.startsWith('Travel'))).toEqual([]);
+      expect(await ada.page({ in: 'search', text: 'ryokan' })).toEqual([]);
+      expect(await ada.call('conversation', row!.id)).toEqual([]);
+      const { tables } = await ada.call<{ tables: Record<string, Record<string, unknown>[]> }>(
+        'stored',
+      );
+      expect(tables.messages!.filter(({ path }) => String(path).startsWith('Travel'))).toEqual([]);
+      expect(tables.search!.filter(({ subject }) => String(subject).includes('Ryokan'))).toEqual(
+        [],
+      );
+      expect(tables.conversations!.filter(({ id }) => id === row!.id)).toEqual([]);
+      expect(tables.placements!.filter(({ conversation }) => conversation === row!.id)).toEqual([]);
+      elsewhere.close();
+    }, 60_000);
 
     test('a move the server refuses rejects with what the server said', async () => {
       const garden = await held('Garden');

@@ -59,8 +59,20 @@ export interface Commands {
   cancelSend(id: string): Promise<MessageRef>;
   /** A failed send, tried again now. */
   retrySend(id: string): Promise<Outgoing>;
+  /**
+   * At its parent's path, the parent's delimiter, then its name, or the name alone at the top. The
+   * name follows the folder name rules, and the parent is one of the account's folders.
+   */
   createFolder(folder: FolderRef): Promise<void>;
+  /**
+   * `to` is the folder's new path, in the same parent: a rename never moves a folder. The folders
+   * inside go along. Refused for a folder with a role in it or anywhere inside it.
+   */
   renameFolder(folder: FolderRef, to: string): Promise<void>;
+  /**
+   * The folder, its mail and every folder inside it, gone for good, once the server confirms it.
+   * Refused for a folder with a role in it or anywhere inside it.
+   */
   deleteFolder(folder: FolderRef): Promise<void>;
 }
 

@@ -3,6 +3,7 @@ import { connect } from 'cloudflare:sockets';
 import { createSocketsTransport } from 'imapflow';
 import PostalMime, { type Address as PostalAddress } from 'postal-mime';
 import { messageOf } from '../../composer/index.ts';
+import { createProblem, deleteProblem, inside, renameProblem } from '../../folders/core/index.ts';
 import {
   messageIdOf,
   writeMime,
@@ -416,6 +417,8 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 
   async createFolder(folder: FolderRef): Promise<void> {
     const { account, path } = this.ownFolder(folder);
+    const problem = createProblem(path, this.store.folders(account));
+    if (problem) throw new Error(problem);
     await (await this.provider(account)).createFolder(path);
     await this.owe(() => this.queue.check(account));
   }
@@ -423,12 +426,32 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   async renameFolder(folder: FolderRef, to: string): Promise<void> {
     const { account, path } = this.ownFolder(folder);
     const renamed = input.folderOf({ account, path: to }).path;
+    const held = this.store.folders(account);
+    const current = held.find((each) => each.path === path);
+    if (!current) throw new Error('There is no such folder.');
+    const problem = renameProblem(current, renamed, held);
+    if (problem) throw new Error(problem);
+    if (renamed === path) return;
     await (await this.provider(account)).renameFolder(path, renamed);
+    // The folders inside go along, and so do the messages the index holds in them all.
+    this.queue.renamed(
+      account,
+      [current, ...inside(current, held)].map(({ path: from }) => ({
+        from,
+        to: `${renamed}${from.slice(path.length)}`,
+      })),
+    );
     await this.owe(() => this.queue.check(account));
   }
 
   async deleteFolder(folder: FolderRef): Promise<void> {
     const { account, path } = this.ownFolder(folder);
+    const held = this.store.folders(account);
+    const current = held.find((each) => each.path === path);
+    // Gone already, as when another device deleted it first.
+    if (!current) return;
+    const problem = deleteProblem(current, held);
+    if (problem) throw new Error(problem);
     await (await this.provider(account)).deleteFolder(path);
     await this.owe(() => this.queue.check(account));
   }
@@ -530,6 +553,11 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   /** Runs once the host has accepted a message and before the Outbox records it. */
   protected accepted(): void {}
 
+  /** The provider an account is reached through, as it's made. A test's Mailroom watches it here. */
+  protected reached(provider: MailProvider): MailProvider {
+    return provider;
+  }
+
   /** Owes sync, and has the next wake land it at once. */
   private async owe(owing: () => void) {
     owing();
@@ -601,7 +629,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
         if (!connection || !sealed) throw new Error('There is no such account.');
         const password = await open(await this.memberKey(), sealed, account);
         return imapOver(account, connection, password);
-      })();
+      })().then((made) => this.reached(made));
       this.providers.set(account, provider);
       provider.catch(() => this.providers.delete(account));
     }

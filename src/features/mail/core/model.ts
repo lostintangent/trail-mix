@@ -46,6 +46,11 @@ export type Folder = FolderRef & {
   name: string;
   /** The path of the folder this one sits in, or nothing at the top of the tree. */
   parent?: string;
+  /**
+   * The character between the names in this folder's path, as the server lists it, so a folder
+   * inside this one is at its path, the delimiter, then its name. Absent where folders can't nest.
+   */
+  delimiter?: string;
   role?: FolderRole;
   unread: number;
   total: number;

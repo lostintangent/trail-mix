@@ -1,4 +1,5 @@
 import { COMMANDS, receivedCall } from '../client/contract.ts';
+import type { MailProvider } from '../../providers/index.ts';
 import { Mailroom, type MailroomEnv } from './mailroom.ts';
 
 /**
@@ -67,6 +68,26 @@ export class TestMailroom extends Mailroom {
     await this.restart();
   }
 
+  private readonly synced: Synced[] = [];
+
+  /** Records what each folder's sync downloads: the messages it reports, by path. */
+  protected override reached(provider: MailProvider): MailProvider {
+    return {
+      ...provider,
+      sync: async (path, cursor, window) => {
+        const batch = await provider.sync(path, cursor, window);
+        const messages = batch.events.filter(({ type }) => type === 'message').length;
+        this.synced.push({ path, messages });
+        return batch;
+      },
+    };
+  }
+
+  /** Each folder sync since the Mailroom started, with how many messages it downloaded. */
+  syncLog(): Promise<Synced[]> {
+    return Promise.resolve(this.synced);
+  }
+
   /** Erases the envelope index and the body cache, which sync rebuilds from the servers. */
   async eraseIndex(): Promise<void> {
     for (const { id } of await this.accounts()) this.store.forget(id);
@@ -96,6 +117,8 @@ export class TestMailroom extends Mailroom {
     return { tables, bodies: listed.objects.map((object) => object.key) };
   }
 }
+
+export type Synced = { path: string; messages: number };
 
 export type Wake = {
   steps: number;

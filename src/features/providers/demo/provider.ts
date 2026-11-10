@@ -19,7 +19,7 @@ import {
   type Moved,
 } from '../provider.ts';
 import * as server from './mailbox.ts';
-import { DEMO_ACCOUNTS, UNREACHABLE, type DemoKind } from './stories.ts';
+import { BUSY_FOLDER, DEMO_ACCOUNTS, UNREACHABLE, type DemoKind } from './stories.ts';
 
 /**
  * The demo provider: a MailProvider over the demo mailbox, for tests, agents, previews and the
@@ -124,6 +124,7 @@ export function demoServer(
             path,
             name: path.slice(path.lastIndexOf('/') + 1),
             ...(server.folderOf(mailbox, parent) ? { parent } : {}),
+            delimiter: '/',
             ...(role ? { role } : {}),
             ...server.countsOf(mailbox, path),
           };
@@ -280,6 +281,14 @@ export function demoServer(
     },
 
     async deleteFolder(path) {
+      // The server turns the first delete of the seeded Projects away, as if another session had
+      // it open, and takes the next.
+      const refused = mailbox.refused ?? [];
+      const asked = `DELETE ${path}`;
+      if (path === BUSY_FOLDER && server.folderOf(mailbox, path) && !refused.includes(asked)) {
+        await commit({ ...mailbox, refused: [...refused, asked] }, []);
+        throw new Error(`NO [INUSE] ${path} is open in another session`);
+      }
       await commit(server.deleteFolder(mailbox, path), [...watchers.keys()]);
     },
 

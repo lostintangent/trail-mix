@@ -10,7 +10,10 @@ import type { Envelope, Flags, Folder, MessageRef, SyncEvent } from '../mail/cor
  * way to recover from a failure part way through.
  */
 export interface MailProvider {
-  /** Every folder, with its role where the server marks one or its name makes it plain. */
+  /**
+   * Every folder, with its role where the server marks one or its name makes it plain, and the
+   * delimiter its server puts between the names in a path.
+   */
   folders(): Promise<Folder[]>;
 
   /**
@@ -71,7 +74,13 @@ export interface MailProvider {
 
   /** Creating a folder that exists, or deleting one that does not, does nothing. */
   createFolder(path: string): Promise<void>;
+  /** Takes the folders inside along, as IMAP's RENAME does. */
   renameFolder(path: string, to: string): Promise<void>;
+  /**
+   * Deletes the folder, its mail and every folder inside it, the deepest first, as the server lists
+   * them now. Resolves only once the server no longer lists any of them, and rejects with why if it
+   * still does, since some servers answer a parent's delete with OK and keep the folder.
+   */
   deleteFolder(path: string): Promise<void>;
 
   /** Ends the provider's connections. A provider is not used again after this. */

@@ -440,6 +440,7 @@ export function describeContract(
       expect((await provider.folders()).find((f) => f.path === 'Projects/Toy Box')).toMatchObject({
         name: 'Toy Box',
         parent: 'Projects',
+        delimiter: '/',
       });
       await provider.renameFolder('Projects/Toy Box', 'Projects/Trail Mix');
       await provider.renameFolder('Projects/Toy Box', 'Projects/Trail Mix');
@@ -449,6 +450,29 @@ export function describeContract(
       expect(paths).toContain('Projects');
       expect(paths).not.toContain('Projects/Toy Box');
       expect(paths).not.toContain('Projects/Trail Mix');
+    });
+
+    it('renames a folder with the folders inside it, and deletes it with them and their mail', async () => {
+      await provider.createFolder('Trips');
+      await provider.createFolder('Trips/Japan');
+      await provider.createFolder('Trips/Japan/Kyoto');
+      await world().deliver(message({ id: 'kyoto', subject: 'Kyoto' }), 'Trips/Japan/Kyoto');
+      await provider.renameFolder('Trips', 'Travel');
+      const renamed: string[] = (await provider.folders()).map((f) => f.path);
+      expect(renamed.filter((path) => path.startsWith('Travel')).toSorted()).toEqual([
+        'Travel',
+        'Travel/Japan',
+        'Travel/Japan/Kyoto',
+      ]);
+      expect(renamed.filter((path) => path.startsWith('Trips'))).toEqual([]);
+      expect((await provider.folders()).find((f) => f.path === 'Travel/Japan/Kyoto')?.total).toBe(
+        1,
+      );
+
+      // Some servers keep a parent whose children are still there, so the children go first.
+      await provider.deleteFolder('Travel');
+      await provider.deleteFolder('Travel');
+      expect((await provider.folders()).filter((f) => f.path.startsWith('Travel'))).toEqual([]);
     });
   });
 }

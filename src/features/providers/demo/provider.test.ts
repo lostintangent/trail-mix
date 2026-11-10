@@ -168,6 +168,34 @@ test('the seeded draft to an unreachable host is refused once, with the reason, 
   ).toEqual(['Sent']);
 });
 
+test('the first delete of the seeded Projects is turned away as in use, and its next takes Toy Box too', async () => {
+  let saved: DemoMailbox | undefined;
+  const server = demoServer('personal', demoMailbox('personal', 400, CREATED), (mailbox) => {
+    saved = mailbox;
+  });
+  const paths = async (provider = server.provider) =>
+    (await provider.folders())
+      .map(({ path }) => path)
+      .filter((path) => path.startsWith('Projects'));
+  expect(await paths()).toEqual(['Projects', 'Projects/Toy Box']);
+  const filed = (await everything(server)).messages.filter(({ path }) =>
+    path.startsWith('Projects'),
+  );
+  expect(filed.length).toBeGreaterThan(0);
+
+  await expect(server.provider.deleteFolder('Projects')).rejects.toThrow(
+    'NO [INUSE] Projects is open in another session',
+  );
+  expect(await paths()).toEqual(['Projects', 'Projects/Toy Box']);
+
+  // The refusal is remembered with the mailbox, so a Mailroom that restarts deletes it next time.
+  const reopened = demoServer('personal', saved!, () => {});
+  await reopened.provider.deleteFolder('Projects');
+  expect(await paths(reopened.provider)).toEqual([]);
+  const { messages } = await everything(reopened);
+  expect(messages.filter(({ path }) => path.startsWith('Projects'))).toEqual([]);
+});
+
 test('whatever happens to the mailbox, syncing keeps up, and reopening what was saved gives the same server', async () => {
   for (let seed = 1; seed <= 25; seed++) {
     const random = seededRandom(seed);
@@ -202,7 +230,12 @@ test('whatever happens to the mailbox, syncing keeps up, and reopening what was 
       else if (roll < 0.65)
         await provider.renameFolder(`Folder ${Math.floor(random() * 3)}`, `Renamed ${step}`);
       else if (roll < 0.7)
-        await provider.deleteFolder(pick(paths.filter((path) => !ROLES.has(path)))!);
+        // Projects' first delete is turned away, and changes nothing.
+        await provider
+          .deleteFolder(pick(paths.filter((path) => !ROLES.has(path)))!)
+          .catch((error: unknown) => {
+            if (!String(error).includes('[INUSE]')) throw error;
+          });
       // Syncing stops after any batch, as a cold start would stop it.
       else await mailroom.step(random() < 0.5 ? undefined : pick(paths));
     }

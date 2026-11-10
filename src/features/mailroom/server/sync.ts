@@ -1,4 +1,12 @@
-import type { AccountId, Folder, FolderRef, FolderRole, Hint } from '../../mail/core/index.ts';
+import type {
+  AccountId,
+  Folder,
+  FolderRef,
+  FolderRole,
+  Hint,
+  Message,
+  SyncEvent,
+} from '../../mail/core/index.ts';
 import type { MailProvider, SyncWindow } from '../../providers/index.ts';
 import type { EnvelopeIndex } from './envelope-index.ts';
 import type { Sql } from './schema.ts';
@@ -48,6 +56,18 @@ type Job = {
   cancelled: boolean;
 };
 
+/** A folder a command renamed, from its path to its new one. */
+type Move = { account: AccountId; from: string; to: string };
+
+/** A message moved, as a rename moves it: gone from its folder and at the same UID in `to`. */
+function movedTo({ conversation: _conversation, ...envelope }: Message, to: string): SyncEvent[] {
+  const { account, path, uidValidity, uid } = envelope;
+  return [
+    { type: 'gone', ref: { account, path, uidValidity, uid } },
+    { type: 'message', envelope: { ...envelope, path: to } },
+  ];
+}
+
 /** A folder a watcher or a command owes goes first: someone is waiting to see it. */
 const OWED = -2;
 const LIST = -1;
@@ -73,6 +93,8 @@ export function syncQueue(syncing: Syncing) {
   let flying: Job | undefined;
   /** Folders whose sync failed during an account's check, with why, so the check skips them. */
   const failed = new Map<AccountId, Map<string, unknown>>();
+  /** Folders a command renamed, whose messages move when a listing shows the rename. */
+  let moves: Move[] = [];
 
   function owe(job: Omit<Job, 'again' | 'changed' | 'cancelled'>) {
     const at = jobs.findIndex((held) => held.rank > job.rank);
@@ -88,23 +110,42 @@ export function syncQueue(syncing: Syncing) {
 
   /**
    * Records the folders the server lists with their counts, and forgets those it no longer has,
-   * mail and all. Returns them, or nothing if the job was cancelled meanwhile.
+   * mail and all. A folder a command renamed shows as its old path gone and its new one listed, and
+   * its messages move to the new path as the index holds them, with the old path's cursor, so the
+   * new path's sync goes on from there rather than downloading them again. If the server gave the
+   * folder a new UIDVALIDITY, that sync starts it over. Returns the folders, or nothing if the job
+   * was cancelled meanwhile.
    */
   async function list(job: Job, provider: MailProvider): Promise<Folder[] | undefined> {
     const { account } = job;
     const folders = await provider.folders();
     if (job.cancelled) return undefined;
     const before = JSON.stringify(store.folders(account));
+    const listed = new Set(folders.map(({ path }) => path));
+    const shown = new Map(
+      moves
+        .filter((move) => move.account === account && !listed.has(move.from) && listed.has(move.to))
+        .map(({ from, to }) => [from, to]),
+    );
     const gone = sql.transaction(() =>
       store.listFolders(account, folders).flatMap((path) => {
         for (const held of jobs) {
           if (held.account === account && held.path === path) held.cancelled = true;
         }
-        const changed = store.fold([{ type: 'reset', folder: { account, path } }]);
+        const to = shown.get(path);
+        const changed = store.fold(
+          to === undefined
+            ? [{ type: 'reset', folder: { account, path } }]
+            : store.reads.folder({ account, path }).flatMap((message) => movedTo(message, to)),
+        );
+        const cursor = to === undefined ? null : store.cursor(account, path);
+        if (to !== undefined && cursor !== null) store.saveCursor(account, to, cursor);
         store.dropFolder(account, path);
         return changed;
       }),
     );
+    // A rename not yet listed waits for a listing that shows it.
+    moves = moves.filter((move) => move.account !== account || listed.has(move.from));
     jobs = jobs.filter((held) => !held.cancelled);
     // A hint means something changed: the folders, their names or their counts.
     if (JSON.stringify(store.folders(account)) !== before) hint({ changed: 'folders', account });
@@ -216,6 +257,14 @@ export function syncQueue(syncing: Syncing) {
     },
 
     forget,
+
+    /**
+     * Notes folders a command renamed, so the listing that shows the rename moves their messages
+     * rather than forgetting them. Held in memory: a Mailroom that restarts first downloads them.
+     */
+    renamed(account: AccountId, renames: readonly { from: string; to: string }[]) {
+      moves = [...moves, ...renames.map((rename) => ({ account, ...rename }))];
+    },
 
     /** Whether anything is owed, so another wake should follow at once. */
     owing: () => jobs.length > 0,
