@@ -3,6 +3,7 @@ import type { MessageRef, Outgoing } from '../../mail/core/index.ts';
 import {
   MISSING,
   RESTARTED,
+  UNDO_SECONDS,
   begin,
   cancel,
   due,
@@ -20,8 +21,9 @@ const T0 = Date.parse('2026-11-10T09:00:00.000Z');
 const at = (minutes: number) => new Date(T0 + minutes * 60_000).toISOString();
 
 const draft: MessageRef = { account: 'personal', path: 'Drafts', uidValidity: 7, uid: 42 };
-const send = (id = 'one', sendAt = at(0)) =>
-  schedule({ id, draft, messageId: `<${id}@trailmix.invalid>`, sendAt });
+const entry = (id: string) => ({ id, draft, messageId: `<${id}@trailmix.invalid>` });
+/** A send scheduled ahead, to go at `sendAt`. */
+const send = (id = 'one', sendAt = at(0)) => schedule(entry(id), at(-24 * 60), sendAt);
 
 const refused: Failure = { error: '550 5.1.1 No such user here', passing: false };
 const offline: Failure = { error: 'The connection to smtp.example.com timed out.', passing: true };
@@ -42,6 +44,22 @@ test('a send waits for its time, then submits, files, and leaves the Outbox', ()
   expect(due([accepted], at(0.3))).toEqual([{ step: 'file', outgoing: accepted }]);
 
   expect(filed(accepted, 'filed', at(0.3))).toBe('done');
+});
+
+test('Send waits out a ten-second undo window before it goes', () => {
+  expect(UNDO_SECONDS).toBe(10);
+  expect(schedule(entry('now'), at(0))).toEqual({
+    ...entry('now'),
+    sendAt: at(10 / 60),
+    state: 'waiting',
+    attempts: 0,
+  });
+});
+
+test('a send scheduled ahead goes at its time, and never before the undo window closes', () => {
+  expect(schedule(entry('later'), at(0), at(60)).sendAt).toBe(at(60));
+  expect(schedule(entry('soon'), at(0), at(5 / 60)).sendAt).toBe(at(10 / 60));
+  expect(schedule(entry('past'), at(0), at(-60)).sendAt).toBe(at(10 / 60));
 });
 
 test('undo inside the window gives back the draft untouched', () => {

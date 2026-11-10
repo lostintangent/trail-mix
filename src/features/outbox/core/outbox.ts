@@ -51,9 +51,21 @@ const HOURLY = 60;
 /** How long a send's automatic retries may wait in all before it waits for Retry instead. */
 const RETRYING_MINUTES = 24 * 60;
 
-/** A draft scheduled to go at `sendAt`, which is the end of the undo window or a later time. */
-export function schedule(entry: Pick<Outgoing, 'id' | 'draft' | 'messageId' | 'sendAt'>): Outgoing {
-  return { ...entry, state: 'waiting', attempts: 0 };
+/** How long Send can be undone, as Apple Mail's default. */
+export const UNDO_SECONDS = 10;
+
+/**
+ * A draft scheduled to go when the undo window that opens at `now` closes, or at `at` if that is
+ * later, for a send scheduled ahead.
+ */
+export function schedule(
+  entry: Pick<Outgoing, 'id' | 'draft' | 'messageId'>,
+  now: string,
+  at?: string,
+): Outgoing {
+  const undone = Date.parse(now) + UNDO_SECONDS * 1000;
+  const sendAt = new Date(Math.max(undone, at === undefined ? 0 : Date.parse(at))).toISOString();
+  return { ...entry, sendAt, state: 'waiting', attempts: 0 };
 }
 
 /**

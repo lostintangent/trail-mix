@@ -1,6 +1,7 @@
 export {
   MISSING,
   RESTARTED,
+  UNDO_SECONDS,
   begin,
   cancel,
   due,

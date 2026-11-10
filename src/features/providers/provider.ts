@@ -80,7 +80,6 @@ export interface MailProvider {
 
 export type { SyncEvent };
 
-/** Where a folder's sync stopped. It belongs to the provider and is opaque to the Mailroom. */
 /** How many messages one folder's search reports at most. */
 export const SEARCH_LIMIT = 100;
 
@@ -114,6 +113,7 @@ export async function beforeSending<T>(work: () => Promise<T>): Promise<T> {
 /** Where a moved message was, and where it is now. */
 export type Moved = { from: MessageRef; to: MessageRef };
 
+/** Where a folder's sync stopped. It belongs to the provider and is opaque to the Mailroom. */
 export type Cursor = string;
 
 /** Only messages newer than `since`, an ISO 8601 date, are reported. */
