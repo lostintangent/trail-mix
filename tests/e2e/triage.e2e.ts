@@ -34,7 +34,8 @@ async function inbox(size: typeof DESKTOP | typeof PHONE = DESKTOP): Promise<Pag
 /**
  * Holds every command this browser sends for a second, so what it shows before then can only be
  * its own doing, and the Mailroom's answer and hints come after. The release lets the held
- * commands through, then stops holding.
+ * commands through, then stops holding. Each request goes on to any route the test set before,
+ * so a browser kept from hearing something stays deaf to it while commands are held.
  */
 async function slowCommands(page: Page): Promise<() => Promise<void>> {
   const held: Promise<void>[] = [];
@@ -42,7 +43,7 @@ async function slowCommands(page: Page): Promise<() => Promise<void>> {
     const through = (async () => {
       if (route.request().method() === 'POST') await new Promise((done) => setTimeout(done, 1_000));
       // A fetch the app gave up on meanwhile, as a superseded refetch is, is already handled.
-      await route.continue().catch((error: unknown) => {
+      await route.fallback().catch((error: unknown) => {
         if (!String(error).includes('already handled')) throw error;
       });
     })();
