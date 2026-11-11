@@ -11,7 +11,7 @@ import {
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { ChevronRight, type LucideIcon } from 'lucide-react';
-import { Suspense, useState, type ReactNode } from 'react';
+import { Suspense, useReducer, useState, type ReactNode, type SyntheticEvent } from 'react';
 import { Pending, TextSkeleton } from '../../../app/theme/Pending.tsx';
 import { StampDot } from '../../../app/theme/StampDot.tsx';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
@@ -34,16 +34,19 @@ import { folderIcon, UNIFIED_VIEWS, type ViewCounts } from './views.ts';
 /** The views that gather mail across every account, at the top of the tree. */
 export function ViewRows({
   view,
+  isViewHere,
   counts,
   onSelect,
 }: {
   view: View;
+  /** Whether a line of the tree lifts for the view. When none does, the first is its Tab stop. */
+  isViewHere: boolean;
   counts: ViewCounts;
   onSelect: (view: View) => void;
 }) {
   return (
     <ul {...stylex.props(styles.rows)}>
-      {UNIFIED_VIEWS.map(({ in: unified, label, icon }) => (
+      {UNIFIED_VIEWS.map(({ in: unified, label, icon }, at) => (
         <li key={unified}>
           <Row
             label={label}
@@ -51,6 +54,7 @@ export function ViewRows({
             count={counts[unified]}
             isCountUnread={unified === 'inbox'}
             isSelected={view.in === unified}
+            isStop={view.in === unified || (!isViewHere && at === 0)}
             onSelect={() => onSelect({ in: unified })}
           />
         </li>
@@ -99,16 +103,16 @@ export function AccountSection({
   const hasUnreadInbox = own.some(({ role, unread }) => role === 'inbox' && unread > 0);
   return (
     <section aria-label={account.name} {...stylex.props(styles.account)}>
-      <Line
-        menu={
-          <RowMenu label={`More for ${account.name}`} actions={() => accountActions(account)} />
-        }
-      >
+      <Line menu={{ label: `More for ${account.name}`, actions: () => accountActions(account) }}>
         <h2 {...stylex.props(styles.accountHeading)}>
           <button
             type="button"
+            // The tree's one Tab stop, when it's folded around the view.
+            tabIndex={!isOpen && holdsView ? 0 : -1}
             aria-expanded={isOpen}
             onClick={() => onFold({ account: account.id })}
+            data-row={1}
+            data-fold
             {...stylex.props(styles.row, styles.accountRow, !isOpen && holdsView && lift.holding)}
           >
             <Chevron isOpen={isOpen} />
@@ -257,14 +261,16 @@ function FolderRows({
           </Suspense>
         ) : (
           <Line
-            menu={<RowMenu label={`More for ${name}`} actions={() => folderActions(folder)} />}
+            menu={{ label: `More for ${name}`, actions: () => folderActions(folder) }}
             fold={
               canFold && (
                 <button
                   type="button"
+                  tabIndex={-1}
                   aria-label={`${isOpen ? 'Fold' : 'Unfold'} ${name}`}
                   aria-expanded={isOpen}
                   onClick={() => onFold(folder)}
+                  data-fold
                   {...stylex.props(styles.fold, styles.foldAt(depth))}
                 >
                   <Chevron isOpen={isOpen} />
@@ -280,10 +286,10 @@ function FolderRows({
               isCountUnread={folder.role === 'inbox'}
               isSelected={isSelected}
               isHolding={holdsView}
+              isStop={isSelected || holdsView}
               onSelect={() =>
                 onSelect({ in: 'folder', folder: { account: folder.account, path: folder.path } })
               }
-              onFold={canFold ? (open) => open !== isOpen && onFold(folder) : undefined}
             />
           </Line>
         )}
@@ -322,7 +328,8 @@ const isFolder = (ref: FolderRef, folder: Folder) =>
 
 /**
  * One line of the tree: what it opens or folds, a chevron over its start when it folds, and its
- * menu over its end, so a selected line lifts as one piece.
+ * menu over its end, so a selected line lifts as one piece. Shift+F10, the menu key and a right
+ * click open its menu too, as its `…` does.
  */
 function Line({
   fold,
@@ -330,14 +337,34 @@ function Line({
   children,
 }: {
   fold?: ReactNode;
-  menu?: ReactNode;
+  menu?: { label: string; actions: () => readonly Command[] };
   children: ReactNode;
 }) {
+  // Asking again while the menu is open, as its own keys and clicks passing up through here do,
+  // leaves it as it is.
+  const [asked, ask] = useReducer((times: number) => times + 1, 0);
+  const openMenu = (event: SyntheticEvent) => {
+    event.preventDefault();
+    ask();
+  };
   return (
-    <div {...stylex.props(styles.line)}>
+    <div
+      data-line
+      {...(menu && {
+        onKeyDown: (event) =>
+          ((event.key === 'F10' && event.shiftKey) || event.key === 'ContextMenu') &&
+          openMenu(event),
+        onContextMenu: openMenu,
+      })}
+      {...stylex.props(styles.line)}
+    >
       {children}
       {fold}
-      {menu && <span {...stylex.props(styles.menu)}>{menu}</span>}
+      {menu && (
+        <span {...stylex.props(styles.menu)}>
+          <RowMenu {...menu} asked={asked} />
+        </span>
+      )}
     </div>
   );
 }
@@ -362,10 +389,19 @@ function Chevron({ isOpen }: { isOpen: boolean }) {
 }
 
 /**
- * A row's `…`, which loads its menu only once pressed, and keeps it after that. Until then it's a
- * plain button, so a sidebar of many folders costs little to draw.
+ * A row's `…`, which loads its menu only once pressed or asked for by its line, and keeps it after
+ * that. Until then it's a plain button, so a sidebar of many folders costs little to draw.
  */
-function RowMenu({ label, actions }: { label: string; actions: () => readonly Command[] }) {
+function RowMenu({
+  label,
+  actions,
+  asked,
+}: {
+  label: string;
+  actions: () => readonly Command[];
+  /** How many times its line has asked for it. */
+  asked: number;
+}) {
   const [isWanted, setWanted] = useState(false);
   const button = (
     <MoreButton
@@ -376,10 +412,10 @@ function RowMenu({ label, actions }: { label: string; actions: () => readonly Co
       onClick={() => setWanted(true)}
     />
   );
-  if (!isWanted) return button;
+  if (!isWanted && asked === 0) return button;
   return (
     <Suspense fallback={button}>
-      <ActionsMenu label={label} actions={actions} />
+      <ActionsMenu label={label} actions={actions} asked={asked} />
     </Suspense>
   );
 }
@@ -396,8 +432,8 @@ function Row({
   isCountUnread,
   isSelected,
   isHolding = false,
+  isStop,
   onSelect,
-  onFold,
 }: {
   label: string;
   icon: LucideIcon;
@@ -409,23 +445,18 @@ function Row({
   isSelected: boolean;
   /** Whether it's folded around the view, which then lifts it instead. */
   isHolding?: boolean;
+  /** Whether it's the tree's one Tab stop: the line that lifts, or the first when none does. */
+  isStop: boolean;
   onSelect: () => void;
-  /** Folds or unfolds it, as the arrow keys ask, where it has folders inside. */
-  onFold?: (isOpen: boolean) => void;
 }) {
   return (
     <button
       type="button"
+      tabIndex={isStop ? 0 : -1}
       aria-current={isSelected ? 'page' : undefined}
       onClick={onSelect}
-      onKeyDown={
-        onFold &&
-        ((event) => {
-          if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return;
-          event.preventDefault();
-          onFold(event.key === 'ArrowRight');
-        })
-      }
+      // A unified view sits at the top, as an account does, and its folders a level in.
+      data-row={depth === undefined ? 1 : depth + 2}
       {...stylex.props(
         styles.row,
         depth !== undefined && styles.folderRow(depth),
@@ -445,9 +476,6 @@ function Row({
 // takes. Each folder inside another starts a column further in.
 const ICON = '1rem';
 const STEP = `calc(${ICON} + ${spacingVars['--spacing-1']})`;
-
-// The focus ring every Astryx control draws, for the sidebar's own buttons.
-const FOCUS_RING = `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`;
 
 const styles = stylex.create({
   rows: {
@@ -511,7 +539,11 @@ const styles = stylex.create({
     fontSize: typeScaleVars['--text-body-size'],
     textAlign: 'start',
     cursor: 'pointer',
-    outline: { default: null, ':focus-visible': FOCUS_RING },
+    outline: {
+      default: null,
+      // The focus ring every Astryx control draws.
+      ':focus-visible': `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`,
+    },
     outlineOffset: '-2px',
   },
   // A folder's icon starts after the column its chevron takes, a step further in for each folder
@@ -543,7 +575,11 @@ const styles = stylex.create({
       ':hover': { default: null, '@media (hover: hover)': colorVars['--color-text-primary'] },
     },
     cursor: 'pointer',
-    outline: { default: null, ':focus-visible': FOCUS_RING },
+    outline: {
+      default: null,
+      // The focus ring every Astryx control draws.
+      ':focus-visible': `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`,
+    },
     outlineOffset: '-2px',
   },
   foldAt: (depth: number) => ({

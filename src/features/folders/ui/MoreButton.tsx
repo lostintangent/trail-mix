@@ -13,11 +13,13 @@ import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 /**
  * The `…` at the end of a sidebar row, always shown, in a quiet tone, so what can be done to the
  * row is in reach without hovering. The row's menu draws itself on this same button once opened.
+ * It's out of the Tab order, since the tree is one stop and its row opens the menu by key.
  */
 export function MoreButton({ label, ...props }: { label: string } & ComponentProps<'button'>) {
   return (
     <button
       type="button"
+      tabIndex={-1}
       aria-label={label}
       aria-haspopup="menu"
       {...props}
@@ -27,9 +29,6 @@ export function MoreButton({ label, ...props }: { label: string } & ComponentPro
     </button>
   );
 }
-
-// The focus ring every Astryx control draws, for the sidebar's own buttons.
-const FOCUS_RING = `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`;
 
 const styles = stylex.create({
   more: {
@@ -52,7 +51,11 @@ const styles = stylex.create({
       ':is([aria-expanded="true"])': colorVars['--color-text-primary'],
     },
     cursor: 'pointer',
-    outline: { default: null, ':focus-visible': FOCUS_RING },
+    outline: {
+      default: null,
+      // The focus ring every Astryx control draws.
+      ':focus-visible': `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`,
+    },
     outlineOffset: '-2px',
     transitionProperty: 'background-color, color',
     transitionDuration: {

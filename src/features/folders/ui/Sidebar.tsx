@@ -11,6 +11,7 @@ import type { FolderEdit } from './commands.ts';
 import { useFolds } from './folds.ts';
 import { RailContent } from './SidebarRail.tsx';
 import { AccountSection, ViewRows } from './Tree.tsx';
+import { onTreeKey, preloadTreeMoves } from './treeKeys.ts';
 import type { ViewCounts } from './views.ts';
 
 /** What a desktop's sidebar needs to fold to its rail. A phone's never folds. */
@@ -91,6 +92,13 @@ export const Sidebar = memo(function Sidebar({
   const [folds, toggleFold] = useFolds();
   const isRail = rail !== undefined && isCollapsed;
   const { isDrawn: isRailDrawn, isShown: isRailShown } = useRail(isRail);
+  // Whether a line of the tree lifts for the view, which a search's or a folder's on its way doesn't.
+  const isViewHere =
+    view.in === 'folder'
+      ? folders.some(
+          ({ account, path }) => account === view.folder.account && path === view.folder.path,
+        )
+      : view.in !== 'search';
   return (
     <nav id={id} aria-label="Mailboxes" {...stylex.props(styles.sidebar)}>
       {/* First, as it reads: it heads both layouts. */}
@@ -119,8 +127,8 @@ export const Sidebar = memo(function Sidebar({
             {search}
           </div>
         )}
-        <div {...stylex.props(styles.scroll)}>
-          <ViewRows view={view} counts={counts} onSelect={onSelect} />
+        <div onKeyDown={onTreeKey} onFocus={preloadTreeMoves} {...stylex.props(styles.scroll)}>
+          <ViewRows view={view} isViewHere={isViewHere} counts={counts} onSelect={onSelect} />
           {accounts.map((account) => (
             <AccountSection
               key={account.id}

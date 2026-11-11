@@ -144,16 +144,41 @@ test('every folder and account has its menu without a hover, for itself rather t
   await readable(page, 'desktop-light-account-menu');
 }, 60_000);
 
-test('the sidebar works from the keyboard alone, its fold first and each menu as its own', async () => {
+test('the tree is one Tab stop, whose arrows move through it and fold it, and whose rows open their menus by key', async () => {
   const page = await open({ ...DESKTOP, colorScheme: 'light' });
+  await page
+    .getByRole('region', { name: 'Work' })
+    .getByRole('button', { name: /^Receipts/ })
+    .waitFor();
+  // What has focus, by role and name, leaving out any count after a row's name.
   const focused = () =>
     page.evaluate(() => {
       const element = document.activeElement!;
-      return `${element.getAttribute('role') ?? element.tagName}: ${element.getAttribute('aria-label') ?? element.textContent}`;
+      const name = element.getAttribute('aria-label') ?? element.textContent.replace(/\d+$/, '');
+      return `${element.getAttribute('role') ?? element.tagName}: ${name}`;
     });
-  await page.keyboard.press('Tab');
-  await expect(focused()).resolves.toBe('BUTTON: Fold the sidebar');
-  // Its rows, chevrons and menus draw the focus ring every Astryx control does.
+  // Focus moves a moment after a key: the tree's moves load as it first takes focus, and a menu
+  // moves focus once it has opened or closed.
+  const focusIs = async (to: string) => {
+    for (let wait = 0; wait < 100 && (await focused()) !== to; wait++) {
+      await page.waitForTimeout(20);
+    }
+    expect(await focused()).toBe(to);
+  };
+  const moveTo = async (key: string, to: string) => {
+    await page.keyboard.press(key);
+    await focusIs(to);
+  };
+  const downTo = async (to: string) => {
+    for (let line = 0; line < 30 && (await focused()) !== to; line++) {
+      const from = await focused();
+      await page.keyboard.press('ArrowDown');
+      for (let wait = 0; wait < 100 && (await focused()) === from; wait++) {
+        await page.waitForTimeout(20);
+      }
+    }
+    expect(await focused()).toBe(to);
+  };
   const ring = () =>
     page.evaluate(() => {
       const { outlineStyle, outlineWidth, outlineColor } = getComputedStyle(
@@ -161,26 +186,71 @@ test('the sidebar works from the keyboard alone, its fold first and each menu as
       );
       return `${outlineStyle} ${outlineWidth} ${outlineColor}`;
     });
-  const astryx = await ring();
-  for (const name of ['Flagged', 'Fold Projects', 'More for Toy Box']) {
-    await page.getByRole('button', { name, exact: true }).first().focus();
-    await page.keyboard.press('Shift+Tab');
-    await page.keyboard.press('Tab');
-    expect({ name, ring: await ring() }).toEqual({ name, ring: astryx });
-  }
 
-  // A row's menu loads as it's first opened, and still opens as a menu does from the keyboard.
-  const more = page
-    .getByRole('region', { name: 'Work' })
-    .getByRole('button', { name: 'More for Receipts' });
-  await more.focus();
+  // The fold button leads, and the tree is one stop between the search and Add account, entered on
+  // the view's line.
+  await moveTo('Tab', 'BUTTON: Fold the sidebar');
+  const astryx = await ring();
+  const stops = [];
+  for (let stop = 0; stop < 4; stop++) {
+    await page.keyboard.press('Tab');
+    stops.push(await focused());
+  }
+  expect(stops).toEqual([
+    'BUTTON: New message',
+    'INPUT: Search mail',
+    'BUTTON: Inbox',
+    'BUTTON: Add account',
+  ]);
+
+  // The arrows step through the lines, into an account and back out of it, and reach either end.
+  await moveTo('Shift+Tab', 'BUTTON: Inbox');
+  await moveTo('ArrowDown', 'BUTTON: Flagged');
+  await moveTo('End', 'BUTTON: Trash');
+  await moveTo('Home', 'BUTTON: Inbox');
+  await page.keyboard.press('ArrowUp');
+  await moveTo('ArrowDown', 'BUTTON: Flagged');
+  await downTo('BUTTON: Personal');
+  await moveTo('ArrowRight', 'BUTTON: Inbox');
+  await moveTo('ArrowLeft', 'BUTTON: Personal');
+  // Every line it reaches draws the focus ring every Astryx control does.
+  expect(await ring()).toBe(astryx);
+
+  // Right steps into a folder and left steps out, then folds it and unfolds it again.
+  await downTo('BUTTON: Projects');
+  expect(await ring()).toBe(astryx);
+  await moveTo('ArrowRight', 'BUTTON: Toy Box');
+  await moveTo('ArrowLeft', 'BUTTON: Projects');
+  await page.keyboard.press('ArrowLeft');
+  await folderRow(page, 'Toy Box').waitFor({ state: 'detached' });
+  await page.keyboard.press('ArrowRight');
+  await folderRow(page, 'Toy Box').waitFor();
+  await focusIs('BUTTON: Projects');
+
+  // Enter opens a folder, and the tree is entered on it from then on.
   await page.keyboard.press('Enter');
-  await page.getByRole('menuitem').first().waitFor();
-  await expect(focused()).resolves.toBe('menuitem: New folder in Receipts');
-  await page.keyboard.press('ArrowDown');
-  await expect(focused()).resolves.toBe('menuitem: Rename Receipts');
+  await page.getByRole('heading', { name: 'Projects', level: 2 }).waitFor();
+  await moveTo('ArrowUp', 'BUTTON: Drafts');
+  await page.keyboard.press('Tab');
+  await moveTo('Shift+Tab', 'BUTTON: Projects');
+
+  // Shift+F10 opens a row's menu, which loads as it's first opened, and Escape comes back to the row.
+  await downTo('BUTTON: Receipts');
+  await moveTo('Shift+F10', 'menuitem: New folder in Receipts');
+  await moveTo('ArrowDown', 'menuitem: Rename Receipts');
+  await moveTo('Escape', 'BUTTON: Receipts');
+  await moveTo('ArrowDown', 'BUTTON: Junk');
+
+  // A right click opens a row's menu too.
+  await folderRow(page, 'Projects').click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'New folder in Projects' }).waitFor();
   await page.keyboard.press('Escape');
-  await expect(focused()).resolves.toBe('BUTTON: More for Receipts');
+
+  // A search lifts no line, so the tree is entered on its first.
+  await page.getByRole('searchbox', { name: 'Search mail' }).fill('lunch');
+  await page.waitForFunction(() => new URL(location.href).searchParams.get('q') === 'lunch');
+  await moveTo('Tab', 'BUTTON: Clear search');
+  await moveTo('Tab', 'BUTTON: Inbox');
 }, 60_000);
 
 test('an account whose folders are on their way shows lines in their shape, which its folders take', async () => {
