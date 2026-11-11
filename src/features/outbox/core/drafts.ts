@@ -1,4 +1,10 @@
-import { sameRef, type ConversationId, type MessageRef } from '../../mail/core/index.ts';
+import {
+  sameRef,
+  type ConversationId,
+  type Folder,
+  type MessageRef,
+  type View,
+} from '../../mail/core/index.ts';
 import { conversationOf, isAway, type Leaving } from './leaving.ts';
 
 /**
@@ -29,6 +35,22 @@ export function awayFromDrafts(
     [...conversations].filter((conversation) => (draftsIn(conversation) ?? []).every(isOnItsWay)),
   );
 }
+
+/** Whether a view lists drafts: the unified Drafts, or an account's folder whose role is drafts. */
+export const isDraftsView = (view: View, folders: readonly Folder[]): boolean =>
+  view.in === 'drafts' ||
+  (view.in === 'folder' &&
+    folders.some(
+      ({ account, path, role }) =>
+        role === 'drafts' && account === view.folder.account && path === view.folder.path,
+    ));
+
+/**
+ * Whether a send leaves its conversation out of the Drafts view, given the conversation's other
+ * drafts: every one of them is already on its way.
+ */
+export const leavesDrafts = (all: readonly Leaving[], others: readonly MessageRef[]): boolean =>
+  others.every((held) => all.some((leaving) => isAway(leaving) && sameRef(leaving.draft, held)));
 
 /** The most a send's Drafts folder has counted since the send began. */
 export type Peak = { draft: MessageRef; count: number };

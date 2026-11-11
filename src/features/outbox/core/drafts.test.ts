@@ -1,6 +1,13 @@
 import { expect, test } from 'bun:test';
 import type { MessageRef, Outgoing } from '../../mail/core/index.ts';
-import { awayFromDrafts, draftsStillCounted, notePeaks, type Peak } from './drafts.ts';
+import {
+  awayFromDrafts,
+  draftsStillCounted,
+  isDraftsView,
+  leavesDrafts,
+  notePeaks,
+  type Peak,
+} from './drafts.ts';
 import { forget, observe, press, type Leaving } from './leaving.ts';
 import { begin, schedule, submitted } from './outbox.ts';
 import { closesAt } from './standing.ts';
@@ -131,4 +138,28 @@ test('a send that failed or was undone is a draft in the count again, and one se
 test('a draft outside a Drafts folder the device knows is no part of the count', () => {
   const elsewhere = { ...draft, path: 'Old Drafts' };
   expect(counting()(pressing(elsewhere), 3)).toBe(0);
+});
+
+test('a Drafts view is the unified one, or a folder whose role is drafts', () => {
+  const folders = [
+    { account: 'personal', path: 'Drafts', name: 'Drafts', role: 'drafts', unread: 0, total: 3 },
+    { account: 'personal', path: 'INBOX', name: 'Inbox', role: 'inbox', unread: 0, total: 9 },
+  ] as const;
+  expect(isDraftsView({ in: 'drafts' }, folders)).toBe(true);
+  expect(
+    isDraftsView({ in: 'folder', folder: { account: 'personal', path: 'Drafts' } }, folders),
+  ).toBe(true);
+  expect(
+    isDraftsView({ in: 'folder', folder: { account: 'personal', path: 'INBOX' } }, folders),
+  ).toBe(false);
+  expect(isDraftsView({ in: 'inbox' }, folders)).toBe(false);
+});
+
+test('a send leaves its conversation out of Drafts only once its other drafts are on their way', () => {
+  const pressed = pressing();
+  expect(leavesDrafts(pressed, [])).toBe(true);
+  expect(leavesDrafts(pressed, [second])).toBe(false);
+  expect(leavesDrafts(pressing(second, pressed), [second])).toBe(true);
+  // One whose send failed is a draft again.
+  expect(leavesDrafts(observe(pressing(second), [refused], at(11), closesAt), [draft])).toBe(false);
 });

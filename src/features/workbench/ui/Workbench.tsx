@@ -17,6 +17,7 @@ import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { Toasts } from '../../../shared/toasts.tsx';
 import {
   marksOf,
+  sameRef,
   type Account,
   type AccountId,
   type ConversationId,
@@ -34,6 +35,8 @@ import {
   outboxQuery,
 } from '../../mailroom/client/index.ts';
 import {
+  isDraftsView,
+  leavesDrafts,
   OutboxList,
   SendActions,
   sendCommands,
@@ -301,22 +304,23 @@ export function Workbench({
   // phone, where the reader fills the screen, the list comes back instead. The list shows the
   // conversation gone at once, and the reader turns to the next one just after, so the frame that
   // shows the archive doesn't wait for the next conversation to render.
-  const triageShown = (action: Action, id: ConversationId) => {
-    if (rowChange(action, view) === 'gone') {
-      const at = places.get(id) ?? -1;
-      const leaving = conversations?.[at];
-      const next = conversations?.[at + 1] ?? conversations?.[at - 1];
-      if (isPhone) {
-        setPhonePane('list');
-        setSelection(NOTHING_SELECTED);
-      } else if (leaving) {
-        setVacating({ row: leaving, at });
-        startTransition(() => {
-          setSelection(next ? { ids: [next.id], anchor: next.id } : NOTHING_SELECTED);
-          setVacating(undefined);
-        });
-      }
+  const giveWay = (id: ConversationId) => {
+    const at = places.get(id) ?? -1;
+    const leaving = conversations?.[at];
+    const next = conversations?.[at + 1] ?? conversations?.[at - 1];
+    if (isPhone) {
+      setPhonePane('list');
+      setSelection(NOTHING_SELECTED);
+    } else if (leaving) {
+      setVacating({ row: leaving, at });
+      startTransition(() => {
+        setSelection(next ? { ids: [next.id], anchor: next.id } : NOTHING_SELECTED);
+        setVacating(undefined);
+      });
     }
+  };
+  const triageShown = (action: Action, id: ConversationId) => {
+    if (rowChange(action, view) === 'gone') giveWay(id);
     triage(action, [id]);
   };
   /**
@@ -641,6 +645,19 @@ export function Workbench({
   // new message has no conversation until the Outbox names one.
   const sendWritten = (draft: MessageRef, at: string | undefined, writing: Writing) => {
     const from = { conversation: selected, isDocked: compose !== undefined && isDocked(compose) };
+    // A draft opened from its conversation gives way to the next conversation, as one archived
+    // does, when its send leaves nothing to show: a draft alone there, or a Drafts list the
+    // conversation leaves.
+    // The draft sent is the one opened, under whatever ref its last save gave it.
+    if (compose?.as === 'draft' && compose.draft.conversation === selected) {
+      const opened = compose.draft;
+      const others = compose.conversation.filter(
+        (message) => message.flags.draft && !sameRef(message, opened),
+      );
+      const isLeft =
+        !from.isDocked || (isDraftsView(view, folders) && leavesDrafts(leaving.all, others));
+      if (isLeft) giveWay(selected);
+    }
     const pressedAt = Date.now();
     leaving.pressed(draft, {
       in: from.isDocked

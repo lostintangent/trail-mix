@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useMemo, useState } from 'react';
 import type { ConversationId, Folder, MessageRef, View } from '../../mail/core/index.ts';
 import { conversationQuery } from '../../mailroom/client/index.ts';
-import { awayFromDrafts, draftsStillCounted, notePeaks } from '../core/drafts.ts';
+import { awayFromDrafts, draftsStillCounted, isDraftsView, notePeaks } from '../core/drafts.ts';
 import type { Leaving } from '../core/leaving.ts';
 
 /**
@@ -33,13 +33,7 @@ export function useDraftsAway(all: readonly Leaving[], folders: readonly Folder[
       rows: readonly Row[] | undefined,
       view: View,
     ) => {
-      const isDrafts =
-        view.in === 'drafts' ||
-        (view.in === 'folder' &&
-          drafts.some(
-            ({ account, path }) => account === view.folder.account && path === view.folder.path,
-          ));
-      if (!rows || !isDrafts) return rows;
+      if (!rows || !isDraftsView(view, drafts)) return rows;
       const away = awayFromDrafts(all, (conversation) =>
         queryClient
           .getQueryData(conversationQuery(conversation).queryKey)

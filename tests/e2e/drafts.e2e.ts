@@ -191,6 +191,11 @@ test('an accepted send waits for the server’s copy out of Drafts, its count an
   await slow(page, 'folders', 1_000);
   await sendDraft(page, /Lunch Thursday/);
   await row(page, /Lunch Thursday/).waitFor({ state: 'detached', timeout: 2_000 });
+  // The reply leaves the list it was opened from, so the reader turns to the next draft there.
+  await page
+    .getByRole('region', { name: 'Reader' })
+    .getByRole('heading', { level: 1, name: /Offsite agenda|Cabin for the long weekend/ })
+    .waitFor({ timeout: 2_000 });
 
   // The server accepts it, and its copy comes a moment later.
   await waitUntil(() => outbox.some(({ states }) => states.includes('accepted')), 20_000);
@@ -224,6 +229,11 @@ test('a count the folders lower before the Outbox lets the send go never drops t
   await slow(page, 'outbox', 1_000);
   await sendDraft(page, /Offsite agenda/);
   await toast(page, /^Sending to Sofia and 2 others in \d+s$/).waitFor();
+  // With nothing left to show of its conversation, the reader turns to the next draft.
+  await page
+    .getByRole('region', { name: 'Reader' })
+    .getByRole('heading', { name: /Cabin for the long weekend/ })
+    .waitFor({ timeout: 2_000 });
   await row(page, /Offsite agenda/).waitFor({ state: 'detached', timeout: 2_000 });
   await waitUntil(() => outbox.some(({ states }) => states.includes('accepted')), 20_000);
   await readable(page, 'desktop-light-accepted');
