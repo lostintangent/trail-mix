@@ -3,6 +3,7 @@ import * as stylex from '@stylexjs/stylex';
 import type { Body, Message, MessageRef } from '../../mail/core/index.ts';
 import { imageUrl, partUrl } from '../../mailroom/client/index.ts';
 import { colorReader, type DarkPaper } from '../core/colors.ts';
+import { refKey, refOf } from './refs.ts';
 import { sanitizeMail, type SafeMail } from '../core/sanitize.ts';
 
 /**
@@ -42,17 +43,6 @@ export function imagesAllowed(message: Message, allowImagesFrom: string[]): bool
   const sender = message.from.email.toLowerCase();
   return allowImagesFrom.some((email) => email.toLowerCase() === sender);
 }
-
-/** Just a message's identity, as queries and URLs name it. */
-export const refOf = ({ account, path, uidValidity, uid }: MessageRef): MessageRef => ({
-  account,
-  path,
-  uidValidity,
-  uid,
-});
-
-export const refKey = ({ account, path, uidValidity, uid }: MessageRef) =>
-  [account, path, uidValidity, uid].join('\u0000');
 
 /** How many sanitized messages are kept, oldest dropped first. */
 const KEPT = 64;

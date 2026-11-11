@@ -1,16 +1,13 @@
 import {
   borderVars,
   colorVars,
-  focusVars,
   fontWeightVars,
   radiusVars,
   spacingVars,
-  typeScaleVars,
-  typographyVars,
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { memo, useEffect, useState, useDeferredValue } from 'react';
+import { memo, useDeferredValue, useEffect, useRef, useState } from 'react';
 import { stampStyles } from '../../../app/theme/stamps.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Command } from '../../commands/index.ts';
@@ -34,9 +31,13 @@ import {
   type Standing,
 } from '../../outbox/index.ts';
 import { folderOf } from '../core/folder.ts';
+import { REST_MS } from '../core/rest.ts';
+import { bareSubject } from '../core/subject.ts';
+import { threadStyles } from './layout.ts';
 import { MessageKeys } from './MessageFrame.tsx';
 import { displayName, MessageSheet, when } from './MessageSheet.tsx';
-import { imagesAllowed, refKey, refOf, safeMail } from './safeMail.ts';
+import { refKey, refOf } from './refs.ts';
+import { imagesAllowed, safeMail } from './safeMail.ts';
 
 export type ReaderProps = {
   /** One conversation's messages, in any order. */
@@ -150,6 +151,7 @@ const Conversation = memo(function Conversation({
   // once. Its open messages, with their frames, follow in a render of their own that yields to the
   // next keys, and not at all while a held key passes the conversation by.
   const isSheetsShown = useDeferredValue(!isPassing, false);
+  const fetchAhead = useFetchAhead(account);
   if (!newest) return null;
   const folder = folderOf(messages, folders);
   // A draft's line already says what it is, so the count is of the mail itself, and only a
@@ -162,9 +164,9 @@ const Conversation = memo(function Conversation({
       : actionsFor?.(message).map((action) => ({ ...action, shortcut: undefined }));
 
   return (
-    <div {...stylex.props(styles.thread)}>
-      <h1 {...stylex.props(styles.subject)}>{subjectOf(messages)}</h1>
-      <p {...stylex.props(styles.meta)}>
+    <div {...stylex.props(threadStyles.thread)}>
+      <h1 {...stylex.props(threadStyles.subject)}>{subjectOf(messages)}</h1>
+      <p {...stylex.props(threadStyles.meta)}>
         <span aria-hidden {...stylex.props(styles.stamp, stampStyles[account.stamp])} />
         {[account.name, ...(folder ? [folderName(folder)] : []), size].join(' · ')}
       </p>
@@ -174,7 +176,7 @@ const Conversation = memo(function Conversation({
             key={refKey(message)}
             type="button"
             onClick={() => onOpenDraft?.(message)}
-            {...stylex.props(styles.folded)}
+            {...stylex.props(threadStyles.folded)}
           >
             <strong {...stylex.props(styles.foldedFrom, styles.draft)}>Draft</strong>
             <span {...stylex.props(styles.foldedPreview)}>{message.preview}</span>
@@ -194,7 +196,8 @@ const Conversation = memo(function Conversation({
             key={refKey(message)}
             type="button"
             onClick={() => setOpened(new Set([...opened, openedKey(message)]))}
-            {...stylex.props(styles.folded)}
+            {...fetchAhead(message)}
+            {...stylex.props(threadStyles.folded)}
           >
             <strong {...stylex.props(styles.foldedFrom)}>
               {message.from.email.toLowerCase() === account.address.toLowerCase()
@@ -217,7 +220,7 @@ const Conversation = memo(function Conversation({
 function OnItsWay({ shown: { leaving, preview } }: { shown: Shown }) {
   const standing = useLeavingStanding(leaving);
   return (
-    <div {...stylex.props(styles.folded, styles.onItsWay)}>
+    <div {...stylex.props(threadStyles.folded, styles.onItsWay)}>
       <Airmail isRunning={isOnItsWay(standing)} xstyle={styles.airmail} />
       <strong {...stylex.props(styles.foldedFrom)}>You</strong>
       <span {...stylex.props(styles.foldedPreview)}>{preview}</span>
@@ -285,6 +288,38 @@ async function prepareConversation(
   safeMail(newest, body, imagesAllowed(newest, account?.allowImagesFrom ?? []));
 }
 
+/**
+ * An older message's body, asked for once the pointer rests on its folded line or the line takes
+ * the focus, and sanitized while the browser is idle, so it is ready by the time the line opens. A
+ * pointer that only passes over the line, as when the conversation scrolls under it, asks for
+ * nothing.
+ */
+function useFetchAhead(account: Account) {
+  const queryClient = useQueryClient();
+  const resting = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(resting.current), []);
+  return (message: Message) => {
+    const ask = () => {
+      clearTimeout(resting.current);
+      void queryClient
+        .fetchQuery(bodyQuery(refOf(message)))
+        .then(async (body) => {
+          await idle();
+          safeMail(message, body, imagesAllowed(message, account.allowImagesFrom));
+        })
+        .catch(() => {});
+    };
+    return {
+      onPointerEnter: () => {
+        clearTimeout(resting.current);
+        resting.current = setTimeout(ask, REST_MS);
+      },
+      onPointerLeave: () => clearTimeout(resting.current),
+      onFocus: ask,
+    };
+  };
+}
+
 /** Resolves when the browser has nothing more pressing to do. Safari has no idle callback. */
 function idle(): Promise<void> {
   return new Promise((resolve) => {
@@ -294,41 +329,9 @@ function idle(): Promise<void> {
 }
 
 /** The conversation's subject, as its first message gave it. */
-function subjectOf(messages: Message[]): string {
-  const subject = messages[0]?.subject.replace(/^(\s*(re|fwd?|aw|wg|sv|vs)\s*:\s*)+/i, '').trim();
-  return subject || '(no subject)';
-}
-
-const FOCUS_RING = `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`;
+const subjectOf = (messages: Message[]) => bareSubject(messages[0]?.subject ?? '');
 
 const styles = stylex.create({
-  thread: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: spacingVars['--spacing-2'],
-    paddingInline: {
-      default: spacingVars['--spacing-6'],
-      [media.phone]: spacingVars['--spacing-3'],
-    },
-    paddingBottom: spacingVars['--spacing-6'],
-  },
-  subject: {
-    margin: 0,
-    fontFamily: tm.serif,
-    fontSize: typeScaleVars['--text-heading-1-size'],
-    fontWeight: typeScaleVars['--text-heading-1-weight'],
-    lineHeight: typeScaleVars['--text-heading-1-leading'],
-    overflowWrap: 'anywhere',
-  },
-  meta: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: spacingVars['--spacing-1-5'],
-    margin: 0,
-    marginBottom: spacingVars['--spacing-1'],
-    color: tm.textQuiet,
-    fontSize: typeScaleVars['--text-supporting-size'],
-  },
   stamp: {
     width: spacingVars['--spacing-2'],
     height: spacingVars['--spacing-2'],
@@ -338,30 +341,6 @@ const styles = stylex.create({
       default: null,
       [media.forcedColors]: `${borderVars['--border-width']} solid CanvasText`,
     },
-  },
-  folded: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: spacingVars['--spacing-2'],
-    minHeight: tm.target,
-    paddingInline: spacingVars['--spacing-3'],
-    borderWidth: 0,
-    borderRadius: tm.sheetRadius,
-    boxShadow: `0 0 0 ${borderVars['--border-width']} ${colorVars['--color-border']}`,
-    backgroundColor: { default: 'transparent', ':hover': colorVars['--color-overlay-hover'] },
-    // Quiet ink falls under 4.5:1 on the hover's shade, so a hovered line takes darker ink.
-    color: { default: tm.textQuiet, ':hover': colorVars['--color-text-secondary'] },
-    fontFamily: typographyVars['--font-family-body'],
-    fontSize: typeScaleVars['--text-supporting-size'],
-    textAlign: 'start',
-    whiteSpace: 'nowrap',
-    cursor: 'pointer',
-    outline: {
-      default: null,
-      [media.forcedColors]: `${borderVars['--border-width']} solid CanvasText`,
-      ':focus-visible': FOCUS_RING,
-    },
-    outlineOffset: focusVars['--focus-outline-offset'],
   },
   // Nothing to open yet, so it neither lifts nor points.
   onItsWay: {

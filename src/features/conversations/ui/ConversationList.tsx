@@ -1,4 +1,5 @@
 import { Icon } from '@astryxdesign/core/Icon';
+import { Skeleton } from '@astryxdesign/core/Skeleton';
 import {
   colorVars,
   durationVars,
@@ -28,6 +29,7 @@ import {
   type PointerEvent,
   type RefObject,
 } from 'react';
+import { Pending, TextSkeleton } from '../../../app/theme/Pending.tsx';
 import { stampStyles } from '../../../app/theme/stamps.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type {
@@ -77,6 +79,7 @@ export function ConversationList({
   onSelect,
   onLongPress,
   onSwipe,
+  onAhead,
   onNearEnd,
 }: {
   label: string;
@@ -93,6 +96,11 @@ export function ConversationList({
   onSelect: (id: ConversationId, by: SelectBy) => void;
   onLongPress?: (id: ConversationId) => void;
   onSwipe?: (id: ConversationId) => void;
+  /**
+   * Called as a conversation is about to be opened, ahead of the click: once the pointer rests on
+   * its row, and again with `isPressed` as a mouse or pen presses it. The same function each render.
+   */
+  onAhead?: (id: ConversationId, isPressed: boolean) => void;
   /** Called while the rows drawn come within reach of the end. */
   onNearEnd: () => void;
 }) {
@@ -195,6 +203,7 @@ export function ConversationList({
               onSelect={onSelect}
               onLongPress={onLongPress}
               onSwipe={onSwipe}
+              onAhead={onAhead}
             />
           );
         })}
@@ -217,6 +226,7 @@ const Row = memo(function Row({
   onSelect,
   onLongPress,
   onSwipe,
+  onAhead,
 }: {
   id: string;
   conversation: ConversationSummary;
@@ -230,6 +240,7 @@ const Row = memo(function Row({
   onSelect: (id: ConversationId, by: SelectBy) => void;
   onLongPress: ((id: ConversationId) => void) | undefined;
   onSwipe: ((id: ConversationId) => void) | undefined;
+  onAhead: ((id: ConversationId, isPressed: boolean) => void) | undefined;
 }) {
   const { subject, senders, preview, date, unread, flagged, hasAttachments } = conversation;
   const isUnread = unread > 0;
@@ -237,6 +248,7 @@ const Row = memo(function Row({
     () => onLongPress?.(conversation.id),
     onSwipe && (() => onSwipe(conversation.id)),
   );
+  const ahead = useAhead((isPressed) => onAhead?.(conversation.id, isPressed));
   const select = (event: MouseEvent) => {
     if (touch.tookClick()) return;
     const by: SelectBy = event.shiftKey
@@ -255,6 +267,12 @@ const Row = memo(function Row({
       aria-setsize={size}
       onClick={select}
       {...touch.handlers}
+      onPointerDown={(event) => {
+        ahead.onPointerDown(event);
+        touch.handlers.onPointerDown(event);
+      }}
+      onPointerEnter={ahead.onPointerEnter}
+      onPointerLeave={ahead.onPointerLeave}
       {...stylex.props(styles.row, styles.placed(top), isSelected && styles.selected)}
     >
       <span {...stylex.props(styles.stamp, stampStyles[stamp])} />
@@ -283,6 +301,72 @@ const Row = memo(function Row({
     </div>
   );
 });
+
+/**
+ * A list on its way: rows in the shape of its conversations, each one row's height, as the ruler
+ * measures it, so the first page lands where they stood.
+ */
+export function ConversationListSkeleton({ label }: { label: string }) {
+  return (
+    <Pending label={`Loading ${label}`} xstyle={styles.skeletons}>
+      {Array.from({ length: SKELETON_ROWS }, (_, row) => {
+        const width = (widths: readonly string[]) => widths[row % widths.length] ?? '50%';
+        return (
+          <div key={row} {...stylex.props(styles.row, styles.standing)}>
+            <Skeleton width="3px" radius="none" index={row} xstyle={styles.stamp} />
+            <span {...stylex.props(styles.lines)}>
+              <span {...stylex.props(styles.top, styles.line)}>
+                <span {...stylex.props(styles.sender, styles.grow)}>
+                  <TextSkeleton width={width(SENDER_WIDTHS)} index={row} />
+                </span>
+                <span {...stylex.props(styles.time)}>
+                  <TextSkeleton width="3em" index={row} />
+                </span>
+              </span>
+              <span {...stylex.props(styles.line)}>
+                <TextSkeleton width={width(SUBJECT_WIDTHS)} index={row} />
+              </span>
+              <span {...stylex.props(styles.preview, styles.line)}>
+                <TextSkeleton width={width(PREVIEW_WIDTHS)} index={row} />
+              </span>
+            </span>
+          </div>
+        );
+      })}
+    </Pending>
+  );
+}
+
+/** Enough rows to fill a tall window, with lines of differing lengths, as mail has. */
+const SKELETON_ROWS = 16;
+const SENDER_WIDTHS = ['38%', '52%', '30%', '45%', '60%'];
+const SUBJECT_WIDTHS = ['72%', '58%', '84%', '64%', '76%', '50%'];
+const PREVIEW_WIDTHS = ['92%', '86%', '96%', '80%'];
+
+/**
+ * When a row is about to be opened: once a mouse rests on it, which a pointer passing over it on
+ * its way elsewhere doesn't, and as a mouse or pen presses it, a moment before the click. A finger
+ * that touches a row may be starting a scroll, so it says nothing.
+ */
+function useAhead(onAhead: (isPressed: boolean) => void) {
+  const resting = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(resting.current), []);
+  return {
+    onPointerEnter: (event: PointerEvent) => {
+      if (event.pointerType !== 'mouse') return;
+      clearTimeout(resting.current);
+      resting.current = setTimeout(() => onAhead(false), REST_MS);
+    },
+    onPointerLeave: () => clearTimeout(resting.current),
+    onPointerDown: (event: PointerEvent) => {
+      clearTimeout(resting.current);
+      if (event.pointerType !== 'touch') onAhead(true);
+    },
+  };
+}
+
+/** How long a mouse rests on a row before the row counts as about to be opened. */
+const REST_MS = 150;
 
 /**
  * What a finger does to a row. Held still for a moment, it starts picking. Moved sideways first, it
@@ -431,6 +515,20 @@ const styles = stylex.create({
     outline: 'none',
   },
   canvas: (height: number) => ({ position: 'relative', height }),
+  // Skeleton rows stand where the scroller would place the first rows, and scroll nowhere.
+  skeletons: {
+    height: '100%',
+    overflow: 'hidden',
+    paddingInline: spacingVars['--spacing-1-5'],
+  },
+  standing: {
+    position: 'relative',
+    cursor: 'default',
+    backgroundColor: 'transparent',
+  },
+  grow: {
+    flexGrow: 1,
+  },
   row: {
     position: 'absolute',
     insetInline: 0,

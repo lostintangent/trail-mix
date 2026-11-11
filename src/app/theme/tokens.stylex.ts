@@ -53,6 +53,8 @@ export const tm = stylex.defineVars({
   // Type and motion
   serif: 'ui-serif, "New York", "Iowan Old Style", Georgia, serif', // conversation subjects only
   easeLayout: 'cubic-bezier(0.16, 1, 0.3, 1)', // panes and the phone track
+  // How long something on its way may take before its skeleton shows, so a fast answer shows none.
+  skeletonDelay: '300ms',
 
   // Screen edges
   safeTop: 'max(env(safe-area-inset-top), 8px)',

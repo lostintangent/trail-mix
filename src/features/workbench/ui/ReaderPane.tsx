@@ -31,7 +31,7 @@ import { conversationQuery } from '../../mailroom/client/index.ts';
 import { preloadTriageActions } from '../../conversations/index.ts';
 import { preloadComposer } from '../../composer/ui/index.ts';
 import { isAwaitingCopy, leavingIn, preloadSendActions, type Leaving } from '../../outbox/index.ts';
-import { preloadReader, Reader, REST_MS } from '../../reader/index.ts';
+import { preloadReader, Reader, ReaderSkeleton, REST_MS } from '../../reader/index.ts';
 import { PhoneIsland } from './PhoneIsland.tsx';
 
 /** The conversation the reader shows, with its messages and the account they belong to. */
@@ -60,6 +60,7 @@ export function ReaderPane({
   leaving,
   onOpenDraft,
   page,
+  subjectOf,
   onBack,
 }: {
   selected: ConversationId | undefined;
@@ -98,10 +99,12 @@ export function ReaderPane({
   onOpenDraft?: (draft: Message, conversation: Message[]) => void;
   /** A page that lies on the sheet in place of a conversation, such as an account's. */
   page?: ReactNode;
+  /** A conversation's subject as the list has it, to show at once while the rest is on its way. */
+  subjectOf?: (id: ConversationId) => string | undefined;
   onBack: () => void;
 }) {
   const { shown, isPassing } = useRestingSelection(selected);
-  const { data: conversation } = useQuery({
+  const { data: conversation, isPending } = useQuery({
     ...conversationQuery(shown ?? ''),
     enabled: shown !== undefined,
     // A reply gone from the Outbox waits for its copy, which a lost hint can't keep from showing.
@@ -120,8 +123,15 @@ export function ReaderPane({
   const bar = useMemo(() => reading && actions?.(reading, 'bar'), [reading, actions]);
   const top = useMemo(() => reading && actions?.(reading, 'top'), [reading, actions]);
   const island = useMemo(() => reading && actions?.(reading, 'island'), [reading, actions]);
-  const placed = useMemo(() => reading && place?.(reading.id), [reading, place]);
   const isShowing = reading !== undefined;
+  // On its way: asked for, and not here yet. Its skeleton stands where it will lie.
+  const isOpening =
+    shown !== undefined && !isShowing && (isPending || (conversation?.length ?? 0) > 0);
+  // Where it sits in the list is known before it arrives, so the bar stands still as it does.
+  const placed = useMemo(
+    () => (shown !== undefined && (isShowing || isOpening) ? place?.(shown) : undefined),
+    [shown, isShowing, isOpening, place],
+  );
   const openDraft = useMemo(
     () => reading && onOpenDraft && ((draft: Message) => onOpenDraft(draft, reading.conversation)),
     [reading, onOpenDraft],
@@ -179,7 +189,7 @@ export function ReaderPane({
       ) : null}
       {isFilled ? null : reading ? (
         <div {...stylex.props(styles.scroll, actions && styles.underBar)}>
-          <Suspense>
+          <Suspense fallback={<ReaderSkeleton subject={subjectOf?.(reading.id)} />}>
             <Reader
               conversation={reading.conversation}
               account={reading.account}
@@ -194,6 +204,10 @@ export function ReaderPane({
             />
           </Suspense>
           {isDocked && <div {...stylex.props(styles.writing)}>{writing?.composer}</div>}
+        </div>
+      ) : isOpening ? (
+        <div {...stylex.props(styles.scroll, actions && styles.underBar)}>
+          <ReaderSkeleton subject={shown && subjectOf?.(shown)} />
         </div>
       ) : (
         <div {...stylex.props(styles.empty)}>

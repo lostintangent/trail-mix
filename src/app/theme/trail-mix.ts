@@ -63,6 +63,10 @@ export const trailMix = defineTheme({
     // A control's edge, such as a field's, where its fill doesn't set it apart: 3:1 or more against
     // its fill and what's around it, on the desk, a pane or paper.
     '--color-border-emphasized': pair('oklch(0.22 0.02 265 / 0.55)', 'oklch(0.93 0 0 / 0.42)'),
+    // What stands in for mail on its way. A skeleton rests at a quarter of this and pulses to
+    // nearly all of it, so on paper and panes it reads about 1.2:1 at rest and 2:1 at most, in both
+    // themes. The neutral theme's light gray, at 1.03:1 on paper, all but vanished.
+    '--color-skeleton': pair('oklch(0.76 0.006 85)', 'oklch(0.44 0 0)'),
     '--color-accent': accent,
     '--color-text-accent': accent,
     '--color-on-accent': pair('#ffffff', 'oklch(0.165 0 0)'),

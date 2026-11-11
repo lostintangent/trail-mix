@@ -1,7 +1,8 @@
 import { afterEach, beforeAll, expect } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { BrowserContextOptions, Page } from 'playwright';
+import type { BrowserContextOptions, Locator, Page, Route } from 'playwright';
+import { bareSubject } from '../../src/features/reader/core/subject.ts';
 import { unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
 
@@ -184,4 +185,312 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await page.getByRole('menuitem', { name: 'View source' }).click();
     await page.getByRole('dialog').getByText('Message-ID', { exact: true }).waitFor();
   }, 30_000);
+}
+
+for (const [size, options] of Object.entries({ desktop: DESKTOP, phone: PHONE })) {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    test(`mail on its way shows skeletons where it will lie, and mail that comes quickly shows none, ${size} ${colorScheme}`, async () => {
+      const page = await open({ ...options, colorScheme });
+      const shot = (screen: string) =>
+        page.screenshot({ path: join(SHOTS, `skeleton-${screen}-${size}-${colorScheme}.png`) });
+      await watchSkeletons(page);
+
+      // Mail that answers within the skeletons' delay, if not at once: a conversation, an older
+      // message, another view.
+      const quick = await slowed(page, QUICK_MS);
+      await openRow(page, 'Q4 planning');
+      await bodies(page);
+      await unfold(page);
+      await bodies(page);
+      await goTo(page, 'Sent');
+      await page.getByRole('option').first().waitFor();
+      await quick();
+      expect({ quick: await skeletonsSeen(page) }).toEqual({ quick: 0 });
+
+      // A view not yet loaded shows rows that the first page lands on exactly.
+      const list = await holding(page, 'conversations');
+      await goTo(page, 'Archive');
+      const rows = await shown(page, '[role="status"][aria-busy="true"] > div');
+      await shot('list');
+      await list();
+      await page.getByRole('option').first().waitFor();
+      const first = await boxOf(page, '[role="option"]');
+      expect(first).toEqual(rows);
+
+      // A conversation opened while the Mailroom is slow shows its subject in the click's own
+      // frame, its sheets as skeletons, and never the empty reader. Its subject stays put.
+      const slow = await slowed(page, SLOW_MS);
+      const target = page.getByRole('option').nth(4);
+      const listed = await target.evaluate((row) => row.lastElementChild?.children[1]?.textContent);
+      await watchOpening(page);
+      await target.click();
+      const opening = await openingSeen(page);
+      expect(opening.clicked).toEqual({ subject: bareSubject(listed ?? ''), pending: true });
+      await shown(page, 'section[aria-label="Reader"] [role="status"][aria-busy="true"]');
+      await shot('reader');
+      await reader(page)
+        .getByRole('article')
+        .first()
+        .waitFor({ timeout: SLOW_MS * 3 });
+      await slow();
+      expect((await openingSeen(page)).empty).toBe(false);
+      expect(await boxOf(page, 'section[aria-label="Reader"] h1')).toEqual(opening.subjectBox);
+
+      // An older message's body on its way shows lines on its sheet, and the sheet holds still.
+      const body = await holding(page, 'body');
+      await openRow(page, 'Workers migration plan');
+      await unfold(page);
+      const sheet = 'section[aria-label="Reader"] article:first-of-type header';
+      await shown(page, 'section[aria-label="Reader"] article [role="status"][aria-busy="true"]');
+      const header = await boxOf(page, sheet);
+      await shot('body');
+      await body();
+      await bodies(page);
+      expect(await boxOf(page, sheet)).toEqual(header);
+    }, 60_000);
+  }
+}
+
+test('an older message’s body is asked for as the pointer rests on its line or it takes the focus', async () => {
+  const page = await open({ ...DESKTOP, colorScheme: 'light' });
+  await openRow(page, 'Workers migration plan');
+  await bodies(page);
+  // The conversations either side are prepared while the browser is idle, which this waits out.
+  await page.waitForTimeout(1_500);
+  const asked: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes(encodeURIComponent('"body"'))) asked.push(request.url());
+  });
+  const lines = reader(page)
+    .locator('button')
+    .filter({ has: page.locator('time') });
+  const [first, second] = [lines.nth(0), lines.nth(1)];
+
+  // A pointer passing over a line asks for nothing.
+  const box = await first.boundingBox();
+  await page.mouse.move(box!.x + 20, box!.y + box!.height / 2);
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(400);
+  expect(asked).toEqual([]);
+
+  // One that rests there asks for its body, and focus asks at once.
+  await first.hover();
+  await waitUntil(() => asked.length === 1);
+  await second.focus();
+  await waitUntil(() => asked.length === 2);
+}, 30_000);
+
+test('a conversation is asked for as the pointer rests on its row, and its newest body as the row is pressed', async () => {
+  const page = await open({ ...DESKTOP, colorScheme: 'light' });
+  await page.getByRole('option').first().waitFor();
+  // The first conversations are prepared while the browser is idle, which this waits out.
+  await page.waitForTimeout(1_500);
+  const asked: string[] = [];
+  page.on('request', (request) => {
+    const url = decodeURIComponent(request.url());
+    if (url.includes('"conversation"')) asked.push('conversation');
+    if (url.includes('"body"')) asked.push('body');
+  });
+  const target = page.getByRole('option').nth(6);
+
+  // A pointer passing over a row asks for nothing.
+  const box = await target.boundingBox();
+  await page.mouse.move(box!.x + 40, box!.y + box!.height / 2);
+  await page.mouse.move(0, 0);
+  await page.waitForTimeout(400);
+  expect(asked).toEqual([]);
+
+  // One that rests asks for the conversation, and a press for its newest body, before the click.
+  await target.hover();
+  await waitUntil(() => asked.includes('conversation'));
+  expect(asked).not.toContain('body');
+  await page.mouse.down();
+  await waitUntil(() => asked.includes('body'));
+  await page.mouse.up();
+}, 30_000);
+
+/** How late a slow Mailroom answers. */
+const SLOW_MS = 1_500;
+
+/**
+ * Notes what the reader shows in the frame after the next click, and whether it shows its empty
+ * state in any frame after that until a message arrives.
+ */
+async function watchOpening(page: Page) {
+  await page.evaluate(() => {
+    type Opening = {
+      clicked?: { subject: string | null; pending: boolean };
+      subjectBox?: { top: number; height: number };
+      empty: boolean;
+    };
+    const seen: Opening = { empty: false };
+    (window as unknown as { opening: Opening }).opening = seen;
+    const reader = () => document.querySelector('section[aria-label="Reader"]');
+    const look = () => {
+      if (reader()?.textContent?.includes('No conversation open')) seen.empty = true;
+      if (!reader()?.querySelector('article')) requestAnimationFrame(look);
+    };
+    addEventListener(
+      'click',
+      () =>
+        requestAnimationFrame(() => {
+          const subject = reader()?.querySelector('h1');
+          const box = subject?.getBoundingClientRect();
+          seen.clicked = {
+            subject: subject?.textContent ?? null,
+            pending: Boolean(reader()?.querySelector('[role="status"][aria-busy="true"]')),
+          };
+          seen.subjectBox = box && { top: box.top, height: Math.round(box.height) };
+          look();
+        }),
+      { once: true },
+    );
+  });
+}
+
+/** What `watchOpening` saw, once the click's frame has been drawn. */
+async function openingSeen(page: Page) {
+  await page.waitForFunction(
+    () => (window as unknown as { opening: { clicked?: unknown } }).opening.clicked,
+  );
+  return page.evaluate(
+    () =>
+      (
+        window as unknown as {
+          opening: {
+            clicked: { subject: string | null; pending: boolean };
+            subjectBox?: { top: number; height: number };
+            empty: boolean;
+          };
+        }
+      ).opening,
+  );
+}
+
+/** Under the skeletons' delay, `tm.skeletonDelay`, yet long enough for several frames. */
+const QUICK_MS = 150;
+
+/** Answers every query `ms` late, until the returned function puts things back. */
+async function slowed(page: Page, ms: number): Promise<() => Promise<void>> {
+  const slow = async (route: Route) => {
+    if (route.request().method() === 'GET') await new Promise((resolve) => setTimeout(resolve, ms));
+    await route.continue().catch(() => {});
+  };
+  await page.route('**/_serverFn/**', slow);
+  return () => page.unroute('**/_serverFn/**', slow);
+}
+
+/** Holds every query of this name until released, as a slow Mailroom would. */
+async function holding(page: Page, name: string): Promise<() => Promise<void>> {
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  const named = encodeURIComponent(`"${name}"`);
+  const hold = async (route: Route) => {
+    if (route.request().url().includes(named)) await released;
+    await route.continue().catch(() => {});
+  };
+  await page.route('**/_serverFn/**', hold);
+  return async () => {
+    release();
+    await page.unroute('**/_serverFn/**', hold);
+  };
+}
+
+/**
+ * Notes, every frame from now on, how visible any skeleton is, so a test can tell whether one ever
+ * showed, if only for a frame.
+ */
+async function watchSkeletons(page: Page) {
+  await page.evaluate(() => {
+    const seen = { most: 0 };
+    (window as unknown as { skeletons: typeof seen }).skeletons = seen;
+    const look = () => {
+      for (const pending of document.querySelectorAll('[role="status"][aria-busy="true"]')) {
+        seen.most = Math.max(seen.most, Number(getComputedStyle(pending).opacity));
+      }
+      requestAnimationFrame(look);
+    };
+    requestAnimationFrame(look);
+  });
+}
+
+/** How visible the most visible skeleton was since the page began watching. */
+const skeletonsSeen = (page: Page) =>
+  page.evaluate(() => (window as unknown as { skeletons: { most: number } }).skeletons.most);
+
+/** Waits until the first element `selector` names is fully shown, and returns where it lies. */
+async function shown(page: Page, selector: string) {
+  await page.waitForFunction((selector) => {
+    const element = document.querySelector(selector);
+    const pending = element?.closest('[role="status"]') ?? element;
+    return element && pending && Number(getComputedStyle(pending).opacity) === 1;
+  }, selector);
+  return boxOf(page, selector);
+}
+
+/** Where the first element `selector` names lies on the page. */
+function boxOf(page: Page, selector: string) {
+  return page.evaluate((selector) => {
+    const box = document.querySelector(selector)?.getBoundingClientRect();
+    return box && { top: box.top, height: Math.round(box.height) };
+  }, selector);
+}
+
+/** Opens a conversation from the unified Inbox, from the list on a phone. */
+async function openRow(page: Page, subject: string) {
+  await goTo(page, 'Inbox');
+  await row(page, subject).click();
+}
+
+/** Opens the first message folded in the open conversation. */
+async function unfold(page: Page) {
+  await reader(page)
+    .locator('button')
+    .filter({ has: page.locator('time') })
+    .first()
+    .click();
+}
+
+/** Waits until every open message shows its body. */
+async function bodies(page: Page) {
+  await page.waitForFunction(() => {
+    const sheets = [...document.querySelectorAll('section[aria-label="Reader"] article')];
+    return (
+      sheets.length > 0 &&
+      sheets.every(
+        (sheet) =>
+          !sheet.querySelector('[aria-busy="true"]') &&
+          [...sheet.querySelectorAll('iframe')].every(
+            (frame) => frame.style.visibility === 'visible',
+          ),
+      )
+    );
+  });
+}
+
+/** Goes to a view: one of the unified ones, or one of Personal's folders. On a phone, by its folders. */
+async function goTo(page: Page, view: 'Inbox' | 'Sent' | 'Archive') {
+  const back = reader(page).getByRole('button', { name: 'Back', exact: true });
+  if (await reachable(back)) await back.click();
+  const button =
+    view === 'Inbox'
+      ? page.getByRole('button', { name: /^Inbox/ }).first()
+      : folder(page, 'Personal', view);
+  if (!(await reachable(button))) {
+    await page.getByRole('button', { name: 'Folders', exact: true }).click();
+  }
+  await button.click();
+}
+
+/** Whether a control is on screen and can be used. A pane off a phone's screen is inert. */
+async function reachable(control: Locator): Promise<boolean> {
+  return (await control.isVisible()) && control.evaluate((element) => !element.closest('[inert]'));
+}
+
+/** Polls until `isTrue` holds, for a second at most. */
+async function waitUntil(isTrue: () => boolean) {
+  for (const started = Date.now(); !isTrue();) {
+    if (Date.now() - started > 1_000) throw new Error('It never came true');
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
 }

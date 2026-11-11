@@ -13,6 +13,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Send } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { stampStyles } from '../../../app/theme/stamps.ts';
+import { ConversationListSkeleton } from '../../conversations/index.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { AccountId, ConversationId, Outgoing, StampColor } from '../../mail/core/index.ts';
 import { outboxQuery } from '../../mailroom/client/index.ts';
@@ -60,7 +61,7 @@ export function OutboxList({
   const now = useClock(outbox);
   const queryClient = useQueryClient();
   const act = outboxActions(queryClient);
-  if (!outbox) return null;
+  if (!outbox) return <ConversationListSkeleton label={label} />;
   if (outbox.length === 0) {
     return (
       <div {...stylex.props(styles.empty)}>

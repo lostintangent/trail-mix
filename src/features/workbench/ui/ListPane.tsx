@@ -15,7 +15,12 @@ import { ChevronRight, Menu, type LucideIcon } from 'lucide-react';
 import { memo, useId, type ReactNode } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { PhoneIsland } from './PhoneIsland.tsx';
-import { ConversationList, type SelectBy, type Selection } from '../../conversations/index.ts';
+import {
+  ConversationList,
+  ConversationListSkeleton,
+  type SelectBy,
+  type Selection,
+} from '../../conversations/index.ts';
 import type {
   Account,
   ConversationId,
@@ -51,6 +56,7 @@ export function ListPane({
   onSelect,
   onLongPress,
   onSwipe,
+  onAhead,
   picked,
   onNearEnd,
   isCollapsed,
@@ -85,6 +91,8 @@ export function ListPane({
   onSelect: (id: ConversationId, by: SelectBy) => void;
   onLongPress: (id: ConversationId) => void;
   onSwipe: (id: ConversationId) => void;
+  /** Asks for a conversation the member is about to open, before the click. */
+  onAhead?: (id: ConversationId, isPressed: boolean) => void;
   /** While picking on a phone, what the island offers for the conversations picked. */
   picked: ReactNode;
   onNearEnd: () => void;
@@ -167,9 +175,12 @@ export function ListPane({
             onSelect={onSelect}
             onLongPress={onLongPress}
             onSwipe={onSwipe}
+            onAhead={onAhead}
             onNearEnd={onNearEnd}
           />
-        ) : null}
+        ) : (
+          <ConversationListSkeleton label={title} />
+        )}
       </div>
       {isPicking ? (
         <PhoneIsland label="Picked conversations">{picked}</PhoneIsland>

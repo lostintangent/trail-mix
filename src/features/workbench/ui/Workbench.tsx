@@ -40,8 +40,9 @@ import { PanelEdge } from './PanelEdge.tsx';
 import { PANELS } from './panels.ts';
 import { ReaderPane, type ActionsPlace, type Reading } from './ReaderPane.tsx';
 import { ReaderPlace } from './ReaderPlace.tsx';
-import { sourceCommand, SourceDialog } from '../../reader/index.ts';
+import { askAhead, sourceCommand, SourceDialog } from '../../reader/index.ts';
 import {
+  ConversationListSkeleton,
   NOTHING_SELECTED,
   rowChange,
   SearchContext,
@@ -432,6 +433,16 @@ export function Workbench({
     },
     [triage],
   );
+  // A conversation about to be opened is asked for before the click lands.
+  const ahead = useCallback(
+    (id: ConversationId, isPressed: boolean) => askAhead(queryClient, id, { body: isPressed }),
+    [queryClient],
+  );
+  // The list's subject shows at once while the rest of the conversation is on its way.
+  const subjectOf = useCallback(
+    (id: ConversationId) => conversations?.find((row) => row.id === id)?.subject,
+    [conversations],
+  );
   const stopPicking = () => {
     setPicking(false);
     setSelection(NOTHING_SELECTED);
@@ -697,7 +708,7 @@ export function Workbench({
                 }
                 list={
                   view.in === 'outbox' && (
-                    <Suspense>
+                    <Suspense fallback={<ConversationListSkeleton label={title} />}>
                       <OutboxList
                         label={title}
                         stamps={stamps}
@@ -719,6 +730,7 @@ export function Workbench({
                 onSelect={pick}
                 onLongPress={startPicking}
                 onSwipe={swipe}
+                onAhead={ahead}
                 picked={
                   <PickedActions count={selection.ids.length} onCancel={stopPicking}>
                     <Suspense>{selectionActions('island')}</Suspense>
@@ -772,6 +784,7 @@ export function Workbench({
                   hidden={composing.hidden}
                   leaving={leaving.all}
                   onOpenDraft={composing.openDraft}
+                  subjectOf={subjectOf}
                   page={
                     page?.as === 'members' ? (
                       <MembersPage />

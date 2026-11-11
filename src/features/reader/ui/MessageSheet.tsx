@@ -5,7 +5,6 @@ import {
   borderVars,
   colorVars,
   focusVars,
-  fontWeightVars,
   radiusVars,
   spacingVars,
   typeScaleVars,
@@ -15,14 +14,17 @@ import * as stylex from '@stylexjs/stylex';
 import { Ellipsis, FileText, ImageIcon, ImageOff } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
-import { media, tm } from '../../../app/theme/tokens.stylex.ts';
+import { tm } from '../../../app/theme/tokens.stylex.ts';
 import { CommandButton, type Command } from '../../commands/index.ts';
 import type { Account, Address, Message } from '../../mail/core/index.ts';
 import { accountsQuery, bodyQuery, mailroom, partUrl } from '../../mailroom/client/index.ts';
 import { foldQuote } from '../core/quotes.ts';
+import { sheetStyles } from './layout.ts';
 import { MessageFrame } from './MessageFrame.tsx';
 import { PlainText } from './PlainText.tsx';
-import { imagesAllowed, refOf, safeMail } from './safeMail.ts';
+import { BodySkeleton } from './skeletons.tsx';
+import { refOf } from './refs.ts';
+import { imagesAllowed, safeMail } from './safeMail.ts';
 
 export type MessageSheetProps = {
   message: Message;
@@ -56,15 +58,15 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
   return (
     <article
       aria-label={`Message from ${displayName(message.from)}`}
-      {...stylex.props(styles.sheet, mail?.paper === 'light' && styles.fixedPaper)}
+      {...stylex.props(sheetStyles.sheet, mail?.paper === 'light' && styles.fixedPaper)}
     >
-      <header {...stylex.props(styles.from)}>
-        <span aria-hidden {...stylex.props(styles.avatar)}>
+      <header {...stylex.props(sheetStyles.from)}>
+        <span aria-hidden {...stylex.props(sheetStyles.avatar)}>
           {initials(message.from)}
         </span>
-        <div {...stylex.props(styles.who)}>
-          <strong {...stylex.props(styles.name)}>{displayName(message.from)}</strong>
-          <small {...stylex.props(styles.quiet)}>
+        <div {...stylex.props(sheetStyles.who)}>
+          <strong {...stylex.props(sheetStyles.name)}>{displayName(message.from)}</strong>
+          <small {...stylex.props(sheetStyles.quiet)}>
             {recipients(message, account)} ·{' '}
             <time dateTime={message.date}>{when(message.date)}</time>
           </small>
@@ -120,12 +122,14 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
       ) : text ? (
         <PlainText text={text.text} />
       ) : isError ? (
-        <p role="alert" {...stylex.props(styles.quiet)}>
+        <p role="alert" {...stylex.props(sheetStyles.quiet)}>
           This message could not be opened.{' '}
           <Button label="Try again" variant="ghost" size="sm" onClick={() => void refetch()} />
         </p>
+      ) : body ? (
+        <p {...stylex.props(sheetStyles.quiet)}>This message is empty.</p>
       ) : (
-        <p {...stylex.props(styles.quiet)}>{body ? 'This message is empty.' : 'Opening…'}</p>
+        <BodySkeleton />
       )}
 
       {hasQuote && (
@@ -158,7 +162,7 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
                   color="secondary"
                 />
                 <span {...stylex.props(styles.attachmentName)}>{attachment.name}</span>
-                <span {...stylex.props(styles.quiet)}>{size(attachment.size)}</span>
+                <span {...stylex.props(sheetStyles.quiet)}>{size(attachment.size)}</span>
               </a>
             </li>
           ))}
@@ -238,58 +242,10 @@ function size(bytes: number): string {
 const FOCUS_RING = `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`;
 
 const styles = stylex.create({
-  sheet: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: spacingVars['--spacing-2'],
-    paddingBlock: spacingVars['--spacing-3'],
-    paddingInline: spacingVars['--spacing-4'],
-    backgroundColor: colorVars['--color-background-card'],
-    color: colorVars['--color-text-primary'],
-    borderRadius: tm.sheetRadius,
-    boxShadow: tm.sheetEdge,
-    outline: {
-      default: null,
-      [media.forcedColors]: `${borderVars['--border-width']} solid CanvasText`,
-    },
-  },
   // Mail that paints its own backgrounds is written for light paper, and stays on it.
   fixedPaper: {
     colorScheme: 'light',
     backgroundColor: tm.paperFixed,
-  },
-  from: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: spacingVars['--spacing-2'],
-  },
-  avatar: {
-    display: 'grid',
-    placeItems: 'center',
-    flexShrink: 0,
-    width: tm.target,
-    height: tm.target,
-    borderRadius: radiusVars['--radius-full'],
-    backgroundColor: colorVars['--color-accent-muted'],
-    color: colorVars['--color-text-accent'],
-    fontSize: typeScaleVars['--text-supporting-size'],
-    fontWeight: fontWeightVars['--font-weight-semibold'],
-  },
-  who: {
-    display: 'flex',
-    flexDirection: 'column',
-    minWidth: 0,
-    flexGrow: 1,
-  },
-  name: {
-    fontWeight: fontWeightVars['--font-weight-semibold'],
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  quiet: {
-    color: tm.textQuiet,
-    fontSize: typeScaleVars['--text-supporting-size'],
   },
   images: {
     display: 'flex',

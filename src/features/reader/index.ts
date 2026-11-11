@@ -3,4 +3,6 @@
 export { REST_MS } from './core/rest.ts';
 export { sourceCommand } from './ui/commands.ts';
 export { preloadReader, Reader, SourceDialog } from './ui/lazy.ts';
+export { askAhead } from './ui/ahead.ts';
+export { ReaderSkeleton } from './ui/skeletons.tsx';
 export type { ReaderProps } from './ui/Reader.tsx';

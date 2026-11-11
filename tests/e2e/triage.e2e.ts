@@ -128,7 +128,7 @@ async function hold(page: Page, which: (request: Request) => boolean) {
 
 /**
  * Waits until the reader shows `count` messages open, each with its body: HTML in its frame, or
- * plain text, and neither still opening nor failed.
+ * plain text, and neither still on its way nor failed.
  */
 async function bodiesShown(page: Page, count: number) {
   await page.waitForFunction(
@@ -139,7 +139,7 @@ async function bodiesShown(page: Page, count: number) {
         sheets.every(
           (sheet) =>
             !sheet.querySelector('[role="alert"]') &&
-            !sheet.textContent?.includes('Opening…') &&
+            !sheet.querySelector('[aria-busy="true"]') &&
             [...sheet.querySelectorAll('iframe')].every(
               (frame) => frame.style.visibility === 'visible',
             ),
