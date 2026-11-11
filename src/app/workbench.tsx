@@ -1,12 +1,9 @@
-import { Button } from '@astryxdesign/core/Button';
-import { EmptyState } from '@astryxdesign/core/EmptyState';
-import { Icon } from '@astryxdesign/core/Icon';
 import { colorVars, spacingVars, typeScaleVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, useRouter } from '@tanstack/react-router';
-import { CloudOff, Hourglass } from 'lucide-react';
 import {
+  Suspense,
   useCallback,
   useEffect,
   useLayoutEffect,
@@ -35,8 +32,6 @@ import {
   foldersQuery,
   outboxQuery,
   useHints,
-  whatFailed,
-  type Unanswered,
 } from '../features/mailroom/client/index.ts';
 import {
   NOTIFICATIONS,
@@ -47,6 +42,8 @@ import { useDraftsAway, useLeaving } from '../features/outbox/index.ts';
 import { REST_MS } from '../features/reader/index.ts';
 import { useHeldWhile } from '../shared/useHeldWhile.ts';
 import { Workbench } from '../features/workbench/index.ts';
+import { preloadable } from '../shared/preloadable.ts';
+import { useHasMail } from './hasMail.ts';
 import { AppTheme } from './theme/AppTheme.tsx';
 import { tm } from './theme/tokens.stylex.ts';
 import { trailMixTheme } from './theme/built/trail-mix.js';
@@ -77,8 +74,10 @@ export const Route = createFileRoute('/')({
 
 /**
  * The member's mail, or, for a member with no accounts, the first-run screen, where they add one.
- * Until the Mailroom says which, the desk stays bare, so neither screen shows only to give way to
- * the other. The first-run screen shows once its code has loaded too.
+ * A device that last saw mail draws the workbench at once, its skeletons standing in until the
+ * Mailroom answers. Any other waits for the Mailroom to say which, on a quiet desk, so the
+ * workbench never shows only to give way to the welcome. The first-run screen shows once its code
+ * has loaded too.
  */
 function App() {
   const [mode, setMode] = useThemeMode();
@@ -92,9 +91,13 @@ function App() {
   const askAgain = useCallback(() => void refetch(), [refetch]);
   const isFirstRun = accounts.data?.length === 0;
   const welcome = useLoaded(preloadFirstRun, isFirstRun);
+  const hasMail = useHasMail(accounts.data);
+  usePreloadWhenIdle(preloadUnreachable);
   const screen =
-    accounts.data === undefined ? (
-      accounts.isError && <Unreachable failed={accounts.error} onTryAgain={askAgain} />
+    accounts.data === undefined && accounts.isError ? (
+      <Unreachable failed={accounts.error} onTryAgain={askAgain} />
+    ) : accounts.data === undefined && !hasMail ? (
+      <Opening />
     ) : !isFirstRun ? (
       <Desk
         sidebarFooter={
@@ -117,8 +120,60 @@ function App() {
     );
   return (
     <AppTheme theme={trailMixTheme} mode={mode}>
-      {screen}
+      <Suspense>{screen}</Suspense>
     </AppTheme>
+  );
+}
+
+/**
+ * What the app says when it can't reach the Mailroom, which the first screen goes without. It loads
+ * once the first screen is idle, so it's in hand when the network goes, as long as the page loaded.
+ */
+const { Component: Unreachable, preload: preloadUnreachable } = preloadable(
+  async () => (await import('./Unreachable.tsx')).Unreachable,
+);
+
+/** How long after the first screen mounts code it can do without starts loading, as toasts do. */
+const LOAD_AFTER_MS = 1_000;
+
+/** Loads `load` once the first screen has had its turn and the browser is idle. */
+function usePreloadWhenIdle(load: () => Promise<unknown>) {
+  useEffect(() => {
+    const preload = () => void load().catch(() => {});
+    let idle: number | undefined;
+    const timer = setTimeout(() => {
+      // Safari has no idle callback.
+      if ('requestIdleCallback' in window) idle = requestIdleCallback(preload, { timeout: 5_000 });
+      else preload();
+    }, LOAD_AFTER_MS);
+    return () => {
+      clearTimeout(timer);
+      if (idle !== undefined) cancelIdleCallback(idle);
+    };
+  }, [load]);
+}
+
+/** How long a device that doesn't know whether there's mail waits before saying it's opening. */
+const OPENING_QUIET_MS = 300;
+
+/**
+ * The desk while the Mailroom is first asked whether there's mail: bare at first, so a quick answer
+ * shows nothing at all, and after a moment a quiet word that it's on its way.
+ */
+function Opening() {
+  const [isSlow, setSlow] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setSlow(true), OPENING_QUIET_MS);
+    return () => clearTimeout(timer);
+  }, []);
+  return (
+    <main aria-busy {...stylex.props(styles.desk)}>
+      {isSlow && (
+        <p role="status" {...stylex.props(styles.opening)}>
+          Opening your mail…
+        </p>
+      )}
+    </main>
   );
 }
 
@@ -139,50 +194,6 @@ function useLoaded(load: () => Promise<unknown>, isWanted: boolean) {
   return state;
 }
 
-/**
- * The Mailroom couldn't be asked, as when the network is down or the sign-in has run out, and what
- * failed. It asks again by itself when the page is seen again or the network comes back, as after
- * a deploy that cut it off for a moment. Try again loads the page anew, which signs in again where
- * the sign-in has run out. The public demo, when it lets no more visitors in, says so instead.
- */
-function Unreachable({ failed, onTryAgain }: { failed?: unknown; onTryAgain?: () => void }) {
-  useEffect(() => {
-    if (!onTryAgain) return;
-    const again = () => {
-      if (document.visibilityState === 'visible' && navigator.onLine) onTryAgain();
-    };
-    document.addEventListener('visibilitychange', again);
-    window.addEventListener('online', again);
-    return () => {
-      document.removeEventListener('visibilitychange', again);
-      window.removeEventListener('online', again);
-    };
-  }, [onTryAgain]);
-  const isFull = (failed as Unanswered | undefined)?.status === 429;
-  return (
-    <main {...stylex.props(styles.desk)}>
-      <EmptyState
-        headingLevel={1}
-        icon={<Icon icon={isFull ? Hourglass : CloudOff} size="lg" color="secondary" />}
-        title={isFull ? 'Trail Mix’s demo is full for now' : 'Trail Mix can’t reach your mail'}
-        description={
-          isFull
-            ? 'It lets in only so many new visitors at a time. Try again in a while, or deploy a Trail Mix of your own.'
-            : 'The connection or your sign-in may have lapsed.'
-        }
-        actions={
-          <div {...stylex.props(styles.actions)}>
-            <Button label="Try again" variant="primary" onClick={() => location.reload()} />
-            {failed !== undefined && !isFull && (
-              <p {...stylex.props(styles.failed)}>{whatFailed(failed)}</p>
-            )}
-          </div>
-        }
-      />
-    </main>
-  );
-}
-
 const styles = stylex.create({
   desk: {
     minHeight: '100dvh',
@@ -191,19 +202,10 @@ const styles = stylex.create({
     padding: spacingVars['--spacing-6'],
     backgroundColor: colorVars['--color-background-body'],
   },
-  actions: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: spacingVars['--spacing-3'],
-  },
-  failed: {
+  opening: {
     margin: 0,
-    maxWidth: '36rem',
     color: tm.textQuiet,
     fontSize: typeScaleVars['--text-supporting-size'],
-    textAlign: 'center',
-    overflowWrap: 'anywhere',
   },
 });
 

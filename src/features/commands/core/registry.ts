@@ -25,25 +25,55 @@ export function commandFor<C extends CommandLike>(
   );
 }
 
+/** Words too little to name a command, which mail is full of. */
+const LITTLE_WORDS = new Set([
+  'a',
+  'an',
+  'and',
+  'as',
+  'at',
+  'by',
+  'for',
+  'from',
+  'in',
+  'is',
+  'it',
+  'of',
+  'on',
+  'or',
+  'the',
+  'this',
+  'to',
+  'with',
+  'you',
+  'your',
+]);
+
 /**
  * The commands the palette lists for what's been typed: every command that can run when nothing
  * is, else those whose title has a word starting with each typed word, best first, where a title
- * that starts with the text comes before one that merely holds its words.
+ * that starts with the text comes before one that merely holds its words. Little words such as
+ * "the" name no command, typed or in a title, so typing only them searches mail alone.
  */
 export function matching<C extends CommandLike>(commands: readonly C[], text: string): C[] {
   const runnable = commands.filter(isEnabled);
-  const words = text.toLowerCase().split(/\s+/).filter(Boolean);
-  if (words.length === 0) return runnable;
-  const typed = words.join(' ');
+  const typed = text.toLowerCase().split(/\s+/).filter(Boolean);
+  if (typed.length === 0) return runnable;
+  const words = typed.filter((word) => !LITTLE_WORDS.has(word));
+  if (words.length === 0) return [];
+  const said = typed.join(' ');
   return runnable
     .filter((command) => {
-      const titleWords = command.title.toLowerCase().split(/[\s,]+/);
+      const titleWords = command.title
+        .toLowerCase()
+        .split(/[\s,]+/)
+        .filter((word) => !LITTLE_WORDS.has(word));
       return words.every((word) => titleWords.some((titleWord) => titleWord.startsWith(word)));
     })
     .toSorted(
       (a, b) =>
-        Number(b.title.toLowerCase().startsWith(typed)) -
-        Number(a.title.toLowerCase().startsWith(typed)),
+        Number(b.title.toLowerCase().startsWith(said)) -
+        Number(a.title.toLowerCase().startsWith(said)),
     );
 }
 

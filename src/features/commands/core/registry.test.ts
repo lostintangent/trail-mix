@@ -42,6 +42,19 @@ test('the palette lists every command that can run, and narrows by word prefixes
   ]);
 });
 
+test('little words name no command, so typing only them searches mail', () => {
+  const fold = command('fold', 'Fold the sidebar');
+  const dark = command('dark', 'Use the dark theme');
+  const commands = [fold, dark, inbox, command('remove', 'Remove the Personal account')];
+  expect(matching(commands, 'the')).toEqual([]);
+  expect(matching(commands, 'to the')).toEqual([]);
+  // A word that starts a little one matches only the words that count.
+  expect(matching(commands, 'th')).toEqual([dark]);
+  // Little words among others are passed over, and a title that starts with all of it still leads.
+  expect(matching(commands, 'go to inbox')).toEqual([inbox]);
+  expect(matching(commands, 'the dark')).toEqual([dark]);
+});
+
 test('a registry with a duplicate id or two commands on one key says so', () => {
   expect(problemsOf([archive, unread, inbox])).toEqual([]);
   expect(problemsOf([archive, command('archive', 'Archive again')])).toEqual([

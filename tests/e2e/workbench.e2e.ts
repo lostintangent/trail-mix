@@ -318,6 +318,72 @@ test('side panels resize by pointer and key, snap to a rail, and come back the s
   await context.close();
 }, 30_000);
 
+/** Holds the page's ask for its accounts until `release`, as a Mailroom slow to answer would. */
+async function holdAccounts(page: Page) {
+  const { promise: released, resolve: release } = Promise.withResolvers<void>();
+  await page.route(
+    (url) => url.href.includes(encodeURIComponent('"accounts"')),
+    async (route) => {
+      await released;
+      await route.continue().catch(() => {});
+    },
+  );
+  return release;
+}
+
+test('a device that last saw mail draws the workbench and its skeletons before the Mailroom answers', async () => {
+  const context = await app.context(SIZES.desktop);
+  const page = await context.newPage();
+  await page.goto(app.url);
+  await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
+  await page.waitForFunction(() => localStorage.getItem('trail-mix.has-mail') !== null);
+
+  const release = await holdAccounts(page);
+  await page.reload();
+  await page.getByRole('navigation', { name: 'Mailboxes' }).waitFor();
+  // The list needs no word on the accounts: its skeleton stands in until its own snapshot comes.
+  await page
+    .getByRole('listbox', { name: 'Inbox' })
+    .or(page.getByLabel('Loading Inbox'))
+    .first()
+    .waitFor();
+  expect(await page.getByRole('region', { name: 'Personal' }).count()).toBe(0);
+  await page.screenshot({ path: join(SHOTS, 'desktop-light-opening-known.png') });
+  release();
+  await page.getByText('Up to date').waitFor({ state: 'attached' });
+  await page.getByRole('option').first().waitFor();
+  await context.close();
+}, 60_000);
+
+test('a device that hasn’t seen mail waits on a quiet desk, and says it’s opening only after a moment', async () => {
+  const context = await app.context(SIZES.desktop);
+  const page = await context.newPage();
+  // Whether the desk said anything within its first moment, or drew the workbench before the
+  // Mailroom answered, from before the app's first script.
+  await context.addInitScript(() => {
+    const started = performance.now();
+    const page = window as unknown as { early: string[] };
+    page.early = [];
+    new MutationObserver(() => {
+      if (document.querySelector('nav[aria-label="Mailboxes"]')) page.early.push('workbench');
+      if (
+        document.body?.innerText.includes('Opening your mail') &&
+        performance.now() - started < 250
+      ) {
+        page.early.push('word too soon');
+      }
+    }).observe(document, { childList: true, subtree: true, characterData: true });
+  });
+  const release = await holdAccounts(page);
+  await page.goto(app.url);
+  await page.getByText('Opening your mail…').waitFor();
+  await page.screenshot({ path: join(SHOTS, 'desktop-light-opening-unknown.png') });
+  expect(await page.evaluate(() => (window as unknown as { early: string[] }).early)).toEqual([]);
+  release();
+  await page.getByRole('navigation', { name: 'Mailboxes' }).waitFor();
+  await context.close();
+}, 60_000);
+
 test('a saved theme paints the desk, and the browser’s chrome, before any of the app runs', async () => {
   for (const [saved, system] of [
     ['dark', 'light'],

@@ -56,10 +56,28 @@ const mailrooms = () =>
 
 /** A new visitor's browser, at the demo's Inbox once it has filled. */
 async function visitor(): Promise<Page> {
-  const page = await (await app.context(SIZES.desktop)).newPage();
+  const context = await app.context(SIZES.desktop);
+  // What the first look said while the new Mailroom filled, from before the app's first script.
+  await context.addInitScript(() => {
+    const said = new Set<string>();
+    Object.assign(window, { said });
+    new MutationObserver(() => {
+      const text = document.body?.innerText ?? '';
+      if (text.includes('No mail yet')) said.add('No mail yet');
+      if (text.includes('Up to date') && !document.querySelector('[role="option"]')) {
+        said.add('Up to date, with no mail');
+      }
+    }).observe(document, { childList: true, subtree: true, characterData: true });
+  });
+  const page = await context.newPage();
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(app.url);
   await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
+  await page.getByRole('option').first().waitFor();
+  // Mail on its way stands as skeletons, and the status says it's checking, until it's in.
+  expect(await page.evaluate(() => [...(window as unknown as { said: Set<string> }).said])).toEqual(
+    [],
+  );
   return page;
 }
 

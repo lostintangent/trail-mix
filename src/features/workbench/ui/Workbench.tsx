@@ -242,6 +242,12 @@ export function Workbench({
   const sidebarId = useId();
   const listId = useId();
   const { title, unread, scope } = describeView(view, accounts, folders, counts);
+  // An empty list while an account the view holds is on its first sync is mail on its way, which
+  // stands as skeleton rows. Search and the Outbox say what they found at once.
+  const isFilling =
+    view.in !== 'search' &&
+    view.in !== 'outbox' &&
+    (scope ? [scope] : accounts).some(({ status }) => status === 'syncing');
   const { move, onViewChange, chooseView, written, pushed } = useAddress({
     place,
     onPlaceChange,
@@ -911,7 +917,7 @@ export function Workbench({
                 }
                 viewIn={view.in}
                 listKey={hashKey([view])}
-                conversations={conversations}
+                conversations={isFilling && conversations?.length === 0 ? undefined : conversations}
                 isUpdating={isFetching}
                 marks={marks}
                 stamps={mixesAccounts ? stamps : undefined}

@@ -9,7 +9,8 @@ export const keys = {
   signIns: ['accounts', 'sign-ins'],
   // How the deployment is set up, which no hint changes.
   signInPresets: ['sign-in-presets'],
-  thisDevice: ['this-device'],
+  // As `notified` is without an endpoint, since the Mailroom answers both alike, so it's asked once.
+  thisDevice: ['this-device', null],
   folders: ['folders'],
   outbox: ['outbox'],
   /** Under this device, so an erase, which makes the Mailroom anew, asks again. */

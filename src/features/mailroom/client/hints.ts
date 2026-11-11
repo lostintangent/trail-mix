@@ -9,6 +9,11 @@ import { isStale, type Key } from './queries.ts';
  * Hints sent while the socket isn't open are lost, before it first opens as after it drops, so each
  * time it opens everything refetches. A new Mailroom, as a demo visitor's first query makes, can
  * fill before the socket that page opened reaches it.
+ *
+ * A refetch starts at once for a hint, and hints that follow within `SETTLE_MS` wait to refetch
+ * together. A refetch that a new one replaces is dropped, so during a burst of hints, as a first
+ * sync sends, refetching for each would leave the lists on their first, empty snapshot until the
+ * burst ends.
  */
 export function useHints(): void {
   const queryClient = useQueryClient();
@@ -20,6 +25,25 @@ export function listen(queryClient: QueryClient): () => void {
   let retry: ReturnType<typeof setTimeout> | undefined;
   let failures = 0;
   let isDone = false;
+  /** Hints heard since the last refetch, waiting for theirs, and when that refetch started. */
+  let waiting: Hint[] = [];
+  let refetching: ReturnType<typeof setTimeout> | undefined;
+  let refetchedAt = -Infinity;
+
+  const refetch = () => {
+    const hints = waiting;
+    waiting = [];
+    refetching = undefined;
+    refetchedAt = Date.now();
+    void queryClient.invalidateQueries({
+      predicate: ({ queryKey }) => hints.some((hint) => isStale(queryKey as unknown as Key, hint)),
+    });
+  };
+  const heard = (hint: Hint) => {
+    waiting.push(hint);
+    if (refetching) return;
+    refetching = setTimeout(refetch, Math.max(0, refetchedAt + SETTLE_MS - Date.now()));
+  };
 
   const connect = () => {
     clearTimeout(retry);
@@ -31,10 +55,7 @@ export function listen(queryClient: QueryClient): () => void {
     };
     socket.onmessage = ({ data }) => {
       const hint = readHint(data);
-      if (!hint) return;
-      void queryClient.invalidateQueries({
-        predicate: ({ queryKey }) => isStale(queryKey as unknown as Key, hint),
-      });
+      if (hint) heard(hint);
     };
     socket.onclose = () => {
       if (!isDone) retry = setTimeout(connect, retryDelay(failures++));
@@ -52,6 +73,7 @@ export function listen(queryClient: QueryClient): () => void {
   return () => {
     isDone = true;
     clearTimeout(retry);
+    clearTimeout(refetching);
     socket?.close();
     removeEventListener('online', reconnect);
     document.removeEventListener('visibilitychange', reconnect);
@@ -69,6 +91,9 @@ function readHint(data: unknown): Hint | undefined {
     return undefined;
   }
 }
+
+/** How long a refetch for hints is left to finish before hints after it start another. */
+export const SETTLE_MS = 250;
 
 /** Up to half a minute between attempts, spread out so every tab doesn't return at once. */
 const retryDelay = (failures: number) =>
