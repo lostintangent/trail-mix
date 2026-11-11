@@ -425,11 +425,16 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     for (const { id } of accounts) await this.disconnect(id);
     this.found = undefined;
     this.tokens.clear();
-    await this.ctx.storage.deleteAlarm();
-    await this.ctx.storage.deleteAll();
-    upgrade(this.sql);
-    this.hint({ changed: 'everything' });
-    await this.forgetBodies(`${this.member}/`);
+    try {
+      await this.ctx.storage.deleteAlarm();
+      await this.ctx.storage.deleteAll();
+      upgrade(this.sql);
+      await this.forgetBodies(`${this.member}/`);
+    } finally {
+      // Once nothing of theirs is left to serve, every device drops what it kept, even if a delete
+      // failed partway.
+      this.hint({ changed: 'everything' });
+    }
   }
 
   async setFlags(refs: MessageRef[], change: Partial<Flags>): Promise<void> {

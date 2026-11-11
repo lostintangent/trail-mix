@@ -766,10 +766,18 @@ describe('The Mailroom with the demo mailbox', () => {
     const { cache, notified } = await eve.call<ThisDevice>('thisDevice');
     expect(notified).toBe(false);
     expect((await eve.call<ThisDevice>('thisDevice')).cache).toBe(cache);
+    // An opened body is in the bucket, which the hint must not come before.
+    await eve.until(async () => (await eve.page({ in: 'inbox' })).length > 0);
+    const [row] = await eve.page({ in: 'inbox' });
+    await eve.call('body', (await eve.call<Message[]>('conversation', row!.id))[0]);
 
+    await eve.call('slowBucket', 500);
     const erased = device.next((hint) => hint.changed === 'everything');
-    await eve.call('eraseEverything');
+    const erasing = eve.call('eraseEverything');
     await erased;
+    // A device refetching on the hint finds nothing of what was erased.
+    expect((await eve.call<{ bodies: unknown[] }>('stored')).bodies).toEqual([]);
+    await erasing;
     expect((await eve.call<ThisDevice>('thisDevice')).cache).not.toBe(cache);
   }, 60_000);
 

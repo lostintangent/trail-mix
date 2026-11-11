@@ -104,6 +104,19 @@ export class TestMailroom extends Mailroom {
     return Promise.resolve(this.synced);
   }
 
+  private bucketDelay = 0;
+
+  /** Has the bucket wait this long before deleting, so a test can look in while it does. */
+  slowBucket(ms: number): Promise<void> {
+    this.bucketDelay = ms;
+    return Promise.resolve();
+  }
+
+  protected override async forgetBodies(prefix: string): Promise<void> {
+    if (this.bucketDelay) await new Promise((resolve) => setTimeout(resolve, this.bucketDelay));
+    await super.forgetBodies(prefix);
+  }
+
   /** Erases the envelope index and the body cache, which sync rebuilds from the servers. */
   async eraseIndex(): Promise<void> {
     for (const { id } of await this.accounts()) this.store.forget(id);
