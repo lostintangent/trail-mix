@@ -700,12 +700,11 @@ export function Workbench({
     return row && (() => pick(row.id, 'only'));
   };
   // In the dark theme, light paper for the conversation open, which a search may have left the list.
+  // It reads the conversation as the reader fetched it, and never asks itself, so a held key that
+  // passes rows asks for nothing the reader wouldn't.
   const isDark = useDarkTheme();
   const reading = isDark ? selected : undefined;
-  const { data: read } = useQuery({
-    ...conversationQuery(reading ?? ''),
-    enabled: reading !== undefined,
-  });
+  const { data: read } = useQuery({ ...conversationQuery(reading ?? ''), enabled: false });
 
   // The registry is made anew each render, as the selection moves, but its commands keep their
   // identity while they look the same, so what draws them and the palette render only on a change.

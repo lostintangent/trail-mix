@@ -391,6 +391,26 @@ test('an older message’s body is asked for as the pointer rests on its line or
   await waitUntil(() => asked.length === 2);
 }, 30_000);
 
+// The dark theme offers light paper for the conversation open, which must ask for nothing itself.
+test('a held key in the dark theme asks for no conversation it passes', async () => {
+  const page = await open({ ...DESKTOP, colorScheme: 'dark' });
+  await page.getByRole('option').first().click();
+  // The first conversations are prepared while the browser is idle, which this waits out.
+  await page.waitForTimeout(1_500);
+  const asked = new Set<string>();
+  page.on('request', (request) => {
+    const url = decodeURIComponent(request.url());
+    if (url.includes('"conversation"')) asked.add(/"s":"([^"]+::[^"]+)"/.exec(url)?.[1] ?? url);
+  });
+  // Twelve rows passed at a held key's pace, quicker than a rest. Only a refetch the demo's own
+  // mail causes may ask for one, where asking for each row passed would ask for about twelve.
+  for (let press = 0; press < 12; press++) {
+    await page.keyboard.press('ArrowDown');
+    await page.waitForTimeout(30);
+  }
+  expect(asked.size).toBeLessThanOrEqual(2);
+}, 30_000);
+
 test('a conversation is asked for as the pointer rests on its row, and its newest body as the row is pressed', async () => {
   const page = await open({ ...DESKTOP, colorScheme: 'light' });
   await page.getByRole('option').first().waitFor();
