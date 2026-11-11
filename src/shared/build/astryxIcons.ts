@@ -31,6 +31,21 @@ export const THEME_ICON_NAMES = new Set([
   'warning',
 ]);
 
+/**
+ * A built theme that extends the neutral one keeps only its icons from it, so the neutral theme's
+ * own tokens and components, which the built theme already carries flattened, stay off the first
+ * load. A module that reads anything else from the neutral theme is left as it is.
+ */
+export function neutralIconsOnly(code: string): string {
+  const imported = /^import \{ neutralTheme \} from '@astryxdesign\/theme-neutral\/built';\n/m;
+  const read = /^const (\w+) = neutralTheme\["icons"\];\n/m;
+  const name = read.exec(code)?.[1];
+  if (!name || !imported.test(code)) return code;
+  const rest = code.replace(imported, '').replace(read, '');
+  if (/\bneutralTheme\b/.test(rest)) return code;
+  return `import { neutralIconRegistry as ${name} } from '@astryxdesign/theme-neutral/built';\n${rest}`;
+}
+
 /** The icon names a theme's icon module registers. */
 export function registeredIcons(code: string): Set<string> {
   return new Set(Array.from(code.matchAll(ENTRY), ([, name]) => name!));
@@ -84,6 +99,10 @@ export function astryxIcons(): Plugin {
         };
       }
       if (id.includes(ASTRYX)) for (const name of quotedNames(code)) asked.add(name);
+      else if (code.includes('@astryxdesign/theme-neutral/built')) {
+        const kept = neutralIconsOnly(code);
+        if (kept !== code) return { code: kept, map: null };
+      }
       return null;
     },
     buildEnd(error) {
