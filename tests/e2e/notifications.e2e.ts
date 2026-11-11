@@ -95,6 +95,16 @@ async function installed(options: BrowserContextOptions = DESKTOP) {
     await context.addInitScript(() =>
       Object.defineProperty(Notification, 'permission', { get: () => 'granted' }),
     );
+    // Which event each ask of the browser's leave came during. Safari asks only from the tap itself.
+    await context.addInitScript(() => {
+      const asked: string[] = [];
+      Object.assign(window, { asked });
+      const real = Notification.requestPermission.bind(Notification);
+      Notification.requestPermission = () => {
+        asked.push(window.event?.type ?? 'no event');
+        return real();
+      };
+    });
   });
   await opened.page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {
     timeout: 15_000,
@@ -124,6 +134,10 @@ test('the installed app turns notifications on and off from the bell, and the Ma
   const { page } = await installed();
   await bell(page, 'off').click();
   await bell(page, 'on').waitFor();
+  // The browser was asked during the tap, not after waiting on code that hadn't loaded.
+  expect(await page.evaluate(() => (window as unknown as { asked: string[] }).asked)).toEqual([
+    'click',
+  ]);
   expect(await page.evaluate(() => localStorage.getItem('test.push-subscription'))).toContain(
     'push.example/devices/e2e',
   );
