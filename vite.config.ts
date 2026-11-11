@@ -12,6 +12,9 @@ import { serviceWorker } from './src/shared/build/serviceWorker.ts';
 import { stylexDefinitionsFirst } from './src/shared/build/stylexDefinitionsFirst.ts';
 import { stylexOptions } from './src/shared/build/stylexOptions.ts';
 
+/** Where a test's preview keeps its storage, as `tests/e2e/preview.ts` sets it. */
+const TEST_STATE = process.env.TRAIL_MIX_TEST_STATE;
+
 export default defineConfig(({ isPreview }) => ({
   // The build's CSS minifier would lower light-dark() into variables only <html> switches, so a
   // sheet that sets its own color-scheme, such as mail on light paper, couldn't flip a token.
@@ -21,10 +24,13 @@ export default defineConfig(({ isPreview }) => ({
       // The Worker, `src/server/entry.ts`, runs on workerd in development, preview and production.
       viteEnvironment: { name: 'ssr' },
       // Development and preview keep separate local storage, so both can run at once. A test's
-      // preview names a fresh place of its own, so it starts empty, as it does in CI.
+      // preview names a fresh place of its own, so it starts empty, as it does in CI, and has no
+      // inspector, whose port the plugin picks before binding it, so a preview starting alongside
+      // could take it first.
       persistState: {
-        path: process.env.TRAIL_MIX_STATE ?? (isPreview ? '.wrangler/preview' : '.wrangler/state'),
+        path: TEST_STATE ?? (isPreview ? '.wrangler/preview' : '.wrangler/state'),
       },
+      ...(TEST_STATE !== undefined && { inspectorPort: false }),
     }),
     tanstackStart({
       router: {

@@ -68,7 +68,7 @@ export async function startPreview(
         // own thread. A deployed Worker has none of it, so it stays out of what the bench measures.
         X_LOCAL_EXPLORER: 'false',
         X_LOCAL_OBSERVABILITY: 'false',
-        TRAIL_MIX_STATE: state,
+        TRAIL_MIX_TEST_STATE: state,
         ...env,
       },
     },
