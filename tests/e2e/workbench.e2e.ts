@@ -6,6 +6,7 @@ import { ACCENT_STORAGE_KEY } from '../../src/app/theme/accent.ts';
 import { parseHex } from '../../src/shared/color.ts';
 import { DESK_HEX } from '../../src/app/theme/palette.ts';
 import { accentRule, accentTokens } from '../../src/app/theme/readableAccent.ts';
+import { PAGE_SIZE } from '../../src/features/mailroom/client/contract.ts';
 import { textContrasts, unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
 
@@ -205,7 +206,7 @@ test('every row is one height, the first with no preview too, so no two overlap'
   }
 }, 60_000);
 
-test('scrolling a long folder never changes a row’s height or moves a row already drawn', async () => {
+test('scrolling a long folder never changes a row’s height, moves a row already drawn, or changes the list’s length', async () => {
   for (const [size, options] of Object.entries(SIZES)) {
     const { context, page } = await open(options);
     // A search for the demo's member finds most of their mail, led by a draft with no preview.
@@ -218,9 +219,11 @@ test('scrolling a long folder never changes a row’s height or moves a row alre
       .waitFor();
     const scrolled = await page.evaluate(async () => {
       const list = document.querySelector<HTMLElement>('[role="listbox"][aria-multiselectable]');
-      if (!list) return { heights: [], misplaced: ['no list'], reached: 0 };
+      if (!list) return { heights: [], lengths: [], misplaced: ['no list'], reached: 0 };
       const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
       const heights = new Set<number>();
+      // The list is as long as the search's results from its first page, so the thumb holds one size.
+      const lengths = new Set<number>();
       const misplaced: string[] = [];
       let reached = 0;
       let still = 0;
@@ -230,6 +233,7 @@ test('scrolling a long folder never changes a row’s height or moves a row alre
         const height = list.querySelector('[role="option"]')?.getBoundingClientRect().height ?? 0;
         // Rows lie on whole pixels, each the height of a row of mail rounded up.
         const pitch = Math.ceil(height);
+        lengths.add(list.scrollHeight);
         for (const row of list.querySelectorAll('[role="option"]')) {
           const box = row.getBoundingClientRect();
           const index = Number(row.getAttribute('aria-posinset')) - 1;
@@ -248,13 +252,19 @@ test('scrolling a long folder never changes a row’s height or moves a row alre
           await new Promise((resolve) => setTimeout(resolve, 100));
         } else still = 0;
       }
-      return { heights: [...heights], misplaced: misplaced.slice(0, 5), reached };
+      return {
+        heights: [...heights],
+        lengths: [...lengths],
+        misplaced: misplaced.slice(0, 5),
+        reached,
+      };
     });
-    expect({ size, heights: scrolled.heights.length, misplaced: scrolled.misplaced }).toEqual({
+    expect({
       size,
-      heights: 1,
-      misplaced: [],
-    });
+      heights: scrolled.heights.length,
+      lengths: scrolled.lengths.length,
+      misplaced: scrolled.misplaced,
+    }).toEqual({ size, heights: 1, lengths: 1, misplaced: [] });
     // Far past the first page, so pages arrived on the way.
     expect(scrolled.reached).toBeGreaterThan(200);
     await context.close();
@@ -733,7 +743,7 @@ test('the reader says where its conversation sits, and steps to the ones either 
   const { context, page, problems } = await open(SIZES.desktop);
   const bar = page.getByRole('toolbar', { name: 'Place' });
   const rows = page.getByRole('option');
-  const loaded = async () => Number(await rows.first().getAttribute('aria-setsize'));
+  const listed = async () => Number(await rows.first().getAttribute('aria-setsize'));
   // The reader shows the selected row once its keys rest, and says where that row sits.
   const shows = (place: string) =>
     page.waitForFunction(
@@ -747,22 +757,22 @@ test('the reader says where its conversation sits, and steps to the ones either 
       { timeout: 5_000 },
     );
 
-  // The Inbox has more than its first page, which the place says until the rest are loaded.
+  // The place counts the whole Inbox, though only its first page has arrived.
   await openConversation(page, 1);
-  await shows(`2 of ${await loaded()}+`);
+  const inbox = await listed();
+  expect(inbox).toBeGreaterThan(PAGE_SIZE);
+  await shows(`2 of ${inbox}`);
   await bar.getByRole('button', { name: 'Next conversation' }).click();
-  await shows(`3 of ${await loaded()}+`);
+  await shows(`3 of ${inbox}`);
   await bar.getByRole('button', { name: 'Previous conversation' }).click();
-  await shows(`2 of ${await loaded()}+`);
+  await shows(`2 of ${inbox}`);
 
-  // A folder whose conversations all came in one page has nothing more to say.
   await page
     .getByRole('region', { name: 'Work' })
     .getByRole('button', { name: /^Receipts/ })
     .click();
   await rows.first().click();
-  await shows(`1 of ${await loaded()}`);
-  expect(await bar.textContent()).not.toContain(`1 of ${await loaded()}+`);
+  await shows(`1 of ${await listed()}`);
 
   // New message tops the sidebar, and opens a message of its own.
   await page

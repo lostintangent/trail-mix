@@ -210,12 +210,12 @@ describe('a list', () => {
       ),
     );
     const seen: string[] = [];
-    let after: string | undefined;
-    do {
-      const page = store.page({ in: 'inbox' }, after, 5);
+    for (let at = 0; at < 23; at += 5) {
+      const page = store.page({ in: 'inbox' }, at, 5);
+      expect([page.at, page.total]).toEqual([at, 23]);
       seen.push(...page.items.map((item) => `${item.date} ${item.id}`));
-      after = page.next;
-    } while (after);
+    }
+    expect(store.page({ in: 'inbox' }, 25, 5)).toEqual({ items: [], at: 25, total: 23 });
     expect(seen).toHaveLength(23);
     expect(new Set(seen).size).toBe(23);
     expect(seen).toEqual([...seen].sort().reverse());
@@ -280,7 +280,7 @@ describe('search', () => {
     expect(found(store, 'café standup')).toEqual([]);
     // FTS5's own syntax is just more words.
     expect(found(store, 'friday OR NEAR( "* ^')).toEqual([]);
-    expect(store.search('  "* ')).toEqual({ items: [] });
+    expect(store.search('  "* ')).toEqual({ items: [], at: 0, total: 0 });
   });
 
   test('finds a ligature or a fullwidth word by its plain form, and the other way round', () => {
@@ -314,12 +314,11 @@ describe('search', () => {
       ),
     );
     const rows: string[] = [];
-    let after: string | undefined;
-    do {
-      const page = store.search('lunch', after, 3);
+    for (let at = 0; at < 7; at += 3) {
+      const page = store.search('lunch', at, 3);
+      expect([page.at, page.total]).toEqual([at, 7]);
       rows.push(...page.items.map((item) => `${item.account} ${item.subject}`));
-      after = page.next;
-    } while (after);
+    }
     expect(rows).toEqual([
       ...[5, 4, 3, 2, 1, 0].map((i) => `work Lunch ${i}`),
       'personal Re: Lunch',
@@ -373,10 +372,10 @@ describe('search', () => {
       ),
     );
     const rows: string[] = [];
-    for (let after: string | undefined, pages = 0; pages === 0 || after; pages++) {
-      const page = store.search('kiwi', after, 2);
+    for (let at = 0; at < 8; at += 2) {
+      const page = store.search('kiwi', at, 2);
+      expect(page.total).toBe(8);
       rows.push(...page.items.map(({ subject }) => subject));
-      after = page.next;
     }
     expect(rows).toEqual([
       'Kiwi pie',
@@ -388,6 +387,34 @@ describe('search', () => {
       'Kiwi 3',
       'Kiwi 1',
     ]);
+  });
+
+  test('a search lists only its newest conversations up to its limit, and counts no further', () => {
+    const store = fresh();
+    const day = (n: number) => new Date(Date.UTC(2026, 10, n, 8)).toISOString();
+    const kiwi = envelope('Kiwi pie', { date: day(10) });
+    store.fold(
+      arrive(
+        kiwi,
+        envelope('Re: Kiwi pie', { references: [kiwi.messageId], date: day(9) }),
+        ...[8, 7, 6, 5].map((n) => envelope(`Kiwi ${n}`, { date: day(n) })),
+      ),
+    );
+    const listed = (at: number) => store.search('kiwi', at, 2, 3);
+
+    expect(
+      [listed(0), listed(2), listed(4)].map(({ items, total }) => [items.length, total]),
+    ).toEqual([
+      [2, 3],
+      [1, 3],
+      [0, 3],
+    ]);
+    expect([...listed(0).items, ...listed(2).items].map(({ subject }) => subject)).toEqual([
+      'Kiwi pie',
+      'Kiwi 8',
+      'Kiwi 7',
+    ]);
+    expect(store.search('kiwi', 0, 2, 10).total).toBe(5);
   });
 
   test('a message re-flagged or re-linked keeps its place', () => {
@@ -410,9 +437,9 @@ describe('search', () => {
     expect(rows.items.map(({ subject, date, count }) => [subject, date, count])).toEqual([
       ['Kiwi pie', day(8), 3],
     ]);
-    const rest = store.search('kiwi', rows.next, 1);
+    expect(rows.total).toBe(2);
+    const rest = store.search('kiwi', 1, 1);
     expect(rest.items.map(({ subject }) => subject)).toEqual(['Kiwi jam']);
-    expect(rest.next).toBeUndefined();
   });
 
   test('forgets a message the moment the index does', () => {

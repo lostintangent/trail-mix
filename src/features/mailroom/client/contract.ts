@@ -28,7 +28,11 @@ import type {} from '@tanstack/react-start';
 export interface Queries {
   accounts(): Promise<Account[]>;
   folders(): Promise<Folder[]>;
-  conversations(view: View, after?: PageCursor): Promise<Page>;
+  /**
+   * A stretch of a view's list from its place `at`, with 0 the newest, and how long the list is,
+   * so any stretch of it can be asked for. A search's list holds the conversations that match.
+   */
+  conversations(view: View, at?: number): Promise<Page>;
   conversation(id: ConversationId): Promise<Message[]>;
   body(ref: MessageRef): Promise<Body>;
   outbox(): Promise<Outgoing[]>;
@@ -94,11 +98,17 @@ export interface Commands {
   deleteFolder(folder: FolderRef): Promise<void>;
 }
 
-/** Where the next page of a list starts. Only the Mailroom reads it. */
-export type PageCursor = string;
+/**
+ * One page of a list, newest first: its conversations, the place of its first, with 0 the newest,
+ * and how many conversations the whole list holds.
+ */
+export type Page = { items: ConversationSummary[]; at: number; total: number };
 
-/** One page of a list, newest first, and where the next one starts if there is more. */
-export type Page = { items: ConversationSummary[]; next?: PageCursor };
+/** How many conversations a page holds, but the list's last. A browser asks for pages from places this far apart. */
+export const PAGE_SIZE = 50;
+
+/** The most conversations a search as it is typed lists: its newest that match. */
+export const MATCHES_LISTED = 1_000;
 
 /**
  * What connecting an account takes: nothing for the demo mailbox, and a password for an IMAP host.

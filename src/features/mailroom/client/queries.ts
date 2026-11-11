@@ -1,6 +1,5 @@
-import { infiniteQueryOptions, queryOptions } from '@tanstack/react-query';
+import { queryOptions } from '@tanstack/react-query';
 import type { ConversationId, FolderRef, Hint, MessageRef, View } from '../../mail/core/index.ts';
-import type { PageCursor } from './contract.ts';
 import { mailroom } from './rpc.ts';
 
 /** What each query's snapshot is cached under. */
@@ -13,7 +12,9 @@ export const keys = {
   thisDevice: ['this-device'],
   folders: ['folders'],
   outbox: ['outbox'],
+  // A view's list, under which each of its pages is kept by the place it starts at.
   conversations: (view: View) => ['conversations', view] as const,
+  page: (view: View, at: number) => ['conversations', view, at] as const,
   conversation: (id: ConversationId) => ['conversation', id] as const,
   body: (ref: MessageRef) => ['body', ref] as const,
 } as const;
@@ -26,6 +27,7 @@ export type Key =
   | typeof keys.folders
   | typeof keys.outbox
   | ReturnType<typeof keys.conversations>
+  | ReturnType<typeof keys.page>
   | ReturnType<typeof keys.conversation>
   | ReturnType<typeof keys.body>;
 
@@ -98,13 +100,11 @@ export const outboxQuery = queryOptions({
   queryFn: () => mailroom.outbox(),
 });
 
-/** A view's conversations, newest first, a page at a time, for `useInfiniteQuery`. */
-export const conversationsQuery = (view: View) =>
-  infiniteQueryOptions({
-    queryKey: keys.conversations(view),
-    queryFn: ({ pageParam }) => mailroom.conversations(view, pageParam),
-    initialPageParam: undefined as PageCursor | undefined,
-    getNextPageParam: (page) => page.next,
+/** The page of a view's list from its place `at`, newest first, with how long the list is. */
+export const conversationsQuery = (view: View, at = 0) =>
+  queryOptions({
+    queryKey: keys.page(view, at),
+    queryFn: () => mailroom.conversations(view, at),
   });
 
 export const conversationQuery = (id: ConversationId) =>

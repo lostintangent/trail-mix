@@ -13,7 +13,7 @@ import {
   type SyncEvent,
   type View,
 } from '../../mail/core/index.ts';
-import type { Page, PageCursor } from '../client/contract.ts';
+import { MATCHES_LISTED, PAGE_SIZE, type Page } from '../client/contract.ts';
 import type { Sql, SqlValue } from './schema.ts';
 
 /**
@@ -22,8 +22,6 @@ import type { Sql, SqlValue } from './schema.ts';
  * row per conversation current, so every list is a single range read however large the index.
  */
 export type EnvelopeIndex = ReturnType<typeof envelopeIndex>;
-
-const PAGE_SIZE = 50;
 
 /**
  * A message's rowid is the second its date names times this, plus a count of those before it in
@@ -281,80 +279,73 @@ export function envelopeIndex(sql: Sql) {
       );
     },
 
-    /** One page of a view, newest first. `after` is the `next` of the page before. */
-    page(
-      view: Exclude<View, { in: 'search' } | { in: 'outbox' }>,
-      after?: PageCursor,
-      size = PAGE_SIZE,
-    ): Page {
-      const { before, bound } = from(after);
-      const rows =
-        view.in === 'folder'
-          ? sql.all<{ summary: string; date: string; id: string }>(
-              `SELECT c.summary, p.date, p.conversation AS id FROM placements p JOIN conversations c ON c.id = p.conversation
-               WHERE p.account = ? AND p.path = ? ${before.replaceAll('date', 'p.date').replaceAll('id <', 'p.conversation <')}
-               ORDER BY p.date DESC, p.conversation DESC LIMIT ?`,
-              view.folder.account,
-              view.folder.path,
-              ...bound,
-              size + 1,
-            )
-          : sql.all<{ summary: string; date: string; id: string }>(
-              `SELECT summary, date, id FROM conversations WHERE ${view.in} = 1 ${before} ORDER BY date DESC, id DESC LIMIT ?`,
-              ...bound,
-              size + 1,
-            );
-      return pageOf(rows, size);
+    /**
+     * One page of a view, newest first: `size` conversations from its place `at`, with 0 the
+     * newest, and how many the view holds. A folder's page reads its placements alone as far as
+     * `at`, and only the page's own conversations past it.
+     */
+    page(view: Exclude<View, { in: 'search' } | { in: 'outbox' }>, at = 0, size = PAGE_SIZE): Page {
+      if (view.in === 'folder') {
+        const { account, path } = view.folder;
+        const [{ total } = { total: 0 }] = sql.all<{ total: number }>(
+          `SELECT COUNT(*) AS total FROM placements WHERE account = ? AND path = ?`,
+          account,
+          path,
+        );
+        const rows = sql.all<{ summary: string }>(
+          `SELECT c.summary FROM (
+             SELECT conversation, date FROM placements WHERE account = ? AND path = ?
+             ORDER BY date DESC, conversation DESC LIMIT ? OFFSET ?
+           ) p JOIN conversations c ON c.id = p.conversation
+           ORDER BY p.date DESC, p.conversation DESC`,
+          account,
+          path,
+          size,
+          at,
+        );
+        return { items: rows.map(summaryIn), at, total };
+      }
+      const [{ total } = { total: 0 }] = sql.all<{ total: number }>(
+        `SELECT COUNT(*) AS total FROM conversations WHERE ${view.in} = 1`,
+      );
+      const rows = sql.all<{ summary: string }>(
+        `SELECT summary FROM conversations WHERE ${view.in} = 1
+         ORDER BY date DESC, id DESC LIMIT ? OFFSET ?`,
+        size,
+        at,
+      );
+      return { items: rows.map(summaryIn), at, total };
     },
 
     /**
      * One page of the conversations with a message whose senders, recipients, subject or preview
-     * hold every word of `text`, each word as typed so far, across every account. They come newest
-     * first by the newest message that matches, and each row shows that message. Matches stream
-     * newest first, so a page reads only as far as it needs, however many messages match.
+     * hold every word of `text`, each word as typed so far, across every account: `size` of them
+     * from place `at`, and how many are listed. They come newest first by the newest message that
+     * matches, and each row shows that message. A search lists at most its newest `most`, so it
+     * reads matches newest first and stops there, and a first letter costs no more than a word.
      */
-    search(text: string, after?: PageCursor, size = PAGE_SIZE): Page {
+    search(text: string, at = 0, size = PAGE_SIZE, most = MATCHES_LISTED): Page {
       const match = matchOf(text);
-      if (!match) return { items: [] };
-      // Earlier pages showed every conversation with a match at or above where they ended.
-      const below = after === undefined ? undefined : streamPositionOf(after);
-      const shownBefore = (conversation: string) =>
-        below !== undefined &&
-        sql.all(
-          `SELECT 1 FROM messages m WHERE m.conversation = ? AND m.rowid >= ?
-             AND EXISTS (SELECT 1 FROM search WHERE search MATCH ? AND rowid = m.rowid) LIMIT 1`,
-          conversation,
-          below,
-          match,
-        ).length > 0;
-      const matches = sql.each<{ rowid: number; conversation: string; message: string }>(
-        `SELECT m.rowid, m.conversation, m.message FROM search JOIN messages m ON m.rowid = search.rowid
-         WHERE search MATCH ? ${below === undefined ? '' : 'AND search.rowid < ?'}
-         ORDER BY search.rowid DESC`,
+      if (!match) return { items: [], at, total: 0 };
+      const newest = new Map<string, number>();
+      for (const { rowid, conversation } of sql.each<{ rowid: number; conversation: string }>(
+        `SELECT m.rowid, m.conversation FROM search JOIN messages m ON m.rowid = search.rowid
+         WHERE search MATCH ? ORDER BY search.rowid DESC`,
         match,
-        ...(below === undefined ? [] : [below]),
-      );
-      const items: ConversationSummary[] = [];
-      const seen = new Set<string>();
-      let end: number | undefined;
-      for (const row of matches) {
-        if (seen.has(row.conversation)) continue;
-        seen.add(row.conversation);
-        if (shownBefore(row.conversation)) continue;
-        if (items.length === size) {
-          return { items, next: btoa(JSON.stringify([end])) };
-        }
-        const [conversation] = sql.all<{ summary: string }>(
-          `SELECT summary FROM conversations WHERE id = ?`,
-          row.conversation,
-        );
-        if (!conversation) continue;
-        items.push(
-          matchedRow(JSON.parse(conversation.summary) as ConversationSummary, messageOf(row)),
-        );
-        end = row.rowid;
+      )) {
+        if (newest.has(conversation)) continue;
+        newest.set(conversation, rowid);
+        if (newest.size === most) break;
       }
-      return { items };
+      const items = [...newest].slice(at, at + size).flatMap(([conversation, rowid]) => {
+        const [row] = sql.all<{ summary: string }>(
+          `SELECT summary FROM conversations WHERE id = ?`,
+          conversation,
+        );
+        const [message] = sql.all<Row>(`SELECT ${COLUMNS} FROM messages WHERE rowid = ?`, rowid);
+        return row && message ? [matchedRow(summaryIn(row), messageOf(message))] : [];
+      });
+      return { items, at, total: newest.size };
     },
 
     conversation: (id: ConversationId): Message[] =>
@@ -412,43 +403,12 @@ export function matchedRow(
 }
 
 /** One page of rows already in order, newest first, as the index pages its own. */
-export function pageAfter(
-  rows: readonly ConversationSummary[],
-  after?: PageCursor,
-  size = PAGE_SIZE,
-): Page {
-  const position = after === undefined ? undefined : positionOf(after);
-  const rest = position
-    ? rows.filter(
-        ({ date, id }) => date < position[0] || (date === position[0] && id < position[1]),
-      )
-    : rows;
-  return pageOf(
-    rest
-      .slice(0, size + 1)
-      .map((row) => ({ summary: JSON.stringify(row), date: row.date, id: row.id })),
-    size,
-  );
+export function pageAfter(rows: readonly ConversationSummary[], at = 0, size = PAGE_SIZE): Page {
+  return { items: rows.slice(at, at + size), at, total: rows.length };
 }
 
-/** The SQL that starts a page after the one a cursor ends, and its parameters. */
-function from(after: PageCursor | undefined) {
-  const position = after === undefined ? undefined : positionOf(after);
-  return {
-    before: position ? `AND (date < ? OR (date = ? AND id < ?))` : '',
-    bound: position ? [position[0], position[0], position[1]] : [],
-  };
-}
-
-/** A page of rows, read one past its size to know whether another follows. */
-function pageOf(rows: { summary: string; date: string; id: string }[], size: number): Page {
-  const items = rows.slice(0, size);
-  const last = items.at(-1);
-  return {
-    items: items.map((row) => JSON.parse(row.summary) as ConversationSummary),
-    ...(rows.length > size && last ? { next: btoa(JSON.stringify([last.date, last.id])) } : {}),
-  };
-}
+/** A conversation's row, as the index keeps it. */
+const summaryIn = ({ summary }: { summary: string }) => JSON.parse(summary) as ConversationSummary;
 
 /**
  * Search text as an FTS5 query: every word must match, each as a prefix, so results follow typing.
@@ -459,41 +419,11 @@ export function matchOf(text: string): string | undefined {
   return words.length ? words.map((word) => `"${word}"*`).join(' ') : undefined;
 }
 
-/** Where a search's page cursor says the next page starts: below this rowid. */
-function streamPositionOf(cursor: PageCursor): number {
-  try {
-    const position: unknown = JSON.parse(atob(cursor));
-    if (Array.isArray(position) && position.length === 1 && Number.isSafeInteger(position[0])) {
-      return position[0] as number;
-    }
-  } catch {
-    // Not base64 JSON, so not a cursor this index wrote.
-  }
-  throw new TypeError('That is not a page cursor.');
-}
-
 /** The first rowid of the second a message's date names, within what a rowid can count to. */
 function firstRowidOf(date: string): number {
   const seconds = Math.floor(Date.parse(date) / 1000);
   const second = Number.isFinite(seconds) ? Math.min(Math.max(seconds, 0), 2 ** 33 - 1) : 0;
   return second * SECOND;
-}
-
-/** Where a page cursor says the next page starts: after this date and conversation. */
-function positionOf(cursor: PageCursor): [date: string, id: string] {
-  try {
-    const position: unknown = JSON.parse(atob(cursor));
-    if (
-      Array.isArray(position) &&
-      position.length === 2 &&
-      position.every((part) => typeof part === 'string')
-    ) {
-      return position as [string, string];
-    }
-  } catch {
-    // Not base64 JSON, so not a cursor this index wrote.
-  }
-  throw new TypeError('That is not a page cursor.');
 }
 
 /** A folder as a map key. */

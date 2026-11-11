@@ -6,6 +6,7 @@ import type {
   Hint,
   View,
 } from '../../src/features/mail/core/index.ts';
+import { PAGE_SIZE, type Page } from '../../src/features/mailroom/client/contract.ts';
 import { caFile, ports, running, start, stop } from '../mail-server/server.ts';
 import { startWorker, type LocalWorker } from '../workerd.ts';
 import { percentile, type BenchArea, type Measurement } from './budget.ts';
@@ -31,6 +32,7 @@ const BUDGET = {
   firstSync: 120_000,
   batch: 1_000,
   inboxPage: 10,
+  pageAnywhere: 10,
   conversation: 10,
   search: 100,
 };
@@ -79,6 +81,16 @@ export const mailroom: BenchArea = {
         measured('First sync of a 50,000-message folder', sync.total, BUDGET.firstSync),
         measured('Slowest batch of that sync, CPU', sync.slowest, BUDGET.batch),
         measured('A page of the unified Inbox, p95', reads.page, BUDGET.inboxPage),
+        measured(
+          `The unified Inbox's last page, at ${reads.inboxLast.at}, p95`,
+          reads.inboxLast.time,
+          BUDGET.pageAnywhere,
+        ),
+        measured(
+          `The Inbox folder's last page, at ${reads.folderLast.at}, p95`,
+          reads.folderLast.time,
+          BUDGET.pageAnywhere,
+        ),
         measured('A 50-message conversation, p95', reads.conversation, BUDGET.conversation),
         measured('Search as it is typed, p95', reads.search, BUDGET.search),
       ];
@@ -168,6 +180,20 @@ async function readTimes(url: string) {
     throw new Error(`The long conversation holds ${messages.length} messages.`);
   }
   const page = await call<number[]>(url, 'timed', 'conversations', [INBOX], READS);
+  // A page anywhere reads as quickly as the first, even the last, which passes over the most rows,
+  // in a unified view and in a folder, whose placements it joins to its conversations.
+  const lastPage = async (view: View) => {
+    const { total } = await call<Page>(url, 'conversations', view);
+    const at = Math.max(0, Math.floor((total - 1) / PAGE_SIZE) * PAGE_SIZE);
+    const times = await call<number[]>(url, 'timed', 'conversations', [view, at], READS);
+    return { at, time: percentile(times, 0.95) };
+  };
+  const [account] = await call<Account[]>(url, 'accounts');
+  const inboxLast = await lastPage(INBOX);
+  const folderLast = await lastPage({
+    in: 'folder',
+    folder: { account: account!.id, path: 'INBOX' },
+  });
   const conversation = await call<number[]>(url, 'timed', 'conversation', [thread.id], READS);
   const search: number[] = [];
   for (const text of TYPED) {
@@ -177,6 +203,8 @@ async function readTimes(url: string) {
   }
   return {
     page: percentile(page, 0.95),
+    inboxLast,
+    folderLast,
     conversation: percentile(conversation, 0.95),
     search: percentile(search, 0.95),
   };
@@ -184,18 +212,12 @@ async function readTimes(url: string) {
 
 /** The 50-message conversation, found by its subject in the unified Inbox, newest first. */
 async function longThread(url: string): Promise<ConversationSummary> {
-  let after: string | undefined;
-  for (let pages = 0; pages < 100; pages++) {
-    const page = await call<{ items: ConversationSummary[]; next?: string }>(
-      url,
-      'conversations',
-      INBOX,
-      ...(after ? [after] : []),
-    );
+  for (let at = 0, pages = 0; pages < 100; pages++) {
+    const page = await call<Page>(url, 'conversations', INBOX, at);
     const found = page.items.find(({ subject }) => subject.endsWith(LONG_THREAD_SUBJECT));
     if (found) return found;
-    if (!page.next) break;
-    after = page.next;
+    at += page.items.length;
+    if (page.items.length === 0 || at >= page.total) break;
   }
   throw new Error('The 50-message conversation is not in the unified Inbox.');
 }

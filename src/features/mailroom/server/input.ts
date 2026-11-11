@@ -10,13 +10,7 @@ import type {
   View,
 } from '../../mail/core/index.ts';
 import type { Endpoint } from '../../providers/index.ts';
-import type {
-  AccountSetup,
-  DraftUpload,
-  FileBytes,
-  PageCursor,
-  SignInSetup,
-} from '../client/contract.ts';
+import type { AccountSetup, DraftUpload, FileBytes, SignInSetup } from '../client/contract.ts';
 import { STAMPS } from './accounts.ts';
 
 /**
@@ -87,10 +81,12 @@ export function viewOf(value: unknown): View {
   }
 }
 
-export function cursorOf(value: unknown): PageCursor | undefined {
-  if (value === undefined || value === null) return undefined;
-  if (typeof value !== 'string' || value.length > 1000)
-    throw new TypeError('That isn’t a page cursor.');
+/** A place in a list, with 0 the newest, or the start of the list when there is none. */
+export function placeOf(value: unknown): number {
+  if (value === undefined || value === null) return 0;
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    throw new TypeError('That isn’t a place in a list.');
+  }
   return value;
 }
 

@@ -216,7 +216,7 @@ test('a row change reaches the triaged conversations and no others', () => {
     { id: 'c', unread: 0, flagged: true },
   ];
 
-  expect(changeRows(rows, new Set(['a', 'c']), 'gone').map(({ id }) => id)).toEqual(['b']);
+  expect(changeRows(rows, new Set(['a', 'c']), 'gone').map((row) => row?.id)).toEqual(['b']);
   expect(changeRows(rows, new Set(['a']), { unread: 0 })).toEqual([
     { id: 'a', unread: 0, flagged: false },
     { id: 'b', unread: 1, flagged: false },
@@ -242,6 +242,24 @@ test('a row put back beside one of the same date takes the place the Mailroom gi
 
   expect(putBack([row('c'), row('a')], [row('b')])).toEqual([row('c'), row('b'), row('a')]);
   expect(putBack([row('b')], [row('c'), row('a')])).toEqual([row('c'), row('b'), row('a')]);
+});
+
+test('places whose page hasn’t arrived stay empty under a change, and rows return around them', () => {
+  const row = (id: string, date: string) => ({ id, date, unread: 0, flagged: false });
+  const a = row('a', '2026-11-09');
+  const c = row('c', '2026-11-05');
+  const d = row('d', '2026-11-03');
+  const z = row('z', '2026-11-01');
+
+  expect(changeRows([a, undefined, d], new Set(['a']), 'gone')).toEqual([undefined, d]);
+  expect(changeRows([a, undefined], new Set(['a']), { unread: 1 })).toEqual([
+    { ...a, unread: 1 },
+    undefined,
+  ]);
+  // A row returns above the first listed row it comes before, and past the last one listed.
+  expect(putBack([a, undefined, undefined, d], [c])).toEqual([a, undefined, undefined, c, d]);
+  expect(putBack([a, undefined, undefined], [z])).toEqual([a, z, undefined, undefined]);
+  expect(isShown([undefined, d], { ids: new Set(['a']), change: 'gone' })).toBe(true);
 });
 
 test('overlays lay over a snapshot in order, so an Undo after an archive shows the row again', () => {

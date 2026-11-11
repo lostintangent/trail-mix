@@ -1,6 +1,6 @@
 import { colorVars, durationVars, spacingVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { hashKey, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   startTransition,
   Suspense,
@@ -27,7 +27,12 @@ import {
   type Place,
   type View,
 } from '../../mail/core/index.ts';
-import { conversationQuery, conversationsQuery, outboxQuery } from '../../mailroom/client/index.ts';
+import {
+  conversationQuery,
+  conversationsQuery,
+  MATCHES_LISTED,
+  outboxQuery,
+} from '../../mailroom/client/index.ts';
 import {
   OutboxList,
   SendActions,
@@ -54,6 +59,7 @@ import {
   triageCommands,
   useTriage,
   type Action,
+  type Listed,
   type SelectBy,
   type Selection,
 } from '../../conversations/index.ts';
@@ -156,9 +162,8 @@ export function Workbench({
   folders,
   counts,
   conversations,
-  hasMore,
   isFetching,
-  onListNearEnd,
+  onListShown,
   sidebarFooter,
   extraCommands = NO_COMMANDS,
 }: {
@@ -171,14 +176,12 @@ export function Workbench({
   accounts: readonly Account[];
   folders: readonly Folder[];
   counts: ViewCounts;
-  /** Nothing until the view's first page arrives. */
-  conversations: readonly ConversationSummary[] | undefined;
-  /** Whether the view has pages beyond those loaded. */
-  hasMore: boolean;
+  /** The view's whole list, with places not yet fetched empty. Nothing until its first page arrives. */
+  conversations: Listed<ConversationSummary> | undefined;
   /** Whether the view's rows are on their way. */
   isFetching: boolean;
-  /** Asks for the view's next page, if it has one. */
-  onListNearEnd: () => void;
+  /** Says which rows the list shows, so the pages they lie on are fetched. */
+  onListShown: (first: number, last: number, selected: number) => void;
   sidebarFooter: ReactNode;
   /** Commands from outside the workbench, such as the theme's, for the registry. */
   extraCommands?: readonly Command[];
@@ -254,7 +257,7 @@ export function Workbench({
   // shows the archive doesn't wait for the next conversation to render.
   const triageShown = (action: Action, id: ConversationId) => {
     if (rowChange(action, view) === 'gone') {
-      const at = conversations?.findIndex((row) => row.id === id) ?? -1;
+      const at = conversations?.findIndex((row) => row?.id === id) ?? -1;
       const leaving = conversations?.[at];
       const next = conversations?.[at + 1] ?? conversations?.[at - 1];
       if (isPhone) {
@@ -276,7 +279,7 @@ export function Workbench({
    */
   const placeOf = useCallback(
     (id: ConversationId | undefined) => {
-      const at = id === undefined ? -1 : (conversations?.findIndex((row) => row.id === id) ?? -1);
+      const at = id === undefined ? -1 : (conversations?.findIndex((row) => row?.id === id) ?? -1);
       return at < 0 && vacating !== undefined && vacating.row.id === id
         ? { at: vacating.at, after: vacating.at }
         : { at, after: at + 1 };
@@ -292,7 +295,7 @@ export function Workbench({
     triage(action, selection.ids);
   };
   const markRead = (id: ConversationId) => {
-    if (conversations?.find((row) => row.id === id)?.unread) {
+    if (conversations?.find((row) => row?.id === id)?.unread) {
       triage({ do: 'read' }, [id], { quietly: true });
     }
   };
@@ -343,9 +346,9 @@ export function Workbench({
   // The reader's place renders again only as the list or the conversation shown changes.
   const readerPlace = useCallback(
     (shown: ConversationId) => (
-      <ReaderPlace at={placeOf(shown).at + 1} of={conversations?.length ?? 0} hasMore={hasMore} />
+      <ReaderPlace at={placeOf(shown).at + 1} of={conversations?.length ?? 0} />
     ),
-    [placeOf, conversations, hasMore],
+    [placeOf, conversations],
   );
   // A message's source shows over everything, whichever message it is.
   const [source, setSource] = useState<Message>();
@@ -453,7 +456,7 @@ export function Workbench({
   };
   const order = useRef<ConversationId[]>([]);
   useLayoutEffect(() => {
-    order.current = conversations?.map(({ id }) => id) ?? [];
+    order.current = conversations?.flatMap((row) => (row ? [row.id] : [])) ?? [];
   }, [conversations]);
   // On a phone, opening a conversation pushes the address, so Back slides from it to its list.
   const isPhoneNow = useRef(isPhone);
@@ -494,7 +497,7 @@ export function Workbench({
   );
   // The list's subject shows at once while the rest of the conversation is on its way.
   const subjectOf = useCallback(
-    (id: ConversationId) => conversations?.find((row) => row.id === id)?.subject,
+    (id: ConversationId) => conversations?.find((row) => row?.id === id)?.subject,
     [conversations],
   );
   const stopPicking = () => {
@@ -502,7 +505,10 @@ export function Workbench({
     setSelection(NOTHING_SELECTED);
   };
   const pickedRows = useMemo(() => {
-    const rows = conversations?.filter(({ id }) => selection.ids.includes(id)) ?? [];
+    const rows =
+      conversations?.filter(
+        (row): row is ConversationSummary => row !== undefined && selection.ids.includes(row.id),
+      ) ?? [];
     return vacating && selection.ids.includes(vacating.row.id) && !rows.includes(vacating.row)
       ? [...rows, vacating.row]
       : rows;
@@ -757,6 +763,7 @@ export function Workbench({
                       <SearchScope
                         isFullText={view.fullText === true}
                         isSearching={isFetching}
+                        isLimited={(conversations?.length ?? 0) >= MATCHES_LISTED}
                         onSearchBodies={searchBodies}
                       />
                     )}
@@ -777,6 +784,7 @@ export function Workbench({
                   )
                 }
                 viewIn={view.in}
+                listKey={hashKey([view])}
                 conversations={conversations}
                 isUpdating={isFetching}
                 marks={marks}
@@ -792,7 +800,7 @@ export function Workbench({
                     <Suspense>{selectionActions('island')}</Suspense>
                   </PickedActions>
                 }
-                onNearEnd={onListNearEnd}
+                onShown={onListShown}
                 isCollapsed={!isPhone && list.isCollapsed}
                 onExpand={() => setList({ ...list, isCollapsed: false })}
                 onShowFolders={showFolders}
@@ -1006,7 +1014,7 @@ function useSearch(view: View, onViewChange: (view: View) => void) {
       if (latest.current.in !== 'search') returnTo.current = latest.current;
       const searched: View = next === '' ? returnTo.current : { in: 'search', text: next };
       // The matches are asked for as the key goes down, not once the keystroke has been drawn.
-      void queryClient.prefetchInfiniteQuery(conversationsQuery(searched));
+      void queryClient.prefetchQuery(conversationsQuery(searched));
       onViewChange(searched);
     },
     [onViewChange, queryClient],
@@ -1025,14 +1033,15 @@ function useSearch(view: View, onViewChange: (view: View) => void) {
  * above the selected one, or the first ones while nothing is selected.
  */
 function neighbors(
-  conversations: readonly ConversationSummary[] | undefined,
+  conversations: Listed<ConversationSummary> | undefined,
   selected: ConversationId | undefined,
 ): ConversationId[] {
   if (!conversations) return [];
-  if (selected === undefined) return conversations.slice(0, 2).map(({ id }) => id);
-  const at = conversations.findIndex(({ id }) => id === selected);
+  const idsOf = (rows: Listed<ConversationSummary>) => rows.flatMap((row) => (row ? [row.id] : []));
+  if (selected === undefined) return idsOf(conversations.slice(0, 2));
+  const at = conversations.findIndex((row) => row?.id === selected);
   if (at < 0) return [];
-  return [conversations[at + 1], conversations[at - 1]].flatMap((row) => (row ? [row.id] : []));
+  return idsOf([conversations[at + 1], conversations[at - 1]]);
 }
 
 /**

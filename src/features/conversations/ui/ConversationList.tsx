@@ -29,7 +29,7 @@ import {
   type PointerEvent,
   type RefObject,
 } from 'react';
-import { Pending, TextSkeleton } from '../../../app/theme/Pending.tsx';
+import { Pending, pendingStyles, TextSkeleton } from '../../../app/theme/Pending.tsx';
 import { stampStyles } from '../../../app/theme/stamps.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type {
@@ -38,6 +38,7 @@ import type {
   Marks,
   StampColor,
 } from '../../mail/core/index.ts';
+import type { Listed } from '../core/pages.ts';
 import type { SelectBy, Selection } from '../core/selection.ts';
 import { formatListDate } from './dates.ts';
 import { Marked } from './search.tsx';
@@ -48,7 +49,7 @@ const NO_MARKS: Marks = [];
 /** A row's height before the list is first laid out: three lines of text and the row's padding. */
 const FIRST_GUESS = 72;
 
-/** How many rows short of the end the list asks for more, so the next page arrives in time. */
+/** How many rows beyond those in sight the list says it shows, so their pages arrive in time. */
 const AHEAD = 30;
 
 /** How long a finger rests on a row before it starts picking, and how far it may drift meanwhile. */
@@ -59,17 +60,21 @@ const LONG_PRESS_SLOP = 10;
 const SWIPE_SHARE = 0.4;
 
 /**
- * The conversations of a view, newest first, drawn only where the list is scrolled to. Selected
- * conversations lift from the sheet onto paper. The list takes focus as one control and moves its
- * selection with the arrow keys, Home, End and the page keys, and Shift extends it. A click selects
- * one, Cmd or Ctrl adds or removes one, and Shift selects the range from the last pick. A finger held
- * on a row starts picking, and while picking, a tap adds or removes. A finger that swipes a row far
- * enough to the left archives it. The sheet the list lies on draws
- * its focus ring, so the list carries StyleX's default marker for
+ * The conversations of a view, newest first, drawn only where the list is scrolled to. The list is
+ * as long as the view, and a row whose page hasn't arrived stands as a skeleton until it has. Rows
+ * arriving or leaving above the top row in sight leave it where it is, so mail that arrives while
+ * the list is scrolled down moves nothing, while at the top it shows. Selected conversations lift
+ * from the sheet onto paper. The list takes focus as one control and moves its selection with the
+ * arrow keys, Home, End and the page keys, and Shift extends it. A key that lands on a row still on
+ * its way selects it once it arrives. A click selects one, Cmd or Ctrl adds or removes one, and
+ * Shift selects the range from the last pick. A finger held on a row starts picking, and while
+ * picking, a tap adds or removes. A finger that swipes a row far enough to the left archives it.
+ * The sheet the list lies on draws its focus ring, so the list carries StyleX's default marker for
  * `stylex.when.descendant(':focus-visible')`.
  */
 export function ConversationList({
   label,
+  listKey,
   conversations,
   marks = NO_MARKS,
   isUpdating = false,
@@ -80,10 +85,13 @@ export function ConversationList({
   onLongPress,
   onSwipe,
   onAhead,
-  onNearEnd,
+  onShown,
 }: {
   label: string;
-  conversations: readonly ConversationSummary[];
+  /** Names the list shown. Another list starts at its top. */
+  listKey: string;
+  /** Every conversation in the list, with those whose page hasn't arrived yet empty. */
+  conversations: Listed<ConversationSummary>;
   /** What a search matched, marked in each row. The same while the search stays the same. */
   marks?: Marks;
   /** Whether newer rows are on their way, as while a search is typed. */
@@ -101,15 +109,21 @@ export function ConversationList({
    * its row, and again with `isPressed` as a mouse or pen presses it. The same function each render.
    */
   onAhead?: (id: ConversationId, isPressed: boolean) => void;
-  /** Called while the rows drawn come within reach of the end. */
-  onNearEnd: () => void;
+  /**
+   * Says which rows the list shows: from the first to the last in sight, with some to spare either
+   * side, and the selected one, which stays drawn out of sight.
+   */
+  onShown: (first: number, last: number, selected: number) => void;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const ruler = useRef<HTMLDivElement>(null);
   const listId = useId();
   const rowHeight = useRowHeight(ruler);
   // The row the keys move from and the list names as active: the last one picked.
-  const selectedIndex = conversations.findIndex(({ id }) => id === selection.anchor);
+  const selectedIndex = useMemo(() => {
+    const { anchor } = selection;
+    return anchor === undefined ? -1 : conversations.findIndex((row) => row?.id === anchor);
+  }, [conversations, selection]);
   const selected = useMemo(() => new Set(selection.ids), [selection.ids]);
   const reportOffset = useRef<(offset: number, isScrolling: boolean) => void>(null);
   const virtualizer = useVirtualizer({
@@ -119,8 +133,9 @@ export function ConversationList({
       reportOffset.current = report;
       return observeElementOffset(instance, report);
     },
+    // Every row is one height, so the list places rows by their index alone, and nothing is
+    // measured again as rows arrive.
     estimateSize: () => rowHeight,
-    getItemKey: (index) => conversations[index]?.id ?? index,
     overscan: 6,
     // The selected row stays drawn when it scrolls away, since the list names it as the active one.
     rangeExtractor: (range) => {
@@ -131,6 +146,43 @@ export function ConversationList({
     },
   });
   useLayoutEffect(() => virtualizer.measure(), [virtualizer, rowHeight]);
+  const drawn = virtualizer.getVirtualItems();
+  const inSight = virtualizer.range;
+  /** Scrolls the list to `top`, and tells the virtualizer at once, so this commit draws the rows. */
+  const scrollTo = (top: number) => {
+    const list = scroller.current;
+    if (!list || list.scrollTop === top) return;
+    list.scrollTop = top;
+    reportOffset.current?.(list.scrollTop, false);
+  };
+  // The top row in sight stays put while rows above it come and go, unless it is the list's first.
+  const topRow = useRef<{
+    rows: Listed<ConversationSummary>;
+    list: string;
+    id: ConversationId;
+    index: number;
+  }>(undefined);
+  useLayoutEffect(() => {
+    const was = topRow.current;
+    if (was && was.rows !== conversations && was.list === listKey && was.index > 0) {
+      const index = conversations.findIndex((row) => row?.id === was.id);
+      if (index >= 0 && index !== was.index) {
+        scrollTo((scroller.current?.scrollTop ?? 0) + (index - was.index) * rowHeight);
+        topRow.current = { ...was, rows: conversations, index };
+        return;
+      }
+    }
+    const at = inSight?.startIndex ?? 0;
+    const row = conversations[at];
+    topRow.current = row && { rows: conversations, list: listKey, id: row.id, index: at };
+  });
+  // Another list starts at its top.
+  const listShown = useRef(listKey);
+  useLayoutEffect(() => {
+    if (listShown.current === listKey) return;
+    listShown.current = listKey;
+    scrollTo(0);
+  });
   // A selection moved from elsewhere, as by J and K, scrolls into view. The list's own keys scroll as
   // they move, in the same commit, so they're left alone here.
   const isMovedHere = useRef(false);
@@ -138,10 +190,24 @@ export function ConversationList({
     if (isMovedHere.current) isMovedHere.current = false;
     else if (selectedIndex >= 0) virtualizer.scrollToIndex(selectedIndex, { align: 'auto' });
   }, [virtualizer, selectedIndex]);
-  const lastDrawn = virtualizer.getVirtualItems().at(-1)?.index ?? -1;
+  const first = Math.max(0, (inSight?.startIndex ?? 0) - AHEAD);
+  const last = (inSight?.endIndex ?? 0) + AHEAD;
   useEffect(() => {
-    if (lastDrawn >= conversations.length - AHEAD) onNearEnd();
-  }, [lastDrawn, conversations.length, onNearEnd]);
+    onShown(first, last, selectedIndex);
+  }, [first, last, selectedIndex, onShown]);
+  // A key that moves to a row whose page hasn't arrived selects it once it has, unless the selection
+  // moved on meanwhile.
+  const awaited = useRef<{ index: number; by: SelectBy }>(undefined);
+  useEffect(() => {
+    awaited.current = undefined;
+  }, [selection.anchor]);
+  useLayoutEffect(() => {
+    const row = awaited.current && conversations[awaited.current.index];
+    if (!row || !awaited.current) return;
+    const { by } = awaited.current;
+    awaited.current = undefined;
+    onSelect(row.id, by);
+  }, [conversations, onSelect]);
   const optionId = (index: number) => `${listId}-${index}`;
 
   const move = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -156,11 +222,14 @@ export function ConversationList({
       Home: 0,
       End: last,
     }[event.key];
-    const target = to === undefined ? undefined : conversations[to];
-    if (to === undefined || !target) return;
+    if (to === undefined || to < 0) return;
     event.preventDefault();
-    isMovedHere.current = true;
-    onSelect(target.id, event.shiftKey ? 'extend' : 'only');
+    const target = conversations[to];
+    const by = event.shiftKey ? 'extend' : 'only';
+    if (target) {
+      isMovedHere.current = true;
+      onSelect(target.id, by);
+    } else awaited.current = { index: to, by };
     // A move that scrolls the list tells the virtualizer where it went at once, instead of in the
     // next frame's scroll event. So the rows it brings in render in the selection's own commit, and
     // that scroll event, finding the offset already known, renders nothing.
@@ -178,16 +247,17 @@ export function ConversationList({
       aria-label={label}
       aria-multiselectable
       aria-activedescendant={selectedIndex < 0 ? undefined : optionId(selectedIndex)}
-      aria-busy={isUpdating}
+      aria-busy={isUpdating || drawn.some(({ index }) => !conversations[index])}
       tabIndex={0}
       onKeyDown={move}
       {...stylex.props(styles.scroller, stylex.defaultMarker())}
     >
       <RowRuler ref={ruler} />
       <div {...stylex.props(styles.canvas(virtualizer.getTotalSize()))}>
-        {virtualizer.getVirtualItems().map(({ index, start }) => {
+        {drawn.map(({ index, start }) => {
           const conversation = conversations[index];
-          if (!conversation) return null;
+          if (!conversation)
+            return <RowSkeleton key={`pending ${index}`} row={index} top={start} />;
           return (
             <Row
               key={conversation.id}
@@ -309,31 +379,44 @@ const Row = memo(function Row({
 export function ConversationListSkeleton({ label }: { label: string }) {
   return (
     <Pending label={`Loading ${label}`} xstyle={styles.skeletons} holdsPlace={false}>
-      {Array.from({ length: SKELETON_ROWS }, (_, row) => {
-        const width = (widths: readonly string[]) => widths[row % widths.length] ?? '50%';
-        return (
-          <div key={row} {...stylex.props(styles.row, styles.standing)}>
-            <Skeleton width="3px" radius="none" index={row} xstyle={styles.stamp} />
-            <span {...stylex.props(styles.lines)}>
-              <span {...stylex.props(styles.top, styles.line)}>
-                <span {...stylex.props(styles.sender, styles.grow)}>
-                  <TextSkeleton width={width(SENDER_WIDTHS)} index={row} />
-                </span>
-                <span {...stylex.props(styles.time)}>
-                  <TextSkeleton width="3em" index={row} />
-                </span>
-              </span>
-              <span {...stylex.props(styles.line)}>
-                <TextSkeleton width={width(SUBJECT_WIDTHS)} index={row} />
-              </span>
-              <span {...stylex.props(styles.preview, styles.line)}>
-                <TextSkeleton width={width(PREVIEW_WIDTHS)} index={row} />
-              </span>
-            </span>
-          </div>
-        );
-      })}
+      {Array.from({ length: SKELETON_ROWS }, (_, row) => (
+        <SkeletonRow key={row} row={row} xstyle={styles.standing} />
+      ))}
     </Pending>
+  );
+}
+
+/**
+ * A row in the list whose page is on its way, where the row will lie. It shows only once late, and
+ * assistive technology hears the list is busy instead.
+ */
+function RowSkeleton({ row, top }: { row: number; top: number }) {
+  return <SkeletonRow row={row} xstyle={[styles.placed(top), pendingStyles.late]} />;
+}
+
+/** A row in the shape of a conversation's, its lines of lengths that differ from row to row. */
+function SkeletonRow({ row, xstyle }: { row: number; xstyle: stylex.StyleXStyles }) {
+  const width = (widths: readonly string[]) => widths[row % widths.length] ?? '50%';
+  return (
+    <div aria-hidden {...stylex.props(styles.row, styles.pending, xstyle)}>
+      <Skeleton width="3px" radius="none" index={row} xstyle={styles.stamp} />
+      <span {...stylex.props(styles.lines)}>
+        <span {...stylex.props(styles.top, styles.line)}>
+          <span {...stylex.props(styles.sender, styles.grow)}>
+            <TextSkeleton width={width(SENDER_WIDTHS)} index={row} />
+          </span>
+          <span {...stylex.props(styles.time)}>
+            <TextSkeleton width="3em" index={row} />
+          </span>
+        </span>
+        <span {...stylex.props(styles.line)}>
+          <TextSkeleton width={width(SUBJECT_WIDTHS)} index={row} />
+        </span>
+        <span {...stylex.props(styles.preview, styles.line)}>
+          <TextSkeleton width={width(PREVIEW_WIDTHS)} index={row} />
+        </span>
+      </span>
+    </div>
   );
 }
 
@@ -523,6 +606,8 @@ const styles = stylex.create({
   },
   standing: {
     position: 'relative',
+  },
+  pending: {
     cursor: 'default',
     backgroundColor: 'transparent',
   },

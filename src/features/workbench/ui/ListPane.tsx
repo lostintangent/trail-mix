@@ -18,6 +18,7 @@ import { PhoneIsland } from './PhoneIsland.tsx';
 import {
   ConversationList,
   ConversationListSkeleton,
+  type Listed,
   type SelectBy,
   type Selection,
 } from '../../conversations/index.ts';
@@ -47,6 +48,7 @@ export function ListPane({
   below,
   list,
   viewIn,
+  listKey,
   conversations,
   isUpdating,
   marks,
@@ -58,7 +60,7 @@ export function ListPane({
   onSwipe,
   onAhead,
   picked,
-  onNearEnd,
+  onShown,
   isCollapsed,
   onExpand,
   onShowFolders,
@@ -79,8 +81,10 @@ export function ListPane({
   list?: ReactNode;
   /** What kind of view the list shows, which says what an empty list means. */
   viewIn: View['in'];
-  /** Nothing until the view's first page arrives. */
-  conversations: readonly ConversationSummary[] | undefined;
+  /** Names the view's list. Another list starts at its top. */
+  listKey: string;
+  /** The view's whole list, with places not yet fetched empty. Nothing until its first page arrives. */
+  conversations: Listed<ConversationSummary> | undefined;
   /** Whether newer rows are on their way. */
   isUpdating: boolean;
   /** What a search matched, marked in each row. */
@@ -95,7 +99,8 @@ export function ListPane({
   onAhead?: (id: ConversationId, isPressed: boolean) => void;
   /** While picking on a phone, what the island offers for the conversations picked. */
   picked: ReactNode;
-  onNearEnd: () => void;
+  /** Says which rows the list shows, so the pages they lie on are fetched. */
+  onShown: (first: number, last: number, selected: number) => void;
   isCollapsed: boolean;
   onExpand: () => void;
   onShowFolders: () => void;
@@ -166,6 +171,7 @@ export function ListPane({
         ) : conversations ? (
           <ConversationList
             label={title}
+            listKey={listKey}
             conversations={conversations}
             isUpdating={isUpdating}
             marks={marks}
@@ -176,7 +182,7 @@ export function ListPane({
             onLongPress={onLongPress}
             onSwipe={onSwipe}
             onAhead={onAhead}
-            onNearEnd={onNearEnd}
+            onShown={onShown}
           />
         ) : (
           <ConversationListSkeleton label={title} />

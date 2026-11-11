@@ -250,17 +250,17 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     return Promise.resolve(this.store.folders());
   }
 
-  async conversations(view: View, after?: string): Promise<Page> {
+  async conversations(view: View, at?: number): Promise<Page> {
     const checked = input.viewOf(view);
-    const cursor = input.cursorOf(after);
+    const place = input.placeOf(at);
     if (checked.in === 'outbox') throw new TypeError('The Outbox is listed by outbox().');
-    if (checked.in !== 'search') return this.store.page(checked, cursor);
-    if (!checked.fullText) return this.store.search(checked.text, cursor);
-    // A first page asks the servers again. Later pages read what that one found.
-    if (cursor === undefined || this.found?.text !== checked.text) {
+    if (checked.in !== 'search') return this.store.page(checked, place);
+    if (!checked.fullText) return this.store.search(checked.text, place);
+    // The first page asks the servers again. Pages further down read what that one found.
+    if (place === 0 || this.found?.text !== checked.text) {
       this.found = await this.searchServers(checked.text);
     }
-    return pageAfter(this.found.rows, cursor);
+    return pageAfter(this.found.rows, place);
   }
 
   conversation(id: ConversationId): Promise<Message[]> {

@@ -52,11 +52,10 @@ export function member(name: string, worker: () => LocalWorker) {
   /** Every row of a view, following its pages. */
   async function page(view: View): Promise<ConversationSummary[]> {
     const rows: ConversationSummary[] = [];
-    for (let after: string | undefined; ;) {
-      const next: Page = await call<Page>('conversations', view, after);
-      rows.push(...next.items);
-      if (!next.next) return rows;
-      after = next.next;
+    for (;;) {
+      const page: Page = await call<Page>('conversations', view, rows.length);
+      rows.push(...page.items);
+      if (page.items.length === 0 || rows.length >= page.total) return rows;
     }
   }
 

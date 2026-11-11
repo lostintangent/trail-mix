@@ -5,16 +5,15 @@ import { RegisteredCommandButton } from '../../commands/index.ts';
 
 /**
  * Where the conversation shown sits in the list, as "3 of 12", and the moves to the ones either
- * side of it. The list loads a page at a time, so while it has more to load it says "3 of 100+".
- * A conversation the list no longer holds, as one just archived from Flagged may be, has no place.
+ * side of it. A conversation the list no longer holds, as one just archived from Flagged may be,
+ * has no place.
  */
-export function ReaderPlace({ at, of, hasMore }: { at: number; of: number; hasMore: boolean }) {
+export function ReaderPlace({ at, of }: { at: number; of: number }) {
   return (
     <span {...stylex.props(styles.place)}>
       {at > 0 && (
         <span {...stylex.props(styles.count)}>
           {at} of {of}
-          {hasMore ? '+' : ''}
         </span>
       )}
       <RegisteredCommandButton id="list.previous" />

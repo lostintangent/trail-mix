@@ -10,7 +10,7 @@ const keys = {
   thisDevice: ['this-device'],
   folders: ['folders'],
   outbox: ['outbox'],
-  conversations: (view: unknown) => ['conversations', view],
+  page: (view: unknown, at: number) => ['conversations', view, at],
   conversation: (id: string) => ['conversation', id],
   body: (message: typeof ref) => ['body', message],
 };
@@ -30,7 +30,7 @@ describe('what is kept', () => {
         keys.accounts,
         keys.folders,
         keys.outbox,
-        keys.conversations({ in: 'inbox' }),
+        keys.page({ in: 'inbox' }, 0),
         keys.conversation('c1'),
         keys.body(ref),
       ]),
@@ -42,13 +42,12 @@ describe('what is kept', () => {
     ]);
   });
 
-  test('a list keeps its first page, which is what opens first', () => {
-    const list = persisted(keys.conversations({ in: 'inbox' }), {
-      pages: [{ rows: [1, 2] }, { rows: [3, 4] }, { rows: [5] }],
-      pageParams: [undefined, 'p2', 'p3'],
-    });
-    expect(keptOf(list).state.data).toEqual({ pages: [{ rows: [1, 2] }], pageParams: [undefined] });
-    expect(list.state.data).toMatchObject({ pages: [{}, {}, {}] });
+  test('a list keeps its first page, which is what opens first, and no page further down', () => {
+    expect([0, 50, 100].map((at) => isKept(keys.page({ in: 'inbox' }, at)))).toEqual([
+      true,
+      false,
+      false,
+    ]);
   });
 
   test('a body knows its size, and nothing else counts', () => {

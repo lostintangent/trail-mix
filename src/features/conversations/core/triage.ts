@@ -9,6 +9,7 @@ import type {
   MessageRef,
   View,
 } from '../../mail/core/index.ts';
+import type { Listed } from './pages.ts';
 
 /**
  * Triage: what archiving, deleting, moving, flagging and marking read do to conversations. A move
@@ -109,33 +110,41 @@ export function rowChange(action: Action, view: View): RowChange | undefined {
   }
 }
 
-/** A list's rows after some of its conversations changed. */
+/** A list's rows after some of its conversations changed. Places not yet fetched stay as they are. */
 export function changeRows<Row extends { id: ConversationId }>(
-  rows: readonly Row[],
+  rows: Listed<Row>,
   ids: ReadonlySet<ConversationId>,
   change: RowChange,
-): Row[] {
-  if (change === 'gone') return rows.filter(({ id }) => !ids.has(id));
-  return rows.map((row) => (ids.has(row.id) ? { ...row, ...change } : row));
+): (Row | undefined)[] {
+  if (change === 'gone') return rows.filter((row) => !row || !ids.has(row.id));
+  return rows.map((row) => (row && ids.has(row.id) ? { ...row, ...change } : row));
 }
 
 /**
  * A list's rows with some conversations' earlier rows put back, as an Undo or a refusal shows them:
  * a row still listed takes its earlier self, and a row that left returns where the Mailroom lists
- * it, newest first, and by id, highest first, among rows of one date.
+ * it, newest first, and by id, highest first, among rows of one date. Among places not yet fetched,
+ * it returns just above the first row listed after it.
  */
 export function putBack<Row extends { id: ConversationId; date: string }>(
-  rows: readonly Row[],
+  rows: Listed<Row>,
   earlier: readonly Row[],
-): Row[] {
+): (Row | undefined)[] {
   const byId = new Map(earlier.map((row) => [row.id, row]));
-  const kept = rows.map((row) => byId.get(row.id) ?? row);
-  const listed = new Set(rows.map(({ id }) => id));
-  const returning = earlier.filter(({ id }) => !listed.has(id));
-  return [...kept, ...returning].toSorted((a, b) =>
-    a.date !== b.date ? (a.date < b.date ? 1 : -1) : a.id < b.id ? 1 : a.id > b.id ? -1 : 0,
-  );
+  const shown = rows.map((row) => (row && byId.get(row.id)) ?? row);
+  const listed = new Set(rows.flatMap((row) => (row ? [row.id] : [])));
+  for (const returning of earlier.filter(({ id }) => !listed.has(id)).toSorted(listOrder)) {
+    const before = shown.findIndex((row) => row !== undefined && listOrder(returning, row) < 0);
+    shown.splice(before < 0 ? shown.findLastIndex(Boolean) + 1 : before, 0, returning);
+  }
+  return shown;
 }
+
+/** The order the Mailroom lists rows in: newest first, and by id, highest first, among one date. */
+const listOrder = (
+  a: { id: ConversationId; date: string },
+  b: { id: ConversationId; date: string },
+) => (a.date !== b.date ? (a.date < b.date ? 1 : -1) : a.id < b.id ? 1 : a.id > b.id ? -1 : 0);
 
 /**
  * What a list shows ahead of the Mailroom's own list: some rows changed or gone, or earlier rows put
@@ -152,10 +161,10 @@ type ListRow = { id: ConversationId; date: string } & Pick<
 
 /** A list's rows with overlays laid over them, in the order they were made. */
 export function overlaid<Row extends ListRow>(
-  rows: readonly Row[],
+  rows: Listed<Row>,
   overlays: readonly Overlay<Row>[],
-): readonly Row[] {
-  return overlays.reduce<readonly Row[]>(
+): Listed<Row> {
+  return overlays.reduce<Listed<Row>>(
     (shown, overlay) =>
       'returning' in overlay
         ? putBack(shown, overlay.returning)
@@ -165,16 +174,16 @@ export function overlaid<Row extends ListRow>(
 }
 
 /** Whether a list's rows already show what an overlay would, so it has nothing left to do. */
-export function isShown<Row extends ListRow>(rows: readonly Row[], overlay: Overlay<Row>): boolean {
+export function isShown<Row extends ListRow>(rows: Listed<Row>, overlay: Overlay<Row>): boolean {
   if ('returning' in overlay) {
-    const listed = new Map(rows.map((row) => [row.id, row]));
+    const listed = new Map(rows.flatMap((row) => (row ? [[row.id, row] as const] : [])));
     return overlay.returning.every((earlier) => {
       const row = listed.get(earlier.id);
       return row?.unread === earlier.unread && row.flagged === earlier.flagged;
     });
   }
   const { ids, change } = overlay;
-  const triaged = rows.filter(({ id }) => ids.has(id));
+  const triaged = rows.filter((row): row is Row => row !== undefined && ids.has(row.id));
   if (change === 'gone') return triaged.length === 0;
   return triaged.every((row) =>
     (Object.keys(change) as (keyof typeof change)[]).every((field) => row[field] === change[field]),

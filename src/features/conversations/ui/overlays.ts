@@ -1,7 +1,8 @@
 import { hashKey, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import type { ConversationSummary, View } from '../../mail/core/index.ts';
-import { conversationsQuery } from '../../mailroom/client/index.ts';
+import { keys } from '../../mailroom/client/index.ts';
+import type { Listed } from '../core/pages.ts';
 import { isShown, overlaid, type Overlay } from '../core/triage.ts';
 
 /**
@@ -51,7 +52,7 @@ export class Overlays {
   }
 
   /** Lifts the overlays a fresh snapshot of a view's list already shows. */
-  agreeWith(view: View, rows: readonly ConversationSummary[]) {
+  agreeWith(view: View, rows: Listed<ConversationSummary>) {
     const key = keyOf(view);
     const shown = this.#laid.filter((laid) => laid.view === key && isShown(rows, laid.overlay));
     for (const laid of shown) clearTimeout(laid.expiry);
@@ -64,7 +65,7 @@ export class Overlays {
   }
 }
 
-const keyOf = (view: View) => hashKey(conversationsQuery(view).queryKey);
+const keyOf = (view: View) => hashKey(keys.conversations(view));
 
 function laidOn(laid: readonly Laid[], view: View): Overlay[] {
   const key = keyOf(view);
@@ -86,8 +87,8 @@ export function overlaysOf(queryClient: QueryClient): Overlays {
  */
 export function useTriagedList(
   view: View,
-  rows: readonly ConversationSummary[] | undefined,
-): readonly ConversationSummary[] | undefined {
+  rows: Listed<ConversationSummary> | undefined,
+): Listed<ConversationSummary> | undefined {
   const laid = overlaysOf(useQueryClient());
   const all = useSyncExternalStore(laid.subscribe, laid.all);
   useEffect(() => {

@@ -3,7 +3,7 @@ import { EmptyState } from '@astryxdesign/core/EmptyState';
 import { Icon } from '@astryxdesign/core/Icon';
 import { colorVars, spacingVars, typeScaleVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, useRouter } from '@tanstack/react-router';
 import { CloudOff } from 'lucide-react';
 import {
@@ -17,7 +17,7 @@ import {
 } from 'react';
 import { FirstRun, preloadFirstRun } from '../features/accounts/index.ts';
 import type { Command } from '../features/commands/index.ts';
-import { useTriagedList } from '../features/conversations/index.ts';
+import { useConversations } from '../features/conversations/index.ts';
 import { standing, useChangedFolders, viewCounts } from '../features/folders/index.ts';
 import {
   addressOf,
@@ -61,7 +61,7 @@ export const Route = createFileRoute('/')({
     void queryClient.prefetchQuery(accountsQuery);
     void queryClient.prefetchQuery(foldersQuery);
     void queryClient.prefetchQuery(outboxQuery);
-    if (view.in !== 'outbox') void queryClient.prefetchInfiniteQuery(conversationsQuery(view));
+    if (view.in !== 'outbox') void queryClient.prefetchQuery(conversationsQuery(view));
     if (open !== undefined) void queryClient.prefetchQuery(conversationQuery(open));
   },
   component: App,
@@ -217,20 +217,10 @@ function Desk({
   }, [view, isHeld, changePlace]);
   const outbox = useQuery(outboxQuery).data ?? NONE;
   const counts = useMemo(() => viewCounts(folders, outbox), [folders, outbox]);
-  const { data, hasNextPage, isFetching, isFetchingNextPage, fetchNextPage } = useInfiniteQuery({
-    ...conversationsQuery(view),
-    // The Outbox lists sends, not conversations.
+  // The Outbox lists sends, not conversations.
+  const { conversations, isFetching, show } = useConversations(view, {
     enabled: view.in !== 'outbox',
-    // While a search is typed, the results so far stay until the next arrive, so the list doesn't
-    // blink between keystrokes.
-    placeholderData: (previous, previousQuery) =>
-      view.in === 'search' && previousQuery?.queryKey[1].in === 'search' ? previous : undefined,
   });
-  const listed = useMemo(() => data?.pages.flatMap(({ items }) => items), [data]);
-  const conversations = useTriagedList(view, listed);
-  const onListNearEnd = useCallback(() => {
-    if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
-  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
 
   return (
     <Workbench
@@ -241,9 +231,8 @@ function Desk({
       folders={folders}
       counts={counts}
       conversations={conversations}
-      hasMore={hasNextPage}
       isFetching={isFetching}
-      onListNearEnd={onListNearEnd}
+      onListShown={show}
       sidebarFooter={sidebarFooter}
       extraCommands={extraCommands}
     />

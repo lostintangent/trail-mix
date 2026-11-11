@@ -13,10 +13,15 @@ const KEPT_KINDS: ReadonlySet<unknown> = new Set([
   'body',
 ]);
 
-/** Whether a snapshot is kept, by its query key. Sign-ins sit under accounts, and aren't. */
+/**
+ * Whether a snapshot is kept, by its query key. Sign-ins sit under accounts, and aren't. A list is
+ * kept by its first page, which is what opens first and says how long the list is.
+ */
 export function isKept(queryKey: readonly unknown[]): boolean {
   const [kind] = queryKey;
-  return KEPT_KINDS.has(kind) && !(kind === 'accounts' && queryKey.length > 1);
+  if (kind === 'accounts') return queryKey.length === 1;
+  if (kind === 'conversations') return queryKey[2] === 0;
+  return KEPT_KINDS.has(kind);
 }
 
 /** How long a snapshot is kept after it was last fetched: as long as an idle Mailroom checks mail. */
@@ -36,17 +41,12 @@ export type Persisted = {
   buster: string;
 };
 
-/** A snapshot as it is kept: a list holds its first page only, and a body knows its size. */
+/** A snapshot as it is kept: a body knows its size. */
 export type Kept = Persisted & { bytes: number };
 
 export function keptOf(persisted: Persisted): Kept {
   const [kind] = persisted.queryKey;
-  const { data } = persisted.state;
-  if (kind === 'conversations' && isPaged(data)) {
-    const first = { pages: data.pages.slice(0, 1), pageParams: data.pageParams.slice(0, 1) };
-    return { ...persisted, state: { ...persisted.state, data: first }, bytes: 0 };
-  }
-  const bytes = kind === 'body' ? (JSON.stringify(data)?.length ?? 0) : 0;
+  const bytes = kind === 'body' ? (JSON.stringify(persisted.state.data)?.length ?? 0) : 0;
   return { ...persisted, bytes };
 }
 
@@ -66,13 +66,4 @@ export function evictions(held: readonly Held[], limits = BODY_LIMITS): string[]
     if (index >= limits.count || bytes > limits.bytes) dropped.push(body.key);
   });
   return dropped;
-}
-
-function isPaged(data: unknown): data is { pages: unknown[]; pageParams: unknown[] } {
-  return (
-    typeof data === 'object' &&
-    data !== null &&
-    Array.isArray((data as { pages?: unknown }).pages) &&
-    Array.isArray((data as { pageParams?: unknown }).pageParams)
-  );
 }

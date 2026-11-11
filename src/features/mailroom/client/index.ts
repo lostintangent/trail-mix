@@ -5,13 +5,13 @@ export type {
   Endpoint,
   Mailroom,
   Page,
-  PageCursor,
   Queries,
   SignIn,
   SignInPreset,
   SignInSetup,
   ThisDevice,
 } from './contract.ts';
+export { MATCHES_LISTED, PAGE_SIZE } from './contract.ts';
 export { whatFailed } from './failed.ts';
 export { useHints } from './hints.ts';
 export {
@@ -20,6 +20,7 @@ export {
   conversationQuery,
   conversationsQuery,
   foldersQuery,
+  keys,
   outboxQuery,
   signInPresetsQuery,
   signInsQuery,

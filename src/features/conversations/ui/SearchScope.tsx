@@ -3,19 +3,28 @@ import { Spinner } from '@astryxdesign/core/Spinner';
 import { spacingVars, typeScaleVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { tm } from '../../../app/theme/tokens.stylex.ts';
+import { MATCHES_LISTED } from '../../mailroom/client/index.ts';
 
 export type SearchScopeProps = {
   isFullText: boolean;
   isSearching: boolean;
+  /** Whether more conversations match than a search lists, so it lists only the newest. */
+  isLimited: boolean;
   onSearchBodies: () => void;
 };
 
 /**
  * Under a search's title: what it looked through, and the way to look through message bodies too,
  * which asks the mail servers and so is slower. Editing the search looks through the index again.
- * It loads apart from the first rows, once a search begins.
+ * A search that matches more than it lists says it lists the newest. It loads apart from the first
+ * rows, once a search begins.
  */
-export function SearchScope({ isFullText, isSearching, onSearchBodies }: SearchScopeProps) {
+export function SearchScope({
+  isFullText,
+  isSearching,
+  isLimited,
+  onSearchBodies,
+}: SearchScopeProps) {
   if (isFullText) {
     return (
       <p role="status" {...stylex.props(styles.scope)}>
@@ -29,7 +38,8 @@ export function SearchScope({ isFullText, isSearching, onSearchBodies }: SearchS
   return (
     <p {...stylex.props(styles.scope)}>
       <span>
-        Matches in people, subjects and previews.{' '}
+        {isLimited ? `The newest ${MATCHES_LISTED.toLocaleString('en')} matches` : 'Matches'} in
+        people, subjects and previews.{' '}
         <Link type="supporting" onClick={onSearchBodies}>
           Search message bodies too
         </Link>

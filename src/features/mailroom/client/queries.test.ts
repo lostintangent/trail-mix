@@ -26,7 +26,7 @@ const snapshots: [string, Key][] = [
   ['outbox', keys.outbox],
   ...views.map((view): [string, Key] => [
     `list of ${view.in === 'folder' ? `${view.folder.account} ${view.folder.path}` : view.in}`,
-    keys.conversations(view),
+    keys.page(view, 0),
   ]),
   ['open conversation', keys.conversation('c1')],
   ['body', keys.body(ref)],
@@ -47,6 +47,14 @@ test('a change to a folder’s mail refetches its counts, its list, every view a
     'list of search',
     'open conversation',
   ]);
+});
+
+test('a list’s pages go stale together, wherever they lie in it', () => {
+  const hint: Hint = { changed: 'conversations', folder: inbox };
+  const pages = [0, 50, 22_650].map((at) => keys.page({ in: 'folder', folder: inbox }, at));
+
+  expect(pages.map((key) => isStale(key, hint))).toEqual([true, true, true]);
+  expect(isStale(keys.page({ in: 'folder', folder: archive }, 50), hint)).toBe(false);
 });
 
 test('accounts, folders and the Outbox each refetch only what shows them', () => {

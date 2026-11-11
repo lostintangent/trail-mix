@@ -1,15 +1,14 @@
-import { useQueryClient, type InfiniteData, type QueryClient } from '@tanstack/react-query';
+import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useCallback, useRef, useState } from 'react';
 import { folderName } from '../../folders/index.ts';
-import type { ConversationId, Folder, Message, View } from '../../mail/core/index.ts';
-import {
-  bodyQuery,
-  conversationQuery,
-  conversationsQuery,
-  mailroom,
-  type Page,
-  type PageCursor,
-} from '../../mailroom/client/index.ts';
+import type {
+  ConversationId,
+  ConversationSummary,
+  Folder,
+  Message,
+  View,
+} from '../../mail/core/index.ts';
+import { bodyQuery, conversationQuery, mailroom } from '../../mailroom/client/index.ts';
 import {
   changeMessages,
   commandFor,
@@ -25,6 +24,7 @@ import { afterPaint } from '../../../shared/afterPaint.ts';
 import { reasonOf } from '../../../shared/reasons.ts';
 import { toast } from '../../../shared/toasts.tsx';
 import { overlaysOf } from './overlays.ts';
+import { fetchedList } from './useConversations.ts';
 
 /** Triages some of a view's conversations, by default saying so with a way to undo it. */
 export type Triage = (
@@ -32,8 +32,6 @@ export type Triage = (
   conversations: readonly ConversationId[],
   options?: { quietly?: boolean },
 ) => void;
-
-type Pages = InfiniteData<Page, PageCursor | undefined>;
 
 /**
  * Triage from the browser. The list shows the change at once, laid over its snapshot until the
@@ -60,9 +58,10 @@ export function useTriage(
   const triage = useCallback<Triage>(
     (action, ids, { quietly = false } = {}) => {
       const overlays = overlaysOf(queryClient);
-      const pages = queryClient.getQueryData<Pages>(conversationsQuery(view).queryKey);
-      const listed = overlaid(pages?.pages.flatMap(({ items }) => items) ?? [], overlays.on(view));
-      const earlierRows = listed.filter(({ id }) => ids.includes(id));
+      const listed = overlaid(fetchedList(queryClient, view) ?? [], overlays.on(view));
+      const earlierRows = listed.filter(
+        (row): row is ConversationSummary => row !== undefined && ids.includes(row.id),
+      );
       const earlierMessages = new Map<ConversationId, Message[]>();
       const change = rowChange(action, view);
       const laid = change && overlays.lay(view, { ids: new Set(ids), change });

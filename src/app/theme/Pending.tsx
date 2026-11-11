@@ -31,7 +31,7 @@ export function Pending({
       aria-busy
       // Its appearing begins once it is late, under reduced motion too, which is when to draw it.
       onAnimationStart={() => setDrawn(true)}
-      {...stylex.props(styles.pending, xstyle)}
+      {...stylex.props(pendingStyles.late, xstyle)}
     >
       <VisuallyHidden>{label}</VisuallyHidden>
       {isDrawn && children}
@@ -52,14 +52,18 @@ const appear = stylex.keyframes({
   to: { opacity: 1 },
 });
 
-const styles = stylex.create({
-  pending: {
+/** What a skeleton wears to show only once it is late, as `Pending` does. */
+export const pendingStyles = stylex.create({
+  late: {
     animationName: appear,
     animationDuration: { default: durationVars['--duration-fast'], [media.reducedMotion]: '0s' },
     animationDelay: tm.skeletonDelay,
     animationFillMode: 'both',
     animationTimingFunction: 'ease-out',
   },
+});
+
+const styles = stylex.create({
   text: {
     display: 'inline-block',
     verticalAlign: 'middle',
