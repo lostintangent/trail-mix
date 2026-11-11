@@ -8,7 +8,15 @@ import { readAccent, saveAccent, showAccent, subscribeToAccent } from './accent.
 export function useAccent(): [string | undefined, (color: string | undefined) => void] {
   const accent = useSyncExternalStore(subscribeToAccent, readAccent);
   useLayoutEffect(() => showAccent(accent), [accent]);
-  // The copy prepaint replays is remade from the pick, in case the math behind it has changed.
-  useEffect(() => saveAccent(readAccent()), []);
-  return [accent, saveAccent];
+  // The copy prepaint replays is remade from the pick, in case the math behind it has changed, once
+  // the browser is idle, which also has the math ready for the next pick.
+  useEffect(() => {
+    const remake = () => void saveAccent(readAccent());
+    if (!('requestIdleCallback' in window)) return void setTimeout(remake, 0);
+    const idle = requestIdleCallback(remake, { timeout: 5_000 });
+    return () => cancelIdleCallback(idle);
+  }, []);
+  return [accent, pick];
 }
+
+const pick = (color: string | undefined) => void saveAccent(color);
