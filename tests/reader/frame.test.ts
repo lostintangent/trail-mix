@@ -212,6 +212,49 @@ for (const type of BROWSERS) {
         await page.close();
       });
 
+      test('holds back a sender’s images in their places, drawn quietly, until they’re allowed', async () => {
+        const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
+        const remote = (name: string) => `${canary.origin}/held/${name}.png`;
+        const html = [
+          `<img src="${remote('masthead')}" width="640" height="140" alt="Kernel Weekly">`,
+          `<img src="${remote('wide')}" width="300" alt="wide">`,
+          `<img src="${remote('tall')}" height="40" alt="tall">`,
+          `<p>A line with <img src="${remote('icon')}" alt="an icon"> in it.</p>`,
+          `<img src="${remote('pixel')}" width="1" height="1" alt="">`,
+        ].join('');
+        // Each image's box, whether it drew a picture of its own, and whether it's held back.
+        const images = () =>
+          page.locator('iframe').evaluate((frame: HTMLIFrameElement) =>
+            [...(frame.contentDocument?.images ?? [])].map((image) => {
+              const { width, height } = image.getBoundingClientRect();
+              return {
+                alt: image.alt,
+                size: `${Math.round(width)}x${Math.round(height)}`,
+                drawn: image.complete && image.naturalWidth > 0,
+                held: image.hasAttribute('data-tm-held'),
+              };
+            }),
+          );
+        await show(page, [{ html, images: 'blocked' }]);
+        expect(await images()).toEqual([
+          { alt: 'Kernel Weekly', size: '640x140', drawn: true, held: true },
+          { alt: 'wide', size: '300x100', drawn: true, held: true },
+          { alt: 'tall', size: '120x40', drawn: true, held: true },
+          { alt: 'an icon', size: '20x20', drawn: true, held: true },
+          { alt: '', size: '1x1', drawn: true, held: true },
+        ]);
+        expect(canary.hits).toEqual([]);
+        await show(page, [{ html, images: 'allowed' }]);
+        expect((await images()).map(({ held }) => held)).toEqual([
+          false,
+          false,
+          false,
+          false,
+          false,
+        ]);
+        await page.close();
+      });
+
       test('stops growing when the message is sized by the frame itself', async () => {
         const tall = hostile.find(({ name }) => name === 'frame-height.html')?.html ?? '';
         const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
@@ -296,6 +339,7 @@ const REAL: Record<string, { reply: string; quoted?: string; paper: Paper }> = {
     paper: 'theme',
   },
   'inline-reply.html': { reply: 'Should I bring the projector', paper: 'theme' },
+  'navy-desk.html': { reply: 'A phone that moves from Wi-Fi', paper: 'theme' },
   'newsletter.html': { reply: 'The north ridge loop', paper: 'theme' },
   'notification.html': { reply: 'Should two-digit years', paper: 'theme' },
   'outlook-desktop-reply.html': {

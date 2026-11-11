@@ -213,7 +213,87 @@ test('light paper, chosen in the palette, holds for a sender on every device unt
   expect(await becomes(true)).toBe(true);
   await control(first).click();
   expect(await becomes(false)).toBe(true);
+
+  // The member's own mail offers none: light paper is a choice about someone else.
+  await row(first, 'Q4 planning').click();
+  await reader(first)
+    .getByRole('button')
+    .filter({ has: first.locator('strong', { hasText: /^You$/ }) })
+    .first()
+    .click();
+  // The line unfolded is the first sheet, the others still lines above and below it.
+  const own = reader(first).getByRole('article').first();
+  await own.getByRole('button', { name: 'Reply', exact: true }).waitFor();
+  expect(await own.getByRole('button', { name: 'Light paper' }).count()).toBe(0);
+  expect(await control(first).count()).toBe(1);
 }, 60_000);
+
+for (const colorScheme of ['light', 'dark'] as const) {
+  test(`on a phone, in ${colorScheme}, a sheet keeps its time whole, and a new message’s title sits on its buttons’ line`, async () => {
+    const page = await open({ ...PHONE, colorScheme });
+    await row(page, 'Q4 planning').click();
+    const header = reader(page).getByRole('article').last().locator('header');
+    await header.locator('time').waitFor();
+    // The time is one line, on the recipients' line, however long the recipients are.
+    const line = await header.evaluate((element) => {
+      const time = element.querySelector('time');
+      const to = time?.closest('small')?.firstElementChild;
+      return {
+        timeLines: time?.getClientRects().length,
+        sameLine:
+          Math.abs(
+            (time?.getBoundingClientRect().top ?? 0) - (to?.getBoundingClientRect().top ?? -1),
+          ) < 2,
+      };
+    });
+    expect(line).toEqual({ timeLines: 1, sameLine: true });
+    await page.screenshot({ path: join(SHOTS, `reader-phone-${colorScheme}-time.png`) });
+
+    await page.keyboard.press('c');
+    const sheet = page.locator('section[aria-label="New message"]');
+    await sheet.waitFor();
+    const centers = await sheet.locator('header').evaluate((element) => {
+      const middle = (found: Element | null | undefined) => {
+        const box = found?.getBoundingClientRect();
+        return box ? Math.round(box.top + box.height / 2) : NaN;
+      };
+      return {
+        title: middle(element.querySelector('h2')),
+        close: middle(element.querySelector('button')),
+      };
+    });
+    expect(Math.abs(centers.title - centers.close)).toBeLessThanOrEqual(1);
+    // What saving says lies under the title, inside the header, and moves the title nowhere, at
+    // its longest. Only its place matters here, so it's written in rather than saved for.
+    await sheet.locator('header h2 + [role="status"]').evaluate((said) => {
+      said.textContent = 'Couldn’t save. Trying again…';
+    });
+    const placed = await sheet.locator('header').evaluate((element) => {
+      const box = (found: Element | null) => found?.getBoundingClientRect();
+      const [header, title, said] = [
+        element,
+        element.querySelector('h2'),
+        element.querySelector('h2 + [role="status"]'),
+      ].map(box);
+      return {
+        under: (said?.top ?? 0) >= (title?.bottom ?? 0) - 1,
+        inside: (said?.bottom ?? Infinity) <= (header?.bottom ?? 0),
+        titleMiddle: Math.round((title?.top ?? 0) + (title?.height ?? 0) / 2),
+      };
+    });
+    expect(placed).toEqual({ under: true, inside: true, titleMiddle: centers.title });
+    await page.screenshot({ path: join(SHOTS, `composer-phone-${colorScheme}-title.png`) });
+  }, 30_000);
+}
+
+test('the Outbox’s empty reader asks for a send', async () => {
+  const page = await open({ ...DESKTOP, colorScheme: 'light' });
+  await page
+    .getByRole('button', { name: /^Outbox/ })
+    .first()
+    .click();
+  await reader(page).getByText('Choosing a send opens its conversation here.').waitFor();
+});
 
 for (const colorScheme of ['light', 'dark'] as const) {
   test(`on a phone, in ${colorScheme}, the top of the screen marks and the island files`, async () => {

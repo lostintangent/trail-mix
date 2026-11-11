@@ -19,9 +19,9 @@ import {
  * did on white, and at least 4.5:1. Black and near-black become the theme's ink.
  *
  * Strong colors and dark ones, such as a button or a footer, and every image are kept as sent,
- * and so is what lies on them: their element takes the light color scheme, so the colors inside
- * it are the sender's own, and text with no color of its own on a light one takes the light
- * theme's ink.
+ * and so is everything on them: their element takes the light color scheme, so the colors inside
+ * it are the sender's own, a light card on a dark desk included, and text with no color of its
+ * own takes the light theme's ink, as the sender saw it.
  *
  * Mail that declares a dark color scheme shows its own dark styles. Mail that asks for light only,
  * paints an image with no color under it, or sets a color no browser reads the same way stays on
@@ -97,11 +97,6 @@ export function shadedPaper(dark: DarkPaper): Rgb {
   return readableShade(dark.paper, 'lighter', (shade) => contrast(shade, BLACK) >= lightest);
 }
 
-/** Whether a kept color is light enough that text on it reads better in the light theme's ink. */
-export function wantsLightInk(color: Rgb, dark: DarkPaper): boolean {
-  return contrast(dark.lightInk, color) >= contrast(dark.ink, color);
-}
-
 /** A color as its sender saw it, over white paper where it lets some through. */
 export function onWhite({ rgb, alpha }: Seen): Rgb {
   return alpha >= 1 ? rgb : over(rgb, alpha, WHITE);
@@ -137,9 +132,9 @@ const COLORED = new Set(['background-color', 'background-image', ...LINES]);
 
 /**
  * What adapting a declaration block did: whether it changed the block, and whether it keeps a
- * light color as sent and sets no text color of its own, so that in the dark theme its text needs
- * the light theme's ink. Text inherits the color its parent shows, and charcoal's ink can't be
- * read on a light color.
+ * color as sent and sets no text color of its own, so that in the dark theme its text needs the
+ * light theme's ink. Text inherits the color its parent shows, and charcoal's ink can't be read
+ * on the light colors the sender may have laid on it.
  */
 export type Adapted = { changed: boolean; needsInk: boolean };
 
@@ -173,9 +168,9 @@ export function mailColors(dark: DarkPaper) {
   };
 
   /** The declarations that keep a color as sent, with everything on it: its own color scheme. */
-  const kept = (color: Rgb, ownsInk: boolean): FromAttribute => ({
+  const kept = (ownsInk: boolean): FromAttribute => ({
     declarations: [['color-scheme', 'light']],
-    needsInk: !ownsInk && wantsLightInk(color, dark),
+    needsInk: !ownsInk,
   });
 
   /**
@@ -188,10 +183,10 @@ export function mailColors(dark: DarkPaper) {
     const shown = seen && seen.alpha > 0 ? onWhite(seen) : undefined;
     // An image or a gradient shows as sent, and so must the color it lies on. With none under it,
     // nothing says what its text lies on.
-    if (hasImage) return shown ? kept(shown, ownsInk) : null;
+    if (hasImage) return shown ? kept(ownsInk) : null;
     if (!shown) return { declarations: [], needsInk: false };
     const shading = shadingOf(shown, dark);
-    if (shading.as === 'kept') return kept(shown, ownsInk);
+    if (shading.as === 'kept') return kept(ownsInk);
     const darkened = hexOf(shading.as === 'paper' ? dark.paper : shading.color);
     return {
       declarations: [['background-color', `light-dark(${css}, ${darkened})`]],

@@ -44,6 +44,8 @@ const KINDS = {
   newsletter: 'painted-newsletter.html',
   /** Tints a signature and a quoted reply, as Outlook does. */
   tinted: 'tinted-reply.html',
+  /** Paints a dark desk, kept as sent, with a light card on it whose text sets no color. */
+  framed: 'navy-desk.html',
   /** Colors its text, and asks for light paper only. */
   lightOnly: 'github-notification.html',
   /** Paints its desk with a variable, a color no browser reads before the page resolves it. */
@@ -255,6 +257,16 @@ for (const type of BROWSERS) {
       for (const start of ['Free shipping', 'Gift cards']) {
         const { color, on } = find(newsletter, start);
         expect({ start, reads: contrast(color, on) >= READS }).toEqual({ start, reads: true });
+      }
+    });
+
+    test('what lies on a color kept as sent shows as its sender designed it, in the light theme’s ink', () => {
+      const [light, dark] = [of('light', 'framed'), of('dark', 'framed')];
+      expect(shown.dark.results[kinds.indexOf('framed')]?.paper).toBe('theme');
+      expect(dark.texts).toEqual(light.texts);
+      expect(backgroundOf(dark, 'A phone that moves')).toEqual(hex('#fdf6e3'));
+      for (const { text, color, on } of dark.texts) {
+        expect({ text, reads: contrast(color, on) >= READS }).toEqual({ text, reads: true });
       }
     });
 

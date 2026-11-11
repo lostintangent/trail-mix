@@ -61,6 +61,7 @@ export function ReaderPane({
   onOpenDraft,
   page,
   subjectOf,
+  choose = 'Choose one from the list to read it here.',
   onBack,
 }: {
   selected: ConversationId | undefined;
@@ -101,6 +102,8 @@ export function ReaderPane({
   page?: ReactNode;
   /** A conversation's subject as the list has it, to show at once while the rest is on its way. */
   subjectOf?: (id: ConversationId) => string | undefined;
+  /** What the empty reader asks the member to choose, in the words of the list beside it. */
+  choose?: string;
   onBack: () => void;
 }) {
   const { shown, isPassing } = useRestingSelection(selected);
@@ -214,7 +217,7 @@ export function ReaderPane({
           <EmptyState
             icon={<Icon icon={MailOpen} size="lg" color="secondary" />}
             title="No conversation open"
-            description="Choose one from the list to read it here."
+            description={choose}
           />
         </div>
       )}

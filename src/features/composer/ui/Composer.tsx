@@ -309,7 +309,13 @@ function Writer({
   const tip = (label: string) => (isCoarse ? undefined : label);
   // Saving is said in a place of its own, the same size whatever it says, so nothing moves for it.
   const status = (
-    <span role="status" {...stylex.props(styles.status, isSheet ? styles.centered : styles.grow)}>
+    <span
+      role="status"
+      {...stylex.props(
+        styles.status,
+        isSheet ? [styles.centered, styles.sheetStatus] : styles.grow,
+      )}
+    >
       {SAVED[autosave.state] || '\u00a0'}
     </span>
   );
@@ -808,12 +814,21 @@ const styles = stylex.create({
     borderBottomStyle: 'solid',
     borderBottomColor: colorVars['--color-border'],
   },
+  // The title on the line of the buttons beside it, and what saving says laid under it, taking no
+  // room, so the title stays centered and nothing moves whatever is said.
   sheetTitle: {
     flexGrow: 1,
     minWidth: 0,
+    position: 'relative',
     display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sheetStatus: {
+    position: 'absolute',
+    top: '100%',
+    insetInline: 0,
+    // Tight enough to fit under the title within the header, loose enough to keep descenders.
+    lineHeight: 1.2,
   },
   title: {
     margin: 0,

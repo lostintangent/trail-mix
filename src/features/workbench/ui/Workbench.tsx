@@ -977,6 +977,11 @@ export function Workbench({
                   leaving={leaving.all}
                   onOpenDraft={composing.openDraft}
                   subjectOf={subjectOf}
+                  choose={
+                    view.in === 'outbox'
+                      ? 'Choosing a send opens its conversation here.'
+                      : undefined
+                  }
                   page={
                     page?.as === 'members' ? (
                       <MembersPage />

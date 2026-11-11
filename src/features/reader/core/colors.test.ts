@@ -9,7 +9,6 @@ import {
   SHADED,
   shadedPaper,
   shadingOf,
-  wantsLightInk,
   type DarkPaper,
 } from './colors.ts';
 
@@ -126,13 +125,6 @@ describe('a background mail paints, in the dark theme', () => {
     ]) {
       expect(shadingOf(color(css), dark)).toEqual({ as: 'kept' });
     }
-  });
-
-  test('takes the light theme’s ink on a kept light color, and the dark theme’s on a dark one', () => {
-    expect(wantsLightInk(color('#ffcc00'), dark)).toBe(true);
-    expect(wantsLightInk(color('#ffe066'), dark)).toBe(true);
-    expect(wantsLightInk(color('#2f2f2f'), dark)).toBe(false);
-    expect(wantsLightInk(color('#0b3d91'), dark)).toBe(false);
   });
 });
 

@@ -93,6 +93,8 @@ export function sanitizeMail(html: string, images: Images, dark: DarkPaper): Saf
   const styles = new Map<string, { rewritten: string; needsInk: boolean }>();
   // Elements whose text takes the light theme's ink in the dark theme, marked once they're walked.
   const inked = new WeakSet<Element>();
+  // Images whose source is held back until the member allows the sender's images.
+  const held = new WeakSet<Element>();
   const lightInk = hexOf(dark.lightInk);
 
   const adaptAttribute = (element: Element, name: 'color' | 'background-color', value: string) => {
@@ -159,8 +161,12 @@ export function sanitizeMail(html: string, images: Images, dark: DarkPaper): Saf
         if (kept.needsInk) inked.add(element);
         return keep(kept.rewritten);
       }
-      case 'src':
-        return keep(tag === 'img' ? imageSource(value) : null);
+      case 'src': {
+        if (tag !== 'img') return keep(null);
+        const source = imageSource(value);
+        if (source === null && /^\s*https?:/i.test(value)) held.add(element);
+        return keep(source);
+      }
       case 'srcset':
         return keep(tag === 'img' || tag === 'source' ? rewriteSrcset(value, imageSource) : null);
       case 'background': {
@@ -183,6 +189,11 @@ export function sanitizeMail(html: string, images: Images, dark: DarkPaper): Saf
     const color = element.localName === 'font' ? element.getAttribute('color') : null;
     if (color !== null) adaptAttribute(element, 'color', color);
     if (inked.has(element)) element.setAttribute(INK, '');
+    // An image held back keeps its place, drawn quietly, unless a source of its own still loads.
+    if (held.has(element) && !element.hasAttribute('src') && !element.hasAttribute('srcset')) {
+      element.setAttribute('src', heldImage(element));
+      element.setAttribute(HELD, '');
+    }
     if (element.hasAttribute('href')) {
       element.setAttribute('target', '_blank');
       element.setAttribute('rel', 'noopener noreferrer');
@@ -284,6 +295,8 @@ function cutOf(html: string): number | undefined {
 const FOLD = 'data-tm-quote';
 /** Marks an element whose text takes the light theme's ink in the dark theme, as its frame says. */
 const INK = 'data-tm-ink';
+/** Marks an image held back until the member allows its sender's images, as its frame draws it. */
+const HELD = 'data-tm-held';
 const FORMS = ['form', 'input', 'button', 'select', 'option', 'optgroup', 'textarea', 'datalist'];
 const POPOVERS = ['popover', 'popovertarget', 'popovertargetaction', 'command', 'commandfor'];
 
@@ -594,11 +607,45 @@ function frameStyle(look: FrameLook): string {
 body{margin:0}
 ${onKept}
 img{max-width:100%;height:auto}
+img[${HELD}]{background:color-mix(in oklab,currentcolor 8%,transparent) url("${HELD_ICON}") center/min(20px,80%) no-repeat;border-radius:4px}
+img[${HELD}]:not([width]):not([height]){vertical-align:middle}
 pre,code,kbd,samp,tt{font-family:${value(look.monospace)}}
 pre{white-space:pre-wrap}
 blockquote[type=cite]{margin:0 0 0 .8ex;padding-left:1ex;border-left:2px solid color-mix(in oklab,currentcolor 25%,transparent)}
 ${look.quotes === 'folded' ? `[${FOLD}]{display:none!important}` : ''}`;
 }
+
+/**
+ * What a held image shows instead of its source: an empty picture as large as its attributes say
+ * the source is, so it keeps its place and its proportions, and the browser draws no broken image
+ * over it. One whose attributes give one side takes three times as wide as tall, and one with none
+ * a small square, as an icon in a line of text would be.
+ */
+function heldImage(image: Element): string {
+  const side = (name: string) => {
+    const value = /^\s*(\d+)\s*(px)?\s*$/i.exec(image.getAttribute(name) ?? '')?.[1];
+    const pixels = value === undefined ? undefined : Number(value);
+    return pixels !== undefined && pixels > 0 && pixels <= 10_000 ? pixels : undefined;
+  };
+  const [width, height] = [side('width'), side('height')];
+  const sized = image.hasAttribute('width') || image.hasAttribute('height');
+  const [w, h] =
+    width && height
+      ? [width, height]
+      : width
+        ? [width, Math.ceil(width / 3)]
+        : height
+          ? [height * 3, height]
+          : sized
+            ? [300, 100]
+            : [20, 20];
+  return `data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='${w}' height='${h}'/>`)}`;
+}
+
+/** A small picture's outline, centered on a held image: something is here, held back. */
+const HELD_ICON = `data:image/svg+xml,${encodeURIComponent(
+  "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='#8a8f98' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'><rect width='18' height='18' x='3' y='3' rx='2'/><circle cx='9' cy='9' r='2'/><path d='m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21'/></svg>",
+)}`;
 
 function escapeAttribute(value: string): string {
   return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');

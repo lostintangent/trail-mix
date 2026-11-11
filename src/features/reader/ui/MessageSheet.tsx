@@ -51,10 +51,12 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
   const allowed = showOnce || imagesAllowed(message, account.allowImagesFrom);
   const allowImages = useAllowImages(account);
   const queryClient = useQueryClient();
-  // In the dark theme, the member may show a sender's mail on light paper, as designed. The
+  // In the dark theme, the member may show someone else's mail on light paper, as designed. The
   // control stands from the first frame, so the header holds still when the body arrives.
   const isDark = useDarkTheme();
-  const lightPaper = isDark && isLightPaper(message.from.email, account.lightPaperFrom);
+  const isOwn = message.from.email.toLowerCase() === account.address.toLowerCase();
+  const offersLightPaper = isDark && !isOwn;
+  const lightPaper = offersLightPaper && isLightPaper(message.from.email, account.lightPaperFrom);
   const [quotes, setQuotes] = useState<'folded' | 'shown'>('folded');
   const reply = actions.find(({ id }) => id === 'message.reply');
   const more = actions.filter((action) => action !== reply && action.isEnabled !== false);
@@ -85,12 +87,16 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
         />
         <div {...stylex.props(sheetStyles.who)}>
           <strong {...stylex.props(sheetStyles.name)}>{displayName(message.from)}</strong>
-          <small {...stylex.props(sheetStyles.quiet)}>
-            {recipients(message, account)} ·{' '}
-            <time dateTime={message.date}>{when(message.date)}</time>
+          {/* The time stays whole, and the recipients give way to it. */}
+          <small {...stylex.props(sheetStyles.quiet, styles.line)}>
+            <span {...stylex.props(styles.recipients)}>{recipients(message, account)}</span>
+            <span aria-hidden>·</span>
+            <time dateTime={message.date} {...stylex.props(styles.when)}>
+              {when(message.date)}
+            </time>
           </small>
         </div>
-        {isDark && (
+        {offersLightPaper && (
           <ToggleButton
             label="Light paper"
             tooltip={
@@ -269,7 +275,21 @@ function size(bytes: number): string {
 const FOCUS_RING = `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`;
 
 const styles = stylex.create({
-  // Mail that paints its own backgrounds is written for light paper, and stays on it.
+  line: {
+    display: 'flex',
+    gap: spacingVars['--spacing-1'],
+    minWidth: 0,
+    whiteSpace: 'nowrap',
+  },
+  recipients: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  },
+  when: {
+    flexShrink: 0,
+  },
+  // Light paper: mail written for it, or a sender's the member chose to show on it.
   fixedPaper: {
     colorScheme: 'light',
     backgroundColor: tm.paperFixed,
