@@ -24,3 +24,6 @@ worker-startup.cpuprofile
 
 # What the smoke suite and the bench record
 test-results
+
+# The public demo, built by `bun run build:demo`
+dist-demo

@@ -25,8 +25,9 @@ await mock.module('@tanstack/react-start/server-entry', () => ({
     },
   },
 }));
-// The Mailroom runs only on workerd, and the Worker here only names it.
+// The Mailroom and the demo's visitor gate run only on workerd, and the Worker here only names them.
 await mock.module('../features/mailroom/server/index.ts', () => ({ Mailroom: class {} }));
+await mock.module('cloudflare:workers', () => ({ DurableObject: class {} }));
 const { default: worker } = await import('./entry.ts');
 
 /** Mailrooms by name, recording each one the Worker opened and each socket it was handed. */
@@ -352,6 +353,115 @@ test('the image proxy refuses a signed-in member’s request that another site s
   expect((await worker.fetch(fromTrailMix, env)).status).toBe(200);
   expect(internet).toHaveBeenCalledTimes(1);
   internet.mockRestore();
+});
+
+test('a deployment of the demo mailbox alone fetches no remote image for anyone', async () => {
+  const internet = anImage();
+  const { env } = developer();
+  const request = new Request(`${LOCAL}${PROXIED}`, {
+    headers: { 'Sec-Fetch-Site': 'same-origin' },
+  });
+  expect((await worker.fetch(request, { ...env, DEMO_MAILBOX: '200' })).status).toBe(404);
+  expect(internet).not.toHaveBeenCalled();
+  internet.mockRestore();
+});
+
+/**
+ * The public demo, with a visitor gate that lets visitors in while `open` says so, and a limit that
+ * takes `changes` a minute from each network.
+ */
+function demo(open = true, changes = Infinity) {
+  const rooms = mailrooms();
+  const asked: string[] = [];
+  const counted = new Map<string, number>();
+  const VISITOR_CHANGES = {
+    limit: ({ key }: { key: string }) => {
+      counted.set(key, (counted.get(key) ?? 0) + 1);
+      return Promise.resolve({ success: counted.get(key)! <= changes });
+    },
+  };
+  const VISITORS = {
+    idFromName: (name: string) => name,
+    get: () => ({
+      admit: (visitor: string) => {
+        asked.push(visitor);
+        return Promise.resolve(open);
+      },
+    }),
+  };
+  const env = {
+    ...rooms,
+    VISITORS,
+    VISITOR_CHANGES,
+    VISITOR_KEY: 'k'.repeat(32),
+    DEMO_MAILBOX: '200',
+  };
+  return { ...rooms, env, asked, counted };
+}
+const cookieOf = (response: Response) => response.headers.get('Set-Cookie')?.split(';')[0] ?? '';
+
+test('a visitor to the demo is let in at their first call to a Mailroom, which is theirs alone', async () => {
+  const { env, asked } = demo();
+  const DEMO = 'https://demo.example.com';
+  const page = await worker.fetch(new Request(`${DEMO}/`), env);
+  expect(await page.text()).toBe('the app');
+  expect(asked).toEqual([]);
+
+  const call = (cookie: string) =>
+    new Request(`${DEMO}/_serverFn/query`, { headers: { Cookie: cookie } });
+  reachedApp.length = 0;
+  const first = await worker.fetch(call(cookieOf(page)), env);
+  const [visitor] = asked;
+  expect(visitor).toMatch(/^[0-9a-f]{32}$/);
+  expect(cookieOf(first)).toContain(`${visitor}.in.`);
+  expect((reachedApp[0]!.mailroom as { name: string }).name).toBe(`${visitor}@demo.invalid`);
+  // From then on, the cookie lets them straight in.
+  await worker.fetch(call(cookieOf(first)), env);
+  expect(asked).toHaveLength(1);
+});
+
+test('a visitor the demo has no room for is told so, and reaches no Mailroom and not the app', async () => {
+  const { env, opened } = demo(false);
+  reachedApp.length = 0;
+  for (const path of ['/_serverFn/query', '/updates', '/messages/personal/INBOX/1/7']) {
+    const response = await worker.fetch(new Request(`https://demo.example.com${path}`), env);
+    expect(response.status).toBe(429);
+    expect(response.headers.get('Retry-After')).toBe('60');
+    expect(await response.text()).toContain('demo is full for now');
+  }
+  expect(opened).toEqual([]);
+  expect(reachedApp).toEqual([]);
+});
+
+test('the demo takes only so many changes a minute from one network, and counts no query', async () => {
+  const { env, counted } = demo(true, 2);
+  const page = await worker.fetch(new Request('https://demo.example.com/'), env);
+  const from = (ip: string, method = 'POST') =>
+    new Request('https://demo.example.com/_serverFn/command', {
+      method,
+      headers: {
+        Cookie: cookieOf(page),
+        'CF-Connecting-IP': ip,
+        Origin: 'https://demo.example.com',
+        'Sec-Fetch-Site': 'same-origin',
+      },
+    });
+  reachedApp.length = 0;
+  const statuses = [];
+  for (const ip of ['203.0.113.7', '203.0.113.7', '203.0.113.7', '198.51.100.1']) {
+    statuses.push((await worker.fetch(from(ip), env)).status);
+  }
+  const refused = await worker.fetch(from('203.0.113.7'), env);
+  expect(statuses).toEqual([200, 200, 429, 200]);
+  expect(refused.headers.get('Retry-After')).toBe('60');
+  expect(await refused.text()).toContain('only so many changes a minute');
+  // Its cookie still comes back, so the visitor stays who they are.
+  expect(cookieOf(refused)).toContain('.in.');
+  expect(reachedApp).toHaveLength(3);
+  // Queries and the page only read, and aren't counted.
+  expect((await worker.fetch(from('203.0.113.7', 'GET'), env)).status).toBe(200);
+  expect((await worker.fetch(new Request('https://demo.example.com/'), env)).status).toBe(200);
+  expect(Object.fromEntries(counted)).toEqual({ '203.0.113.7': 4, '198.51.100.1': 1 });
 });
 
 /**

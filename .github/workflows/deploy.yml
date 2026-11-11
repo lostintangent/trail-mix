@@ -1,9 +1,9 @@
 name: Deploy
 
-# Production for every push to main, and a preview for every pull request from this repository,
-# each once CI has passed: CI calls this workflow after its three jobs. Nothing deploys unless the
-# repository holds the Cloudflare secrets, so a fork's pull request, which never gets them, builds
-# and tests but never deploys. No step here runs a fork's code with a secret: there is no
+# Production for every push to main, then the public demo, and a preview for every pull request
+# from this repository, each once CI has passed: CI calls this workflow after its three jobs.
+# Nothing deploys unless the repository holds the Cloudflare secrets, so a fork's pull request,
+# which never gets them, builds and tests but never deploys. No step here runs a fork's code with a secret: there is no
 # pull_request_target or workflow_run, and every job that deploys runs only for this repository.
 on:
   workflow_call:
@@ -296,6 +296,163 @@ jobs:
             sleep 5
           done
           echo "::error::Rolled back to version $PREVIOUS, but /health still reports ${reported:-nothing}, not $BEFORE."
+          exit 1
+
+  # The public demo, once production is out: no sign-in, the demo mailbox alone, a throwaway
+  # Mailroom per visitor. Only this repository has one, so a copy's deploy.yml never puts a public
+  # demo on its operator's account.
+  demo:
+    needs: production
+    if: github.repository == 'lostintangent/trail-mix'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: demo
+      cancel-in-progress: false
+    env:
+      COMMIT: ${{ github.sha }}
+      CONFIG: dist-demo/server/wrangler.json
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: canary
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - name: Build
+        run: bun run build:demo
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Prepare the account
+        id: account
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          worker=$(jq -er .name "$CONFIG")
+          api() {
+            curl -sS --max-time 30 -o "$RUNNER_TEMP/api.json" -w '%{http_code}' \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/$1"
+          }
+          failed() {
+            echo "::error::$1: $(jq -c '.errors // .' "$RUNNER_TEMP/api.json" 2> /dev/null)"
+            exit 1
+          }
+
+          if [ "$(api workers/subdomain)" != 200 ]; then
+            failed "Couldn't read the workers.dev subdomain"
+          fi
+          address="https://$worker.$(jq -er .result.subdomain "$RUNNER_TEMP/api.json").workers.dev"
+
+          for bucket in $(jq -r '.r2_buckets[].bucket_name' "$CONFIG"); do
+            case "$(api "r2/buckets/$bucket")" in
+              200) ;;
+              404) $WRANGLER r2 bucket create "$bucket" ;;
+              *) failed "Couldn't look for the bucket $bucket" ;;
+            esac
+          done
+
+          case "$(api "workers/scripts/$worker/deployments")" in
+            200)
+              previous=$(jq -r '.result.deployments[0] | (.versions // []) | max_by(.percentage)
+                | .version_id // empty' "$RUNNER_TEMP/api.json")
+              ;;
+            404) previous= ;;
+            *) failed "Couldn't read what $worker serves now" ;;
+          esac
+
+          # Whether the demo has the key that signs its visitors' cookies.
+          case "$(api "workers/scripts/$worker/secrets")" in
+            200)
+              if jq -e '.result | any(.name == "VISITOR_KEY")' "$RUNNER_TEMP/api.json" > /dev/null; then
+                visitor=kept
+              else
+                visitor=missing
+              fi
+              ;;
+            404) visitor=missing ;;
+            *) failed "Couldn't read $worker's secrets" ;;
+          esac
+
+          before=$(curl -sS --max-time 10 -A "$USER_AGENT" "$address/health" 2> /dev/null | jq -r '.version // empty' 2> /dev/null || true)
+          [[ "$before" =~ ^[0-9a-f]{40}$ ]] || before=
+
+          {
+            echo "worker=$worker"
+            echo "address=$address"
+            echo "previous=$previous"
+            echo "before=$before"
+            echo "visitor=$visitor"
+          } >> "$GITHUB_OUTPUT"
+          echo "The demo is $address, now serving version ${previous:-none} (commit ${before:-unknown})."
+
+      - name: Deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          VISITOR: ${{ steps.account.outputs.visitor }}
+        run: |
+          args=(--config "$CONFIG" --var "VERSION:$COMMIT" --message "Commit $COMMIT")
+          # VISITOR_KEY signs each visitor's cookie. It is made here once, when the demo has none, in
+          # a file only the runner's user can read. Replacing it would make every visitor new.
+          umask 077
+          secrets="$RUNNER_TEMP/secrets.json"
+          trap 'rm -f "$secrets"' EXIT
+          if [ "$VISITOR" = missing ]; then
+            NEW_VISITOR_KEY=$(openssl rand -base64 48 | tr -d '\n')
+            export NEW_VISITOR_KEY
+            jq -n '{VISITOR_KEY: env.NEW_VISITOR_KEY}' > "$secrets"
+            unset NEW_VISITOR_KEY
+            args+=(--secrets-file "$secrets")
+            echo "The demo has no VISITOR_KEY yet, so this deploy gives it one."
+          fi
+          $WRANGLER deploy "${args[@]}"
+
+      - name: Check /health reports the commit
+        id: health
+        env:
+          ADDRESS: ${{ steps.account.outputs.address }}
+        run: |
+          for _ in $(seq 24); do
+            reported=$(curl -sS --max-time 10 -A "$USER_AGENT" "$ADDRESS/health" 2> /dev/null | jq -r '.version // empty' 2> /dev/null || true)
+            if [ "$reported" = "$COMMIT" ]; then
+              echo "$ADDRESS/health reports $COMMIT."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::$ADDRESS/health didn't report $COMMIT within two minutes. It said ${reported:-nothing}."
+          exit 1
+
+      # A new visitor opens the demo mailbox and can't add a real account. The check is a visitor,
+      # so it takes one of the day's places, and on a day the demo is already full it can only say so.
+      - name: Check a new visitor opens the demo mailbox
+        id: visitor
+        env:
+          ADDRESS: ${{ steps.account.outputs.address }}
+        run: bun tests/e2e/demo-check.ts "$ADDRESS"
+
+      - name: Roll back
+        if: failure() && (steps.health.outcome == 'failure' || steps.visitor.outcome == 'failure')
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          WORKER: ${{ steps.account.outputs.worker }}
+          PREVIOUS: ${{ steps.account.outputs.previous }}
+        run: |
+          if [ -z "$PREVIOUS" ]; then
+            echo "::error::This was the demo's first deploy, so there is no version to roll back to."
+            exit 1
+          fi
+          $WRANGLER rollback "$PREVIOUS" --name "$WORKER" --message "The demo's checks failed for $COMMIT" --yes
+          echo "::error::Rolled the demo back to version $PREVIOUS."
           exit 1
 
   preview:

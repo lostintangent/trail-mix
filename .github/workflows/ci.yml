@@ -130,10 +130,19 @@ jobs:
       - name: Build
         run: bun run build
 
+      # The public demo, a second build of the same Worker with its own settings, which the suite
+      # drives too.
+      - name: Build the demo
+        run: bun run build:demo
+
       # The preview the suite drives runs on Node, as everything that starts the Workers runtime does.
       - uses: actions/setup-node@v7
         with:
           node-version: 24
+
+      # Builds the demo's exact upload without an account, so a demo that would not deploy fails here.
+      - name: Check the demo deploys
+        run: node node_modules/wrangler/bin/wrangler.js deploy --dry-run --config dist-demo/server/wrangler.json
 
       # Drives the built app on workerd at both sizes in both themes, and saves a screenshot of each.
       - name: Smoke test

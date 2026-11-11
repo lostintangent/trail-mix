@@ -9,7 +9,7 @@ import {
   type BrowserType,
   type Page,
 } from 'playwright';
-import { startPreview, type Preview } from './preview.ts';
+import { BUILDS, startPreview, type Build, type Preview } from './preview.ts';
 
 /** The built app and a browser, shared by one suite's tests. */
 export type Suite = {
@@ -40,11 +40,14 @@ export function suite({
   vars = {},
   env = {},
   engine = chromium,
+  build = BUILDS.app,
 }: {
   vars?: Record<string, string>;
   /** Added to the app's environment, as `startPreview` takes it. */
   env?: Record<string, string>;
   engine?: BrowserType;
+  /** Which build to serve, as `startPreview` takes it. */
+  build?: Build;
 } = {}): Suite {
   let preview: Preview | undefined;
   let launched: Promise<Browser> | undefined;
@@ -62,13 +65,13 @@ export function suite({
   };
 
   beforeAll(async () => {
-    preview = await startPreview(vars, env);
+    preview = await startPreview(vars, env, build);
   }, 60_000);
 
   beforeEach(async () => {
     if (!preview || (await answers(preview.url))) return;
     await preview.stop();
-    preview = await startPreview(vars, env);
+    preview = await startPreview(vars, env, build);
   }, 60_000);
 
   afterEach(async () => {

@@ -59,6 +59,9 @@ export async function proxyImage(
   });
 }
 
+/** The answer where no remote image loads, as on a deployment that serves only the demo mailbox. */
+export const noRemoteImages = () => refuse(404, 'This Trail Mix loads no remote images.');
+
 /** An http or https address on the public internet, or null. */
 export function remoteUrl(raw: string): URL | null {
   const url = URL.parse(raw);

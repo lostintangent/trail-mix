@@ -880,6 +880,11 @@ describe('The Mailroom with the demo mailbox', () => {
     await gil.until(async () =>
       (await gil.call<Account[]>('accounts')).every(({ status }) => status === 'ready'),
     );
+    // Closed but lately opened, it checks every few minutes, unlike a demo visitor's.
+    const checking = await gil.call<{ alarm: number }>('wakeNow');
+    expect(checking.alarm - Date.now()).toBeGreaterThan(60_000);
+    expect(checking.alarm - Date.now()).toBeLessThanOrEqual(5 * 60_000);
+
     await gil.call('unopenedFor', 30);
     // Its wakes come from the alarm alone from here, which opens nothing.
     const before = (await gil.call<Synced[]>('syncLog')).length;
@@ -994,6 +999,49 @@ describe('The Mailroom with the demo mailbox', () => {
       'Sam Rivera <sam@work.trailmix.test>',
     );
   }, 30_000);
+});
+
+describe('A visitor’s Mailroom on the public demo', () => {
+  let worker: LocalWorker;
+  beforeAll(async () => {
+    worker = await mailrooms({
+      DEMO_MAILBOX: '100',
+      DEMO_MAILBOX_AT: AT,
+      VISITOR_KEY: 'a-demo-key-that-is-at-least-32-characters',
+      REST_AFTER_DAYS: '1',
+      ERASE_AFTER_DAYS: '1',
+    });
+  }, 120_000);
+  afterAll(() => worker?.stop());
+
+  test('checks mail only while the visitor has it open, and otherwise sleeps until it erases itself', async () => {
+    const vi = member('vi', () => worker);
+    await vi.until(async () =>
+      (await vi.call<Account[]>('accounts')).every(({ status }) => status === 'ready'),
+    );
+    // Closed, a wake checks nothing, since nothing reaches the demo mailbox from outside.
+    const before = (await vi.call<Synced[]>('syncLog')).length;
+    const closed = await vi.call<{ steps: number; alarm: number; openedAt: number }>('wakeNow');
+    expect(closed.steps).toBe(0);
+    expect((await vi.call<Synced[]>('syncLog')).length).toBe(before);
+    expect(closed.alarm).toBe(closed.openedAt + DAY);
+
+    // Open, it watches again, and wakes within the minute.
+    const device = vi.device();
+    await device.opened;
+    const open = await vi.call<{ alarm: number }>('wakeNow');
+    expect(open.alarm - Date.now()).toBeLessThanOrEqual(60_000);
+    device.close();
+  }, 120_000);
+
+  test('keeps both demo accounts, since filling one again would write thousands of rows', async () => {
+    const vi = member('vi', () => worker);
+    const accounts = await vi.call<Account[]>('accounts');
+    const keeps = 'The demo keeps its two accounts';
+    await expect(vi.call('removeAccount', accounts[0]!.id)).rejects.toThrow(keeps);
+    await expect(vi.call('eraseEverything')).rejects.toThrow(keeps);
+    expect(await vi.call<Account[]>('accounts')).toEqual(accounts);
+  }, 60_000);
 });
 
 // A pull request's preview runs the Mailroom with the variables `wrangler.jsonc` gives previews,

@@ -22,4 +22,40 @@
     "durable_objects": { "bindings": [{ "name": "MAILROOM", "class_name": "Mailroom" }] },
     "r2_buckets": [{ "binding": "BODIES", "bucket_name": "trail-mix-preview-bodies" }],
   },
+  "env": {
+    // The public demo, at trail-mix-demo.<subdomain>.workers.dev, deployed after production. It has
+    // no sign-in: each visitor gets a throwaway Mailroom with the demo mailbox alone, named by a
+    // cookie signed with the VISITOR_KEY secret, which checks mail only while it is open and erases
+    // itself a day after. It takes nothing from production and can never reach a real account.
+    "demo": {
+      "vars": {
+        "DEMO_MAILBOX": "200",
+        "REST_AFTER_DAYS": "1",
+        "ERASE_AFTER_DAYS": "1",
+        // At most this many new visitors a day, counted by the one VisitorGate.
+        "NEW_VISITORS_A_DAY": "100",
+      },
+      "durable_objects": {
+        "bindings": [
+          { "name": "MAILROOM", "class_name": "Mailroom" },
+          { "name": "VISITORS", "class_name": "VisitorGate" },
+        ],
+      },
+      "migrations": [
+        { "tag": "v1", "new_sqlite_classes": ["Mailroom"] },
+        { "tag": "v2", "new_sqlite_classes": ["VisitorGate"] },
+      ],
+      "r2_buckets": [{ "binding": "BODIES", "bucket_name": "trail-mix-demo-bodies" }],
+      // At most 10 new visitors, and 300 changes, a minute from one network, counted at each
+      // Cloudflare location.
+      "ratelimits": [
+        { "name": "NEW_VISITORS", "namespace_id": "4801", "simple": { "limit": 10, "period": 60 } },
+        {
+          "name": "VISITOR_CHANGES",
+          "namespace_id": "4802",
+          "simple": { "limit": 300, "period": 60 },
+        },
+      ],
+    },
+  },
 }

@@ -5,7 +5,7 @@ import { colorVars, spacingVars, typeScaleVars } from '@astryxdesign/core/theme/
 import * as stylex from '@stylexjs/stylex';
 import { useQuery } from '@tanstack/react-query';
 import { createFileRoute, useRouter } from '@tanstack/react-router';
-import { CloudOff } from 'lucide-react';
+import { CloudOff, Hourglass } from 'lucide-react';
 import {
   useCallback,
   useEffect,
@@ -36,6 +36,7 @@ import {
   outboxQuery,
   useHints,
   whatFailed,
+  type Unanswered,
 } from '../features/mailroom/client/index.ts';
 import {
   NOTIFICATIONS,
@@ -142,7 +143,7 @@ function useLoaded(load: () => Promise<unknown>, isWanted: boolean) {
  * The Mailroom couldn't be asked, as when the network is down or the sign-in has run out, and what
  * failed. It asks again by itself when the page is seen again or the network comes back, as after
  * a deploy that cut it off for a moment. Try again loads the page anew, which signs in again where
- * the sign-in has run out.
+ * the sign-in has run out. The public demo, when it lets no more visitors in, says so instead.
  */
 function Unreachable({ failed, onTryAgain }: { failed?: unknown; onTryAgain?: () => void }) {
   useEffect(() => {
@@ -157,17 +158,24 @@ function Unreachable({ failed, onTryAgain }: { failed?: unknown; onTryAgain?: ()
       window.removeEventListener('online', again);
     };
   }, [onTryAgain]);
+  const isFull = (failed as Unanswered | undefined)?.status === 429;
   return (
     <main {...stylex.props(styles.desk)}>
       <EmptyState
         headingLevel={1}
-        icon={<Icon icon={CloudOff} size="lg" color="secondary" />}
-        title="Trail Mix can’t reach your mail"
-        description="The connection or your sign-in may have lapsed."
+        icon={<Icon icon={isFull ? Hourglass : CloudOff} size="lg" color="secondary" />}
+        title={isFull ? 'Trail Mix’s demo is full for now' : 'Trail Mix can’t reach your mail'}
+        description={
+          isFull
+            ? 'It lets in only so many new visitors at a time. Try again in a while, or deploy a Trail Mix of your own.'
+            : 'The connection or your sign-in may have lapsed.'
+        }
         actions={
           <div {...stylex.props(styles.actions)}>
             <Button label="Try again" variant="primary" onClick={() => location.reload()} />
-            {failed !== undefined && <p {...stylex.props(styles.failed)}>{whatFailed(failed)}</p>}
+            {failed !== undefined && !isFull && (
+              <p {...stylex.props(styles.failed)}>{whatFailed(failed)}</p>
+            )}
           </div>
         }
       />

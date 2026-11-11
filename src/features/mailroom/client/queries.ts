@@ -1,6 +1,6 @@
 import { queryOptions } from '@tanstack/react-query';
 import type { ConversationId, FolderRef, Hint, MessageRef, View } from '../../mail/core/index.ts';
-import { mailroom } from './rpc.ts';
+import { mailroom, type Unanswered } from './rpc.ts';
 
 /** What each query's snapshot is cached under. */
 export const keys = {
@@ -73,6 +73,8 @@ const isSameFolder = (a: FolderRef, b: FolderRef) => a.account === b.account && 
 export const accountsQuery = queryOptions({
   queryKey: keys.accounts,
   queryFn: () => mailroom.accounts(),
+  // The public demo answers 429 while it lets no more visitors in, which asking again won't change.
+  retry: (failures, error: Unanswered) => error.status !== 429 && failures < 3,
 });
 
 /**

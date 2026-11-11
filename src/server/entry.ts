@@ -3,30 +3,42 @@ import type { Mailroom, Timed } from '../features/mailroom/client/contract.ts';
 import { readLogoPath, readMessagePath } from '../features/mailroom/client/urls.ts';
 import { CLOUDFLARE_API, cloudflareApi, membersFor } from '../features/members/server/index.ts';
 import { signInFor, signsInDevelopers, type SignInConfig } from './access.ts';
-import { proxyImage } from './routes/images.ts';
+import { noRemoteImages, proxyImage } from './routes/images.ts';
 import { serveLogo, type LogoBytes } from './routes/logos.ts';
 import { serveMessageBytes, type MessageBytes } from './routes/messages.ts';
 import { act } from './routes/notifications.ts';
 import { updates } from './routes/updates.ts';
+import {
+  gateOf,
+  isChangeAllowed,
+  tooManyChanges,
+  type RateLimit,
+  type VisitorGateEnv,
+} from './visitors.ts';
 
 export { Mailroom } from '../features/mailroom/server/index.ts';
+export { VisitorGate } from './visitors.ts';
 
-export type Env = SignInConfig & {
-  /** One Mailroom per member, named by their verified email address. */
-  MAILROOM: {
-    idFromName(name: string): unknown;
-    get(id: unknown): Mailroom & MessageBytes & LogoBytes;
+export type Env = Omit<SignInConfig, 'VISITOR_GATE'> &
+  VisitorGateEnv & {
+    /** One Mailroom per member, named by their verified email address. */
+    MAILROOM: {
+      idFromName(name: string): unknown;
+      get(id: unknown): Mailroom & MessageBytes & LogoBytes;
+    };
+    /** The commit this deployment runs. */
+    VERSION?: string;
+    /** Who manages members. Without it, nobody does. */
+    OPERATOR_EMAIL?: string;
+    /** The account Access belongs to, and the operator's token that edits its member list. */
+    CLOUDFLARE_ACCOUNT_ID?: string;
+    ACCESS_API_TOKEN?: string;
+    /** A stand-in for Cloudflare's API, which only a developer's own deployment heeds. */
+    CLOUDFLARE_API?: string;
+    /** The public demo's visitor gate, and its limit on each network's changes. Only the demo has them. */
+    VISITORS?: Parameters<typeof gateOf>[0];
+    VISITOR_CHANGES?: RateLimit;
   };
-  /** The commit this deployment runs. */
-  VERSION?: string;
-  /** Who manages members. Without it, nobody does. */
-  OPERATOR_EMAIL?: string;
-  /** The account Access belongs to, and the operator's token that edits its member list. */
-  CLOUDFLARE_ACCOUNT_ID?: string;
-  ACCESS_API_TOKEN?: string;
-  /** A stand-in for Cloudflare's API, which only a developer's own deployment heeds. */
-  CLOUDFLARE_API?: string;
-};
 
 /** Whether this isolate has served a request yet. Its first one paid for starting it. */
 let started = false;
@@ -44,11 +56,25 @@ export default {
     const url = new URL(request.url);
     if (url.pathname === '/health') return Response.json({ version: env.VERSION ?? 'development' });
 
-    const signIn = signInFor(env);
+    const signIn = signInFor({ ...env, VISITOR_GATE: env.VISITORS && gateOf(env.VISITORS) });
     if (!signIn) return setupPage(url);
     if (!isFromTrailMix(request)) return new Response('Forbidden', { status: 403 });
-    const member = await signIn(request);
-    if (!member) return new Response('Sign in through Cloudflare Access.', { status: 401 });
+    const message = readMessagePath(url.pathname);
+    const logo = readLogoPath(url.pathname);
+    // Everything but the page and remote images reaches the member's Mailroom, which may make one.
+    const reachesMailroom =
+      url.pathname.startsWith('/_serverFn/') ||
+      url.pathname === '/updates' ||
+      url.pathname === '/notifications/act' ||
+      message !== null ||
+      logo !== null;
+    const signed = await signIn(request, { reachesMailroom });
+    if (signed instanceof Response) return signed;
+    const { member, setCookie } = signed;
+    const answer = (response: Response) => withCookie(response, setCookie);
+    if (reachesMailroom && !(await isChangeAllowed(env.VISITOR_CHANGES, request))) {
+      return answer(tooManyChanges());
+    }
     // The app's responses say where their time went, so a member's browser can show it.
     const timing: Timed[] = [
       ...(isFirst ? [{ name: 'isolate', note: 'The Worker started for this request' }] : []),
@@ -57,13 +83,15 @@ export default {
 
     // A new stub each time it's reached, since one that threw stays broken.
     const mailroom = () => env.MAILROOM.get(env.MAILROOM.idFromName(member));
-    if (url.pathname === '/updates') return updates(request, mailroom());
-    const message = readMessagePath(url.pathname);
-    if (message) return serveMessageBytes(message, mailroom());
-    const logo = readLogoPath(url.pathname);
-    if (logo) return serveLogo(logo, mailroom());
-    if (url.pathname === '/images') return proxyImage(request);
-    if (url.pathname === '/notifications/act') return act(request, mailroom());
+    if (url.pathname === '/updates') return answer(await updates(request, mailroom()));
+    if (message) return answer(await serveMessageBytes(message, mailroom()));
+    if (logo) return answer(await serveLogo(logo, mailroom()));
+    if (url.pathname === '/images') {
+      // The demo mailbox's images are at reserved addresses that never resolve, so a deployment
+      // that serves only it fetches nothing from the internet for anyone.
+      return answer(env.DEMO_MAILBOX ? noRemoteImages() : await proxyImage(request));
+    }
+    if (url.pathname === '/notifications/act') return answer(await act(request, mailroom()));
     const response = await start.fetch(request, {
       context: {
         mailroom,
@@ -71,9 +99,22 @@ export default {
         timing,
       },
     });
-    return withTiming(response, [...timing, { name: 'worker', ms: performance.now() - begun }]);
+    return answer(
+      withTiming(response, [...timing, { name: 'worker', ms: performance.now() - begun }]),
+    );
   },
 };
+
+/**
+ * A response that sets the cookie sign-in keeps, where it keeps one. A socket's upgrade goes as it
+ * is, since its page set the cookie already.
+ */
+function withCookie(response: Response, setCookie: string | undefined): Response {
+  if (!setCookie || response.status === 101) return response;
+  const kept = new Response(response.body, response);
+  kept.headers.append('Set-Cookie', setCookie);
+  return kept;
+}
 
 /**
  * A response with a Server-Timing header of the parts of its time. On Cloudflare a clock stands

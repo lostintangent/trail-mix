@@ -134,6 +134,13 @@ export type MailroomEnv = {
   REST_AFTER_DAYS?: string;
   ERASE_AFTER_DAYS?: string;
   /**
+   * Set only on the public demo, where the Worker signs visitors in with it. Its presence tells a
+   * visitor's Mailroom, which holds only the demo mailbox, to check mail only while they have it
+   * open, since nothing reaches the demo mailbox from outside, and to keep both demo accounts, since
+   * filling one again writes thousands of rows.
+   */
+  VISITOR_KEY?: string;
+  /**
    * A test's stand-in for Outlook, as JSON: Microsoft's sign-in and the hosts. Honored only when
    * every address in it names this machine.
    */
@@ -161,6 +168,10 @@ const WINDOW_DAYS = 365;
 const WATCHING_MS = 60_000;
 /** Every account is checked this often, whether or not a device is open. */
 const CHECKING_MS = 5 * 60_000;
+
+/** Why a visitor's Mailroom keeps what it holds. */
+const VISITORS_KEEP =
+  'The demo keeps its two accounts, and erases itself a day after your last visit.';
 /**
  * How often while any device is notified, so mail that lands just after a check still reaches it
  * within five minutes, with the sync and the push service's share of the time.
@@ -222,11 +233,17 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   private news: Message[] = [];
   private pushKey: Promise<PushKey | undefined> | undefined;
   private readonly demo: DemoSettings | undefined;
+  /**
+   * Whether this is a visitor's Mailroom on the public demo, which checks mail only while open and
+   * keeps its accounts.
+   */
+  private readonly isVisitors: boolean;
 
   constructor(ctx: DurableObjectState, env: MailroomEnv) {
     super(ctx, env);
     this.demo = demoSettings(env.DEMO_MAILBOX, env.DEMO_MAILBOX_AT, env.DEMO_HOST_FILES_SENT);
     this.windDown = windDownOf(env.REST_AFTER_DAYS, env.ERASE_AFTER_DAYS);
+    this.isVisitors = Boolean(env.VISITOR_KEY) && this.demo !== undefined;
     this.sql = durableSql(ctx.storage);
     const found = upgrade(this.sql);
     // A Mailroom new, upgraded, or erased counts as opened when it starts, so none rests at once.
@@ -471,6 +488,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   }
 
   async removeAccount(id: AccountId): Promise<void> {
+    if (this.isVisitors) throw new Error(VISITORS_KEEP);
     const account = input.accountOf(id);
     if (!this.book.get(account)) return;
     await this.disconnect(account);
@@ -506,6 +524,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   }
 
   eraseEverything(): Promise<void> {
+    if (this.isVisitors) return Promise.reject(new Error(VISITORS_KEEP));
     return this.erase();
   }
 
@@ -843,15 +862,22 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     const open = this.devices() > 0;
     const now = Date.now();
     const checking = this.notifying.isAnyNotified() ? NOTIFYING_CHECKING_MS : CHECKING_MS;
+    // A visitor's Mailroom checks only while they have it open, or as it first fills, and otherwise
+    // sleeps until its erase.
+    const isChecking = open || !this.isVisitors || this.checkedAt === 0;
     // If this wake ends early, as an eviction would end it, the next one is already set.
-    const poll = now + (open ? WATCHING_MS : checking);
+    const poll = open
+      ? now + WATCHING_MS
+      : isChecking
+        ? now + checking
+        : erasesAt(this.openedAt, this.windDown);
     await this.ctx.storage.setAlarm(
       Math.min(poll, this.sending.nextWake() ?? poll, this.signInWake() ?? poll),
     );
     // A send that is due goes before sync, which can wait.
     await this.sending.run(() => new Date().toISOString());
     // Timed from the wake's start, as the next alarm is, so the wake it sets always checks.
-    if (now - this.checkedAt >= checking - ALARM_SLACK_MS) this.checkAll(now);
+    if (isChecking && now - this.checkedAt >= checking - ALARM_SLACK_MS) this.checkAll(now);
     await this.watchAll(open);
     const landed = await this.queue.run();
     await this.tellNews();

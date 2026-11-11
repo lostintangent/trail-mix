@@ -1,5 +1,5 @@
-import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 
 const ROOT = join(import.meta.dir, '../..');
 
@@ -19,15 +19,20 @@ const KEPT_LINES = 300;
  * gets the variables a fresh clone starts with, from `.dev.vars.example`, so it signs in as the
  * development member on localhost. `vars` override them, such as `DEMO_MAILBOX`, and `env` adds to
  * the preview's environment, such as a certificate authority for workerd to trust.
+ *
+ * `build` names another build to serve, such as the public demo's, which runs as it is deployed:
+ * with its own configuration's variables and `vars`, and none from `.dev.vars.example`.
  */
 export async function startPreview(
   vars: Record<string, string> = {},
   env: Record<string, string> = {},
+  build: Build = BUILDS.app,
 ): Promise<Preview> {
-  if (!existsSync(join(ROOT, 'dist/server/wrangler.json'))) {
-    throw new Error('There is no build to drive. Run `bun run build` first.');
+  if (!existsSync(join(ROOT, build.directory, 'server/wrangler.json'))) {
+    throw new Error(`There is no build to drive. Run \`${build.command}\` first.`);
   }
-  const restoreVars = writeVars({ ...exampleVars(), ...vars });
+  const restoreVars = writeVars(build, build === BUILDS.app ? { ...exampleVars(), ...vars } : vars);
+  const restoreBuild = pointAt(build);
   const server = Bun.spawn(
     ['node', 'node_modules/vite/bin/vite.js', 'preview', '--port', '0', '--strictPort'],
     {
@@ -56,14 +61,22 @@ export async function startPreview(
       server.kill();
       await server.exited;
       restoreVars();
+      restoreBuild();
     },
     log: () => kept.join('\n'),
   };
 }
 
+/** A build the tests drive: where it is, and the command that makes it. */
+export type Build = { directory: string; command: string };
+export const BUILDS = {
+  app: { directory: 'dist', command: 'bun run build' },
+  demo: { directory: 'dist-demo', command: 'bun run build:demo' },
+} satisfies Record<string, Build>;
+
 /** The built Worker's server function ids, by the name of the function in `rpc.ts`. */
-export function serverFunctionIds(): Record<string, string> {
-  const server = join(ROOT, 'dist/server');
+export function serverFunctionIds(build: Build = BUILDS.app): Record<string, string> {
+  const server = join(ROOT, build.directory, 'server');
   const ids: Record<string, string> = {};
   for (const file of readdirSync(server, { recursive: true, encoding: 'utf8' })) {
     if (!file.endsWith('.js')) continue;
@@ -90,9 +103,23 @@ function exampleVars(): Record<string, string> {
   );
 }
 
+/**
+ * Points the preview at `build`, and returns its undo. Vite's preview serves the Worker that the
+ * last build named in `.wrangler/deploy/config.json`, whatever its output folder, so after the
+ * demo's build it would serve the demo.
+ */
+function pointAt(build: Build): () => void {
+  const file = join(ROOT, '.wrangler/deploy/config.json');
+  const original = existsSync(file) ? readFileSync(file, 'utf8') : undefined;
+  mkdirSync(dirname(file), { recursive: true });
+  const configPath = `../../${build.directory}/server/wrangler.json`;
+  writeFileSync(file, JSON.stringify({ configPath, auxiliaryWorkers: [] }));
+  return () => (original === undefined ? rmSync(file) : writeFileSync(file, original));
+}
+
 /** Writes the build's `.dev.vars`, which the preview reads, and returns its undo. */
-function writeVars(vars: Record<string, string>): () => void {
-  const file = join(ROOT, 'dist/server/.dev.vars');
+function writeVars(build: Build, vars: Record<string, string>): () => void {
+  const file = join(ROOT, build.directory, 'server/.dev.vars');
   const original = existsSync(file) ? readFileSync(file, 'utf8') : undefined;
   const lines = Object.entries(vars).map(([name, value]) => `${name}='${value}'`);
   writeFileSync(file, [...lines, ''].join('\n'));
