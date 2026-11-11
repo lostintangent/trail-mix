@@ -1,17 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { Folder, FolderRole, Message, View } from '../../mail/core/index.ts';
-import {
-  changeMessages,
-  changeRows,
-  commandFor,
-  followMoves,
-  isShown,
-  overlaid,
-  putBack,
-  rowChange,
-  undoOf,
-  type Command,
-} from './triage.ts';
+import { changeMessages, commandFor, followMoves, undoOf, type Command } from './carrying.ts';
+import { changeRows, isShown, overlaid, putBack, rowChange } from './triage.ts';
 
 const ROLES: Partial<Record<string, FolderRole>> = {
   INBOX: 'inbox',

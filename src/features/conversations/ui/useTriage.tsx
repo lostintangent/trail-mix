@@ -1,25 +1,8 @@
-import { useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { useCallback, useRef, useState } from 'react';
-import { folderName } from '../../folders/index.ts';
-import type {
-  ConversationId,
-  ConversationSummary,
-  Folder,
-  Message,
-  View,
-} from '../../mail/core/index.ts';
-import { bodyQuery, conversationQuery, mailroom } from '../../mailroom/client/index.ts';
-import {
-  changeMessages,
-  commandFor,
-  followMoves,
-  overlaid,
-  rowChange,
-  undoOf,
-  type Action,
-  type Command,
-  type Moved,
-} from '../core/triage.ts';
+import { useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { ConversationId, ConversationSummary, Folder, View } from '../../mail/core/index.ts';
+import { overlaid, rowChange, type Action } from '../core/triage.ts';
+import { afterFirstScreen } from '../../../shared/afterFirstScreen.ts';
 import { afterPaint } from '../../../shared/afterPaint.ts';
 import { reasonOf } from '../../../shared/reasons.ts';
 import { toast } from '../../../shared/toasts.tsx';
@@ -55,6 +38,24 @@ export function useTriage(
     undo?.();
   }, []);
 
+  // The key that undoes the last triage, once.
+  const undoKey = useMemo(
+    () => ({
+      offer: (undo: () => void) => {
+        last.current = undo;
+        setCanUndo(true);
+      },
+      spend: (undo: () => void) => {
+        if (last.current !== undo) return;
+        last.current = undefined;
+        setCanUndo(false);
+      },
+    }),
+    [],
+  );
+  // What carries a triage out loads once the first screen has settled, ready before the first one.
+  useEffect(() => afterFirstScreen(() => void loadCarrying()), []);
+
   const triage = useCallback<Triage>(
     (action, ids, { quietly = false } = {}) => {
       const overlays = overlaysOf(queryClient);
@@ -62,144 +63,36 @@ export function useTriage(
       const earlierRows = listed.filter(
         (row): row is ConversationSummary => row !== undefined && ids.includes(row.id),
       );
-      const earlierMessages = new Map<ConversationId, Message[]>();
       const change = rowChange(action, view);
       const laid = change && overlays.lay(view, { ids: new Set(ids), change });
 
-      const restoreMessages = () => {
-        for (const [id, messages] of earlierMessages) {
-          queryClient.setQueryData(conversationQuery(id).queryKey, messages);
-        }
-      };
-      const refused = (error: unknown, doing: string) => {
-        void toast({ type: 'error', body: `Couldn't ${doing}. ${reasonOf(error)}` });
-        for (const id of ids) {
-          void queryClient.invalidateQueries({ queryKey: conversationQuery(id).queryKey });
-        }
-      };
-      const undo = async (command: Command, moved: readonly Moved[]) => {
-        if (laid) overlays.lift(laid);
-        const back = overlays.lay(view, { returning: earlierRows });
-        // The refs from before a move are retired, so a move back waits for the refs it gives.
-        if ('setFlags' in command) restoreMessages();
-        try {
-          for (const step of undoOf(command, moved)) follow(queryClient, ids, await send(step));
-          overlays.settle(back);
-        } catch (error) {
-          overlays.lift(back);
-          refused(error, 'undo that');
-        }
-      };
-
       void (async () => {
+        // The rows show the change in this frame. Telling the Mailroom waits until it has painted.
+        await afterPaint();
         try {
-          // The rows show the change in this frame. Telling the Mailroom waits until it has painted.
-          await afterPaint();
-          const conversations = await Promise.all(
-            ids.map((id) => queryClient.ensureQueryData(conversationQuery(id))),
-          );
-          const command = commandFor(action, view, conversations, folders);
-          if (!command) {
-            if (laid) overlays.lift(laid);
-            return;
-          }
-          for (const [at, id] of ids.entries()) {
-            const messages = conversations[at] ?? [];
-            earlierMessages.set(id, messages);
-            queryClient.setQueryData(
-              conversationQuery(id).queryKey,
-              changeMessages(messages, command),
-            );
-          }
-          const moved = await send(command);
-          follow(queryClient, ids, moved);
-          if (laid) overlays.settle(laid);
-          if (quietly) return;
-          // The toast's Undo spends the key's undo too, so neither undoes it twice.
-          const undoThis = () => {
-            if (last.current === undoFromKey) {
-              last.current = undefined;
-              setCanUndo(false);
-            }
-            void undo(command, moved);
-          };
-          const dismissing = toast({
-            body: said(action, ids.length, folders),
-            action: { label: 'Undo', onAction: undoThis },
+          const { carryOut } = await loadCarrying();
+          await carryOut({
+            queryClient,
+            view,
+            folders,
+            action,
+            ids,
+            quietly,
+            overlays,
+            laid,
+            earlierRows,
+            undoKey,
           });
-          const undoFromKey = () => {
-            void dismissing.then((dismiss) => dismiss());
-            void undo(command, moved);
-          };
-          last.current = undoFromKey;
-          setCanUndo(true);
         } catch (error) {
+          // Only what carries it out failing to load reaches here, so the rows go back as they were.
           if (laid) overlays.lift(laid);
-          restoreMessages();
-          refused(error, doingOf(action, folders));
+          void toast({ type: 'error', body: `Couldn't do that. ${reasonOf(error)}` });
         }
       })();
     },
-    [queryClient, view, folders],
+    [queryClient, view, folders, undoKey],
   );
   return { triage, undoLast, canUndo };
 }
 
-/**
- * Gives some conversations' snapshots the refs their messages moved to, so nothing asks for a
- * message by a ref its move retired. A body is the same wherever its message is, so one already
- * fetched is kept under the new ref too.
- */
-function follow(queryClient: QueryClient, ids: readonly ConversationId[], moved: readonly Moved[]) {
-  for (const id of ids) {
-    const { queryKey } = conversationQuery(id);
-    const messages = queryClient.getQueryData(queryKey);
-    const followed = messages && followMoves(messages, moved);
-    if (followed) queryClient.setQueryData(queryKey, followed);
-  }
-  for (const { from, to } of moved) {
-    const body = queryClient.getQueryData(bodyQuery(from).queryKey);
-    if (body) queryClient.setQueryData(bodyQuery(to).queryKey, body);
-  }
-}
-
-/** Asks the Mailroom to carry out a command, and says where each moved message went. */
-async function send(command: Command): Promise<Moved[]> {
-  if ('move' in command) return mailroom.move(command.move, command.to);
-  await mailroom.setFlags(command.setFlags, command.change);
-  return [];
-}
-
-/** What a toast says once the server has an action: "Archived", or "Moved 3 conversations to Receipts". */
-function said(action: Action, count: number, folders: readonly Folder[]): string {
-  const how = {
-    archive: 'Archived',
-    delete: 'Deleted',
-    move: 'Moved',
-    flag: 'Flagged',
-    unflag: 'Unflagged',
-    read: 'Marked read',
-    unread: 'Marked unread',
-  }[action.do];
-  const what = count === 1 ? '' : ` ${count} conversations`;
-  const where = action.do === 'move' ? ` to ${destinationName(action.to, folders)}` : '';
-  return `${how}${what}${where}`;
-}
-
-/** What a refusal says the member was doing: "Couldn't archive." */
-function doingOf(action: Action, folders: readonly Folder[]): string {
-  switch (action.do) {
-    case 'move':
-      return `move to ${destinationName(action.to, folders)}`;
-    case 'read':
-    case 'unread':
-      return `mark ${action.do}`;
-    default:
-      return action.do;
-  }
-}
-
-function destinationName(to: { account: string; path: string }, folders: readonly Folder[]) {
-  const folder = folders.find(({ account, path }) => account === to.account && path === to.path);
-  return folder ? folderName(folder) : to.path;
-}
+const loadCarrying = () => import('./carrying.ts');
