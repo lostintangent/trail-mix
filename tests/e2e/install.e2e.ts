@@ -144,11 +144,19 @@ async function openConversation(page: Page, row: number | RegExp): Promise<strin
   const rows = page.getByRole('option');
   await (typeof row === 'number' ? rows.nth(row) : rows.filter({ hasText: row }).first()).click();
   const subject = page.locator('section[aria-label="Reader"] h1');
+  // Its open messages show their bodies: HTML in a frame sized to it, or plain text, which has none.
   await page.waitForFunction(() => {
-    const frames = [
-      ...document.querySelectorAll<HTMLIFrameElement>('section[aria-label="Reader"] iframe'),
-    ];
-    return frames.length > 0 && frames.every((frame) => frame.style.visibility === 'visible');
+    const sheets = [...document.querySelectorAll('section[aria-label="Reader"] article')];
+    return (
+      sheets.length > 0 &&
+      sheets.every(
+        (sheet) =>
+          !sheet.querySelector('[aria-busy="true"], [role="alert"]') &&
+          [...sheet.querySelectorAll('iframe')].every(
+            (frame) => frame.style.visibility === 'visible',
+          ),
+      )
+    );
   });
   return (await subject.textContent()) ?? '';
 }

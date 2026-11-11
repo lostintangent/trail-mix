@@ -9,7 +9,8 @@ import { sheetStyles, threadStyles } from './layout.ts';
 /**
  * A conversation on its way, in the shapes it arrives in: its subject and the line under it, an
  * older message folded to its line, and the newest open on its sheet. The subject is the list's,
- * when the list has it, so it shows at once, and only what is still to come waits.
+ * when the list has it, so it shows at once, and only what is still to come waits. Nothing lies
+ * below a conversation to hold still, so its skeletons are drawn only once it is late.
  */
 export function ReaderSkeleton({ subject }: { subject?: string }) {
   const coming = (
@@ -41,7 +42,7 @@ export function ReaderSkeleton({ subject }: { subject?: string }) {
     </>
   );
   return subject === undefined ? (
-    <Pending label="Opening the conversation" xstyle={threadStyles.thread}>
+    <Pending label="Opening the conversation" xstyle={threadStyles.thread} holdsPlace={false}>
       <div {...stylex.props(threadStyles.subject)}>
         <TextSkeleton width="55%" />
       </div>
@@ -50,7 +51,7 @@ export function ReaderSkeleton({ subject }: { subject?: string }) {
   ) : (
     <div {...stylex.props(threadStyles.thread)}>
       <h1 {...stylex.props(threadStyles.subject)}>{bareSubject(subject)}</h1>
-      <Pending label="Opening the conversation" xstyle={threadStyles.stack}>
+      <Pending label="Opening the conversation" xstyle={threadStyles.stack} holdsPlace={false}>
         {coming}
       </Pending>
     </div>

@@ -308,7 +308,7 @@ const Row = memo(function Row({
  */
 export function ConversationListSkeleton({ label }: { label: string }) {
   return (
-    <Pending label={`Loading ${label}`} xstyle={styles.skeletons}>
+    <Pending label={`Loading ${label}`} xstyle={styles.skeletons} holdsPlace={false}>
       {Array.from({ length: SKELETON_ROWS }, (_, row) => {
         const width = (widths: readonly string[]) => widths[row % widths.length] ?? '50%';
         return (
