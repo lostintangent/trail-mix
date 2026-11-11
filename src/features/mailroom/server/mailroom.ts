@@ -72,6 +72,7 @@ import {
   type SignInSetup,
   type ThisDevice,
 } from '../client/contract.ts';
+import { erasesAt, idlenessOf, isWorthNoting, windDownOf, type WindDown } from '../core/idle.ts';
 import {
   accountBook,
   connectionOf,
@@ -103,6 +104,9 @@ export type MailroomEnv = {
   DEMO_MAILBOX_AT?: string;
   /** The app the operator registered with Microsoft, which Outlook accounts sign in through. */
   MICROSOFT_CLIENT_ID?: string;
+  /** Whole days unopened before a Mailroom rests, and before it erases itself: 30 and 90 unset. */
+  REST_AFTER_DAYS?: string;
+  ERASE_AFTER_DAYS?: string;
   /**
    * A test's stand-in for Outlook, as JSON: Microsoft's sign-in and the hosts. Honored only when
    * every address in it names this machine.
@@ -152,6 +156,10 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   protected readonly sending: OutboxQueue;
   /** When every account was last owed a check. A cold start checks at its first wake. */
   private checkedAt = 0;
+  /** When a signed-in device last asked for something, as storage holds it. */
+  protected openedAt: number;
+  /** How long unopened before it rests, and before it erases itself. */
+  private readonly windDown: WindDown;
   private key: Promise<CryptoKey> | undefined;
   /** The last full-text search. Only memory holds it, so a restart forgets it. */
   private found: Found | undefined;
@@ -164,8 +172,13 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   constructor(ctx: DurableObjectState, env: MailroomEnv) {
     super(ctx, env);
     this.demo = demoSettings(env.DEMO_MAILBOX, env.DEMO_MAILBOX_AT);
+    this.windDown = windDownOf(env.REST_AFTER_DAYS, env.ERASE_AFTER_DAYS);
     this.sql = durableSql(ctx.storage);
     const found = upgrade(this.sql);
+    // A Mailroom new, upgraded, or erased counts as opened when it starts, so none rests at once.
+    const openedAt = openedAtIn(this.sql);
+    this.openedAt = openedAt ?? Date.now();
+    if (openedAt === undefined) this.writeOpened(this.openedAt);
     this.store = envelopeIndex(this.sql);
     this.book = accountBook(this.sql);
     this.underWay = signInBook(this.sql);
@@ -217,6 +230,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   async answer({ name, args }: Call<QueryName | CommandName>, sentAt: number): Promise<Answered> {
     if (!CALLABLE.has(name))
       throw new TypeError('That isn’t something a browser can ask its Mailroom.');
+    this.noteOpened();
     const reached = Date.now() - sentAt;
     const cold = !this.isRunning;
     this.isRunning = true;
@@ -420,7 +434,12 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     return Promise.resolve();
   }
 
-  async eraseEverything(): Promise<void> {
+  eraseEverything(): Promise<void> {
+    return this.erase();
+  }
+
+  /** Forgets everything stored for this member, as asked or once the Mailroom is long unopened. */
+  private async erase() {
     const accounts = this.book.all();
     for (const { id } of accounts) await this.disconnect(id);
     this.found = undefined;
@@ -429,6 +448,8 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       await this.ctx.storage.deleteAlarm();
       await this.ctx.storage.deleteAll();
       upgrade(this.sql);
+      // Nothing of the member's stays, not even when they last opened it.
+      this.openedAt = Date.now();
       await this.forgetBodies(`${this.member}/`);
     } finally {
       // Once nothing of theirs is left to serve, every device drops what it kept, even if a delete
@@ -610,6 +631,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   // A message's bytes, for the Worker's routes. Null means the message or part is gone.
 
   async source(ref: MessageRef): Promise<ReadableStream<Uint8Array> | null> {
+    this.noteOpened();
     const bytes = await this.bytes(input.refOf(ref));
     return bytes && new Blob([bytes]).stream();
   }
@@ -618,6 +640,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     ref: MessageRef,
     attachmentId: string,
   ): Promise<{ body: ReadableStream<Uint8Array>; type: string; name: string } | null> {
+    this.noteOpened();
     const bytes = await this.bytes(input.refOf(ref));
     if (!bytes || !/^\d{1,4}$/.test(String(attachmentId))) return null;
     const attachment = await attachmentOf(bytes, Number(attachmentId));
@@ -639,6 +662,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     }
     const { 0: device, 1: socket } = new WebSocketPair();
     this.ctx.acceptWebSocket(socket);
+    this.noteOpened();
     // A device just opened: catch up now, and watch while any device stays open.
     this.background(this.owe(() => this.checkAll()));
     return Promise.resolve(new Response(null, { status: 101, webSocket: device }));
@@ -688,14 +712,29 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
    * memory and the Inbox watchers alive. Every account is owed a check every few minutes either
    * way. A wake lands what is owed within its budget, and if more remains, the next wake follows at
    * once and picks up from the stored cursors. Returns how many steps it landed.
+   *
+   * A Mailroom long unopened rests: it checks no mail and watches nothing, sends only what is due,
+   * and sleeps until it erases itself, unless a send is due sooner. Then it erases itself.
    */
   protected async wake(): Promise<number> {
+    const idleness = idlenessOf(this.openedAt, Date.now(), this.windDown);
+    if (idleness === 'erasing') {
+      await this.erase();
+      return 0;
+    }
     // A sign-in polls first, so a long sync never keeps a member waiting on their code.
     await this.pollSignIns();
     const accounts = this.book.all();
     if (accounts.length === 0) {
       const signInAt = this.signInWake();
       if (signInAt !== undefined) await this.ctx.storage.setAlarm(signInAt);
+      return 0;
+    }
+    if (idleness === 'resting') {
+      for (const id of [...this.watchers.keys()]) this.unwatch(id);
+      await this.sending.run(() => new Date().toISOString());
+      const erase = erasesAt(this.openedAt, this.windDown);
+      await this.ctx.storage.setAlarm(Math.min(erase, this.sending.nextWake() ?? erase));
       return 0;
     }
     const open = this.devices() > 0;
@@ -720,6 +759,23 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   private checkAll() {
     this.checkedAt = Date.now();
     for (const { id } of this.book.all()) this.queue.check(id);
+  }
+
+  /**
+   * A signed-in device asked for something. It is written down at most hourly. A resting Mailroom
+   * wakes at once, to check mail from where it stopped.
+   */
+  private noteOpened() {
+    const now = Date.now();
+    if (!isWorthNoting(this.openedAt, now)) return;
+    const wasResting = idlenessOf(this.openedAt, now, this.windDown) !== 'open';
+    this.writeOpened(now);
+    if (wasResting) this.background(this.owe(() => this.checkAll()));
+  }
+
+  protected writeOpened(at: number) {
+    this.openedAt = at;
+    this.sql.run(`INSERT OR REPLACE INTO opened (one, at) VALUES (1, ?)`, at);
   }
 
   /** Has the alarm come by `at`, unless it is already set to come sooner. */
@@ -1275,6 +1331,12 @@ const folderRef = ({ account, path }: FolderRef): FolderRef => ({ account, path 
 
 const sizeOf = (content: ArrayBuffer | Uint8Array | string) =>
   typeof content === 'string' ? new TextEncoder().encode(content).length : content.byteLength;
+
+/** When a signed-in device last asked this Mailroom for something, as storage holds it. */
+function openedAtIn(sql: Sql): number | undefined {
+  const [row] = sql.all<{ at: number }>(`SELECT at FROM opened`);
+  return row?.at;
+}
 
 function report(error: unknown) {
   console.error('Mailroom:', error instanceof Error ? error.message : error);

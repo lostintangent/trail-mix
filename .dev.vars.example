@@ -17,3 +17,8 @@ DEMO_MAILBOX=2000
 
 # Uncomment to date the demo mailbox from a fixed instant instead of when the Mailroom adds it.
 # DEMO_MAILBOX_AT=2026-11-09T12:00:00Z
+
+# Uncomment to wind Mailrooms down sooner than a member's 30 days unopened before one stops checking
+# mail and 90 before it erases itself, in whole days. The public demo erases each visitor's after one.
+# REST_AFTER_DAYS=1
+# ERASE_AFTER_DAYS=1

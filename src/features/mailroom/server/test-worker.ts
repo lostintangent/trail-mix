@@ -1,4 +1,4 @@
-import { COMMANDS, receivedCall } from '../client/contract.ts';
+import { COMMANDS, QUERIES, receivedCall } from '../client/contract.ts';
 import { HOST_FILING_SECONDS } from '../../outbox/core/index.ts';
 import type { MailProvider, Preset, PresetName } from '../../providers/index.ts';
 import { Mailroom, type MailroomEnv } from './mailroom.ts';
@@ -32,6 +32,28 @@ export class TestMailroom extends Mailroom {
 
   wakeLog(): Promise<Wake[]> {
     return Promise.resolve(this.wakes);
+  }
+
+  /** Has the member last opened this Mailroom `days` ago, as if no device had asked since. */
+  unopenedFor(days: number): Promise<void> {
+    this.writeOpened(Date.now() - days * 24 * 60 * 60_000);
+    return Promise.resolve();
+  }
+
+  /** When storage says a signed-in device last asked this Mailroom for something. */
+  lastOpened(): Promise<number | undefined> {
+    return Promise.resolve(this.sql.all<{ at: number }>(`SELECT at FROM opened`)[0]?.at);
+  }
+
+  /** When the alarm next comes, if it is set. */
+  alarmAt(): Promise<number | null> {
+    return this.ctx.storage.getAlarm();
+  }
+
+  /** One wake now, as the alarm runs it: the steps it landed, and when the next alarm comes. */
+  async wakeNow(): Promise<{ steps: number; alarm: number | null; openedAt: number }> {
+    const steps = await this.wake();
+    return { steps, alarm: await this.ctx.storage.getAlarm(), openedAt: this.openedAt };
   }
 
   /** Ends this instance, as a deploy or an eviction would. The next request starts a new one. */
@@ -179,8 +201,15 @@ export default {
         string,
         (...args: unknown[]) => Promise<unknown>
       >;
+      // A query or command reaches the Mailroom as the Worker sends it. The rest are a test's own.
+      const isAsked =
+        (QUERIES as readonly string[]).includes(name) ||
+        (COMMANDS as readonly string[]).includes(name);
       try {
-        return Response.json({ value: (await methods[name]!(...args)) ?? null });
+        const value = isAsked
+          ? ((await methods.answer!({ name, args }, Date.now())) as { value: unknown }).value
+          : await methods[name]!(...args);
+        return Response.json({ value: value ?? null });
       } catch (error) {
         return Response.json({ error: error instanceof Error ? error.message : String(error) });
       }

@@ -1,4 +1,4 @@
-import { LogIn, MailMinus, MailPlus, Settings2 } from 'lucide-react';
+import { Eraser, LogIn, MailMinus, MailPlus, Settings2 } from 'lucide-react';
 import type { Command } from '../../commands/index.ts';
 import type { Account } from '../../mail/core/index.ts';
 
@@ -13,7 +13,8 @@ export const isAccountCommand = ({ id }: Command, account: Account) =>
 
 /**
  * Adding an account, and editing or removing each one the member has. An account whose vendor wants
- * its member to sign in again offers that too.
+ * its member to sign in again offers that too. Erasing everything Trail Mix holds for the member
+ * reaches beyond any one account, so no account's menu lists it.
  */
 export function accountCommands({
   accounts,
@@ -21,16 +22,26 @@ export function accountCommands({
   edit,
   remove,
   signIn,
+  erase,
 }: {
   accounts: readonly Account[];
   add: () => void;
   edit: (account: Account) => void;
   remove: (account: Account) => void;
   signIn: (account: Account) => void;
+  erase: () => void;
 }): Command[] {
   const group = 'Accounts';
   return [
     { id: 'account.add', title: 'Add account', group, icon: MailPlus, run: add },
+    {
+      id: 'account.erase-everything',
+      title: 'Erase everything Trail Mix holds for you',
+      group,
+      icon: Eraser,
+      isDestructive: true,
+      run: erase,
+    },
     ...accounts.flatMap((account): Command[] => [
       ...(account.status === 'needs-sign-in'
         ? [

@@ -106,6 +106,7 @@ import {
   accountCommands,
   isAccountCommand,
   AccountPage,
+  EraseQuestion,
   RemoveQuestion,
   type AccountPageOf,
 } from '../../accounts/index.ts';
@@ -235,6 +236,7 @@ export function Workbench({
   // one closes it.
   const [page, setPage] = useState<SheetPage>();
   const [removing, setRemoving] = useState<Account>();
+  const [isErasing, setErasing] = useState(false);
   const write =
     writeFrom &&
     (() => {
@@ -424,6 +426,7 @@ export function Workbench({
         edit: (account) => openPage({ as: 'edit', account: account.id }),
         remove: setRemoving,
         signIn: (account) => openPage({ as: 'edit', account: account.id, isSigningIn: true }),
+        erase: () => setErasing(true),
       }),
     [accounts, openPage],
   );
@@ -847,6 +850,7 @@ export function Workbench({
                         accounts={accounts}
                         onClose={closePage}
                         onRemove={setRemoving}
+                        onErase={() => setErasing(true)}
                       />
                     ) : undefined
                   }
@@ -864,6 +868,15 @@ export function Workbench({
             waiting={(outgoing ?? []).filter(({ draft }) => draft.account === removing.id).length}
             onRemoved={removed}
             onClose={() => setRemoving(undefined)}
+          />
+        </Suspense>
+      )}
+      {isErasing && (
+        <Suspense>
+          <EraseQuestion
+            accounts={accounts}
+            waiting={(outgoing ?? []).filter(({ state }) => state === 'waiting').length}
+            onClose={() => setErasing(false)}
           />
         </Suspense>
       )}

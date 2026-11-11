@@ -38,6 +38,7 @@ import type { Synced, Wake } from './test-worker.ts';
 
 const { alice, bob } = users;
 const AT = '2026-11-09T12:00:00.000Z';
+const DAY = 24 * 60 * 60_000;
 const setup: AccountSetup = {
   provider: 'imap',
   name: 'Alice',
@@ -718,14 +719,63 @@ describe('The Mailroom', () => {
       'stored',
     );
     expect(bodies).toEqual([]);
-    // Only the schema's version and the search table's own bookkeeping remain, with no word of mail.
+    // Only the schema's version, when the member last opened the Mailroom, who is still here, and
+    // the search table's own bookkeeping remain, with no word of mail.
+    expect(
+      Object.entries(tables).filter(
+        ([name, rows]) =>
+          name !== 'schema' && name !== 'opened' && !name.startsWith('search_') && rows.length,
+      ),
+    ).toEqual([]);
+    expect(JSON.stringify(tables).toLowerCase()).not.toMatch(/garden|tickets|lunch|alice|bob/);
+  });
+
+  test('erasing everything leaves no table, body, alarm, send or secret, and a fresh start holds nothing', async () => {
+    const cam = member('cam', () => worker);
+    const device = cam.device();
+    await device.opened;
+    const added = await cam.call<Account>('addAccount', setup);
+    await cam.until(async () => (await cam.page({ in: 'inbox' })).length > 0);
+    const [row] = await cam.page({ in: 'inbox' });
+    await cam.call('body', (await cam.call<Message[]>('conversation', row!.id))[0]);
+    // A send for tomorrow, so the Outbox holds it and the alarm waits for it.
+    const saved = await cam.call<MessageRef>('saveDraft', {
+      account: added.id,
+      to: [{ name: 'Bob', email: bob.email }],
+      cc: [],
+      bcc: [],
+      subject: 'Never sent',
+      markdown: 'This goes nowhere.\n',
+      attachments: [],
+    });
+    await cam.call('send', saved, new Date(Date.now() + DAY).toISOString());
+    expect(await cam.call('outbox')).toHaveLength(1);
+    expect(await cam.call('alarmAt')).not.toBeNull();
+    expect((await cam.call<{ bodies: string[] }>('stored')).bodies).not.toEqual([]);
+
+    const erased = device.next((hint) => hint.changed === 'everything');
+    await cam.call('eraseEverything');
+    await erased;
+    const { tables, bodies } = await cam.call<{ tables: Record<string, unknown[]>; bodies: [] }>(
+      'stored',
+    );
+    expect(bodies).toEqual([]);
     expect(
       Object.entries(tables).filter(
         ([name, rows]) => name !== 'schema' && !name.startsWith('search_') && rows.length,
       ),
     ).toEqual([]);
-    expect(JSON.stringify(tables).toLowerCase()).not.toMatch(/garden|tickets|lunch|alice|bob/);
-  });
+    expect(JSON.stringify(tables)).not.toContain(alice.password);
+    expect(await cam.call('alarmAt')).toBeNull();
+
+    // The next sign-in starts a Mailroom with nothing in it, as the first-run screen shows.
+    await cam.call('restart').catch(() => {});
+    expect(await cam.call('accounts')).toEqual([]);
+    expect(await cam.call('folders')).toEqual([]);
+    expect(await cam.call('outbox')).toEqual([]);
+    expect(await cam.call('alarmAt')).toBeNull();
+    device.close();
+  }, 60_000);
 });
 
 describe('The Mailroom with the demo mailbox', () => {
@@ -779,6 +829,48 @@ describe('The Mailroom with the demo mailbox', () => {
     expect((await eve.call<{ bodies: unknown[] }>('stored')).bodies).toEqual([]);
     await erasing;
     expect((await eve.call<ThisDevice>('thisDevice')).cache).not.toBe(cache);
+  }, 60_000);
+
+  test('a Mailroom left unopened for 30 days stops checking mail, and opening it picks up again', async () => {
+    const gil = member('gil', () => worker);
+    await gil.until(async () =>
+      (await gil.call<Account[]>('accounts')).every(({ status }) => status === 'ready'),
+    );
+    await gil.call('unopenedFor', 30);
+    // Its wakes come from the alarm alone from here, which opens nothing.
+    const before = (await gil.call<Synced[]>('syncLog')).length;
+    const rested = await gil.call<{ steps: number; alarm: number; openedAt: number }>('wakeNow');
+    expect(rested.steps).toBe(0);
+    expect((await gil.call<Synced[]>('syncLog')).length).toBe(before);
+    // It sleeps until it would erase itself, with nothing to send sooner.
+    expect(rested.alarm).toBe(rested.openedAt + 90 * DAY);
+
+    // A device asks for something, and it checks mail at once, from the cursors it kept.
+    await gil.call('folders');
+    await gil.until(async () => (await gil.call<Synced[]>('syncLog')).length > before);
+    const after = (await gil.call<Synced[]>('syncLog')).slice(before);
+    expect(after.reduce((sum, { messages }) => sum + messages, 0)).toBe(0);
+    expect(Date.now() - (await gil.call<number>('lastOpened'))).toBeLessThan(60_000);
+  }, 60_000);
+
+  test('a Mailroom left unopened for 90 days erases itself', async () => {
+    const fay = member('fay', () => worker);
+    await fay.until(async () => (await fay.page({ in: 'inbox' })).length > 0);
+    const [row] = await fay.page({ in: 'inbox' });
+    await fay.call('body', (await fay.call<Message[]>('conversation', row!.id))[0]);
+
+    await fay.call('unopenedFor', 90);
+    const erased = await fay.call<{ alarm: number | null }>('wakeNow');
+    expect(erased.alarm).toBeNull();
+    const { tables, bodies } = await fay.call<{ tables: Record<string, unknown[]>; bodies: [] }>(
+      'stored',
+    );
+    expect(bodies).toEqual([]);
+    expect(
+      Object.entries(tables).filter(
+        ([name, rows]) => name !== 'schema' && !name.startsWith('search_') && rows.length,
+      ),
+    ).toEqual([]);
   }, 60_000);
 
   test('starts with Personal and Work, and fills each Inbox first and newest first', async () => {

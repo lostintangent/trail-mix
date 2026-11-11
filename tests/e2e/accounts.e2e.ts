@@ -1,6 +1,7 @@
-import { afterEach, beforeAll, expect } from 'bun:test';
+import { afterEach, beforeAll, describe, expect } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
+import type { BrowserContextOptions, Page } from 'playwright';
 import { unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
 
@@ -89,3 +90,76 @@ test('a Mailroom that can’t be reached says so, and Try again comes back to it
   await page.getByRole('button', { name: 'Try again' }).click();
   await page.getByRole('heading', { name: 'Welcome to Trail Mix' }).waitFor();
 }, 30_000);
+
+// Erasing everything Trail Mix holds for a member, from the palette and from an account's page, on
+// two devices at once: each a member of their own, with the demo mailbox to erase.
+for (const [size, options] of Object.entries(SIZES)) {
+  describe(`Erasing everything at a ${size}’s size`, () => {
+    const erasing = suite({
+      vars: { DEMO_MAILBOX: '200', DEV_MEMBER: `erase-${size}-${Date.now()}@trailmix.test` },
+    });
+    const colorScheme = size === 'desktop' ? 'light' : 'dark';
+
+    async function device(more: BrowserContextOptions = {}): Promise<Page> {
+      const page = await (await erasing.context({ ...options, colorScheme, ...more })).newPage();
+      page.on('pageerror', (error) => errors.push(error.message));
+      await page.goto(erasing.url);
+      await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
+      return page;
+    }
+
+    async function run(page: Page, title: RegExp) {
+      await page.keyboard.press('ControlOrMeta+k');
+      await page.keyboard.type(title.source.replace(/^\^/, ''));
+      await page.getByRole('option', { name: title }).click();
+    }
+
+    erasing.test(
+      'a member erases everything after saying what goes, and every device starts over',
+      async () => {
+        const page = await device();
+        const other = await device();
+        const question = page.getByRole('alertdialog', {
+          name: 'Erase everything Trail Mix holds for you?',
+        });
+
+        // From the palette: it says what goes and what stays, and Cancel, which has the focus, keeps it.
+        await run(page, /^Erase everything/);
+        await question.waitFor();
+        expect(await question.textContent()).toContain(
+          'The demo mailbox goes, with all its mail. Every device you’re signed in on starts over.',
+        );
+        expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('Cancel');
+        await shown(page, `${size}-${colorScheme}-erase-question`);
+        await page.keyboard.press('Enter');
+        await question.waitFor({ state: 'detached' });
+        expect(await page.getByRole('form', { name: 'Add an account' }).count()).toBe(0);
+
+        // From an account's page, apart from the account, as all of Trail Mix.
+        await run(page, /^Edit the Personal account/);
+        const everything = page.getByRole('region', { name: 'All of Trail Mix' });
+        const erase = everything.getByRole('button', { name: 'Erase everything…' });
+        await erase.waitFor();
+        if (size === 'phone')
+          expect((await erase.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+        await shown(page, `${size}-${colorScheme}-erase-from-account`);
+        await erase.click();
+        await question.getByRole('button', { name: 'Erase everything' }).click();
+
+        // Both devices start over, and so does a fresh sign-in.
+        await page.getByRole('form', { name: 'Add an account' }).waitFor();
+        await other.getByRole('form', { name: 'Add an account' }).waitFor({ timeout: 30_000 });
+        await page.reload();
+        await page.getByRole('form', { name: 'Add an account' }).waitFor();
+        await shown(page, `${size}-${colorScheme}-erased`);
+      },
+      90_000,
+    );
+  });
+}
+
+async function shown(page: Page, screen: string) {
+  await page.evaluate(() => Promise.all(document.getAnimations().map(({ finished }) => finished)));
+  await page.screenshot({ path: join(SHOTS, `accounts-${screen}.png`) });
+  expect({ screen, unreadable: await unreadableText(page) }).toEqual({ screen, unreadable: [] });
+}

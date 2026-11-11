@@ -88,7 +88,8 @@ These are invariants. Breaking one needs an amendment to this file, not a clever
 - **Closed until configured.** A deployment with no sign-in configured answers every request with a setup page. The one exception is the health endpoint, which reports only the running version.
 - **The operator is trusted.** Whoever controls the Cloudflare account can read everything stored in it, encryption included, because the key is theirs. The README says so, for the operator to tell the people they invite.
 - **Storage upgrades itself.** Each Mailroom records its schema version and applies newer versions, in order, when it wakes. Versions are only ever appended, so any deployment can move forward from any earlier release.
-- **Idle Mailrooms wind down.** A Mailroom nobody has opened for 30 days stops checking mail, and after 90 days it erases itself.
+- **Idle Mailrooms wind down.** A Mailroom nobody has opened for 30 days stops checking mail, and after 90 days it erases itself. It is opened when the member's device asks it for something: a query, a command, a message's bytes or the hint socket. Its own alarm, sync and sends don't open it. Opening a resting Mailroom checks mail again from the stored cursors. `REST_AFTER_DAYS` and `ERASE_AFTER_DAYS` set both in whole days for a deployment, as the public demo's one-day erase does, and a Mailroom refuses to start with anything but whole days, resting no later than it erases.
+- **Members leave cleanly.** A member erases everything Trail Mix holds for them from the palette or the foot of any account's page, after a question that says what goes and what stays. It is the operator's erase: every table, the alarm, every cached body and every sealed secret go, every open device hears that everything changed, and the next sign-in finds the first-run screen.
 
 ## Design
 

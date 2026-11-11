@@ -1,5 +1,13 @@
-import { spacingVars, typeScaleVars } from '@astryxdesign/core/theme/tokens.stylex';
+import { Button } from '@astryxdesign/core/Button';
+import {
+  borderVars,
+  colorVars,
+  fontWeightVars,
+  spacingVars,
+  typeScaleVars,
+} from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
+import { useId } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, AccountId } from '../../mail/core/index.ts';
 import { AddAccount } from './AddAccount.tsx';
@@ -15,19 +23,25 @@ export type AccountPageOf =
 
 /**
  * Adding or editing an account, on the reader's sheet, where a phone slides to it on its track. An
- * account removed meanwhile, here or on another device, closes its page.
+ * account removed meanwhile, here or on another device, closes its page. Below an account's own
+ * settings, set apart from them, lies the way to erase all of Trail Mix, where a member already
+ * goes to take things away.
  */
 export function AccountPage({
   page,
   accounts,
   onClose,
   onRemove,
+  onErase,
 }: {
   page: AccountPageOf;
   accounts: readonly Account[];
   onClose: () => void;
   onRemove: (account: Account) => void;
+  /** Asks first, then erases everything Trail Mix holds for the member. */
+  onErase: () => void;
 }) {
+  const eraseId = useId();
   const editing = page.as === 'edit' ? accounts.find(({ id }) => id === page.account) : undefined;
   if (page.as === 'edit' && !editing) return null;
   const vendor = editing && vendorOf(editing);
@@ -55,6 +69,19 @@ export function AccountPage({
       ) : (
         <AddAccount accounts={accounts} onAdded={onClose} onCancel={onClose} />
       )}
+      {editing && (
+        <section aria-labelledby={eraseId} {...stylex.props(styles.everything)}>
+          <h2 id={eraseId} {...stylex.props(styles.everythingTitle)}>
+            All of Trail Mix
+          </h2>
+          <p {...stylex.props(styles.quiet)}>
+            Erase every account and everything Trail Mix holds for you, on every device.
+          </p>
+          <div>
+            <Button label="Erase everything…" variant="ghost" onClick={onErase} />
+          </div>
+        </section>
+      )}
     </section>
   );
 }
@@ -79,5 +106,27 @@ const styles = stylex.create({
     fontWeight: typeScaleVars['--text-heading-1-weight'],
     lineHeight: typeScaleVars['--text-heading-1-leading'],
     overflowWrap: 'anywhere',
+  },
+  // Ruled off from the account above it, since it reaches beyond that account.
+  everything: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: spacingVars['--spacing-2'],
+    marginTop: spacingVars['--spacing-4'],
+    paddingTop: spacingVars['--spacing-4'],
+    borderTopWidth: borderVars['--border-width'],
+    borderTopStyle: 'solid',
+    borderTopColor: colorVars['--color-border'],
+  },
+  everythingTitle: {
+    margin: 0,
+    fontSize: typeScaleVars['--text-body-size'],
+    fontWeight: fontWeightVars['--font-weight-semibold'],
+    color: colorVars['--color-text-primary'],
+  },
+  quiet: {
+    margin: 0,
+    color: tm.textQuiet,
+    fontSize: typeScaleVars['--text-supporting-size'],
   },
 });

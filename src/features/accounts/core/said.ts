@@ -20,6 +20,35 @@ export function removeSaid(account: Account, waiting: number): string {
   return `${forgets} ${sends} in the Outbox won’t be sent, and ${waiting === 1 ? 'stays' : 'stay'} in Drafts.`;
 }
 
+/**
+ * The question before a member erases everything Trail Mix holds for them. It forgets every account
+ * with how it signs in, the index of their mail, the copies of messages they opened and what waits
+ * in the Outbox. The mail stays on its servers, except the demo mailbox's, which Trail Mix holds.
+ */
+export function eraseSaid(accounts: readonly Account[], waiting: number): string {
+  const own = accounts.filter(({ provider }) => provider !== 'demo');
+  const said = [
+    own.length > 0
+      ? `Trail Mix forgets ${listed(own.map(({ name }) => name))}: the index of ${own.length === 1 ? 'its' : 'their'} mail, the copies of messages you opened, and how it signs in to ${own.length === 1 ? 'it' : 'them'}.`
+      : '',
+    own.length < accounts.length ? 'The demo mailbox goes, with all its mail.' : '',
+    accounts.length === 0 ? 'Trail Mix forgets everything it holds for you.' : '',
+    waiting > 0
+      ? `${waiting === 1 ? '1 message' : `${waiting} messages`} waiting in the Outbox won’t be sent.`
+      : '',
+    own.length > 0 ? 'Your mail stays on its servers, and you can add your accounts again.' : '',
+    'Every device you’re signed in on starts over.',
+  ];
+  return said.filter(Boolean).join(' ');
+}
+
+/** Names as a sentence lists them: "A", "A and B", or "A, B and C". */
+function listed(names: readonly string[]): string {
+  return names.length < 2
+    ? (names[0] ?? '')
+    : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
+}
+
 /** The Mailroom's refusal for a deployment that holds the demo mailbox. */
 const DEMO_ONLY = 'This deployment has only the demo mailbox.';
 

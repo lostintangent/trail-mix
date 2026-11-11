@@ -176,6 +176,11 @@ export const versions: readonly (readonly string[])[] = [
     `DELETE FROM placements`,
     `UPDATE folders SET cursor = NULL`,
   ],
+  [
+    // When a signed-in device last asked this Mailroom for something, in milliseconds since the
+    // epoch, in its one row. A Mailroom that starts without it counts as opened then.
+    `CREATE TABLE opened (one INTEGER PRIMARY KEY CHECK (one = 1), at INTEGER NOT NULL)`,
+  ],
 ];
 
 /**
