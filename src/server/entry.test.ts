@@ -1,6 +1,6 @@
 import { expect, mock, spyOn, test } from 'bun:test';
 import { exportJWK, generateKeyPair, SignJWT } from 'jose';
-import type { Mailroom } from '../features/mailroom/client/contract.ts';
+import type { Mailroom, Timed } from '../features/mailroom/client/contract.ts';
 import type { Members } from '../features/members/core/index.ts';
 import { cloudflareStandIn, STAND_IN_AUD } from '../../tests/cloudflare-stand-in.ts';
 import type { MessageBytes } from './routes/messages.ts';
@@ -11,11 +11,16 @@ import type { MessageBytes } from './routes/messages.ts';
  */
 
 const reachedApp: { url: string; mailroom: unknown; members: Members }[] = [];
+type Context = { mailroom: unknown; members: Members; timing: Timed[] };
 await mock.module('@tanstack/react-start/server-entry', () => ({
   default: {
-    fetch(request: Request, { context }: { context: { mailroom: unknown; members: Members } }) {
+    fetch(request: Request, { context }: { context: Context }) {
       reachedApp.push({ url: request.url, mailroom: context.mailroom, members: context.members });
-      return new Response('the app');
+      // A call notes its parts of the request's time, as `rpc.ts` does.
+      if (request.url.includes('/_serverFn/')) {
+        context.timing.push({ name: 'mailroom', ms: 12.34, note: 'conversation' });
+      }
+      return new Response('the app', { headers: { 'Content-Type': 'text/plain' } });
     },
   },
 }));
@@ -82,6 +87,30 @@ test('the health endpoint answers without sign-in, with the version alone', asyn
 
   expect(await response.json()).toEqual({ version: 'abc1234' });
   expect(opened).toEqual([]);
+});
+
+test('the app’s responses say where their time went, in names and times alone', async () => {
+  // A module of its own is an isolate of its own, whose first request started it.
+  const { default: fresh } = (await import(`./entry.ts?isolate=${Date.now()}`)) as {
+    default: typeof worker;
+  };
+  const { env } = developer();
+  const timingOf = async (path: string) => {
+    const response = await fresh.fetch(new Request(`${LOCAL}${path}`), env);
+    expect(await response.text()).toBe('the app');
+    expect(response.headers.get('Content-Type')).toBe('text/plain');
+    return response.headers.get('Server-Timing');
+  };
+
+  expect(await timingOf('/_serverFn/query')).toMatch(
+    /^isolate;desc="The Worker started for this request", access;dur=[\d.]+, mailroom;dur=12\.3;desc="conversation", worker;dur=[\d.]+$/,
+  );
+  expect(await timingOf('/_serverFn/query')).toMatch(
+    /^access;dur=[\d.]+, mailroom;dur=12\.3;desc="conversation", worker;dur=[\d.]+$/,
+  );
+  expect(await timingOf('/')).toMatch(/^access;dur=[\d.]+, worker;dur=[\d.]+$/);
+  const health = await fresh.fetch(new Request(`${LOCAL}/health`), env);
+  expect(health.headers.get('Server-Timing')).toBeNull();
 });
 
 test('a deployment with no sign-in configured serves the setup page and nothing else', async () => {

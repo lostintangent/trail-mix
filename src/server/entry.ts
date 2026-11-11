@@ -1,5 +1,5 @@
 import start from '@tanstack/react-start/server-entry';
-import type { Mailroom } from '../features/mailroom/client/contract.ts';
+import type { Mailroom, Timed } from '../features/mailroom/client/contract.ts';
 import { readMessagePath } from '../features/mailroom/client/urls.ts';
 import { CLOUDFLARE_API, cloudflareApi, membersFor } from '../features/members/server/index.ts';
 import { signInFor, signsInDevelopers, type SignInConfig } from './access.ts';
@@ -23,6 +23,9 @@ export type Env = SignInConfig & {
   CLOUDFLARE_API?: string;
 };
 
+/** Whether this isolate has served a request yet. Its first one paid for starting it. */
+let started = false;
+
 /**
  * The Worker. Files from the build are served before it runs. Every other request passes the gate
  * below in order, and only a member's own pages, signed in, reach their Mailroom. The Mailroom is
@@ -30,6 +33,9 @@ export type Env = SignInConfig & {
  */
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const begun = performance.now();
+    const isFirst = !started;
+    started = true;
     const url = new URL(request.url);
     if (url.pathname === '/health') return Response.json({ version: env.VERSION ?? 'development' });
 
@@ -38,15 +44,44 @@ export default {
     if (!isFromTrailMix(request)) return new Response('Forbidden', { status: 403 });
     const member = await signIn(request);
     if (!member) return new Response('Sign in through Cloudflare Access.', { status: 401 });
+    // The app's responses say where their time went, so a member's browser can show it.
+    const timing: Timed[] = [
+      ...(isFirst ? [{ name: 'isolate', note: 'The Worker started for this request' }] : []),
+      { name: 'access', ms: performance.now() - begun },
+    ];
 
     const mailroom = env.MAILROOM.get(env.MAILROOM.idFromName(member));
     if (url.pathname === '/updates') return updates(request, mailroom);
     const message = readMessagePath(url.pathname);
     if (message) return serveMessageBytes(message, mailroom);
     if (url.pathname === '/images') return proxyImage(request);
-    return start.fetch(request, { context: { mailroom, members: membersOf(env, member) } });
+    const response = await start.fetch(request, {
+      context: { mailroom, members: membersOf(env, member), timing },
+    });
+    return withTiming(response, [...timing, { name: 'worker', ms: performance.now() - begun }]);
   },
 };
+
+/**
+ * A response with a Server-Timing header of the parts of its time. On Cloudflare a clock stands
+ * still while code runs, so each part counts waiting, such as on the network or the Mailroom.
+ */
+function withTiming(response: Response, timing: readonly Timed[]): Response {
+  const timed = new Response(response.body, response);
+  timed.headers.set(
+    'Server-Timing',
+    timing
+      .map(({ name, ms, note }) =>
+        [
+          name,
+          ...(ms === undefined ? [] : [`dur=${Math.round(ms * 10) / 10}`]),
+          ...(note === undefined ? [] : [`desc="${note.replace(/["\\]/g, '')}"`]),
+        ].join(';'),
+      )
+      .join(', '),
+  );
+  return timed;
+}
 
 /**
  * The Members page's side for the signed-in member. It answers the operator alone, and only its

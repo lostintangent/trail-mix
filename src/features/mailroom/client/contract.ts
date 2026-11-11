@@ -195,18 +195,41 @@ export type DraftUpload = Omit<DraftInput, 'attachments'> & {
 export type Mailroom = Queries &
   Omit<Commands, 'saveDraft'> & {
     saveDraft(draft: DraftUpload, replaces?: MessageRef): Promise<MessageRef>;
+    /**
+     * Runs a query or command a browser sent, which is how the Worker asks for every one, and says
+     * how long it took. `sentAt` is when the Worker sent it, by the Worker's clock.
+     */
+    answer(call: Call<QueryName | CommandName>, sentAt: number): Promise<Answered>;
     fetch(request: Request): Promise<Response>;
     closeDevices(): Promise<void>;
   };
+
+/**
+ * A call's answer, with how long it took in the Mailroom, for the response's Server-Timing. On
+ * Cloudflare a clock stands still while code runs, so each time counts waiting, not computing.
+ */
+export type Answered = {
+  value: unknown;
+  /** From the Worker sending the call to the Mailroom starting it, by two clocks Cloudflare keeps in step. */
+  reached: number;
+  /** From the Mailroom starting the call to its answer. */
+  ran: number;
+  /** Whether the Mailroom started for this call, rather than already running. */
+  cold: boolean;
+};
+
+/** One part of a request's time, for its Server-Timing header: a name, a duration, a note. */
+export type Timed = { name: string; ms?: number; note?: string };
 
 declare module '@tanstack/react-start' {
   interface Register {
     server: {
       /**
        * The Worker hands each request its signed-in member's Mailroom, and nothing that names them,
-       * and the Members page's side for them, which answers the operator alone.
+       * the Members page's side for them, which answers the operator alone, and the parts of the
+       * request's time, which a call adds to and the Worker sends as Server-Timing.
        */
-      requestContext: { mailroom: Mailroom; members: Members };
+      requestContext: { mailroom: Mailroom; members: Members; timing: Timed[] };
     };
   }
 }

@@ -44,3 +44,28 @@ test('a command can’t travel as a GET, through either server function', async 
   expect((await get(page, asCommand)).text).toContain(REFUSED);
   expect(await get(page, commandFunction)).toMatchObject({ status: 405 });
 });
+
+test('a query’s response says where its time went, in names and times alone', async () => {
+  const page = await (await app.context()).newPage();
+  const answered = page.waitForResponse((response) =>
+    response.url().includes(encodeURIComponent('"accounts"')),
+  );
+  await page.goto(app.url);
+  const timing = (await (await answered).allHeaders())['server-timing'] ?? '';
+  const parts = timing.split(', ').map((part) => part.split(';')[0]);
+
+  expect(parts.filter((name) => name !== 'isolate' && name !== 'cold')).toEqual([
+    'access',
+    'mailroom',
+    'reached',
+    'ran',
+    'returned',
+    'worker',
+  ]);
+  expect(timing).toContain('mailroom;dur=');
+  expect(timing).toContain(';desc="accounts"');
+  // Each part is a name, a time and at most a fixed note, so nothing the call carried shows.
+  for (const part of timing.split(', ')) {
+    expect(part).toMatch(/^[a-z]+(;dur=\d+(\.\d)?)?(;desc="(accounts|[A-Z][a-z ]+)")?$/);
+  }
+});

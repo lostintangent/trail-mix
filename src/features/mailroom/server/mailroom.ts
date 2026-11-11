@@ -56,15 +56,21 @@ import {
   type SyncWindow,
   type Tokens,
 } from '../../providers/index.ts';
-import type {
-  AccountSetup,
-  DraftUpload,
-  Mailroom as Contract,
-  Page,
-  SignIn,
-  SignInPreset,
-  SignInSetup,
-  ThisDevice,
+import {
+  COMMANDS,
+  QUERIES,
+  type AccountSetup,
+  type Answered,
+  type Call,
+  type CommandName,
+  type DraftUpload,
+  type Mailroom as Contract,
+  type Page,
+  type QueryName,
+  type SignIn,
+  type SignInPreset,
+  type SignInSetup,
+  type ThisDevice,
 } from '../client/contract.ts';
 import {
   accountBook,
@@ -151,6 +157,8 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   private found: Found | undefined;
   /** Drafts this Mailroom filed, whose attachments the next version may carry before sync sees it. */
   private readonly drafts = new Set<string>();
+  /** Whether this instance has had anything to do yet, so the first call can say it started it. */
+  private isRunning = false;
   private readonly demo: DemoSettings | undefined;
 
   constructor(ctx: DurableObjectState, env: MailroomEnv) {
@@ -200,6 +208,22 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       // The alarm fills the index, whether or not a device opens.
       void ctx.storage.setAlarm(Date.now());
     }
+  }
+
+  /**
+   * Runs a query or command a browser sent, and says how long it took to reach this Mailroom and to
+   * run here, for the response's Server-Timing.
+   */
+  async answer({ name, args }: Call<QueryName | CommandName>, sentAt: number): Promise<Answered> {
+    if (!CALLABLE.has(name))
+      throw new TypeError('That isn’t something a browser can ask its Mailroom.');
+    const reached = Date.now() - sentAt;
+    const cold = !this.isRunning;
+    this.isRunning = true;
+    const started = Date.now();
+    const methods = this as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+    const value = await methods[name]!(...args);
+    return { value, reached, ran: Date.now() - started, cold };
   }
 
   // Queries
@@ -604,6 +628,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   // The hint socket, and staying current
 
   override fetch(request: Request): Promise<Response> {
+    this.isRunning = true;
     if (request.headers.get('Upgrade')?.toLowerCase() !== 'websocket') {
       return Promise.resolve(new Response('Hints arrive on a WebSocket.', { status: 426 }));
     }
@@ -649,6 +674,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
    * owes sync and sets the alarm for now, so every wake lands a bounded share.
    */
   override async alarm(): Promise<void> {
+    this.isRunning = true;
     await this.wake();
   }
 
@@ -1149,6 +1175,9 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     this.ctx.waitUntil(work.catch(report));
   }
 }
+
+/** What a browser may ask, and nothing else the Mailroom answers to. */
+const CALLABLE: ReadonlySet<string> = new Set([...QUERIES, ...COMMANDS]);
 
 /** The IMAP provider for an account, over workerd's sockets. */
 function imapOver(

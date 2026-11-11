@@ -17,7 +17,7 @@ import type {
 import { RESTARTED, UNDO_SECONDS } from '../../outbox/core/index.ts';
 import { SIGN_IN_PATIENCE_MS } from '../../providers/index.ts';
 import PostalMime from 'postal-mime';
-import type { AccountSetup, Page, ThisDevice } from '../client/contract.ts';
+import type { AccountSetup, Answered, Page, ThisDevice } from '../client/contract.ts';
 import {
   caFile,
   empty,
@@ -55,6 +55,7 @@ describe('The Mailroom', () => {
   let account: Account;
   const ada = member('ada', () => worker);
   const bea = member('bea', () => worker);
+  const fay = member('fay', () => worker);
 
   beforeAll(async () => {
     await start('full');
@@ -67,6 +68,22 @@ describe('The Mailroom', () => {
   afterAll(async () => {
     worker?.stop();
     await stop();
+  });
+
+  test('answers a browser’s call with how long it took, saying when it started for it', async () => {
+    const answer = (name: string) => fay.call<Answered>('answer', { name, args: [] }, Date.now());
+    // Fay's Mailroom has never run, and her first call starts it.
+    expect(await answer('accounts')).toMatchObject({ value: [], cold: true });
+    const again = await answer('accounts');
+    expect(again).toMatchObject({ value: [], cold: false });
+    expect(again.reached).toBeGreaterThanOrEqual(0);
+    expect(again.ran).toBeGreaterThanOrEqual(0);
+    await fay.call('restart').catch(() => {});
+    expect(await answer('folders')).toMatchObject({ value: [], cold: true });
+    // Only what a browser may ask: the Worker's own calls and a test's are refused.
+    for (const name of ['closeDevices', 'restart', 'alarm']) {
+      await expect(answer(name)).rejects.toThrow('That isn’t something a browser can ask');
+    }
   });
 
   test('refuses an account in its hosts’ own words, and keeps nothing', async () => {
