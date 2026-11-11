@@ -5,10 +5,11 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 
 const ROOT = join(import.meta.dir, '../..');
 
@@ -26,7 +27,8 @@ const KEPT_LINES = 300;
 
 /**
  * Serves the built app the way production does, on workerd, through `vite preview` under Node. The
- * build must already exist, so a test drives what CI built rather than building its own. The Worker
+ * build must already exist, so a test drives what CI built rather than building its own, and must
+ * be newer than what it is built from, so a test never drives yesterday's app. The Worker
  * gets the variables a fresh clone starts with, from `dev.vars.example`, so it signs in as the
  * development member on localhost. `vars` override them, such as `DEMO_MAILBOX`, and `env` adds to
  * the preview's environment, such as a certificate authority for workerd to trust. Each preview
@@ -46,6 +48,12 @@ export async function startPreview(
 ): Promise<Preview> {
   if (!existsSync(join(ROOT, build.directory, 'server/wrangler.json'))) {
     throw new Error(`There is no build to drive. Run \`${build.command}\` first.`);
+  }
+  const changed = changedSince(build);
+  if (changed) {
+    throw new Error(
+      `${build.directory} is older than ${changed}. Run \`${build.command}\` to build it again.`,
+    );
   }
   if (isRunning) {
     throw new Error('A preview is already running. Stop it before starting another.');
@@ -111,6 +119,47 @@ export const BUILDS = {
   app: { directory: 'dist', command: 'bun run build' },
   demo: { directory: 'dist-demo', command: 'bun run build:demo' },
 } satisfies Record<string, Build>;
+
+/** What a build is made from: the app's source, what it serves as it is, and how it is built. */
+const BUILD_INPUTS = [
+  'src',
+  'public',
+  'vite.config.ts',
+  'package.json',
+  'bun.lock',
+  'wrangler.jsonc',
+];
+
+/**
+ * The newest of a build's inputs that changed after the build was made, relative to `root`, or none
+ * if the build is current. A build is made when its Worker's configuration is written, last. A test
+ * under `src` builds into nothing, so changing one leaves the build current.
+ */
+export function changedSince(build: Build, root = ROOT): string | undefined {
+  const builtAt = statSync(join(root, build.directory, 'server/wrangler.json')).mtimeMs;
+  let newest: { path: string; at: number } | undefined;
+  for (const path of inputsIn(root)) {
+    const at = statSync(path).mtimeMs;
+    if (at > builtAt && at > (newest?.at ?? 0)) newest = { path, at };
+  }
+  return newest && relative(root, newest.path);
+}
+
+function* inputsIn(root: string): Generator<string> {
+  for (const input of BUILD_INPUTS) {
+    const path = join(root, input);
+    if (!existsSync(path)) continue;
+    if (!statSync(path).isDirectory()) {
+      yield path;
+      continue;
+    }
+    for (const file of readdirSync(path, { recursive: true, withFileTypes: true })) {
+      const name = file.name;
+      if (!file.isFile() || name.startsWith('.') || /\.test\.tsx?$/.test(name)) continue;
+      yield join(file.parentPath, name);
+    }
+  }
+}
 
 /** The built Worker's server function ids, by the name of the function in `rpc.ts`. */
 export function serverFunctionIds(build: Build = BUILDS.app): Record<string, string> {
