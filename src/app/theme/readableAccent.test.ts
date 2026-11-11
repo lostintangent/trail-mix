@@ -9,7 +9,7 @@ import {
   quantized,
   type Rgb,
 } from '../../shared/color.ts';
-import { DEFAULT_ACCENT, DEFAULT_ACCENT_HEX, DESK, MUTED_ALPHA, PANE, PAPER } from './palette.ts';
+import { DEFAULT_ACCENT, DESK, MUTED_ALPHA, PANE, PAPER } from './palette.ts';
 import { accentRule, accentTokens, readableAccent, type Theme } from './readableAccent.ts';
 
 const THEMES: Theme[] = ['light', 'dark'];
@@ -116,8 +116,4 @@ describe('the rule', () => {
       expect(accentRule(pick)).toBeUndefined();
     }
   });
-});
-
-test('the color picker starts at ink blue, as paper shows it', () => {
-  expect(DEFAULT_ACCENT_HEX).toBe(hexOf(parseColor(DEFAULT_ACCENT.light)!));
 });

@@ -23,8 +23,5 @@ export const DEFAULT_ACCENT: Halves = {
   dark: 'oklch(0.77 0.13 265)',
 };
 
-/** Ink blue in hex, as paper shows it, where the system's color picker starts. A test holds it. */
-export const DEFAULT_ACCENT_HEX = '#2c57cd';
-
 /** How strongly the accent tints what it marks quietly, such as a tag, in each theme. */
 export const MUTED_ALPHA = { light: 0.09, dark: 0.14 } as const;
