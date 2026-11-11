@@ -1,7 +1,7 @@
 import { gzipSync } from 'node:zlib';
 import { chromium, type Page } from 'playwright';
 import { startPreview } from '../e2e/preview.ts';
-import { percentile, type BenchArea, type Measurement } from './budget.ts';
+import { percentile, type BenchArea, type Measurement, type Slow } from './budget.ts';
 import { phone, slowDown } from './phone.ts';
 import { inputLatency, type InputLatency } from './latency.ts';
 import { watch, type Watch } from './steady.ts';
@@ -40,6 +40,17 @@ const MEMBER = 'bench@trailmix.test';
 /** A frame counts as on time within a millisecond of the 60Hz interval, for timer jitter. */
 const FRAME_SLACK = 1;
 
+/**
+ * How many times a key is held and the searches are typed, each from a fresh page, pooled into one
+ * p95. With one round, a p95 is the second-slowest of a few dozen inputs, so one slow frame decides
+ * it. Every input of every round counts, so a round can't be dropped, and a real regression moves
+ * them all.
+ */
+const ROUNDS = 5;
+
+/** How many conversations are archived in a row. */
+const ARCHIVES = 60;
+
 export const workbench: BenchArea = {
   name: 'workbench',
   measure: async () => {
@@ -76,11 +87,24 @@ export const workbench: BenchArea = {
         await phoneWatch.during('Scrolling', () => scrollFrames(page)),
         0.95,
       );
-      await phoneWatch.steady();
+      const typed: Typed[] = [];
+      for (let round = 1; round <= ROUNDS; round++) {
+        if (round > 1) {
+          await page.reload();
+          await firstRows(page);
+        }
+        await phoneWatch.steady();
+        typed.push(
+          ...(await phoneWatch.during(`Searching as it is typed, round ${round}`, () =>
+            searchKeystrokes(page),
+          )),
+        );
+      }
       const search = percentile(
-        await phoneWatch.during('Searching as it is typed', () => searchKeystrokes(page)),
+        typed.map(({ latency }) => latency),
         0.95,
       );
+      const searchSlowest = await (await inputLatency(page)).slowestSpans(typed);
       await context.close();
 
       // Keys move through the list on a desktop, where the list stays in view as its selection opens.
@@ -90,16 +114,29 @@ export const workbench: BenchArea = {
       await slowDown(desk);
       await desk.goto(preview.url);
       await firstRows(desk);
-      const latency = await inputLatency(desk);
-      // The moves start from the first conversation, open, read and settled, so the read mark that
-      // opening it sends lands before the moves are timed.
-      await desk.getByRole('option').first().click();
-      await deskWatch.steady();
-      const keyMove = percentile(
-        await deskWatch.during('Moving by key', () => keyMoves(desk, latency)),
-        0.95,
-      );
-      const archive = percentile(await archives(desk, deskWatch, latency), 0.95);
+      const moves: number[] = [];
+      const keySlowest: Slow[] = [];
+      let latency: InputLatency | undefined;
+      for (let round = 1; round <= ROUNDS; round++) {
+        if (round > 1) {
+          await desk.reload();
+          await firstRows(desk);
+        }
+        const timing = await inputLatency(desk);
+        latency = timing;
+        // The moves start from the first conversation, open, read and settled, so the read mark that
+        // opening it sends lands before the moves are timed.
+        await desk.getByRole('option').first().click();
+        await deskWatch.steady();
+        const keys = await deskWatch.during(`Moving by key, round ${round}`, () =>
+          keyMoves(desk, timing),
+        );
+        moves.push(...keys.latencies);
+        keySlowest.push(...(await timing.slowest('keydown', keys.timestamps)));
+      }
+      const keyMove = percentile(moves, 0.95);
+      const archive = percentile(await archives(desk, deskWatch, latency!), 0.95);
+      const archiveSlowest = await latency!.slowestOf('click');
       await desktop.close();
 
       return [
@@ -111,9 +148,15 @@ export const workbench: BenchArea = {
           BUDGET.scrollFrame + FRAME_SLACK,
           'ms',
         ),
-        measured('Moving through the list by key, p95', keyMove, BUDGET.keyMove, 'ms'),
-        measured('Archiving, p95', archive, BUDGET.archive, 'ms'),
-        measured('Search showing matches as it is typed, p95', search, BUDGET.search, 'ms'),
+        measured('Moving through the list by key, p95', keyMove, BUDGET.keyMove, 'ms', keySlowest),
+        measured('Archiving, p95', archive, BUDGET.archive, 'ms', archiveSlowest),
+        measured(
+          'Search showing matches as it is typed, p95',
+          search,
+          BUDGET.search,
+          'ms',
+          searchSlowest,
+        ),
       ];
     } finally {
       await browser.close();
@@ -122,17 +165,26 @@ export const workbench: BenchArea = {
   },
 };
 
-function measured(name: string, value: number, budget: number, unit: Measurement['unit']) {
-  return { area: 'workbench', name, value, budget, unit };
+function measured(
+  name: string,
+  value: number,
+  budget: number,
+  unit: Measurement['unit'],
+  slowest?: Slow[],
+): Measurement {
+  const worst = slowest?.toSorted((a, b) => b.latency - a.latency).slice(0, 5);
+  return { area: 'workbench', name, value, budget, unit, ...(worst && { slowest: worst }) };
 }
 
 /**
  * Each keystroke of the typed searches, timed from the key going down until the list holding the
  * matches for everything typed so far has painted.
  */
-async function searchKeystrokes(page: Page): Promise<number[]> {
+type Typed = { start: number; latency: number };
+
+async function searchKeystrokes(page: Page): Promise<Typed[]> {
   const field = page.getByRole('searchbox', { name: 'Search mail' });
-  const times: number[] = [];
+  const times: Typed[] = [];
   for (const text of TYPED) {
     await field.fill('');
     await page.getByRole('heading', { name: 'Inbox', level: 2 }).waitFor();
@@ -159,16 +211,17 @@ async function searchKeystrokes(page: Page): Promise<number[]> {
  * `text`'s matches has painted. The list is checked as each frame begins, and a task queued then
  * runs once that frame has painted.
  */
-function matched(text: string): Promise<number> {
+function matched(text: string): Promise<{ start: number; latency: number }> {
   return new Promise((resolve) => {
     const check = () => {
       const field = document.querySelector<HTMLInputElement>('input[type="search"]');
       // The conversation list, and not the palette's commands, which can show as the field is typed in.
       const list = document.querySelector('[role="listbox"][aria-busy]');
       if (field?.value === text && list?.getAttribute('aria-busy') === 'false') {
-        setTimeout(() =>
-          resolve(performance.now() - (window as unknown as { pressedAt: number }).pressedAt),
-        );
+        setTimeout(() => {
+          const start = (window as unknown as { pressedAt: number }).pressedAt;
+          resolve({ start, latency: performance.now() - start });
+        });
       } else requestAnimationFrame(check);
     };
     requestAnimationFrame(check);
@@ -244,7 +297,10 @@ const REPEATS = 40;
  * fails unless the keys reached the list a repeat apart and the reader opened only the first and
  * the last conversation, since anything else measured something other than a held key.
  */
-async function keyMoves(page: Page, latency: InputLatency): Promise<number[]> {
+async function keyMoves(
+  page: Page,
+  latency: InputLatency,
+): Promise<{ latencies: number[]; timestamps: number[] }> {
   await page.locator('[role="listbox"]').focus();
   await page.evaluate(() => {
     const seen = { keys: [] as number[], opened: [] as string[] };
@@ -287,7 +343,7 @@ async function keyMoves(page: Page, latency: InputLatency): Promise<number[]> {
     throw new Error(`The reader opened ${seen.opened.length} conversations while a key was held.`);
   }
   // Each key by the page's own record of it, since its timestamp comes from this process's clock.
-  return latency.at('keydown', seen.keys);
+  return { latencies: await latency.at('keydown', seen.keys), timestamps: seen.keys };
 }
 
 /**
@@ -301,7 +357,7 @@ async function archives(page: Page, watching: Watch, latency: InputLatency): Pro
     .getByRole('button', { name: 'Archive' });
   await page.getByRole('option').nth(2).click();
   const times: number[] = [];
-  for (let press = 0; press < 20; press++) {
+  for (let press = 0; press < ARCHIVES; press++) {
     await archive.waitFor();
     // The reader follows a selection once it rests, so wait until it shows the selected one.
     await page.waitForFunction(() => {

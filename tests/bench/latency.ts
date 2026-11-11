@@ -1,4 +1,5 @@
 import type { Page } from 'playwright';
+import type { Slow } from './budget.ts';
 
 /** Event Timing reports only an input that took this long or longer, so a faster one counts as this. */
 const REPORTED_FROM = 16;
@@ -6,7 +7,16 @@ const REPORTED_FROM = 16;
 /** How near an entry's start must be to an input's timestamp to be that input's, well under a key repeat. */
 const SAME_INPUT_MS = 1;
 
-type Timed = { name: string; start: number; duration: number };
+type Timed = {
+  name: string;
+  start: number;
+  duration: number;
+  processingStart: number;
+  processingEnd: number;
+};
+
+/** A frame that took longer than 50 ms, and the scripts that ran in it. */
+type LongFrame = { start: number; end: number; scripts: { name: string; duration: number }[] };
 
 /**
  * The latency of a page's inputs as the browser times them with Event Timing: from each input's own
@@ -16,13 +26,61 @@ type Timed = { name: string; start: number; duration: number };
 export async function inputLatency(page: Page) {
   await page.evaluate((from) => {
     const timed: Timed[] = [];
-    (window as unknown as { timed: Timed[] }).timed = timed;
+    const frames: LongFrame[] = [];
+    Object.assign(window, { timed, frames });
     new PerformanceObserver((list) => {
-      for (const { name, startTime, duration } of list.getEntries()) {
-        timed.push({ name, start: startTime, duration });
+      for (const entry of list.getEntries() as PerformanceEventTiming[]) {
+        const { name, startTime, duration, processingStart, processingEnd } = entry;
+        timed.push({ name, start: startTime, duration, processingStart, processingEnd });
       }
     }).observe({ type: 'event', durationThreshold: from } as PerformanceObserverInit);
+    type Script = {
+      invoker: string;
+      sourceFunctionName: string;
+      sourceURL: string;
+      duration: number;
+    };
+    new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        const scripts = ((entry as unknown as { scripts: Script[] }).scripts ?? []).map(
+          ({ invoker, sourceFunctionName, sourceURL, duration }) => ({
+            name: `${invoker} ${sourceFunctionName || '(anonymous)'} ${sourceURL.split('/').pop() ?? ''}`.trim(),
+            duration: Math.round(duration),
+          }),
+        );
+        frames.push({ start: entry.startTime, end: entry.startTime + entry.duration, scripts });
+      }
+    }).observe({ type: 'long-animation-frame', buffered: true });
   }, REPORTED_FROM);
+  /**
+   * The `count` slowest of the inputs named `name` at these timestamps, each split into the wait
+   * before its handlers ran, the handlers and the wait for the frame, with the scripts that ran
+   * longest in the long frames it spanned.
+   */
+  const slowest = async (
+    name: string,
+    timestamps: readonly number[],
+    count = 5,
+  ): Promise<Slow[]> => {
+    const { timed, frames } = await page.evaluate(() => {
+      const { timed, frames } = window as unknown as { timed: Timed[]; frames: LongFrame[] };
+      return { timed, frames };
+    });
+    return timestamps
+      .flatMap((at) =>
+        timed.filter((entry) => entry.name === name && Math.abs(entry.start - at) < SAME_INPUT_MS),
+      )
+      .toSorted((a, b) => b.duration - a.duration)
+      .slice(0, count)
+      .map((entry) => ({
+        latency: entry.duration,
+        inputDelay: Math.round(entry.processingStart - entry.start),
+        processing: Math.round(entry.processingEnd - entry.processingStart),
+        presentation: Math.round(entry.start + entry.duration - entry.processingEnd),
+        scripts: scriptsDuring(frames, entry.start, entry.start + entry.duration),
+      }));
+  };
+
   return {
     now: () => page.evaluate(() => performance.now()),
     /**
@@ -59,7 +117,44 @@ export async function inputLatency(page: Page) {
           REPORTED_FROM,
       );
     },
+    slowest,
+    /** The `count` slowest inputs named `name` the page has seen, split as `slowest` splits them. */
+    slowestOf: async (name: string, count = 5): Promise<Slow[]> => {
+      const starts = await page.evaluate(
+        (name) =>
+          (window as unknown as { timed: Timed[] }).timed
+            .filter((entry) => entry.name === name)
+            .map(({ start }) => start),
+        name,
+      );
+      return slowest(name, starts, count);
+    },
+    /** The slowest of these spans, such as a keystroke until its matches painted, with the long frames' scripts. */
+    slowestSpans: async (
+      spans: readonly { start: number; latency: number }[],
+      count = 5,
+    ): Promise<Slow[]> => {
+      const frames = await page.evaluate(
+        () => (window as unknown as { frames: LongFrame[] }).frames,
+      );
+      return spans
+        .toSorted((a, b) => b.latency - a.latency)
+        .slice(0, count)
+        .map(({ start, latency }) => ({
+          latency: Math.round(latency),
+          scripts: scriptsDuring(frames, start, start + latency),
+        }));
+    },
   };
+}
+
+/** The scripts that ran longest in the long frames overlapping a span, longest first. */
+function scriptsDuring(frames: readonly LongFrame[], start: number, end: number) {
+  return frames
+    .filter((frame) => frame.end > start && frame.start < end)
+    .flatMap((frame) => frame.scripts)
+    .toSorted((a, b) => b.duration - a.duration)
+    .slice(0, 5);
 }
 
 export type InputLatency = Awaited<ReturnType<typeof inputLatency>>;
