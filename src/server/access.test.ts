@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, test } from 'bun:test';
+import { afterEach, beforeAll, describe, expect, setSystemTime, test } from 'bun:test';
 import {
   createLocalJWKSet,
   exportJWK,
@@ -162,14 +162,15 @@ test('a deployment with no sign-in configured has no way to sign in', () => {
 
 describe('a visitor to the public demo', () => {
   const KEY = 'a-demo-key-that-is-at-least-32-characters';
-  /** A gate that lets everyone in, and remembers who asked from where. */
-  const gate = (admits = true) => {
+  afterEach(() => setSystemTime());
+  /** A gate that lets everyone in now, unless `letIn` says otherwise, and remembers who asked from where. */
+  const gate = (letIn: () => number | undefined = () => Date.now()) => {
     const asked: [string, string][] = [];
     return {
       asked,
       admit: (visitor: string, network: string) => {
         asked.push([visitor, network]);
-        return Promise.resolve(admits);
+        return Promise.resolve(letIn());
       },
     };
   };
@@ -193,7 +194,7 @@ describe('a visitor to the public demo', () => {
     expect(first.member).toMatch(/^[0-9a-f]{32}@demo\.invalid$/);
     expect(first.setCookie).toMatch(
       new RegExp(
-        `^__Host-visitor=[0-9a-f]{32}\\.in\\.[\\w-]{43}; Max-Age=${VISITOR_SECONDS}; Path=/; Secure; HttpOnly; SameSite=Lax$`,
+        `^__Host-visitor=[0-9a-f]{32}\\.\\d{10}\\.[\\w-]{43}; Max-Age=${VISITOR_SECONDS}; Path=/; Secure; HttpOnly; SameSite=Lax$`,
       ),
     );
     const again = (await visit(config, `other=1; ${cookieOf(first)}`)) as Signed;
@@ -241,17 +242,53 @@ describe('a visitor to the public demo', () => {
     const query = (await visit(config, cookieOf(page))) as Signed;
     expect(query.member).toBe(member);
     expect(asks.asked).toEqual([[member.split('@')[0]!, '203.0.113.7']]);
-    expect(cookieOf(query)).toContain('.in.');
+    expect(cookieOf(query)).toMatch(/\.\d{10}\./);
     await visit(config, cookieOf(query));
     expect(asks.asked).toHaveLength(1);
-    // A visitor can't say they're in: their cookie's state is signed with their id.
-    const claimed = cookieOf(page).replace('.new.', '.in.');
+    // A visitor can't say they're in: when the gate let them in is signed with their id.
+    const claimed = cookieOf(page).replace('.new.', `.${Math.floor(Date.now() / 1000)}.`);
     await visit(config, claimed);
     expect(asks.asked).toHaveLength(2);
   });
 
+  test('asks the gate again once its word runs out, which no other answer renews', async () => {
+    const at = Date.parse('2026-11-11T08:00:00Z');
+    setSystemTime(at);
+    const asks = gate();
+    const config = demo(asks);
+    const query = (await visit(config)) as Signed;
+    expect(cookieOf(query)).toContain(`.${at / 1000}.`);
+
+    // Until the gate's word runs out, neither the page nor a call asks again, or moves its time.
+    setSystemTime(at + (VISITOR_SECONDS - 1) * 1000);
+    for (const reachesMailroom of [false, true]) {
+      expect(cookieOf(await visit(config, cookieOf(query), reachesMailroom))).toBe(cookieOf(query));
+    }
+    expect(asks.asked).toHaveLength(1);
+
+    // After it, serving the page still asks nothing, and the next call asks the gate again, as the
+    // same visitor, so a cookie kept past its Mailroom's erase can't make another unasked.
+    setSystemTime(at + VISITOR_SECONDS * 1000);
+    expect(cookieOf(await visit(config, cookieOf(query), false))).toBe(cookieOf(query));
+    expect(asks.asked).toHaveLength(1);
+    const again = (await visit(config, cookieOf(query))) as Signed;
+    expect(asks.asked).toEqual([
+      [query.member.split('@')[0]!, '203.0.113.7'],
+      [query.member.split('@')[0]!, '203.0.113.7'],
+    ]);
+    expect(again.member).toBe(query.member);
+    expect(cookieOf(again)).toContain(`.${at / 1000 + VISITOR_SECONDS}.`);
+  });
+
+  test('carries the time the gate let them in, not the time it was asked', async () => {
+    const letIn = Date.parse('2026-11-11T08:00:00Z');
+    setSystemTime(letIn + 5 * 60_000);
+    const query = await visit(demo(gate(() => letIn)));
+    expect(cookieOf(query)).toContain(`.${letIn / 1000}.`);
+  });
+
   test('finds the demo full for now when the gate says no, and is named nobody', async () => {
-    const config = demo(gate(false));
+    const config = demo(gate(() => undefined));
     const refused = await visit(config);
     expect(refused).toBeInstanceOf(Response);
     const response = refused as Response;

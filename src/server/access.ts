@@ -22,18 +22,24 @@ export type SignInConfig = {
   VISITOR_KEY?: string;
   /** Set where the deployment serves only the demo mailbox, as previews and the demo do. */
   DEMO_MAILBOX?: string;
-  /** The demo's gate, which says whether a new visitor may come in. */
+  /** The demo's gate, which says whether a visitor may come in. */
   VISITOR_GATE?: VisitorGate;
 };
 
-/** Says whether a new visitor may come in, by their id and the network they come from. */
-export type VisitorGate = { admit(visitor: string, network: string): Promise<boolean> };
+/**
+ * Says whether a visitor may come in, by their id and the network they come from: when it let them
+ * in, in milliseconds since the epoch, or nothing when the demo is full for now.
+ */
+export type VisitorGate = {
+  admit(visitor: string, network: string): Promise<number | undefined>;
+};
 
 /**
  * Someone proved: their verified email address, and a cookie their response must set to stay
- * signed in, where sign-in keeps one.
+ * signed in, where sign-in keeps one. A visitor to the public demo also says whether its gate has
+ * let them in, and one it hasn't reaches no Mailroom.
  */
-export type Signed = { member: string; setCookie?: string };
+export type Signed = { member: string; setCookie?: string; isLetIn?: boolean };
 
 /**
  * Proves who sent a request, or answers it in their place, saying why nobody could be named. A
@@ -127,9 +133,10 @@ function accessSignIn(team: string, audience: string, keys: JWTVerifyGetKey): Si
 const VISITOR_COOKIE = '__Host-visitor';
 
 /**
- * How long a visitor's cookie lasts after their last request: under the demo's day, less the hour
- * an opening may go unnoted, so it always ends before their Mailroom erases itself, and nobody
- * comes back to an empty one.
+ * How long the gate's letting a visitor in holds: under the demo's day, less the hour an opening
+ * may go unnoted. A Mailroom made in that time can't have erased itself before it runs out, so a
+ * visitor's cookie never makes a second Mailroom without the gate. Their browser keeps the cookie
+ * as long after their last request, so they stay the same visitor.
  */
 export const VISITOR_SECONDS = 22 * 60 * 60;
 
@@ -141,10 +148,13 @@ const VISITOR_DOMAIN = 'demo.invalid';
  * in a cookie the demo signs with its key, named as that id on `demo.invalid`. A browser can drop
  * its cookie and come back as a new visitor, but without the key it can't name another.
  *
- * Serving the page only gives a new visitor their cookie. Their first request that reaches a
- * Mailroom, which makes one, asks the gate first, and the cookie then says they're in, so the gate
- * is asked once a visitor. When the gate says no, the demo is full for now, and no Mailroom is
- * made. Each answer sets the cookie again, so a visitor stays one while they keep coming back.
+ * Serving the page only gives a new visitor their cookie. A request that reaches a Mailroom, and
+ * so may make one, asks the gate first, unless the cookie says the gate let its visitor in within
+ * `VISITOR_SECONDS`. The cookie then carries the time the gate let them in, which no other answer
+ * moves, so a cookie is never good for longer than the gate's word. A visitor still coming back
+ * after that asks again, and keeps their id. When the gate says no, the demo is full for now, and
+ * no Mailroom is made. Each answer sets the cookie again, so a visitor stays one while they keep
+ * coming back.
  */
 function visitorSignIn(secret: string, gate: VisitorGate): SignIn {
   if (secret.length < 32) throw new Error('VISITOR_KEY must be at least 32 characters.');
@@ -152,48 +162,57 @@ function visitorSignIn(secret: string, gate: VisitorGate): SignIn {
     const key = await visitorKey(secret);
     const held = await heldVisitor(request, key);
     const id = held?.id ?? newVisitorId();
-    let isIn = held?.isIn ?? false;
-    if (reachesMailroom && !isIn) {
+    let letIn = held?.letIn;
+    if (reachesMailroom && !isLetIn(letIn, Date.now())) {
       const network = networkOf(request.headers.get('CF-Connecting-IP') ?? '');
-      if (!(await gate.admit(id, network))) return fullForNow();
-      isIn = true;
+      const at = await gate.admit(id, network);
+      if (at === undefined) return fullForNow();
+      letIn = Math.floor(at / 1000);
     }
-    const value = `${id}.${isIn ? IN : NEW}`;
+    const value = `${id}.${letIn ?? NEW}`;
     const signature = new Uint8Array(await crypto.subtle.sign('HMAC', key, signed(value)));
     return {
       member: `${id}@${VISITOR_DOMAIN}`,
+      isLetIn: isLetIn(letIn, Date.now()),
       setCookie: `${VISITOR_COOKIE}=${value}.${base64Url(signature)}; Max-Age=${VISITOR_SECONDS}; Path=/; Secure; HttpOnly; SameSite=Lax`,
     };
   };
 }
 
-/** What a visitor's cookie says of the gate: they're in, or they haven't asked it yet. */
-const IN = 'in';
+/** What a visitor's cookie says until the gate lets them in, for the first time or again. */
 const NEW = 'new';
+
+/** Whether the gate's letting a visitor in, at `letIn` in seconds since the epoch, still holds. */
+const isLetIn = (letIn: number | undefined, now: number) =>
+  letIn !== undefined && now / 1000 - letIn < VISITOR_SECONDS;
 
 const newVisitorId = () =>
   [...crypto.getRandomValues(new Uint8Array(16))]
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('');
 
-/** The visitor a request's cookie names, and whether the gate let them in, if the demo signed it. */
+/**
+ * The visitor a request's cookie names, and when the gate last let them in, in seconds since the
+ * epoch, if the demo signed it.
+ */
 async function heldVisitor(
   request: Request,
   key: CryptoKey,
-): Promise<{ id: string; isIn: boolean } | undefined> {
+): Promise<{ id: string; letIn?: number } | undefined> {
   const value = (request.headers.get('Cookie') ?? '')
     .split(';')
     .map((pair) => pair.trim())
     .find((pair) => pair.startsWith(`${VISITOR_COOKIE}=`))
     ?.slice(VISITOR_COOKIE.length + 1);
   const [, id, state, signature] =
-    /^([0-9a-f]{32})\.(in|new)\.([\w-]{43})$/.exec(value ?? '') ?? [];
+    /^([0-9a-f]{32})\.(new|\d{1,12})\.([\w-]{43})$/.exec(value ?? '') ?? [];
   if (!id || !state || !signature) return undefined;
   const bytes = Uint8Array.from(atob(signature.replace(/-/g, '+').replace(/_/g, '/')), (c) =>
     c.charCodeAt(0),
   );
   const isSigned = await crypto.subtle.verify('HMAC', key, bytes, signed(`${id}.${state}`));
-  return isSigned ? { id, isIn: state === IN } : undefined;
+  if (!isSigned) return undefined;
+  return state === NEW ? { id } : { id, letIn: Number(state) };
 }
 
 /** What the demo signs for a visitor, so its signature can't stand for anything else. */

@@ -16,7 +16,11 @@ type Context = { mailroom: () => unknown; members: Members; timing: Timed[] };
 await mock.module('@tanstack/react-start/server-entry', () => ({
   default: {
     fetch(request: Request, { context }: { context: Context }) {
-      reachedApp.push({ url: request.url, mailroom: context.mailroom(), members: context.members });
+      reachedApp.push({
+        url: request.url,
+        mailroom: tried(context.mailroom),
+        members: context.members,
+      });
       // A call notes its parts of the request's time, as `rpc.ts` does.
       if (request.url.includes('/_serverFn/')) {
         context.timing.push({ name: 'mailroom', ms: 12.34, note: 'conversation' });
@@ -25,6 +29,16 @@ await mock.module('@tanstack/react-start/server-entry', () => ({
     },
   },
 }));
+
+/** What `reach` returns, or what it threw. */
+function tried(reach: () => unknown): unknown {
+  try {
+    return reach();
+  } catch (error) {
+    return error;
+  }
+}
+
 // The Mailroom and the demo's visitor gate run only on workerd, and the Worker here only names them.
 await mock.module('../features/mailroom/server/index.ts', () => ({ Mailroom: class {} }));
 await mock.module('cloudflare:workers', () => ({ DurableObject: class {} }));
@@ -397,7 +411,7 @@ function demo(open = true, changes = Infinity) {
     get: () => ({
       admit: (visitor: string) => {
         asked.push(visitor);
-        return Promise.resolve(open);
+        return Promise.resolve(open ? Date.now() : undefined);
       },
     }),
   };
@@ -413,11 +427,15 @@ function demo(open = true, changes = Infinity) {
 const cookieOf = (response: Response) => response.headers.get('Set-Cookie')?.split(';')[0] ?? '';
 
 test('a visitor to the demo is let in at their first call to a Mailroom, which is theirs alone', async () => {
-  const { env, asked } = demo();
+  const { env, asked, opened } = demo();
   const DEMO = 'https://demo.example.com';
+  reachedApp.length = 0;
   const page = await worker.fetch(new Request(`${DEMO}/`), env);
   expect(await page.text()).toBe('the app');
   expect(asked).toEqual([]);
+  // Serving the page hands the app no Mailroom, so nothing it does there can make one.
+  expect(reachedApp[0]!.mailroom).toEqual(new Error('The demo’s gate hasn’t let this visitor in.'));
+  expect(opened).toEqual([]);
 
   const call = (cookie: string) =>
     new Request(`${DEMO}/_serverFn/query`, { headers: { Cookie: cookie } });
@@ -425,7 +443,7 @@ test('a visitor to the demo is let in at their first call to a Mailroom, which i
   const first = await worker.fetch(call(cookieOf(page)), env);
   const [visitor] = asked;
   expect(visitor).toMatch(/^[0-9a-f]{32}$/);
-  expect(cookieOf(first)).toContain(`${visitor}.in.`);
+  expect(cookieOf(first)).toMatch(new RegExp(`=${visitor}\\.\\d{10}\\.`));
   expect((reachedApp[0]!.mailroom as { name: string }).name).toBe(`${visitor}@demo.invalid`);
   // From then on, the cookie lets them straight in.
   await worker.fetch(call(cookieOf(first)), env);
@@ -468,7 +486,7 @@ test('the demo takes only so many changes a minute from one network, and counts 
   expect(refused.headers.get('Retry-After')).toBe('60');
   expect(await refused.text()).toContain('only so many changes a minute');
   // Its cookie still comes back, so the visitor stays who they are.
-  expect(cookieOf(refused)).toContain('.in.');
+  expect(cookieOf(refused)).toMatch(/\.\d{10}\./);
   expect(reachedApp).toHaveLength(3);
   // Queries and the page only read, and aren't counted.
   expect((await worker.fetch(from('203.0.113.7', 'GET'), env)).status).toBe(200);

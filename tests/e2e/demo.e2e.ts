@@ -5,6 +5,7 @@ import { toJSON } from 'seroval';
 import type { Page } from 'playwright';
 import { unreadableText } from './contrast.ts';
 import { checkDemo } from './demo-check.ts';
+import { VISITOR_SECONDS } from '../../src/server/access.ts';
 import { BUILDS, serverFunctionIds } from './preview.ts';
 import { suite } from './suite.ts';
 
@@ -27,9 +28,10 @@ const SIZES = {
   phone: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
 };
 
+const VISITOR_KEY = crypto.randomUUID().repeat(2);
 const app = suite({
   build: BUILDS.demo,
-  vars: { VISITOR_KEY: crypto.randomUUID().repeat(2), NEW_VISITORS_A_DAY: String(A_DAY) },
+  vars: { VISITOR_KEY, NEW_VISITORS_A_DAY: String(A_DAY) },
 });
 const { test } = app;
 
@@ -92,8 +94,8 @@ test('each visitor opens the demo mailbox in a Mailroom of their own, which no o
   const ben = await visitor();
   await ben.getByRole('option').filter({ hasText: subject }).waitFor();
   const [anas = '', bens = ''] = [await cookieOf(ana), await cookieOf(ben)];
-  expect(anas).toMatch(/^[0-9a-f]{32}\.in\./);
-  expect(bens).toMatch(/^[0-9a-f]{32}\.in\./);
+  expect(anas).toMatch(/^[0-9a-f]{32}\.\d{10}\./);
+  expect(bens).toMatch(/^[0-9a-f]{32}\.\d{10}\./);
   expect(anas.slice(0, 32)).not.toBe(bens.slice(0, 32));
   expect(mailrooms()).toBe(3);
 }, 90_000);
@@ -236,5 +238,36 @@ test('a page load makes no Mailroom, and a script makes no more new visitors tha
   }
   // So the deploy's check can only say so.
   expect(await checkDemo(app.url)).toBe('full');
+
+  // Nor does a cookie banked from an earlier day, which the demo signed when its gate let the
+  // visitor in, make a Mailroom without asking the gate again.
+  const banked = await fetch(accounts, {
+    headers: {
+      'x-tsr-serverFn': 'true',
+      'Sec-Fetch-Site': 'same-origin',
+      Cookie: await visitorCookie(Math.floor(Date.now() / 1000) - VISITOR_SECONDS),
+    },
+  });
+  await banked.body?.cancel();
+  expect(banked.status).toBe(429);
   expect(mailrooms()).toBe(A_DAY);
 }, 90_000);
+
+/** A cookie the demo would have given a new visitor its gate let in at `letIn`, in seconds. */
+async function visitorCookie(letIn: number): Promise<string> {
+  const id = crypto.randomUUID().replaceAll('-', '');
+  const key = await crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(VISITOR_KEY),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign'],
+  );
+  const value = `${id}.${letIn}`;
+  const signature = await crypto.subtle.sign(
+    'HMAC',
+    key,
+    new TextEncoder().encode(`trail-mix visitor ${value}`),
+  );
+  return `__Host-visitor=${value}.${Buffer.from(signature).toString('base64url')}`;
+}

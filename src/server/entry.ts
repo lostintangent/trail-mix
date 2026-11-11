@@ -70,7 +70,7 @@ export default {
       logo !== null;
     const signed = await signIn(request, { reachesMailroom });
     if (signed instanceof Response) return signed;
-    const { member, setCookie } = signed;
+    const { member, setCookie, isLetIn = true } = signed;
     const answer = (response: Response) => withCookie(response, setCookie);
     if (reachesMailroom && !(await isChangeAllowed(env.VISITOR_CHANGES, request))) {
       return answer(tooManyChanges());
@@ -81,8 +81,12 @@ export default {
       { name: 'access', ms: performance.now() - begun },
     ];
 
-    // A new stub each time it's reached, since one that threw stays broken.
-    const mailroom = () => env.MAILROOM.get(env.MAILROOM.idFromName(member));
+    // A new stub each time it's reached, since one that threw stays broken. A visitor the demo's
+    // gate hasn't let in reaches none, so no route, however it is reached, makes a Mailroom past it.
+    const mailroom = () => {
+      if (!isLetIn) throw new Error('The demo’s gate hasn’t let this visitor in.');
+      return env.MAILROOM.get(env.MAILROOM.idFromName(member));
+    };
     if (url.pathname === '/updates') return answer(await updates(request, mailroom()));
     if (message) return answer(await serveMessageBytes(message, mailroom()));
     if (logo) return answer(await serveLogo(logo, mailroom()));
