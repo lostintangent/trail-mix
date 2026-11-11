@@ -15,6 +15,7 @@ import type {
   View,
 } from '../../mail/core/index.ts';
 import type { Members } from '../../members/core/index.ts';
+import type { Subscription } from '../../notifications/index.ts';
 // Brings Start's `Register` in, so the declaration below can add to it in either program.
 import type {} from '@tanstack/react-start';
 
@@ -46,7 +47,9 @@ export interface Queries {
 
 /**
  * `cache` names what an installed app keeps of this Mailroom. A new Mailroom, as an erase leaves,
- * has a new one, so a device that kept the old one's drops what it kept.
+ * has a new one, so a device that kept the old one's drops what it kept. `pushKey` is the public key
+ * a device subscribes to notifications with, absent where notifications are off, as on previews and
+ * the demo. `notified` says whether the device at the endpoint asked about is notified.
  */
 export type ThisDevice = { cache: string; pushKey?: string; notified: boolean };
 
@@ -96,6 +99,12 @@ export interface Commands {
    * Refused for a folder with a role in it or anywhere inside it.
    */
   deleteFolder(folder: FolderRef): Promise<void>;
+  /**
+   * Notifies this device of new Inbox mail from now on. Its keys let only this deployment write to
+   * it, and no query returns them.
+   */
+  notifyDevice(subscription: Subscription): Promise<void>;
+  forgetDevice(endpoint: string): Promise<void>;
 }
 
 /**
@@ -276,6 +285,8 @@ export const COMMANDS = [
   'createFolder',
   'renameFolder',
   'deleteFolder',
+  'notifyDevice',
+  'forgetDevice',
 ] as const satisfies readonly (keyof Commands)[];
 
 export type QueryName = (typeof QUERIES)[number];

@@ -156,6 +156,31 @@ export class TestMailroom extends Mailroom {
     await super.forgetBodies(prefix);
   }
 
+  private readonly pushed: Pushed[] = [];
+  private pushAnswer = 201;
+
+  /** Keeps each push as it would have gone, for a test's stand-in push service to open. */
+  protected override async postPush(request: Request): Promise<Response> {
+    const body = new Uint8Array(await request.arrayBuffer());
+    this.pushed.push({
+      url: request.url,
+      headers: [...request.headers],
+      body: btoa(String.fromCharCode(...body)),
+    });
+    return new Response(null, { status: this.pushAnswer });
+  }
+
+  /** Every push since the Mailroom started, its body base64. */
+  pushes(): Promise<Pushed[]> {
+    return Promise.resolve(this.pushed);
+  }
+
+  /** Has every push service answer each push from now on with this status. */
+  answerPushesWith(status: number): Promise<void> {
+    this.pushAnswer = status;
+    return Promise.resolve();
+  }
+
   /** Erases the envelope index and the body cache, which sync rebuilds from the servers. */
   async eraseIndex(): Promise<void> {
     for (const { id } of await this.accounts()) this.store.forget(id);
@@ -192,6 +217,8 @@ export class TestMailroom extends Mailroom {
 }
 
 export type Synced = { path: string; messages: number };
+
+export type Pushed = { url: string; headers: [string, string][]; body: string };
 
 export type Wake = {
   steps: number;

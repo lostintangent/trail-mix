@@ -3,8 +3,9 @@
  * Each version is applied once, in order, when a Mailroom wakes. Versions are only ever appended,
  * so any Mailroom moves forward from whatever version it last ran.
  *
- * Only `accounts`, `credentials`, `demo` and `outbox` hold what Trail Mix owns. Every other table is
- * the envelope index, which sync rebuilds from the mail servers.
+ * Only `accounts`, `credentials`, `demo`, `outbox` and `devices` hold what Trail Mix owns. Every
+ * other table is the envelope index, which sync rebuilds from the mail servers, or a note that
+ * costs nothing to lose.
  */
 
 /** What a Mailroom reads and writes through, on either runtime. */
@@ -180,6 +181,18 @@ export const versions: readonly (readonly string[])[] = [
     // When a signed-in device last asked this Mailroom for something, in milliseconds since the
     // epoch, in its one row. A Mailroom that starts without it counts as opened then.
     `CREATE TABLE opened (one INTEGER PRIMARY KEY CHECK (one = 1), at INTEGER NOT NULL)`,
+  ],
+  [
+    // The devices the member turned notifications on for, each by its push subscription, as JSON.
+    // Trail Mix owns them, so nothing rebuilds them.
+    `CREATE TABLE devices (endpoint TEXT PRIMARY KEY, subscription TEXT NOT NULL, added INTEGER NOT NULL)`,
+    // How far each Inbox has been read for news, as JSON. Losing one only makes its next sync quiet.
+    `CREATE TABLE news_marks (
+      account TEXT NOT NULL,
+      path TEXT NOT NULL,
+      mark TEXT NOT NULL,
+      PRIMARY KEY (account, path)
+    )`,
   ],
 ];
 

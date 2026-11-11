@@ -1,4 +1,8 @@
-import { fromBase64Url, toBase64Url, type Subscription } from '../core/subscription.ts';
+import {
+  fromBase64Url,
+  toBase64Url,
+  type Subscription,
+} from '../src/features/notifications/core/subscription.ts';
 
 /** What a stand-in push service received: the push, decrypted, and what its sender signed. */
 export type Received = {
@@ -54,10 +58,10 @@ export async function standInPushService(endpoint = 'https://push.example/device
 
 /** A push's plaintext, as the device decrypts it: one aes128gcm record (RFC 8188, RFC 8291). */
 export async function decrypt(
-  body: Uint8Array,
+  body: Uint8Array<ArrayBuffer>,
   devicePrivate: CryptoKey,
-  devicePublic: Uint8Array,
-  auth: Uint8Array,
+  devicePublic: Uint8Array<ArrayBuffer>,
+  auth: Uint8Array<ArrayBuffer>,
 ): Promise<Uint8Array> {
   const salt = body.slice(0, 16);
   const keyLength = body[20]!;
@@ -70,7 +74,7 @@ export async function decrypt(
     false,
     [],
   );
-  // Workers' types name the member `$public`, for the binding, but it is `public` at run time.
+  // Workers' types name the member `$public`, after their binding, but it is `public` at run time.
   const ecdh = { name: 'ECDH', public: sender } as Parameters<SubtleCrypto['deriveBits']>[0];
   const shared = await crypto.subtle.deriveBits(ecdh, devicePrivate, 256);
   const keyInfo = concat(text('WebPush: info\0'), devicePublic, senderPublic);
@@ -111,8 +115,17 @@ async function verified(authorization: string) {
   return { claims, key };
 }
 
-async function hkdf(salt: Uint8Array, ikm: Uint8Array, info: Uint8Array, bytes: number) {
-  const material = await crypto.subtle.importKey('raw', ikm, 'HKDF', false, ['deriveBits']);
+async function hkdf(
+  saltBytes: Uint8Array,
+  ikm: Uint8Array,
+  infoBytes: Uint8Array,
+  bytes: number,
+): Promise<Uint8Array<ArrayBuffer>> {
+  // Copied, so each is backed by an ArrayBuffer of its own, as WebCrypto's types ask.
+  const [salt, info] = [new Uint8Array(saltBytes), new Uint8Array(infoBytes)];
+  const material = await crypto.subtle.importKey('raw', new Uint8Array(ikm), 'HKDF', false, [
+    'deriveBits',
+  ]);
   return new Uint8Array(
     await crypto.subtle.deriveBits(
       { name: 'HKDF', hash: 'SHA-256', salt, info },
@@ -124,7 +137,7 @@ async function hkdf(salt: Uint8Array, ikm: Uint8Array, info: Uint8Array, bytes: 
 
 const text = (value: string) => new TextEncoder().encode(value);
 
-function concat(...parts: Uint8Array[]): Uint8Array {
+function concat(...parts: Uint8Array[]): Uint8Array<ArrayBuffer> {
   const joined = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
   let at = 0;
   for (const part of parts) {

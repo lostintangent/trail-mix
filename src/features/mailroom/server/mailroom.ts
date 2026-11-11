@@ -24,8 +24,17 @@ import {
   type MessageRef,
   type MimeAttachment,
   type Outgoing,
+  type SyncEvent,
   type View,
 } from '../../mail/core/index.ts';
+import {
+  newsIn,
+  noticesOf,
+  pushOf,
+  subscriptionOf,
+  type Subscription,
+} from '../../notifications/index.ts';
+import { deliver, pushKeyOf, type PushKey } from '../../notifications/server/index.ts';
 import {
   DEMO_ACCOUNTS,
   PRESETS,
@@ -82,6 +91,7 @@ import {
   type DemoSettings,
 } from './accounts.ts';
 import { memberKey, open, seal } from './credentials.ts';
+import { notifying, type Notifying } from './notifying.ts';
 import { envelopeIndex, pageAfter, type EnvelopeIndex } from './envelope-index.ts';
 import * as input from './input.ts';
 import { upgrade, type Sql, type SqlValue } from './schema.ts';
@@ -102,6 +112,12 @@ export type MailroomEnv = {
   DEMO_MAILBOX?: string;
   /** Fixes the demo accounts' creation time, an ISO 8601 instant, so their dates never move. */
   DEMO_MAILBOX_AT?: string;
+  /**
+   * The deployment's Web Push key, a P-256 private key in PKCS #8 PEM. With `OPERATOR_EMAIL`, whom
+   * push services contact about its pushes, it turns notifications on.
+   */
+  PUSH_KEY?: string;
+  OPERATOR_EMAIL?: string;
   /** The app the operator registered with Microsoft, which Outlook accounts sign in through. */
   MICROSOFT_CLIENT_ID?: string;
   /** Whole days unopened before a Mailroom rests, and before it erases itself: 30 and 90 unset. */
@@ -128,6 +144,13 @@ const WINDOW_DAYS = 365;
 const WATCHING_MS = 60_000;
 /** Every account is checked this often, whether or not a device is open. */
 const CHECKING_MS = 5 * 60_000;
+/**
+ * How often while any device is notified, so mail that lands just after a check still reaches it
+ * within five minutes, with the sync and the push service's share of the time.
+ */
+const NOTIFYING_CHECKING_MS = 4 * 60_000;
+/** How many refs of messages the member moved into an Inbox are held, oldest dropped first. */
+const MOVED_IN_HELD = 1_000;
 /** Where the id that names what an installed app keeps is stored. */
 const CACHE_KEY = 'cache';
 
@@ -167,6 +190,12 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   private readonly drafts = new Set<string>();
   /** Whether this instance has had anything to do yet, so the first call can say it started it. */
   private isRunning = false;
+  private readonly notifying: Notifying;
+  /** Messages the member moved into an Inbox, by ref, whose arrival there is no news. */
+  private readonly movedIn = new Set<string>();
+  /** The news this wake's sync folded, told once the wake's sync is done. */
+  private news: Message[] = [];
+  private pushKey: Promise<PushKey | undefined> | undefined;
   private readonly demo: DemoSettings | undefined;
 
   constructor(ctx: DurableObjectState, env: MailroomEnv) {
@@ -182,6 +211,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     this.store = envelopeIndex(this.sql);
     this.book = accountBook(this.sql);
     this.underWay = signInBook(this.sql);
+    this.notifying = notifying(this.sql);
     this.queue = syncQueue({
       sql: this.sql,
       store: this.store,
@@ -194,6 +224,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
         if (this.book.get(account)?.account.status === 'needs-sign-in') return;
         this.setStatus(account, error ? 'error' : 'ready');
       },
+      landed: (folder, events) => this.noteNews(folder, events),
     });
     this.sending = outboxQueue({
       sql: this.sql,
@@ -300,15 +331,22 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 
   /**
    * Names what an installed app keeps of this Mailroom with an id made the first time it's asked.
-   * An erase deletes it with everything else, so the Mailroom it leaves has a new one.
+   * An erase deletes it with everything else, so the Mailroom it leaves has a new one. Says too
+   * whether the device at `endpoint` is notified, and gives the key to subscribe with.
    */
-  async thisDevice(): Promise<ThisDevice> {
+  async thisDevice(endpoint?: string): Promise<ThisDevice> {
+    const asked = endpoint === undefined ? undefined : input.pushEndpointOf(endpoint);
     let cache = await this.ctx.storage.get<string>(CACHE_KEY);
     if (cache === undefined) {
       cache = crypto.randomUUID();
       await this.ctx.storage.put(CACHE_KEY, cache);
     }
-    return { cache, notified: false };
+    const key = await this.pushKeyNow();
+    return {
+      cache,
+      ...(key ? { pushKey: key.publicKey } : {}),
+      notified: asked !== undefined && this.notifying.isNotified(asked),
+    };
   }
 
   // Commands
@@ -412,6 +450,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       this.store.forget(account);
       this.sending.forget(account);
       this.underWay.forget(account);
+      this.notifying.forgetAccount(account);
     });
     this.tokens.delete(account);
     this.found = undefined;
@@ -477,7 +516,9 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
         typeof destination === 'string'
           ? this.pathWithRole(account, destination)
           : destination.path;
-      moved.push(...(await (await this.provider(account)).move(held, path)));
+      const landed = await (await this.provider(account)).move(held, path);
+      for (const { to } of landed) this.noteMovedIn(to);
+      moved.push(...landed);
       await this.owe(() => {
         for (const from of new Set([...held.map((ref) => ref.path), path])) {
           this.queue.folder({ account, path: from });
@@ -622,6 +663,23 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     await this.owe(() => this.queue.check(account));
   }
 
+  /**
+   * Notifies a device of new Inbox mail from now on, and has the alarm come within the shorter
+   * interval that notifying keeps.
+   */
+  async notifyDevice(subscription: Subscription): Promise<void> {
+    const checked = subscriptionOf(subscription);
+    if (!(await this.pushKeyNow()))
+      throw new Error('Notifications aren’t set up on this Trail Mix.');
+    this.notifying.notify(checked, Date.now());
+    await this.wakeBy(Date.now() + NOTIFYING_CHECKING_MS);
+  }
+
+  forgetDevice(endpoint: string): Promise<void> {
+    this.notifying.forget(input.pushEndpointOf(endpoint));
+    return Promise.resolve();
+  }
+
   async deleteFolder(folder: FolderRef): Promise<void> {
     const { account, path } = this.ownFolder(folder);
     const provider = await this.provider(account);
@@ -745,16 +803,20 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       return 0;
     }
     const open = this.devices() > 0;
+    const now = Date.now();
+    const checking = this.notifying.isAnyNotified() ? NOTIFYING_CHECKING_MS : CHECKING_MS;
     // If this wake ends early, as an eviction would end it, the next one is already set.
-    const poll = Date.now() + (open ? WATCHING_MS : CHECKING_MS);
+    const poll = now + (open ? WATCHING_MS : checking);
     await this.ctx.storage.setAlarm(
       Math.min(poll, this.sending.nextWake() ?? poll, this.signInWake() ?? poll),
     );
     // A send that is due goes before sync, which can wait.
     await this.sending.run(() => new Date().toISOString());
-    if (Date.now() - this.checkedAt >= CHECKING_MS) this.checkAll();
+    // Timed from the wake's start, as the next alarm is, so the wake it sets always checks.
+    if (now - this.checkedAt >= checking) this.checkAll(now);
     await this.watchAll(open);
     const landed = await this.queue.run();
+    await this.tellNews();
     // A new account's Inbox is known only once its folders are.
     await this.watchAll(this.devices() > 0);
     const sendAt = this.sending.nextWake() ?? poll;
@@ -763,8 +825,8 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     return landed;
   }
 
-  private checkAll() {
-    this.checkedAt = Date.now();
+  private checkAll(at = Date.now()) {
+    this.checkedAt = at;
     for (const { id } of this.book.all()) this.queue.check(id);
   }
 
@@ -845,6 +907,73 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
         // Closing as this sends.
       }
     }
+  }
+
+  /**
+   * Notes the news in a batch an Inbox's sync landed, to tell once the wake's sync is done, and
+   * moves the Inbox's mark on. Marks move whether or not a device is notified, so turning
+   * notifications on finds every Inbox already read.
+   */
+  private noteNews(folder: FolderRef, events: readonly SyncEvent[]) {
+    if (this.store.reads.role(folder) !== 'inbox') return;
+    const held = this.notifying.mark(folder);
+    const { news, mark } = newsIn(events, held, {
+      now: Date.now(),
+      movedIn: (ref) => this.movedIn.delete(refKeyOf(ref)),
+    });
+    if (mark && (mark.uid !== held?.uid || mark.uidValidity !== held.uidValidity)) {
+      this.notifying.setMark(folder, mark);
+    }
+    if (news.length === 0 || !this.notifying.isAnyNotified()) return;
+    for (const envelope of news) {
+      const message = this.store.reads.message(envelope);
+      if (message) this.news.push(message);
+    }
+  }
+
+  /**
+   * Tells every notified device the news this wake's sync folded. A device whose subscription has
+   * ended is forgotten. A push that fails costs that notice and nothing more.
+   */
+  private async tellNews() {
+    const news = this.news;
+    this.news = [];
+    const key = news.length > 0 ? await this.pushKeyNow() : undefined;
+    if (!key) return;
+    const notices = noticesOf(news, (id) => this.book.get(id)?.account.name);
+    for (const device of this.notifying.devices()) {
+      for (const notice of notices) {
+        const fared = await deliver(device, pushOf(notice), key, (request) =>
+          this.postPush(request),
+        );
+        if (fared === 'gone') {
+          this.notifying.forget(device.endpoint);
+          break;
+        }
+        if (fared === 'refused') report(new Error('A push service refused this deployment’s key.'));
+      }
+    }
+  }
+
+  /** A message the member moved, which isn't news if its move lands it in an Inbox. */
+  private noteMovedIn(ref: MessageRef) {
+    this.movedIn.add(refKeyOf(ref));
+    for (const oldest of this.movedIn) {
+      if (this.movedIn.size <= MOVED_IN_HELD) break;
+      this.movedIn.delete(oldest);
+    }
+  }
+
+  /** The deployment's push key, or nothing where notifications are off. */
+  private pushKeyNow(): Promise<PushKey | undefined> {
+    const { PUSH_KEY: pem, OPERATOR_EMAIL: operator } = this.env;
+    this.pushKey ??= pem && operator ? pushKeyOf(pem, operator) : Promise.resolve(undefined);
+    return this.pushKey;
+  }
+
+  /** Posts a push to its push service. A test's Mailroom keeps it instead. */
+  protected postPush(request: Request): Promise<Response> {
+    return fetch(request);
   }
 
   private setStatus(account: AccountId, status: Account['status']) {

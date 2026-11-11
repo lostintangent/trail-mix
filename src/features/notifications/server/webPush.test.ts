@@ -2,7 +2,7 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test';
 import { encryptNotification } from '@block65/webcrypto-web-push';
 import { pushOf } from '../core/push.ts';
 import { fromBase64Url } from '../core/subscription.ts';
-import { decrypt, standInPushService } from './test-push-service.ts';
+import { decrypt, standInPushService } from '../../../../tests/push-service.ts';
 import { deliver, pushKeyOf } from './webPush.ts';
 
 afterEach(() => {

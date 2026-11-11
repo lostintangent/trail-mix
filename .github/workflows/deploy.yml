@@ -166,16 +166,15 @@ jobs:
             *) failed "Couldn't read what $worker serves now" ;;
           esac
 
-          # Whether production has the key every member's passwords are sealed with.
+          # Whether production has the key every member's passwords are sealed with, and the key that
+          # signs its notifications.
           case "$(api "workers/scripts/$worker/secrets")" in
             200)
-              if jq -e '.result | any(.name == "CREDENTIALS_KEY")' "$RUNNER_TEMP/api.json" > /dev/null; then
-                key=kept
-              else
-                key=missing
-              fi
+              has() { jq -e --arg name "$1" '.result | any(.name == $name)' "$RUNNER_TEMP/api.json" > /dev/null; }
+              if has CREDENTIALS_KEY; then key=kept; else key=missing; fi
+              if has PUSH_KEY; then push=kept; else push=missing; fi
               ;;
-            404) key=missing ;;
+            404) key=missing push=missing ;;
             *) failed "Couldn't read $worker's secrets" ;;
           esac
 
@@ -189,6 +188,7 @@ jobs:
             echo "previous=$previous"
             echo "before=$before"
             echo "key=$key"
+            echo "push=$push"
           } >> "$GITHUB_OUTPUT"
           echo "Production is $address, now serving version ${previous:-none} (commit ${before:-unknown})."
 
@@ -202,6 +202,7 @@ jobs:
           MICROSOFT_CLIENT_ID: ${{ vars.MICROSOFT_CLIENT_ID }}
           ACCESS_API_TOKEN: ${{ secrets.ACCESS_API_TOKEN }}
           KEY: ${{ steps.account.outputs.key }}
+          PUSH: ${{ steps.account.outputs.push }}
         run: |
           args=(--var "VERSION:$COMMIT" --var "CLOUDFLARE_ACCOUNT_ID:$CLOUDFLARE_ACCOUNT_ID")
           args+=(--message "Commit $COMMIT")
@@ -219,6 +220,8 @@ jobs:
           # the environment, so no secret is ever an argument or printed. A deploy adds to the
           # secrets production has and removes none.
           # - CREDENTIALS_KEY is made here once, when production has none, and never replaced.
+          # - PUSH_KEY, the P-256 key that signs notifications, is made once the same way. Replacing
+          #   it would silently end every device's subscription.
           # - ACCESS_API_TOKEN goes with every deploy while the repository has it, so a token
           #   replaced in GitHub reaches the Worker on the next deploy.
           umask 077
@@ -229,10 +232,16 @@ jobs:
             export NEW_KEY
             echo "Production has no CREDENTIALS_KEY yet, so this deploy gives it one."
           fi
+          if [ "$PUSH" = missing ]; then
+            NEW_PUSH_KEY=$(openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256)
+            export NEW_PUSH_KEY
+            echo "Production has no PUSH_KEY yet, so this deploy gives it one."
+          fi
           jq -n '{}
             + if env.NEW_KEY then {CREDENTIALS_KEY: env.NEW_KEY} else {} end
+            + if env.NEW_PUSH_KEY then {PUSH_KEY: env.NEW_PUSH_KEY} else {} end
             + if (env.ACCESS_API_TOKEN // "") != "" then {ACCESS_API_TOKEN: env.ACCESS_API_TOKEN} else {} end' > "$secrets"
-          unset NEW_KEY
+          unset NEW_KEY NEW_PUSH_KEY
           if [ "$(jq length "$secrets")" -gt 0 ]; then
             args+=(--secrets-file "$secrets")
           fi

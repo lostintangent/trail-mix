@@ -11,11 +11,12 @@ export type Mark = { uidValidity: number; uid: number };
 export const NEWS_FOR_MS = 24 * 60 * 60_000;
 
 /**
- * The news in one batch of an Inbox's sync, and the Inbox's mark after it. A message is news when
- * the server reports it unseen, above the mark under the same UIDVALIDITY, dated within a day, and
- * not moved there by the member, as an undone archive is. An Inbox with no mark, or under a new
- * UIDVALIDITY, is being read for the first time, so nothing in it is news, and the mark starts at
- * its highest UID. A first sync, a new account or a server starting a folder over never floods.
+ * The news in one batch of an Inbox's sync, and the Inbox's mark after it. A batch that starts the
+ * Inbox over, as every provider's first sync does and a server renumbering it, has no news: it only
+ * sets the mark, so a first sync, a new account or a renumbered folder never floods. After that, a
+ * message is news when the server reports it unseen, above the mark, or anywhere if the Inbox had
+ * no mail to mark, dated within a day, and not moved there by the member, as an undone archive is.
+ * A renumbered Inbox's mark starts again under its new UIDVALIDITY.
  */
 export function newsIn(
   events: readonly SyncEvent[],
@@ -23,11 +24,11 @@ export function newsIn(
   { now, movedIn }: { now: number; movedIn: (ref: MessageRef) => boolean },
 ): { news: Envelope[]; mark: Mark | undefined } {
   const arrived = events.flatMap((event) => (event.type === 'message' ? [event.envelope] : []));
+  const startsOver = events.some(({ type }) => type === 'reset');
   const news = arrived.filter(
     (envelope) =>
-      mark !== undefined &&
-      envelope.uidValidity === mark.uidValidity &&
-      envelope.uid > mark.uid &&
+      !startsOver &&
+      (mark === undefined || envelope.uid > mark.uid) &&
       !envelope.flags.seen &&
       now - Date.parse(envelope.date) < NEWS_FOR_MS &&
       !movedIn(envelope),

@@ -29,7 +29,10 @@ export type Budget = { steps: number; ms: number };
 
 export type SyncQueue = ReturnType<typeof syncQueue>;
 
-/** What sync works with. `settled` hears when an account's check finishes, or fails. */
+/**
+ * What sync works with. `settled` hears when an account's check finishes, or fails, and `landed`
+ * hears each batch of a folder once the index holds it.
+ */
 export type Syncing = {
   sql: Sql;
   store: EnvelopeIndex;
@@ -37,6 +40,7 @@ export type Syncing = {
   provider: (account: AccountId) => Promise<MailProvider>;
   window: (account: AccountId) => SyncWindow;
   settled: (account: AccountId, error?: unknown) => void;
+  landed?: (folder: FolderRef, events: readonly SyncEvent[]) => void;
 };
 
 /** One thing owed: an account's folders to list, or a folder to sync. */
@@ -177,6 +181,7 @@ export function syncQueue(syncing: Syncing) {
       return folders;
     });
     for (const folder of changed) hint({ changed: 'conversations', folder });
+    syncing.landed?.({ account, path }, batch.events);
     job.changed ||= batch.events.length > 0;
     if (batch.more) return;
     if (job.again) {

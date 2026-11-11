@@ -57,6 +57,12 @@ function mailrooms() {
           did.push([name, 'eraseEverything']);
           return Promise.resolve();
         },
+        answer: (call: { name: string; args: unknown[] }) => {
+          did.push([name, JSON.stringify(call)]);
+          return JSON.stringify(call.args[0]) === '["gone"]'
+            ? Promise.reject(new Error('That message is no longer in this mailbox.'))
+            : Promise.resolve({ value: undefined, reached: 0, ran: 0, cold: false });
+        },
       } as unknown as Mailroom & MessageBytes;
     },
   };
@@ -225,6 +231,55 @@ test('a message’s bytes come only from the signed-in member’s Mailroom, whoe
   expect(await response.text()).toBe("the source of ada@example.com's message");
   expect(opened).toEqual(['ada@example.com']);
   expect(sources).toEqual(['ada@example.com']);
+});
+
+test('a notification’s button reaches only the signed-in member’s Mailroom, as the command it stands for', async () => {
+  const { env, did } = developer();
+  const ref = { account: 'personal', path: 'INBOX', uidValidity: 7, uid: 1 };
+  const press = (body: unknown, init: RequestInit = {}) =>
+    worker.fetch(
+      new Request(`${LOCAL}/notifications/act?member=eve@example.com`, {
+        method: 'POST',
+        headers: { ...SOMEONE_ELSE, 'Sec-Fetch-Site': 'same-origin' },
+        body: JSON.stringify(body),
+        ...init,
+      }),
+      env,
+    );
+
+  expect((await press({ action: 'archive', message: ref })).status).toBe(204);
+  expect((await press({ action: 'read', message: ref })).status).toBe(204);
+  expect(did).toEqual([
+    ['ada@example.com', JSON.stringify({ name: 'move', args: [[ref], 'archive'] })],
+    ['ada@example.com', JSON.stringify({ name: 'setFlags', args: [[ref], { seen: true }] })],
+  ]);
+
+  // Anything else a button can't ask, and a refusal says why.
+  for (const asked of [{ action: 'delete', message: ref }, { action: 'archive' }, 'archive']) {
+    expect((await press(asked)).status).toBe(400);
+  }
+  expect(
+    (await press({ action: 'read', message: ref }, { method: 'GET', body: null })).status,
+  ).toBe(405);
+  const gone = await press({ action: 'read', message: 'gone' });
+  expect([gone.status, await gone.text()]).toEqual([
+    409,
+    'That message is no longer in this mailbox.',
+  ]);
+});
+
+test('a notification’s button that another site started is refused, and reaches no Mailroom', async () => {
+  const { env, opened } = developer();
+  const response = await worker.fetch(
+    new Request(`${LOCAL}/notifications/act`, {
+      method: 'POST',
+      headers: { 'Sec-Fetch-Site': 'cross-site', Origin: 'https://evil.example' },
+      body: JSON.stringify({ action: 'archive', message: {} }),
+    }),
+    env,
+  );
+  expect(response.status).toBe(403);
+  expect(opened).toEqual([]);
 });
 
 /** The internet, answering the proxy's one request with an image. */

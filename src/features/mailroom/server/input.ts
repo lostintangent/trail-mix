@@ -214,6 +214,14 @@ export function draftOf(value: unknown): DraftUpload {
   };
 }
 
+/** A device's push endpoint, as a browser names the device it asks about or forgets. */
+export function pushEndpointOf(value: unknown): string {
+  if (typeof value !== 'string' || value.length > 2_048) {
+    throw new TypeError('A device is named by its push endpoint.');
+  }
+  return value;
+}
+
 export function senderOf(value: unknown): string {
   return addressOf(value).toLowerCase();
 }

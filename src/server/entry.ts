@@ -5,6 +5,7 @@ import { CLOUDFLARE_API, cloudflareApi, membersFor } from '../features/members/s
 import { signInFor, signsInDevelopers, type SignInConfig } from './access.ts';
 import { proxyImage } from './routes/images.ts';
 import { serveMessageBytes, type MessageBytes } from './routes/messages.ts';
+import { act } from './routes/notifications.ts';
 import { updates } from './routes/updates.ts';
 
 export { Mailroom } from '../features/mailroom/server/index.ts';
@@ -56,6 +57,7 @@ export default {
     const message = readMessagePath(url.pathname);
     if (message) return serveMessageBytes(message, mailroom());
     if (url.pathname === '/images') return proxyImage(request);
+    if (url.pathname === '/notifications/act') return act(request, mailroom);
     const response = await start.fetch(request, {
       context: {
         mailroom,
