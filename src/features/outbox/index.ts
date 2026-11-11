@@ -2,6 +2,7 @@
 export * from './core/index.ts';
 export { useOutboxCommands } from './ui/commands.ts';
 export { sendCommands } from './ui/sendCommands.ts';
+export { useSendCommands } from './ui/useSendCommands.ts';
 export { OutboxList, SendActions, preloadSendActions } from './ui/lazy.ts';
 export { useSend, type Send, type SendOptions } from './ui/useSend.ts';
 export { useLeaving, useLeavingStanding, type LeavingSends } from './ui/useLeaving.ts';

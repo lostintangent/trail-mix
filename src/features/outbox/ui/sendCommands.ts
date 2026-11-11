@@ -1,12 +1,11 @@
 import { Clock, Send } from 'lucide-react';
 import type { Command } from '../../commands/index.ts';
 import { laterTimes, type Later } from '../core/later.ts';
+import { GROUP } from './commands.ts';
 
 export const SEND = 'outbox.send';
 /** The prefix of the Send later commands, one for each time ahead that Send later offers. */
 export const SEND_LATER = 'outbox.later:';
-
-export const GROUP = 'Send';
 
 /**
  * Send, and Send later at each time it offers now, as commands for whatever holds a draft: the

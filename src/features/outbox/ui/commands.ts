@@ -3,9 +3,11 @@ import type { Command } from '../../commands/index.ts';
 import type { Outgoing } from '../../mail/core/index.ts';
 import { outboxQuery } from '../../mailroom/client/index.ts';
 import { briefly } from '../core/standing.ts';
-import { GROUP } from './sendCommands.ts';
 import { useUndoable } from './undoable.ts';
 import { loadSending } from './useSend.ts';
+
+/** Where the palette lists sending, and taking a send back. */
+export const GROUP = 'Send';
 
 const NONE: readonly Outgoing[] = [];
 

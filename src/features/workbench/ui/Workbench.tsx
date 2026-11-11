@@ -41,7 +41,7 @@ import {
   leavesDrafts,
   OutboxList,
   SendActions,
-  sendCommands,
+  useSendCommands,
   type LeavingSends,
   useOutboxCommands,
   useSend,
@@ -697,13 +697,11 @@ export function Workbench({
       if (!outgoing) leaving.forgotten(draft);
     });
   };
-  const writingCommands = compose
-    ? sendCommands({
-        onSend: (at) => sender.current?.(at),
-        isEnabled: isSendable,
-        shortcut: 'Mod+Enter',
-      })
-    : [];
+  const writingCommands = useSendCommands(compose !== undefined, {
+    onSend: (at) => sender.current?.(at),
+    isEnabled: isSendable,
+    shortcut: 'Mod+Enter',
+  });
 
   // The registry: every command the workbench can run now, gathered from each feature, which binds
   // their keys and feeds the palette and the shortcut sheet.
