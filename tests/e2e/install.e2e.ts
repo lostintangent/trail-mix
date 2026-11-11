@@ -94,6 +94,8 @@ test('the installed app with nothing kept opens offline, and says at once it can
       ...(bare === undefined ? [] : [`a bare desk at ${Math.round(bare)} ms`]),
     ];
     expect({ size, missed }).toEqual({ size, missed: [] });
+    // And why, in plain words, not the browser's.
+    await page.getByText('This device is offline.', { exact: true }).waitFor();
     await page.screenshot({ path: join(SHOTS, `offline-${size}-${colorScheme}-unreachable.png`) });
     expect({ size, errors }).toEqual({ size, errors: [] });
     await context.close();

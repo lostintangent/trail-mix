@@ -95,6 +95,8 @@ describe('The first-run screen', () => {
       .waitFor({ timeout: 15_000 });
     const waited = (asked.at(-1) ?? 0) - (asked[0] ?? 0);
     expect({ asks: asked.length, isSpread: waited > 5_000 }).toEqual({ asks: 4, isSpread: true });
+    // Online, the browser's own words are the only clue to what went wrong.
+    await page.getByText('No answer came: Failed to fetch', { exact: true }).waitFor();
     await page.screenshot({ path: join(SHOTS, 'desktop-light-unreachable.png') });
     await page.unroute('**/_serverFn/**');
     await page.getByRole('button', { name: 'Try again' }).click();

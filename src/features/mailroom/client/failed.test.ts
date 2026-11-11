@@ -12,8 +12,17 @@ test('a failed call says the status the Worker answered with, and its reason', (
 });
 
 test('a call no answer came back to says so, with the browser’s reason', () => {
-  expect(whatFailed(new TypeError('Failed to fetch'))).toBe('No answer came: Failed to fetch');
-  expect(whatFailed(undefined)).toBe('No answer came.');
+  expect(whatFailed(new TypeError('Failed to fetch'), false)).toBe(
+    'No answer came: Failed to fetch',
+  );
+  expect(whatFailed(undefined, false)).toBe('No answer came.');
+});
+
+test('a call no answer came back to while the browser says it’s offline says the device is', () => {
+  expect(whatFailed(new TypeError('Load failed'), true)).toBe('This device is offline.');
+  // An answer came, so its status and reason say more.
+  const answered = Object.assign(new Error('Service Unavailable'), { status: 503 });
+  expect(whatFailed(answered, true)).toBe('Trail Mix answered 503: Service Unavailable');
 });
 
 test('an error page is cut down to the start of its words', () => {

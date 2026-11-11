@@ -1,9 +1,16 @@
+import { isUnreached } from '../../../shared/reasons.ts';
+
 /**
  * What failed when a call to the Mailroom did, in a line a member can pass on: the status the
  * Worker answered with and its reason, which is the Mailroom's own when the Mailroom failed, or that
- * no answer came at all, as when the network is down or a sign-in has lapsed.
+ * no answer came at all, as when the network is down or a sign-in has lapsed. With no answer while
+ * the browser says it's offline, that says why. Otherwise the browser's words are the only clue.
  */
-export function whatFailed(error: unknown): string {
+export function whatFailed(
+  error: unknown,
+  isOffline = typeof navigator !== 'undefined' && navigator.onLine === false,
+): string {
+  if (isOffline && isUnreached(error)) return 'This device is offline.';
   const { status, message } = (typeof error === 'object' && error !== null ? error : {}) as {
     status?: unknown;
     message?: unknown;
