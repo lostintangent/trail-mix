@@ -380,8 +380,7 @@ async function rowsAgree(page: Page) {
       const control = document.getElementById(label.htmlFor) as HTMLInputElement;
       // What each control draws: the switch's track, around its input, or the swatch beside the
       // picker.
-      const drawn =
-        control.type === 'color' ? control.previousElementSibling! : control.parentElement!;
+      const drawn = control.type === 'color' ? control.nextElementSibling! : control.parentElement!;
       return {
         name,
         looks: `${color} ${fontSize} ${fontWeight}`,

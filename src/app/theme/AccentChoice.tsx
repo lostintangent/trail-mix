@@ -30,7 +30,6 @@ export function AccentChoice({
   return (
     <>
       <span ref={target} {...stylex.props(styles.target)}>
-        <span {...stylex.props(styles.swatch)} />
         <input
           ref={registerPicker}
           id={id}
@@ -42,8 +41,10 @@ export function AccentChoice({
           onPointerDown={preloadAccentMath}
           onFocus={preloadAccentMath}
           onChange={(event) => onChange(event.currentTarget.value)}
-          {...stylex.props(styles.input)}
+          // The marker lets the swatch after it ring itself when the picker has keyboard focus.
+          {...stylex.props(styles.input, stylex.defaultMarker())}
         />
+        <span {...stylex.props(styles.swatch)} />
       </span>
       <LaterTooltip anchor={target} content="Accent color" />
       {accent && (
@@ -91,12 +92,6 @@ const styles = stylex.create({
     height: sizeVars['--size-element-sm'],
     borderRadius: radiusVars['--radius-element'],
     backgroundColor: { default: null, ':hover': colorVars['--color-overlay-hover'] },
-    outline: {
-      default: null,
-      [stylex.when.descendant(':focus-visible')]:
-        `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`,
-    },
-    outlineOffset: focusVars['--focus-outline-offset'],
   },
   swatch: {
     width: tm.swatch,
@@ -107,6 +102,14 @@ const styles = stylex.create({
     boxShadow: `0 0 0 1px ${colorVars['--color-border-emphasized']}`,
     // Forced colors keep it, since the color is what it shows.
     forcedColorAdjust: 'none',
+    // Keyboard focus rings the color itself, as a switch's rings its track, so the ring stays clear
+    // of whatever the target's reach past it runs into.
+    outline: {
+      default: null,
+      [stylex.when.siblingBefore(':focus-visible')]:
+        `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`,
+    },
+    outlineOffset: focusVars['--focus-outline-offset'],
   },
   // Over the whole target, unseen, so a press anywhere on it opens the picker.
   input: {

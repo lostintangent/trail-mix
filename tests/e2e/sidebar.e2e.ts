@@ -185,6 +185,32 @@ test('the foot holds the Settings gear, a rule and Trail Mix, and says nothing a
         expect(swatch).toBeGreaterThanOrEqual(44);
       }
       await readable(page, `${size}-${colorScheme}-settings`);
+
+      // A Tab onto the swatch rings the color, whole, within what Settings shows.
+      const picker = page.getByLabel('Accent color');
+      await picker.focus();
+      await page.keyboard.press('Shift+Tab');
+      await page.keyboard.press('Tab');
+      const settings = await page.getByRole('region', { name: 'Settings' }).elementHandle();
+      expect(
+        await picker.evaluate((input, shown) => {
+          const swatch = input.nextElementSibling!;
+          const { outlineStyle, outlineWidth, outlineOffset } = getComputedStyle(swatch);
+          const reach = parseFloat(outlineWidth) + parseFloat(outlineOffset);
+          const ring = swatch.getBoundingClientRect();
+          const within = shown.getBoundingClientRect();
+          return {
+            isFocusVisible: input.matches(':focus-visible'),
+            ring: `${outlineStyle} ${outlineWidth}`,
+            isWhole:
+              ring.left - reach >= within.left &&
+              ring.right + reach <= Math.min(within.right, innerWidth) &&
+              ring.top - reach >= within.top &&
+              ring.bottom + reach <= within.bottom,
+          };
+        }, settings),
+      ).toEqual({ isFocusVisible: true, ring: 'solid 2px', isWhole: true });
+      await readable(page, `${size}-${colorScheme}-swatch-focus`);
       await page.context().close();
     }
   }
