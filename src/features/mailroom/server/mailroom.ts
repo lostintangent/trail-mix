@@ -587,30 +587,36 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     return conversation === undefined ? outgoing : { ...outgoing, conversation };
   }
 
+  // Folder commands judge a change by the server's own listing, not the index's, which a change a
+  // moment ago may not have reached yet.
+
   async createFolder(folder: FolderRef): Promise<void> {
     const { account, path } = this.ownFolder(folder);
-    const problem = createProblem(path, this.store.folders(account));
+    const provider = await this.provider(account);
+    const problem = createProblem(path, await provider.folders());
     if (problem) throw new Error(problem);
-    await (await this.provider(account)).createFolder(path);
+    await provider.createFolder(path);
     await this.owe(() => this.queue.check(account));
   }
 
   async renameFolder(folder: FolderRef, to: string): Promise<void> {
     const { account, path } = this.ownFolder(folder);
     const renamed = input.folderOf({ account, path: to }).path;
-    const held = this.store.folders(account);
-    const current = held.find((each) => each.path === path);
+    const provider = await this.provider(account);
+    const listed = await provider.folders();
+    const current = listed.find((each) => each.path === path);
     if (!current) throw new Error('There is no such folder.');
-    const problem = renameProblem(current, renamed, held);
+    const problem = renameProblem(current, renamed, listed);
     if (problem) throw new Error(problem);
     if (renamed === path) return;
-    await (await this.provider(account)).renameFolder(path, renamed);
-    // The folders inside go along, and so do the messages the index holds in them all.
+    await provider.renameFolder(path, renamed);
+    // The folders inside go along, and so do the messages the index holds in them all, under the
+    // paths it holds them at, which an earlier rename it hasn't listed yet may have changed since.
     this.queue.renamed(
       account,
-      [current, ...inside(current, held)].map(({ path: from }) => ({
-        from,
-        to: `${renamed}${from.slice(path.length)}`,
+      [current, ...inside(current, listed)].map(({ path: at }) => ({
+        from: this.queue.heldAt(account, at),
+        to: `${renamed}${at.slice(path.length)}`,
       })),
     );
     await this.owe(() => this.queue.check(account));
@@ -618,13 +624,14 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 
   async deleteFolder(folder: FolderRef): Promise<void> {
     const { account, path } = this.ownFolder(folder);
-    const held = this.store.folders(account);
-    const current = held.find((each) => each.path === path);
+    const provider = await this.provider(account);
+    const listed = await provider.folders();
+    const current = listed.find((each) => each.path === path);
     // Gone already, as when another device deleted it first.
     if (!current) return;
-    const problem = deleteProblem(current, held);
+    const problem = deleteProblem(current, listed);
     if (problem) throw new Error(problem);
-    await (await this.provider(account)).deleteFolder(path);
+    await provider.deleteFolder(path);
     await this.owe(() => this.queue.check(account));
   }
 

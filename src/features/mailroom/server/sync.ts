@@ -259,11 +259,26 @@ export function syncQueue(syncing: Syncing) {
     forget,
 
     /**
-     * Notes folders a command renamed, so the listing that shows the rename moves their messages
-     * rather than forgetting them. Held in memory: a Mailroom that restarts first downloads them.
+     * Notes folders a command renamed, from where the index holds them, so the listing that shows
+     * the rename moves their messages rather than forgetting them. A folder renamed again before
+     * that listing moves once, to its latest name. Held in memory: a Mailroom that restarts first
+     * downloads them.
      */
     renamed(account: AccountId, renames: readonly { from: string; to: string }[]) {
-      moves = [...moves, ...renames.map((rename) => ({ account, ...rename }))];
+      const again = (move: Move) =>
+        move.account === account && renames.some(({ from }) => from === move.from);
+      moves = [
+        ...moves.filter((move) => !again(move)),
+        ...renames.map((rename) => ({ account, ...rename })),
+      ];
+    },
+
+    /**
+     * Where the index holds a folder the server now has at `path`: a path a command renamed it from,
+     * until a listing shows the rename, or else `path` itself.
+     */
+    heldAt(account: AccountId, path: string): string {
+      return moves.find((move) => move.account === account && move.to === path)?.from ?? path;
     },
 
     /** Whether anything is owed, so another wake should follow at once. */

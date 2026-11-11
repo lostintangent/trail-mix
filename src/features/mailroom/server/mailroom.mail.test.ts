@@ -339,6 +339,50 @@ describe('The Mailroom', () => {
       );
     }, 30_000);
 
+    test('renames a folder again, or deletes it, before the index has seen its new name', async () => {
+      const at = (path: string) => ({ account: account.id, path });
+      await ada.call('createFolder', at('Bills'));
+      await ada.call('createFolder', at('Bills/Water'));
+      await asAlice((client) =>
+        client.append('Bills/Water', raw({ id: 'meter', subject: 'Meter reading', minutesAgo: 5 })),
+      );
+      await ada.call('createFolder', at('Scratch'));
+      await ada.until(async () =>
+        (await ada.call<Folder[]>('folders')).some(({ path }) => path === 'Scratch'),
+      );
+      await ada.until(
+        async () => (await ada.page({ in: 'folder', folder: at('Bills/Water') })).length === 1,
+      );
+      await ada.call('holdWakes');
+      try {
+        await ada.call('renameFolder', at('Bills'), 'Utilities');
+        await ada.call('renameFolder', at('Utilities'), 'Paid');
+        await ada.call('renameFolder', at('Scratch'), 'Scratch 2026');
+        await ada.call('deleteFolder', at('Scratch 2026'));
+        expect(
+          (await foldersOnServer()).filter((path) => /^(Bills|Utilities|Paid|Scratch)/.test(path)),
+        ).toEqual(['Paid', 'Paid/Water']);
+      } finally {
+        await ada.call('releaseWakes');
+      }
+      await ada.until(async () => {
+        const paths = (await ada.call<Folder[]>('folders')).map(({ path }) => path);
+        return (
+          paths.includes('Paid/Water') &&
+          !paths.some((path) => /^(Bills|Utilities|Scratch)/.test(path))
+        );
+      });
+      // The message moved with its folder, so the index kept it rather than fetching it again.
+      expect(
+        (await ada.page({ in: 'folder', folder: at('Paid/Water') })).map(({ subject }) => subject),
+      ).toEqual(['Meter reading']);
+      await ada.call('deleteFolder', at('Paid'));
+      // Settled, so the next test hears only of its own changes.
+      await ada.until(async () =>
+        (await ada.call<Folder[]>('folders')).every(({ path }) => !path.startsWith('Paid')),
+      );
+    }, 60_000);
+
     test('creates, renames and deletes nested folders, and every open browser hears of each', async () => {
       const elsewhere = ada.device();
       await elsewhere.opened;

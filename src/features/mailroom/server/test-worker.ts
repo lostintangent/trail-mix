@@ -11,8 +11,25 @@ import { Mailroom, type MailroomEnv } from './mailroom.ts';
 export class TestMailroom extends Mailroom {
   private readonly wakes: Wake[] = [];
 
+  /** Set while a test holds wakes back, and resolved when it lets them go. */
+  private held: { wakes: Promise<void>; release: () => void } | undefined;
+
+  /** Holds every wake back until `releaseWakes`, so nothing a command owes lands meanwhile. */
+  holdWakes(): Promise<void> {
+    const { promise, resolve } = Promise.withResolvers<void>();
+    this.held = { wakes: promise, release: resolve };
+    return Promise.resolve();
+  }
+
+  releaseWakes(): Promise<void> {
+    this.held?.release();
+    this.held = undefined;
+    return Promise.resolve();
+  }
+
   /** Records each wake that landed anything, with each account's status and indexed mail after it. */
   protected override async wake(): Promise<number> {
+    await this.held?.wakes;
     const steps = await super.wake();
     if (steps === 0) return steps;
     const accounts = await this.accounts();
