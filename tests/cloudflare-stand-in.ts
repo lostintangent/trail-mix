@@ -1,5 +1,5 @@
 /**
- * A stand-in for the parts of Cloudflare's API the Members page reaches: the Access applications,
+ * A stand-in for the parts of Cloudflare's API Members reaches: the Access applications,
  * one member policy, each person's last sign-in, and revoking someone's sessions. It answers in
  * Cloudflare's envelope, records every call, and can refuse any of them as Cloudflare would.
  */

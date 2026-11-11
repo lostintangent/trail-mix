@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { BrowserContextOptions, Page, Route } from 'playwright';
 import { unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
+import { mailIsIn } from '../mailIsIn.ts';
 
 /**
  * Folders, end to end: the built app on workerd, changing the demo mailbox's folders. A change
@@ -33,7 +34,7 @@ async function open(options: BrowserContextOptions): Promise<Page> {
   const page = await (await app.context({ deviceScaleFactor: 2, ...options })).newPage();
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(app.url);
-  await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
+  await mailIsIn(page);
   return page;
 }
 
@@ -158,7 +159,7 @@ test('a delete asks first with what goes, comes back with the server’s reason,
   await page.getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click();
   await page.getByRole('heading', { name: 'Inbox', level: 2 }).waitFor();
   await page.reload();
-  await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
+  await mailIsIn(page);
   await personal(page)
     .getByRole('button', { name: /^Inbox/ })
     .waitFor();

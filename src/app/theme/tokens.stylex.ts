@@ -23,10 +23,12 @@ export const tm = stylex.defineVars({
   rowPad: { default: '8px', [COARSE]: '11px' },
   measure: '72ch', // longest line of message text
   swatch: '14px', // a color to pick, the size of an icon
-  statusDot: '6px', // the dot before the mail's status, in the sidebar and a phone's list
+  statusDot: '6px', // the dot before a list's word that the device is offline
 
   // Color roles beyond Astryx's
   textQuiet: 'light-dark(oklch(0.52 0.015 265), oklch(0.66 0 0))', // previews, times: still 4.5:1
+  // The short rule that parts the foot's gear from the name, and the rail's groups: quiet ink at half
+  rule: 'light-dark(oklch(0.52 0.015 265 / 0.5), oklch(0.66 0 0 / 0.5))',
   paperFixed: 'oklch(0.975 0.004 85)', // HTML mail on light paper sits on this in both themes
   highlight: 'oklch(0.86 0.17 92)', // the suite yellow: flagged, search match
   onHighlight: 'oklch(0.25 0.03 265)', // ink on the highlighter, dark in both themes

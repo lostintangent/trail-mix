@@ -1,6 +1,6 @@
-import { lazy } from 'react';
+import { preloadable } from '../../../shared/preloadable.ts';
 
-/** The Members page loads apart from the first screen, and only for the operator. */
-export const MembersPage = lazy(async () => ({
-  default: (await import('./MembersPage.tsx')).MembersPage,
-}));
+/** Members, in Settings, loads apart from the first screen, and only for the operator. */
+export const { Component: MembersSettings, preload: preloadMembers } = preloadable(
+  async () => (await import('./MembersSettings.tsx')).MembersSettings,
+);

@@ -9,6 +9,7 @@ import { accentRule, accentTokens } from '../../src/app/theme/readableAccent.ts'
 import { PAGE_SIZE } from '../../src/features/mailroom/client/contract.ts';
 import { textContrasts, unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
+import { mailIsIn } from '../mailIsIn.ts';
 
 /**
  * The smoke suite: the built app, served on workerd, driven in Chromium at a desktop and a phone
@@ -336,7 +337,7 @@ test('the first screen draws every control it settles with, from the first load 
   const filling = await app.context(SIZES.desktop);
   const page = await filling.newPage();
   await page.goto(app.url);
-  await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
+  await mailIsIn(page);
   await filling.close();
   // The first load is what the page's HTML names. Every other chunk waits until the first rows.
   const html = await (await fetch(app.url)).text();
@@ -463,7 +464,7 @@ test('a device that last saw mail draws the workbench and its skeletons before t
   const context = await app.context(SIZES.desktop);
   const page = await context.newPage();
   await page.goto(app.url);
-  await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
+  await mailIsIn(page);
   await page.waitForFunction(() => localStorage.getItem('trail-mix.has-mail') !== null);
 
   const release = await holdAccounts(page);
@@ -478,7 +479,7 @@ test('a device that last saw mail draws the workbench and its skeletons before t
   expect(await page.getByRole('region', { name: 'Personal' }).count()).toBe(0);
   await page.screenshot({ path: join(SHOTS, 'desktop-light-opening-known.png') });
   release();
-  await page.getByText('Up to date').waitFor({ state: 'attached' });
+  await mailIsIn(page);
   await page.getByRole('option').first().waitFor();
   await context.close();
 }, 60_000);
@@ -512,35 +513,41 @@ test('a device that hasn’t seen mail waits on a quiet desk, and says it’s op
   await context.close();
 }, 60_000);
 
-test('a saved theme paints the desk, and the browser’s chrome, before any of the app runs', async () => {
+test('the desk, and the browser’s chrome, follow the system, whatever an earlier release saved', async () => {
   for (const [saved, system] of [
     ['dark', 'light'],
     ['light', 'dark'],
   ] as const) {
     const context = await app.context({ colorScheme: system });
-    await context.addInitScript((mode) => localStorage.setItem('trail-mix.theme', mode), saved);
+    await context.addInitScript((mode) => {
+      if (!sessionStorage.getItem('seeded')) localStorage.setItem('trail-mix.theme', mode);
+      sessionStorage.setItem('seeded', 'yes');
+    }, saved);
     const page = await context.newPage();
+    // Whether the desk shows the system's scheme: as a probe set to that scheme draws it.
+    const deskShown = () =>
+      page.evaluate((system) => {
+        const probe = document.createElement('div');
+        probe.style.colorScheme = system;
+        probe.style.backgroundColor = 'var(--color-background-body)';
+        document.body.append(probe);
+        const expected = getComputedStyle(probe).backgroundColor;
+        probe.remove();
+        return getComputedStyle(document.body).backgroundColor === expected;
+      }, system);
+    // Before any of the app runs, the system's theme shows.
     await page.route(/\.js(\?|$)/, (route) => route.abort());
     await page.goto(app.url, { waitUntil: 'load' });
-    expect(await page.evaluate(() => getComputedStyle(document.body).colorScheme)).toBe(saved);
-    expect(await chromeColors(page)).toEqual([DESK_HEX[saved], DESK_HEX[saved]]);
+    expect(await deskShown()).toBe(true);
+    expect(await chromeColors(page)).toEqual([DESK_HEX.light, DESK_HEX.dark]);
+    // Once it runs, the choice is forgotten, and the system's still shows.
+    await page.unroute(/\.js(\?|$)/);
+    await page.reload();
+    await page.getByRole('navigation', { name: 'Mailboxes' }).waitFor();
+    expect(await deskShown()).toBe(true);
+    expect(await page.evaluate(() => localStorage.getItem('trail-mix.theme'))).toBeNull();
     await context.close();
   }
-});
-
-test('the browser’s chrome follows the theme as it is switched', async () => {
-  const { context, page, problems } = await open({ ...SIZES.desktop, colorScheme: 'dark' });
-  const each = [DESK_HEX.light, DESK_HEX.dark];
-  expect(await chromeColors(page)).toEqual(each);
-  // System, then Light, then Dark.
-  await page.getByRole('button', { name: 'Theme: System' }).click();
-  expect(await chromeColors(page)).toEqual([DESK_HEX.light, DESK_HEX.light]);
-  await page.getByRole('button', { name: 'Theme: Light' }).click();
-  expect(await chromeColors(page)).toEqual([DESK_HEX.dark, DESK_HEX.dark]);
-  await page.getByRole('button', { name: 'Theme: Dark' }).click();
-  expect(await chromeColors(page)).toEqual(each);
-  expect(problems).toEqual([]);
-  await context.close();
 });
 
 test('a saved accent paints before any of the app runs, made readable in each theme', async () => {
@@ -559,10 +566,12 @@ test('a saved accent paints before any of the app runs, made readable in each th
   }
 });
 
-test('an accent picked beside the theme choice shows at once, outlasts a reload, and goes back to ink blue', async () => {
+test('an accent picked in Settings shows at once, outlasts a reload, and goes back to ink blue', async () => {
   const { context, page, problems } = await open(SIZES.desktop);
   const inkBlue = await accentShown(page);
   const picker = page.getByLabel('Accent color');
+  const openSettings = () => page.getByRole('button', { name: 'Open settings' }).click();
+  await openSettings();
   const newMessage = page.getByRole('button', { name: 'New message' });
   // The button eases from one color to the next, so it is read once that has finished.
   const buttonOf = () =>
@@ -582,9 +591,12 @@ test('an accent picked beside the theme choice shows at once, outlasts a reload,
 
   await page.reload({ waitUntil: 'networkidle' });
   expect(await accentShown(page)).toBe(picked);
+  await openSettings();
   expect(await picker.inputValue()).toBe('#c2185b');
 
-  // The palette opens the same picker.
+  // The palette opens Settings at the same picker, from anywhere.
+  await page.keyboard.press('Escape');
+  await page.getByRole('region', { name: 'Settings' }).waitFor({ state: 'detached' });
   await page.evaluate(() => {
     HTMLInputElement.prototype.showPicker = function (this: HTMLInputElement) {
       this.dataset['shown'] = 'true';
@@ -594,7 +606,13 @@ test('an accent picked beside the theme choice shows at once, outlasts a reload,
   await page.keyboard.type('choose an accent');
   await page.getByRole('listbox', { name: 'Commands' }).getByRole('option').first().waitFor();
   await page.keyboard.press('Enter');
-  expect(await picker.getAttribute('data-shown')).toBe('true');
+  await page.waitForFunction(
+    () =>
+      document.querySelector<HTMLInputElement>('input[aria-label="Accent color"]')?.dataset[
+        'shown'
+      ],
+  );
+  expect(await picker.evaluate((input) => input === document.activeElement)).toBe(true);
 
   await page.getByRole('button', { name: 'Use the default accent' }).click();
   expect(await accentShown(page)).toBe(inkBlue);
@@ -605,16 +623,39 @@ test('an accent picked beside the theme choice shows at once, outlasts a reload,
   await context.close();
 }, 30_000);
 
+test('offline, a desktop’s list says so beside its title, and going offline and back moves nothing', async () => {
+  const { context, page } = await open(SIZES.desktop);
+  const list = page.getByRole('region', { name: 'Inbox' });
+  const offline = list.getByRole('status').filter({ hasText: /^Offline/ });
+  const places = async () => ({
+    header: await list.locator('header').boundingBox(),
+    firstRow: await page.getByRole('option').first().boundingBox(),
+  });
+  // Online, nothing on the page says whether mail is current.
+  const online = await places();
+  expect(await offline.count()).toBe(0);
+  expect(await page.getByText(/Up to date|Checking for mail/).count()).toBe(0);
+
+  await context.setOffline(true);
+  await offline.waitFor();
+  expect(await places()).toEqual(online);
+  await context.setOffline(false);
+  await offline.waitFor({ state: 'detached' });
+  expect(await places()).toEqual(online);
+  await context.close();
+});
+
 /** The least time a person takes to choose a color in the system's picker, once it opens. */
 const CHOOSING_MS = 300;
 
-test('reaching for the accent the moment the list shows, on a slowed CPU, loads its math before any pick can come', async () => {
+test('reaching for the accent in Settings the moment the list shows, on a slowed CPU, loads its math before any pick can come', async () => {
   const context = await app.context({ ...SIZES.desktop, deviceScaleFactor: 1 });
   const page = await context.newPage();
   const cdp = await context.newCDPSession(page);
   await cdp.send('Emulation.setCPUThrottlingRate', { rate: 6 });
   await page.goto(app.url);
   await page.getByRole('option').first().waitFor();
+  await page.getByRole('button', { name: 'Open settings' }).click();
   const picker = page.getByLabel('Accent color');
   await picker.click();
   // The math a pick needs, named by the module it's built from, as the browser fetched it.

@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { BrowserContextOptions, Page, Route } from 'playwright';
 import { unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
+import { mailIsIn } from '../mailIsIn.ts';
 
 /**
  * Mail on its way stays out of Drafts, end to end: the built app on workerd, sending the demo
@@ -42,7 +43,7 @@ async function open(options: BrowserContextOptions): Promise<Page> {
   const page = await (await app.context({ deviceScaleFactor: 2, ...options })).newPage();
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(app.url);
-  await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
+  await mailIsIn(page);
   await goTo(page, 'Drafts');
   await page.getByRole('option').first().waitFor();
   await page

@@ -142,7 +142,7 @@ function withTiming(response: Response, timing: readonly Timed[]): Response {
 }
 
 /**
- * The Members page's side for the signed-in member. It answers the operator alone, and only its
+ * Members' side for the signed-in member. It answers the operator alone, and only its
  * removal of a member names that member's Mailroom, as the rule "Every request is a member" allows.
  */
 function membersOf(env: Env, member: string) {

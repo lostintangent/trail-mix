@@ -3,23 +3,38 @@ import { Bell, BellOff } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Command } from '../../commands/index.ts';
 import { notifiedQuery } from '../../mailroom/client/index.ts';
-import { standingOf, subscribedAt } from './device.ts';
+import { standingOf, subscribedAt, type Standing } from './device.ts';
 
-/** The one command that turns this device's notifications on and off, and its bell's id. */
+/** The one command that turns this device's notifications on and off. */
 export const NOTIFICATIONS = 'notifications.toggle';
+
+/**
+ * Notifications on this device: whether the deployment and the browser have them at all, where the
+ * device stands, whether they're on, and turning them over, which Settings' switch and the
+ * palette's command both do.
+ */
+export type Notifications = {
+  /** Only a deployment with a push key notifies, and only a browser with Web Push can be. */
+  isShown: boolean;
+  standing: Standing;
+  isOn: boolean;
+  /** Whether a turn is under way. */
+  isBusy: boolean;
+  /** Turns them on or off, or, where the device can't yet, says what it needs. */
+  toggle: () => Promise<void>;
+};
 
 /** Turning notifications on and off, which the first screen goes without. */
 const loadSetup = () => import('./setup.ts');
 type Setup = Awaited<ReturnType<typeof loadSetup>>;
 
 /**
- * Notifications on this device, as a command: on or off where the deployment has them, the palette
- * and the bell both drawing from it. Turning them on asks the browser's leave from the tap itself,
+ * Notifications on this device. Turning them on asks the browser's leave from the tap itself,
  * subscribes and tells the Mailroom, and turning them off does the reverse. Where the device can't
- * subscribe yet, it says what it needs. What turning does loads once the command shows, before
- * anyone can tap it, so the tap asks the browser at once.
+ * subscribe yet, it says what it needs. What turning does loads once they can show, before anyone
+ * can tap, so the tap asks the browser at once.
  */
-export function useNotificationCommands(): Command[] {
+export function useNotifications(): Notifications {
   const queryClient = useQueryClient();
   const [standing, setStanding] = useState(standingOf);
   const [isBusy, setBusy] = useState(false);
@@ -60,21 +75,26 @@ export function useNotificationCommands(): Command[] {
     }
   }, [setup, standing, pushKey, isOn, settle]);
 
-  return useMemo(() => {
-    // Only a deployment with a push key notifies, and only a browser with Web Push can be.
-    if (!isShown) return [];
-    return [
-      {
-        id: NOTIFICATIONS,
-        title: isOn
-          ? 'Turn off notifications on this device'
-          : 'Turn on notifications on this device',
-        group: 'This device',
-        icon: isOn ? Bell : BellOff,
-        isChecked: isOn,
-        isEnabled: !isBusy,
-        run: toggle,
-      },
-    ];
-  }, [isShown, isOn, isBusy, toggle]);
+  return useMemo(
+    () => ({ isShown, standing, isOn, isBusy, toggle }),
+    [isShown, standing, isOn, isBusy, toggle],
+  );
+}
+
+/** Turning notifications on and off, as the palette's command, where this device can have them. */
+export function notificationCommands({ isShown, isOn, isBusy, toggle }: Notifications): Command[] {
+  if (!isShown) return [];
+  return [
+    {
+      id: NOTIFICATIONS,
+      title: isOn
+        ? 'Turn off notifications on this device'
+        : 'Turn on notifications on this device',
+      group: 'This device',
+      icon: isOn ? Bell : BellOff,
+      isChecked: isOn,
+      isEnabled: !isBusy,
+      run: toggle,
+    },
+  ];
 }

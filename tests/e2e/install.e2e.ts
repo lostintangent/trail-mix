@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { BrowserContextOptions, Page } from 'playwright';
 import { ICONS } from '../../src/app/icons.ts';
 import { suite } from './suite.ts';
+import { mailIsIn } from '../mailIsIn.ts';
 
 const SHOTS = join(import.meta.dir, '../../test-results');
 mkdirSync(SHOTS, { recursive: true });
@@ -83,7 +84,7 @@ test('the installed app opens offline to the lists and conversations it showed',
   await page.reload();
   const status = page.getByText('Offline: kept mail');
   await status.waitFor();
-  // The sidebar at its first width says all of it.
+  // The list says all of it beside its title.
   expect(await status.evaluate((line) => line.scrollWidth <= line.clientWidth)).toBe(true);
   await page.screenshot({ path: join(SHOTS, 'desktop-light-offline.png') });
   for (const [row, subject] of subjects.entries()) {
@@ -114,7 +115,7 @@ test('the installed app reads offline at both sizes in both themes: the Inbox an
       if (size === 'phone') {
         await page.getByRole('button', { name: 'Back', exact: true }).click();
         await page.getByRole('option').first().waitFor();
-        // The sidebar that says it on a desktop is off the screen, so the list says it.
+        // The list says it beside its title, at every width.
         await page
           .getByRole('region', { name: 'Inbox' })
           .getByRole('status')
@@ -282,7 +283,7 @@ test('back online, the installed app catches up with what changed, with no reloa
   await row.waitFor({ state: 'detached' });
 
   await context.setOffline(false);
-  await page.getByText('Up to date').waitFor();
+  await mailIsIn(page);
   await page
     .getByRole('option')
     .filter({ hasText: archived })

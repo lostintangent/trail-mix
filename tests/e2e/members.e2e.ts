@@ -5,9 +5,10 @@ import type { BrowserContextOptions, Page } from 'playwright';
 import { cloudflareStandIn, STAND_IN_AUD } from '../cloudflare-stand-in.ts';
 import { unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
+import { mailIsIn } from '../mailIsIn.ts';
 
 /**
- * The Members page, as the operator uses it: the built app with the development member as the
+ * Members, in Settings, as the operator uses it: the built app with the development member as the
  * operator, and a stand-in for Cloudflare's API holding the Access policy. Inviting, listing and
  * removing each change the stand-in's policy, and a removal Cloudflare half refuses says so.
  */
@@ -50,7 +51,7 @@ async function membersPage(options: BrowserContextOptions): Promise<Page> {
   const page = await (await app.context({ deviceScaleFactor: 2, ...options })).newPage();
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(app.url);
-  await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
+  await mailIsIn(page);
   await page.keyboard.press('ControlOrMeta+k');
   await page.keyboard.type('members');
   await page.getByRole('option', { name: 'Members' }).waitFor();
@@ -67,17 +68,24 @@ async function readable(page: Page, screen: string) {
   expect({ screen, unreadable: await unreadableText(page) }).toEqual({ screen, unreadable: [] });
 }
 
-test('the operator sees each member’s last sign-in, and what else the policy admits', async () => {
+test('the operator sees each member’s last sign-in, and what else the policy admits, in Settings', async () => {
   const page = await membersPage({ ...DESKTOP, colorScheme: 'light' });
   await row(page, OPERATOR).getByText('You, the operator', { exact: false }).waitFor();
   await row(page, 'bo@example.org').getByText('Last signed in', { exact: false }).waitFor();
   expect(await row(page, OPERATOR).getByRole('button', { name: 'Remove' }).count()).toBe(0);
   await page.getByText('Everyone at family.example').waitFor();
-  // The sidebar opens the same page.
-  const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
-  await sidebar.getByRole('button', { name: 'Members' }).scrollIntoViewIfNeeded();
-  expect(await sidebar.getByRole('button', { name: 'Members' }).isVisible()).toBe(true);
+  // The palette's Members is a section of Settings, which the gear opens too, and nothing else does.
+  const settings = page.getByRole('region', { name: 'Settings' });
+  for (const section of ['Appearance', 'Members']) {
+    await settings.getByRole('heading', { name: section, level: 2 }).waitFor();
+  }
   await readable(page, 'desktop-light');
+  await page.keyboard.press('Escape');
+  await settings.waitFor({ state: 'detached' });
+  const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
+  expect(await sidebar.getByRole('button', { name: 'Members' }).count()).toBe(0);
+  await sidebar.getByRole('button', { name: 'Open settings' }).click();
+  await settings.getByRole('list', { name: 'Members' }).waitFor();
 }, 60_000);
 
 test('an invitation joins the policy, and says what to send them', async () => {

@@ -1,5 +1,10 @@
 export { useNotificationOpenings } from './ui/openings.ts';
-export { NOTIFICATIONS, useNotificationCommands } from './ui/useNotifications.ts';
+export {
+  notificationCommands,
+  useNotifications,
+  type Notifications,
+} from './ui/useNotifications.ts';
+export { needsOf } from './ui/device.ts';
 export {
   clickNotification,
   showPush,

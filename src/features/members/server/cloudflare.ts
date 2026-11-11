@@ -1,7 +1,7 @@
 import type { AccessPolicy } from '../core/index.ts';
 
 /**
- * Cloudflare's API, as far as the Members page reaches it: the Access application in front of
+ * Cloudflare's API, as far as Members reaches it: the Access application in front of
  * Trail Mix, its policies, each person's last sign-in, and ending someone's sessions. The token
  * is the operator's second one, which can do no more than this.
  */

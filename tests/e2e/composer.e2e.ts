@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { chromium, webkit, type Locator, type Page } from 'playwright';
 import { SAVE_AFTER_MS, SAVE_AT_LEAST_EVERY_MS } from '../../src/features/composer/core/session.ts';
 import { suite } from './suite.ts';
+import { mailIsIn } from '../mailIsIn.ts';
 
 /**
  * Writing, end to end: the built app on workerd with a member's demo mail. What the member writes
@@ -41,7 +42,7 @@ async function inbox(): Promise<Page> {
   const page = await (await app.context(SIZE)).newPage();
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(app.url);
-  await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
+  await mailIsIn(page);
   return page;
 }
 

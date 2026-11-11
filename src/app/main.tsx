@@ -16,3 +16,10 @@ startTransition(() => {
 
 // The installed app keeps what it needs to open with no network.
 keepForOffline();
+
+// The theme follows the system now, so a Light or Dark choice an earlier release saved is forgotten.
+try {
+  localStorage.removeItem('trail-mix.theme');
+} catch {
+  // Without storage there is nothing saved.
+}

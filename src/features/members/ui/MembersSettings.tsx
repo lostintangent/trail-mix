@@ -13,7 +13,7 @@ import {
 import * as stylex from '@stylexjs/stylex';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
-import { media, tm } from '../../../app/theme/tokens.stylex.ts';
+import { tm } from '../../../app/theme/tokens.stylex.ts';
 import { folded, type Member } from '../core/index.ts';
 import { members } from './rpc.ts';
 
@@ -23,12 +23,12 @@ const DASHBOARD = 'https://one.dash.cloudflare.com/';
 const listQuery = { queryKey: ['members'], queryFn: () => members.members() } as const;
 
 /**
- * The operator's Members page, on the reader's sheet: who Access lets in by address, with their
- * last sign-in, inviting someone, and removing them, which signs them out at once and can erase
- * what Trail Mix holds for them. Every other way the policy admits people shows in words. The list
- * is read from Access each time, and kept nowhere else.
+ * Members, as the operator's section of Settings, under the heading Settings gives it: who Access
+ * lets in by address, with their last sign-in, inviting someone, and removing them, which signs
+ * them out at once and can erase what Trail Mix holds for them. Every other way the policy admits
+ * people shows in words. The list is read from Access each time, and kept nowhere else.
  */
-export function MembersPage() {
+export function MembersSettings() {
   const queryClient = useQueryClient();
   const { data, error, refetch } = useQuery(listQuery);
   const reload = () => void queryClient.invalidateQueries({ queryKey: listQuery.queryKey });
@@ -62,10 +62,7 @@ export function MembersPage() {
   };
 
   return (
-    <section aria-labelledby="members-title" {...stylex.props(styles.page)}>
-      <h1 id="members-title" {...stylex.props(styles.title)}>
-        Members
-      </h1>
+    <div {...stylex.props(styles.section)}>
       <p {...stylex.props(styles.text)}>
         People you invite sign in with a code sent to their address, and each has a Trail Mix of
         their own, with mail nobody else here can see.
@@ -115,9 +112,9 @@ export function MembersPage() {
           </ul>
           {data.alsoAdmitted.length > 0 && (
             <section aria-labelledby="also-admitted" {...stylex.props(styles.also)}>
-              <h2 id="also-admitted" {...stylex.props(styles.heading)}>
+              <h3 id="also-admitted" {...stylex.props(styles.heading)}>
                 Also admitted
-              </h2>
+              </h3>
               <ul {...stylex.props(styles.plain)}>
                 {data.alsoAdmitted.map((said) => (
                   <li key={said}>{said}</li>
@@ -139,7 +136,7 @@ export function MembersPage() {
           )}
         </>
       )}
-    </section>
+    </div>
   );
 }
 
@@ -270,24 +267,10 @@ const styles = stylex.create({
   control: {
     height: tm.target,
   },
-  page: {
+  section: {
     display: 'flex',
     flexDirection: 'column',
     gap: spacingVars['--spacing-4'],
-    width: '100%',
-    maxWidth: tm.measure,
-    paddingInline: {
-      default: spacingVars['--spacing-6'],
-      [media.phone]: spacingVars['--spacing-3'],
-    },
-    paddingBottom: spacingVars['--spacing-6'],
-  },
-  title: {
-    margin: 0,
-    fontFamily: tm.serif,
-    fontSize: typeScaleVars['--text-heading-1-size'],
-    fontWeight: typeScaleVars['--text-heading-1-weight'],
-    lineHeight: typeScaleVars['--text-heading-1-leading'],
   },
   heading: {
     margin: 0,

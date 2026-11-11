@@ -2,7 +2,7 @@ import { queryOptions } from '@tanstack/react-query';
 import { members } from './rpc.ts';
 
 /**
- * Whether the signed-in member is the operator, which decides whether the Members page shows at
+ * Whether the signed-in member is the operator, which decides whether Members shows in Settings at
  * all. It's asked once a session: the operator is the deployment's to name, not the page's.
  */
 export const operatorQuery = queryOptions({

@@ -5,6 +5,7 @@ import type { BrowserContextOptions, Locator, Page, Route } from 'playwright';
 import { bareSubject } from '../../src/features/reader/core/subject.ts';
 import { unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
+import { mailIsIn } from '../mailIsIn.ts';
 
 /**
  * The reader around a conversation, end to end on the demo mailbox: the folder it lies in, a reply
@@ -38,7 +39,7 @@ async function open(
   page.on('pageerror', (error) => errors.push(error.message));
   await beforeLoad?.(page);
   await page.goto(app.url);
-  await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
+  await mailIsIn(page);
   return page;
 }
 

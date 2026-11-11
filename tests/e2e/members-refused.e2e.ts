@@ -2,9 +2,10 @@ import { afterAll, expect, test } from 'bun:test';
 import { cloudflareStandIn, STAND_IN_AUD } from '../cloudflare-stand-in.ts';
 import { serverFunctionIds } from './preview.ts';
 import { suite } from './suite.ts';
+import { mailIsIn } from '../mailIsIn.ts';
 
 /**
- * The Members page as anyone but the operator meets it: not there at all, and its calls refused
+ * Members as anyone but the operator meets it: not there at all, and its calls refused
  * with a 403 before they reach Cloudflare or anyone's Mailroom.
  */
 
@@ -23,16 +24,21 @@ const app = suite({
   },
 });
 
-test('anyone but the operator has no Members page, and its calls are refused before Cloudflare', async () => {
+test('anyone but the operator has no Members in Settings, and its calls are refused before Cloudflare', async () => {
   const page = await (await app.context({ viewport: { width: 1440, height: 900 } })).newPage();
   await page.goto(app.url);
-  await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
+  await mailIsIn(page);
   await page.keyboard.press('ControlOrMeta+k');
   await page.keyboard.type('members');
   // The palette has drawn what matches by then, and the operator's command isn't among it.
   await page.waitForTimeout(1_000);
   expect(await page.getByRole('option', { name: 'Members' }).count()).toBe(0);
-  expect(await page.getByRole('button', { name: 'Members' }).count()).toBe(0);
+  await page.keyboard.press('Escape');
+  // Settings has the member's own sections, and no Members.
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  const settings = page.getByRole('region', { name: 'Settings' });
+  await settings.getByRole('heading', { name: 'Appearance', level: 2 }).waitFor();
+  expect(await settings.getByRole('heading', { name: 'Members' }).count()).toBe(0);
 
   // Naming someone to remove, as a page could, gets a 403 and reaches nothing.
   const status = await page.evaluate(async (url) => {

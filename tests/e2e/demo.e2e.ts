@@ -9,6 +9,7 @@ import { PANELS } from '../../src/features/workbench/ui/panels.ts';
 import { VISITOR_SECONDS } from '../../src/server/access.ts';
 import { BUILDS, serverFunctionIds } from './preview.ts';
 import { suite } from './suite.ts';
+import { mailIsIn } from '../mailIsIn.ts';
 
 /**
  * The public demo as visitors meet it: the demo build on workerd, as deployed, with no sign-in.
@@ -65,17 +66,23 @@ async function visitor(): Promise<Page> {
     new MutationObserver(() => {
       const text = document.body?.innerText ?? '';
       if (text.includes('No mail yet')) said.add('No mail yet');
-      if (text.includes('Up to date') && !document.querySelector('[role="option"]')) {
-        said.add('Up to date, with no mail');
+      const isSettled = document.querySelector('nav[aria-label="Mailboxes"][aria-busy="false"]');
+      if (isSettled && !document.querySelector('[role="option"]')) {
+        said.add('Settled, with no mail');
       }
-    }).observe(document, { childList: true, subtree: true, characterData: true });
+    }).observe(document, {
+      childList: true,
+      subtree: true,
+      characterData: true,
+      attributeFilter: ['aria-busy'],
+    });
   });
   const page = await context.newPage();
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(app.url);
-  await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
+  await mailIsIn(page);
   await page.getByRole('option').first().waitFor();
-  // Mail on its way stands as skeletons, and the status says it's checking, until it's in.
+  // Mail on its way stands as skeletons, and the sidebar stays busy, until it's in.
   expect(await page.evaluate(() => [...(window as unknown as { said: Set<string> }).said])).toEqual(
     [],
   );
@@ -154,6 +161,7 @@ test('a visitor can’t add an account of their own, or remove or erase the demo
   // The app says as much: the demo names itself, invites rather than asks for an account, and
   // offers no Remove account or Erase everything, saying why beside each.
   await cy.getByText('A sample mailbox, yours for a day.').waitFor();
+  await cy.screenshot({ path: join(SHOTS, 'desktop-light-demo-foot.png') });
   await cy.getByRole('button', { name: 'Add account' }).click();
   await cy.getByText('deploy a Trail Mix of your own').waitFor();
   expect(await cy.getByRole('form', { name: 'Add an account' }).count()).toBe(0);
@@ -170,10 +178,10 @@ test('a visitor can’t add an account of their own, or remove or erase the demo
     expect(await cy.locator(`[id="${about}"]`).textContent()).toContain(why);
   }
 
-  // The rail's controls and the accent's swatch gain their tooltips a moment after the first
-  // screen. Hovered right after a load on a slowed CPU, each shows its tooltip, and the status's
-  // carries the demo's line, which its words already read. The tooltip's code is held until the
-  // first hover rests, so that hover proves a tooltip arriving under the pointer opens at once.
+  // The rail's controls, and the accent's swatch in Settings, gain their tooltips a moment after
+  // the first screen. Hovered right after a load on a slowed CPU, each shows its tooltip. The
+  // tooltip's code is held until the first hover rests, so that hover proves a tooltip arriving
+  // under the pointer opens at once.
   await cy.evaluate(
     ([key, width]) => localStorage.setItem(key, JSON.stringify({ width, isCollapsed: true })),
     [PANELS.sidebar.key, PANELS.sidebar.min] as const,
@@ -190,7 +198,6 @@ test('a visitor can’t add an account of their own, or remove or erase the demo
   await cdp.send('Emulation.setCPUThrottlingRate', { rate: 6 });
   await cy.reload();
   await cy.getByRole('option').first().waitFor();
-  const demoLine = 'A sample mailbox, yours for a day.';
   const tooltip = (says: string | RegExp) => cy.getByRole('tooltip').filter({ hasText: says });
   await cy
     .getByRole('button', { name: /^Inbox/ })
@@ -201,14 +208,10 @@ test('a visitor can’t add an account of their own, or remove or erase the demo
   release();
   await tooltip(/^Inbox/).waitFor({ timeout: 2_000 });
   await cy.unroute(tooltipCode);
-  for (const [control, says] of [
-    [cy.locator('p[role="status"]', { hasText: demoLine }), demoLine],
-    [cy.locator('input[aria-label="Accent color"]:not([inert] *)'), 'Accent color'],
-  ] as const) {
-    await cy.mouse.move(0, 0);
-    await control.hover();
-    await tooltip(says).waitFor({ timeout: 2_000 });
-  }
+  await cy.getByRole('button', { name: 'Open settings' }).click();
+  await cy.mouse.move(0, 0);
+  await cy.getByLabel('Accent color').hover();
+  await tooltip('Accent color').waitFor({ timeout: 2_000 });
   await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
 }, 60_000);
 

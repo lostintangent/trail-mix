@@ -13,7 +13,7 @@ import {
   type ReactNode,
 } from 'react';
 import { FirstRun, preloadFirstRun } from '../features/accounts/index.ts';
-import { RegisteredCommandButton, type Command } from '../features/commands/index.ts';
+import type { Command } from '../features/commands/index.ts';
 import { useConversations } from '../features/conversations/index.ts';
 import { standing, useChangedFolders, viewCounts } from '../features/folders/index.ts';
 import {
@@ -34,25 +34,22 @@ import {
   useHints,
 } from '../features/mailroom/client/index.ts';
 import {
-  NOTIFICATIONS,
-  useNotificationCommands,
+  notificationCommands,
   useNotificationOpenings,
+  useNotifications,
 } from '../features/notifications/index.ts';
 import { useDraftsAway, useLeaving } from '../features/outbox/index.ts';
 import { REST_MS } from '../features/reader/index.ts';
 import { afterFirstScreen } from '../shared/afterFirstScreen.ts';
 import { useHeldWhile } from '../shared/useHeldWhile.ts';
-import { Workbench } from '../features/workbench/index.ts';
+import { Workbench, type SettingsAt } from '../features/workbench/index.ts';
 import { preloadable } from '../shared/preloadable.ts';
 import { useHasMail } from './hasMail.ts';
 import { AppTheme } from './theme/AppTheme.tsx';
 import { tm } from './theme/tokens.stylex.ts';
 import { trailMixTheme } from './theme/built/trail-mix.js';
-import { AccentChoice } from './theme/AccentChoice.tsx';
-import { ThemeChoice } from './theme/ThemeChoice.tsx';
-import { accentCommands, themeCommands } from './theme/commands.ts';
+import { accentCommands } from './theme/commands.ts';
 import { useAccent } from './theme/useAccent.ts';
-import { useThemeMode } from './theme/useThemeMode.ts';
 
 export const Route = createFileRoute('/')({
   // The address names the member's place, which a reload, a link or a notification opens.
@@ -81,9 +78,8 @@ export const Route = createFileRoute('/')({
  * has loaded too.
  */
 function App() {
-  const [mode, setMode] = useThemeMode();
   const [accent, setAccent] = useAccent();
-  const notificationCommands = useNotificationCommands();
+  const notifications = useNotifications();
   // The hint socket is open on the first-run screen too, so an account added on another device
   // shows here.
   useHints();
@@ -94,33 +90,36 @@ function App() {
   const welcome = useLoaded(preloadFirstRun, isFirstRun);
   const hasMail = useHasMail(accounts.data);
   usePreloadWhenIdle(preloadUnreachable);
+  usePreloadWhenIdle(preloadSettings);
+  const settings = useCallback(
+    (at: SettingsAt | undefined) => (
+      <Suspense>
+        <Settings at={at} notifications={notifications} accent={accent} onAccent={setAccent} />
+      </Suspense>
+    ),
+    [notifications, accent, setAccent],
+  );
+  const extraCommands = useCallback(
+    (openSettings: (at?: SettingsAt) => void) => [
+      ...notificationCommands(notifications),
+      ...accentCommands(accent, setAccent, () => openSettings('accent')),
+    ],
+    [notifications, accent, setAccent],
+  );
   const screen =
     accounts.data === undefined && accounts.isError ? (
       <Unreachable failed={accounts.error} onTryAgain={askAgain} />
     ) : accounts.data === undefined && !hasMail ? (
       <Opening />
     ) : !isFirstRun ? (
-      <Desk
-        sidebarFooter={
-          <>
-            <RegisteredCommandButton id={NOTIFICATIONS} />
-            <AccentChoice accent={accent} onChange={setAccent} />
-            <ThemeChoice mode={mode} onChange={setMode} />
-          </>
-        }
-        extraCommands={[
-          ...notificationCommands,
-          ...themeCommands(mode, setMode),
-          ...accentCommands(accent, setAccent),
-        ]}
-      />
+      <Desk settings={settings} extraCommands={extraCommands} />
     ) : welcome === 'failed' ? (
       <Unreachable />
     ) : (
       welcome === 'loaded' && <FirstRun />
     );
   return (
-    <AppTheme theme={trailMixTheme} mode={mode}>
+    <AppTheme theme={trailMixTheme}>
       <Suspense>{screen}</Suspense>
     </AppTheme>
   );
@@ -132,6 +131,11 @@ function App() {
  */
 const { Component: Unreachable, preload: preloadUnreachable } = preloadable(
   async () => (await import('./Unreachable.tsx')).Unreachable,
+);
+
+/** Settings, which the first screen goes without, and which loads once that screen is idle. */
+const { Component: Settings, preload: preloadSettings } = preloadable(
+  async () => (await import('./settings.tsx')).Settings,
 );
 
 /** Loads `load` once the first screen has had its turn and the browser is idle. */
@@ -199,11 +203,11 @@ const NONE = [] as const;
 
 /** The member's mail on the workbench, which the hint socket keeps current. */
 function Desk({
-  sidebarFooter,
+  settings,
   extraCommands,
 }: {
-  sidebarFooter: ReactNode;
-  extraCommands: readonly Command[];
+  settings: (at: SettingsAt | undefined) => ReactNode;
+  extraCommands: (openSettings: (at?: SettingsAt) => void) => readonly Command[];
 }) {
   const { place, changePlace, goBack } = usePlace();
   const { view } = place;
@@ -260,7 +264,7 @@ function Desk({
       conversations={conversations}
       isFetching={isFetching}
       onListShown={show}
-      sidebarFooter={sidebarFooter}
+      settings={settings}
       extraCommands={extraCommands}
       leaving={leaving}
     />

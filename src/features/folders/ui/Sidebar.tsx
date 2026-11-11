@@ -1,8 +1,14 @@
 import { Button } from '@astryxdesign/core/Button';
 import { Icon } from '@astryxdesign/core/Icon';
-import { colorVars, durationVars, spacingVars } from '@astryxdesign/core/theme/tokens.stylex';
+import {
+  colorVars,
+  durationVars,
+  fontWeightVars,
+  spacingVars,
+  typeScaleVars,
+} from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { MailPlus, Users } from 'lucide-react';
+import { MailPlus } from 'lucide-react';
 import { memo, useEffect, useState, type ReactNode } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Command } from '../../commands/index.ts';
@@ -24,17 +30,18 @@ export type SidebarRail = {
   top: ReactNode;
 };
 
-/** Where the footer sits: along the sidebar's foot, or stacked at the rail's. */
-export type FooterPlace = 'sidebar' | 'rail';
+/** The name at the foot of the sidebar. */
+const NAME = 'Trail Mix';
 
 /**
  * The sidebar, lying directly on the desk: the unified views, then each account under its stamp,
- * with its folders. The current view lifts onto a pane.
+ * with its folders, and at its foot the Settings gear, a short rule and Trail Mix's name. The
+ * current view lifts onto a pane.
  *
  * On a desktop it has two layouts over one origin, as Toy Box's and GistPad's do: the whole tree,
- * and the rail it folds to, which keeps the views, each account's stamp and the footer's actions
- * in reach. They crossfade rather than swap, and the fold button is pinned outside both, so it
- * holds still while the content around it leaves and arrives.
+ * and the rail it folds to, which keeps the views and each account's stamp in reach. They crossfade
+ * rather than swap, and the fold button at the top and the gear at the foot are pinned outside
+ * both, so they hold still while the content around them leaves and arrives.
  */
 export const Sidebar = memo(function Sidebar({
   id,
@@ -48,13 +55,14 @@ export const Sidebar = memo(function Sidebar({
   expandedWidth,
   header,
   search,
-  footer,
+  settings,
+  note,
+  isBusy = false,
   editing,
   onEdited,
   folderActions,
   accountActions,
   onAddAccount,
-  onMembers,
 }: {
   id: string;
   view: View;
@@ -75,7 +83,15 @@ export const Sidebar = memo(function Sidebar({
   header?: ReactNode;
   /** What sits under the header, such as the search field on a desktop. */
   search?: ReactNode;
-  footer: (place: FooterPlace) => ReactNode;
+  /** The Settings gear, at the foot, pinned there over both layouts where the sidebar folds. */
+  settings: ReactNode;
+  /** A quiet line above the foot, such as the public demo's naming itself. */
+  note?: string;
+  /**
+   * Whether what the tree shows is still on its way, as while the Mailroom checks the accounts,
+   * which it says only to assistive technology, as `aria-busy`.
+   */
+  isBusy?: boolean;
   /** A folder being named in place, new or renamed. */
   editing?: FolderEdit;
   /** Told the name to keep, or nothing to leave the folder as it was. */
@@ -86,8 +102,6 @@ export const Sidebar = memo(function Sidebar({
   accountActions: (account: Account) => readonly Command[];
   /** Starts adding an account, from the end of the accounts. */
   onAddAccount?: () => void;
-  /** Opens the Members page, which only the operator has. */
-  onMembers?: () => void;
 }) {
   const [folds, toggleFold] = useFolds();
   const isRail = rail !== undefined && isCollapsed;
@@ -100,7 +114,7 @@ export const Sidebar = memo(function Sidebar({
         )
       : view.in !== 'search';
   return (
-    <nav id={id} aria-label="Mailboxes" {...stylex.props(styles.sidebar)}>
+    <nav id={id} aria-label="Mailboxes" aria-busy={isBusy} {...stylex.props(styles.sidebar)}>
       {/* First, as it reads: it heads both layouts. */}
       {rail && (
         <div {...stylex.props(styles.pinned, styles.width(`${rail.width}px`))}>{rail.fold}</div>
@@ -153,19 +167,16 @@ export const Sidebar = memo(function Sidebar({
                 size="sm"
                 onClick={onAddAccount}
               />
-              {onMembers && (
-                <Button
-                  label="Members"
-                  icon={<Icon icon={Users} size="sm" />}
-                  variant="ghost"
-                  size="sm"
-                  onClick={onMembers}
-                />
-              )}
             </div>
           )}
         </div>
-        <div {...stylex.props(styles.footer)}>{footer('sidebar')}</div>
+        {note && <p {...stylex.props(styles.note)}>{note}</p>}
+        <div {...stylex.props(styles.footer)}>
+          {/* Where the pinned gear lands, or the gear itself where the sidebar never folds. */}
+          {rail ? <span {...stylex.props(styles.footRoom)} /> : settings}
+          <span aria-hidden {...stylex.props(styles.footRule)} />
+          <span {...stylex.props(styles.name)}>{NAME}</span>
+        </div>
       </div>
       {rail && (
         <>
@@ -189,12 +200,14 @@ export const Sidebar = memo(function Sidebar({
                 accounts={accounts}
                 folders={folders}
                 counts={counts}
-                footer={footer}
                 onAddAccount={onAddAccount}
-                onMembers={onMembers}
               />
             </div>
           )}
+          {/* Last, as it reads: it ends both layouts. */}
+          <div {...stylex.props(styles.pinnedFoot, styles.width(`${rail.width}px`))}>
+            {settings}
+          </div>
         </>
       )}
     </nav>
@@ -271,6 +284,15 @@ const styles = stylex.create({
     width: tm.target,
     height: tm.target,
   },
+  // The gear, over both layouts, centered on the rail and level with the footer's line.
+  pinnedFoot: {
+    position: 'absolute',
+    bottom: spacingVars['--spacing-2'],
+    insetInlineStart: 0,
+    zIndex: 1,
+    display: 'flex',
+    justifyContent: 'center',
+  },
   header: {
     flexShrink: 0,
     display: 'flex',
@@ -302,19 +324,49 @@ const styles = stylex.create({
     marginTop: spacingVars['--spacing-3'],
     paddingInline: spacingVars['--spacing-1'],
   },
-  // The footer's line takes the room, and its controls sit at the end.
-  // A rule across the sidebar sets the footer off from the tree above it, as in Toy Box.
+  // A rule across the sidebar sets the footer off from the tree above it, as in Toy Box. Its gear
+  // starts where the header's fold button does, a pixel in, so the pinned one lines up with both.
   footer: {
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'flex-end',
-    gap: spacingVars['--spacing-1'],
+    gap: spacingVars['--spacing-2'],
     marginInline: `calc(-1 * ${spacingVars['--spacing-2']})`,
     paddingTop: spacingVars['--spacing-2'],
-    paddingInline: spacingVars['--spacing-2'],
+    paddingInline: `calc(${spacingVars['--spacing-2']} + 1px)`,
     borderTopWidth: '1px',
     borderTopStyle: 'solid',
     borderTopColor: colorVars['--color-border'],
+  },
+  footRoom: {
+    flexShrink: 0,
+    width: tm.target,
+    height: tm.target,
+  },
+  // The short upright rule between the gear and the name, the rail's rules stood on end. The gear's
+  // target pads its icon, so the rule sits a little further from the name to look centered.
+  footRule: {
+    flexShrink: 0,
+    width: '1px',
+    height: '1rem',
+    marginInlineEnd: spacingVars['--spacing-1'],
+    backgroundColor: tm.rule,
+  },
+  name: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: colorVars['--color-text-primary'],
+    fontWeight: fontWeightVars['--font-weight-semibold'],
+  },
+  // Quiet, and wrapping rather than cut, since it says what this Trail Mix is.
+  // Clear of the tree's lines above, which scroll under its edge.
+  note: {
+    margin: 0,
+    paddingInline: spacingVars['--spacing-2'],
+    paddingBlock: spacingVars['--spacing-2'],
+    color: tm.textQuiet,
+    fontSize: typeScaleVars['--text-supporting-size'],
   },
   rail: {
     alignItems: 'center',

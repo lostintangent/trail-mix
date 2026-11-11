@@ -6,20 +6,21 @@ import {
   spacingVars,
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { MailPlus, Users } from 'lucide-react';
+import { MailPlus } from 'lucide-react';
 import { useRef, type ReactNode } from 'react';
 import { LaterTooltip } from '../../../shared/LaterTooltip.tsx';
 import { StampDot } from '../../../app/theme/StampDot.tsx';
-import { tm } from '../../../app/theme/tokens.stylex.ts';
+import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, Folder, View } from '../../mail/core/index.ts';
-import type { FooterPlace, SidebarRail } from './Sidebar.tsx';
-import { lift } from './Tree.tsx';
+import type { SidebarRail } from './Sidebar.tsx';
+import { lift, troubleOf } from './Tree.tsx';
 import { UNIFIED_VIEWS, type ViewCounts } from './views.ts';
 
 /**
- * The folded sidebar: its header and footer turned on their side, one target wide, with the views
- * and each account's stamp between them, so folding gives up the tree without taking anything the
- * member needs. Each shows its name as a tooltip, and a stamp opens its account's Inbox.
+ * The folded sidebar: its header turned on its side, one target wide, with the views and each
+ * account's stamp below it, so folding gives up the tree without taking anything the member needs.
+ * Each shows its name as a tooltip, a stamp opens its account's Inbox, and an account that needs
+ * the member marks its stamp. The gear the sidebar pins over both layouts ends it.
  */
 export function RailContent({
   rail,
@@ -28,9 +29,7 @@ export function RailContent({
   accounts,
   folders,
   counts,
-  footer,
   onAddAccount,
-  onMembers,
 }: {
   rail: SidebarRail;
   view: View;
@@ -38,9 +37,7 @@ export function RailContent({
   accounts: readonly Account[];
   folders: readonly Folder[];
   counts: ViewCounts;
-  footer: (place: FooterPlace) => ReactNode;
   onAddAccount?: () => void;
-  onMembers?: () => void;
 }) {
   return (
     <>
@@ -67,12 +64,16 @@ export function RailContent({
           const inbox =
             folders.find((folder) => folder.account === account.id && folder.role === 'inbox') ??
             folders.find((folder) => folder.account === account.id);
+          const trouble = troubleOf(account);
           return (
             <RailButton
               key={account.id}
-              label={inbox?.unread ? `${account.name}, ${inbox.unread} unread` : account.name}
+              label={[account.name, trouble, inbox?.unread && `${inbox.unread} unread`]
+                .filter(Boolean)
+                .join(', ')}
               isSelected={view.in === 'folder' && view.folder.account === account.id}
               hasDot={Boolean(inbox?.unread)}
+              isTroubled={trouble !== undefined}
               onSelect={() =>
                 inbox &&
                 onSelect({ in: 'folder', folder: { account: inbox.account, path: inbox.path } })
@@ -88,13 +89,9 @@ export function RailContent({
           <Icon icon={MailPlus} size="sm" />
         </RailButton>
       )}
-      {onMembers && (
-        <RailButton label="Members" onSelect={onMembers}>
-          <Icon icon={Users} size="sm" />
-        </RailButton>
-      )}
       <span {...stylex.props(styles.rule)} />
-      <div {...stylex.props(styles.railFooter)}>{footer('rail')}</div>
+      {/* Where the pinned gear lands. */}
+      <span {...stylex.props(styles.foldRoom)} />
     </>
   );
 }
@@ -103,6 +100,7 @@ function RailButton({
   label,
   isSelected = false,
   hasDot = false,
+  isTroubled = false,
   onSelect,
   children,
 }: {
@@ -110,6 +108,8 @@ function RailButton({
   isSelected?: boolean;
   /** Marks unread mail in Inbox in the accent, whose count is in the label. */
   hasDot?: boolean;
+  /** Marks an account that needs the member, in the error's color, as its label says. */
+  isTroubled?: boolean;
   onSelect: () => void;
   children: ReactNode;
 }) {
@@ -126,6 +126,7 @@ function RailButton({
       >
         {children}
         {hasDot && <span {...stylex.props(styles.dot)} />}
+        {isTroubled && <span {...stylex.props(styles.troubled)} />}
       </button>
       <LaterTooltip anchor={button} content={label} placement="end" />
     </>
@@ -184,18 +185,25 @@ const styles = stylex.create({
     backgroundColor: colorVars['--color-accent'],
     forcedColorAdjust: 'none',
   },
-  // The rail's separators: the footer's line, turned on its side.
+  // An account that needs the member: a ringed dot of the error's color at the stamp's lower corner,
+  // apart from the unread dot above it.
+  troubled: {
+    position: 'absolute',
+    bottom: spacingVars['--spacing-1'],
+    insetInlineEnd: spacingVars['--spacing-1'],
+    width: spacingVars['--spacing-2'],
+    height: spacingVars['--spacing-2'],
+    borderRadius: '50%',
+    backgroundColor: { default: colorVars['--color-error'], [media.forcedColors]: 'Mark' },
+    boxShadow: `0 0 0 2px ${colorVars['--color-background-body']}`,
+    forcedColorAdjust: 'none',
+  },
+  // The rail's separators: the header's line, turned on its side.
   rule: {
     flexShrink: 0,
     width: '1rem',
     height: '1px',
     marginBlock: spacingVars['--spacing-1-5'],
-    backgroundColor: colorVars['--color-border'],
-  },
-  railFooter: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: spacingVars['--spacing-0-5'],
+    backgroundColor: tm.rule,
   },
 });

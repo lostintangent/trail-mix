@@ -24,7 +24,7 @@ export class NotTheOperator extends Error {
 }
 
 /**
- * The Members page's server side, for one verified caller. Every answer but `isOperator` is the
+ * Members' server side, for one verified caller. Every answer but `isOperator` is the
  * operator's alone, refused for anyone else before Cloudflare or any Mailroom is reached. Only
  * removing a member names their Mailroom, to close their connections and, if asked, erase it.
  */

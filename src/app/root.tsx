@@ -20,8 +20,10 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 
 /**
  * The document every page starts as: plain HTML, with no Astryx or StyleX rendered in it. It names
- * the theme on `<html>`, so the desk is painted in the theme's colors before any module runs, and
- * the prepaint script applies the device's Light or Dark choice before that first paint. Its
+ * the theme on `<html>`, so the desk is painted in the theme's colors before any module runs, in
+ * the system's light or dark, which the browser's own chrome takes too, by one `theme-color` meta
+ * per scheme. The prepaint script applies the accent and the panes' widths before that first
+ * paint. Its
  * manifest and icons let a device install Trail Mix as an app.
  */
 function Shell({ children }: { children: ReactNode }) {

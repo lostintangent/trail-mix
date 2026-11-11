@@ -1,6 +1,7 @@
 import { afterEach, expect } from 'bun:test';
 import type { Page, Request, Route } from 'playwright';
 import { suite } from './suite.ts';
+import { mailIsIn } from '../mailIsIn.ts';
 
 /**
  * Triage, end to end: the built app on workerd, with two browsers open on one member's demo mail.
@@ -29,7 +30,7 @@ async function inbox(size: typeof DESKTOP | typeof PHONE = DESKTOP): Promise<Pag
   const page = await (await app.context(size)).newPage();
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(app.url);
-  await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
+  await mailIsIn(page);
   return page;
 }
 

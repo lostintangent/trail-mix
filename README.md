@@ -44,7 +44,7 @@ Cloudflare Access stands in front of Trail Mix and emails each person a one-time
 
 ### 3. Name yourself the operator
 
-The operator invites and removes people from Trail Mix's **Members** page, which edits the Access policy from step 2 for you.
+The operator invites and removes people from **Members**, in Trail Mix's **Settings**, which edits the Access policy from step 2 for you.
 
 1. Under **My Profile → API Tokens**, create a **Custom token** named "Trail Mix members", for your account alone, with exactly these four **Account** permissions:
    - Access: Apps Read
@@ -53,7 +53,7 @@ The operator invites and removes people from Trail Mix's **Members** page, which
    - Access: Organizations Revoke
 2. In **Variables and Secrets**, add `OPERATOR_EMAIL` as **Text**, the address you sign in with, and `ACCESS_API_TOKEN` as **Secret**, the token. Select **Deploy**.
 
-Reload Trail Mix, and **Members** appears in its sidebar and its command palette. Each person you invite signs in with a code and gets a Mailroom of their own, with mail nobody else can see.
+Reload Trail Mix, and **Members** appears in **Settings**, which the gear at the foot of the sidebar opens, and in its command palette. Each person you invite signs in with a code and gets a Mailroom of their own, with mail nobody else can see.
 
 ### 4. Add your mail
 

@@ -21,6 +21,7 @@ import { caFile, empty, ports, start, stop, users } from '../mail-server/server.
 import { missing } from './clients.ts';
 import { mutt } from './mutt.ts';
 import { roundcube, type Roundcube } from './roundcube.ts';
+import { mailIsIn } from '../mailIsIn.ts';
 
 const { alice, bob } = users;
 type User = { email: string; password: string };
@@ -619,7 +620,7 @@ describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix
       },
     );
     expect(added).toBe(200);
-    await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
+    await mailIsIn(page);
     await page.getByRole('option').filter({ hasText: 'Lunch on Thursday?' }).waitFor();
   }
 

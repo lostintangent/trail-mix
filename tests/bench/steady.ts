@@ -1,4 +1,5 @@
 import type { Page, Request } from 'playwright';
+import { mailIsIn } from '../mailIsIn.ts';
 
 /** How long a page must go without a request in flight to count as idle. */
 const IDLE_MS = 500;
@@ -28,7 +29,7 @@ export function watch(page: Page) {
      * section timed after this measures the page, not the Mailroom catching up.
      */
     async steady() {
-      await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 180_000 });
+      await mailIsIn(page, 180_000);
       const since = performance.now();
       while (inFlight.size > 0 || performance.now() - quietSince < IDLE_MS) {
         if (performance.now() - since > 15_000) {

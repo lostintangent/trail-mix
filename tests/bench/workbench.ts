@@ -5,6 +5,7 @@ import { percentile, type BenchArea, type Measurement, type Slow } from './budge
 import { phone, slowDown } from './phone.ts';
 import { inputLatency, type InputLatency } from './latency.ts';
 import { watch, type Watch } from './steady.ts';
+import { mailIsIn } from '../mailIsIn.ts';
 
 /**
  * The workbench's budgets, as AGENTS.md sets them: a cold load to the first Inbox rows, the
@@ -62,7 +63,7 @@ export const workbench: BenchArea = {
       const warm = await phone(browser);
       const filling = await warm.newPage();
       await filling.goto(preview.url);
-      await filling.getByText('Up to date').waitFor({ state: 'attached', timeout: 180_000 });
+      await mailIsIn(filling, 180_000);
       await warm.close();
 
       const context = await phone(browser);

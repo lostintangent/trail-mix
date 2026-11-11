@@ -502,7 +502,7 @@ test('the demo takes only so many changes a minute from one network, and counts 
 });
 
 /**
- * The Members page's side, as the Worker hands it to the app for a member Access signed in, with
+ * Members' side, as the Worker hands it to the app for a member Access signed in, with
  * Cloudflare's API and Access's certificates answered by stand-ins.
  */
 async function signedInMembers(env: Record<string, unknown>, team: string) {

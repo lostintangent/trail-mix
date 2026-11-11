@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { BrowserContextOptions, Page } from 'playwright';
 import { unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
+import { mailIsIn } from '../mailIsIn.ts';
 
 /**
  * The Outbox, end to end: the built app on workerd, sending the demo mailbox's drafts. The undo toast
@@ -35,7 +36,7 @@ async function open(options: BrowserContextOptions): Promise<Page> {
   const page = await (await app.context({ deviceScaleFactor: 2, ...options })).newPage();
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(app.url);
-  await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
+  await mailIsIn(page);
   return page;
 }
 

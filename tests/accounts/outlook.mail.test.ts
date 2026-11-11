@@ -166,7 +166,7 @@ for (const [size, options] of Object.entries(SIZES)) {
       ).not.toMatch(SECRET);
     }, 60_000);
 
-    test('an account whose sign-in lapsed signs in again from its page, and keeps its mail', async () => {
+    test('an account whose sign-in lapsed says so on its line and its stamp, and signs in again from its menu', async () => {
       await fetch(`${identity.origin}/revoke`, {
         method: 'POST',
         body: new URLSearchParams({ login_hint: alice.email }),
@@ -174,18 +174,36 @@ for (const [size, options] of Object.entries(SIZES)) {
       // Opening Trail Mix checks the account, whose refresh Microsoft now refuses.
       const page = await open({ colorScheme: 'dark' });
       await ferry(page).waitFor({ timeout: 30_000 });
-      await page.keyboard.press('ControlOrMeta+k');
-      await page.keyboard.type('sign in to');
-      const command = page.getByRole('option', { name: 'Sign in to trailmix.test again' });
-      await command.waitFor({ timeout: 30_000 });
-      await page.keyboard.press('Enter');
+      if (size === 'phone')
+        await page.getByRole('button', { name: 'Folders', exact: true }).click();
+      const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
+      await sidebar
+        .getByRole('button', { name: /^trailmix\.test Sign in again/i })
+        .waitFor({ timeout: 30_000 });
+      await readable(page, size, 'dark-lapsed');
+      if (size === 'desktop') {
+        // Folded, its stamp says so too.
+        await page.keyboard.press('ControlOrMeta+b');
+        await sidebar.getByRole('button', { name: /^trailmix\.test, Sign in again/ }).waitFor();
+        // The fold swaps the sidebar's lines for the rail's, ending their transitions early.
+        await page.waitForFunction(() =>
+          document.getAnimations().every(({ playState }) => playState !== 'running'),
+        );
+        await readable(page, size, 'dark-lapsed-rail');
+        await page.keyboard.press('ControlOrMeta+b');
+      }
+      // Its menu offers the fix.
+      await sidebar.getByRole('button', { name: 'More for trailmix.test' }).click();
+      await page.getByRole('menuitem', { name: 'Sign in to trailmix.test again' }).click();
 
       const again = page.getByRole('region', { name: 'Signing in at Microsoft' });
       await codeOf(page).waitFor();
       await readable(page, size, 'dark-again');
       await atMicrosoft(page, { login_hint: alice.email });
       await again.waitFor({ state: 'detached', timeout: 30_000 });
-      await page.getByText('Sign in to trailmix.test again').waitFor({ state: 'detached' });
+      await sidebar
+        .getByRole('button', { name: /Sign in again/ })
+        .waitFor({ state: 'detached', timeout: 30_000 });
       await ferry(page).waitFor();
     }, 90_000);
   });

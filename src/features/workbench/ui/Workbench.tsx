@@ -79,7 +79,7 @@ import {
   type Selection,
 } from '../../conversations/index.ts';
 import { PickedActions, SelectionPane } from './SelectionPane.tsx';
-import { workbenchCommands } from './commands.ts';
+import { OPEN_SETTINGS, workbenchCommands } from './commands.ts';
 import { FoldToggle } from './FoldToggle.tsx';
 import {
   CommandButton,
@@ -104,7 +104,8 @@ import {
 } from '../../composer/ui/index.ts';
 import { newestOf, useComposing } from './useComposing.ts';
 
-const NO_COMMANDS: readonly Command[] = [];
+/** No commands from outside the workbench. */
+const noCommands = (): readonly Command[] => [];
 
 /** The triage buttons as they're drawn while nothing is open or selected: all disabled. */
 const NOTHING_TO_TRIAGE = triageCommands({
@@ -114,9 +115,7 @@ const NOTHING_TO_TRIAGE = triageCommands({
   isUnread: false,
   onTriage: () => {},
 }).map((command) => ({ ...command, isEnabled: false }));
-import { StatusLine } from './StatusLine.tsx';
-import { mailStatus } from './status.ts';
-import { useReach } from '../../offline/index.ts';
+import { useReach, type Reach } from '../../offline/index.ts';
 import {
   CREATE,
   folderName,
@@ -127,7 +126,6 @@ import {
   useFolderEditing,
   viewCommands,
   viewIcon,
-  type FooterPlace,
   type SidebarRail,
   type ViewCounts,
 } from '../../folders/index.ts';
@@ -140,10 +138,16 @@ import {
   RemoveQuestion,
   type AccountPageOf,
 } from '../../accounts/index.ts';
-import { memberCommands, MembersPage, operatorQuery } from '../../members/index.ts';
+import { memberCommands, operatorQuery } from '../../members/index.ts';
+
+/**
+ * Where Settings opens: at one of its sections, or at the accent, whose picker it opens too. It opens
+ * at its top otherwise.
+ */
+export type SettingsAt = 'notifications' | 'accent' | 'members';
 
 /** What can lie on the reader's sheet in place of a conversation. */
-type SheetPage = AccountPageOf | { as: 'members' };
+type SheetPage = AccountPageOf | { as: 'settings'; at?: SettingsAt };
 import { usePanel } from './usePanel.ts';
 
 type Pane = 'sidebar' | 'list' | 'reader';
@@ -156,6 +160,15 @@ const SEARCH_FIELD = <SearchField />;
  * sidebar, memoized around it, doesn't render again with every key.
  */
 const NEW_MESSAGE = <PrimaryCommandButton id="message.new" />;
+
+/** The Settings gear at the foot of the sidebar, drawn from its command. */
+const SETTINGS_GEAR = <RegisteredCommandButton id={OPEN_SETTINGS} />;
+
+/** What a list says beside its title while the device can't reach its Mailroom. */
+const OFFLINE: Record<Exclude<Reach, 'online'>, string> = {
+  offline: 'Offline',
+  'offline-kept': 'Offline: kept mail',
+};
 
 /** How a desktop's sidebar folds: to its rail, led by New message, with a button that holds still. */
 const RAIL: SidebarRail = {
@@ -188,8 +201,8 @@ export function Workbench({
   conversations,
   isFetching,
   onListShown,
-  sidebarFooter,
-  extraCommands = NO_COMMANDS,
+  settings,
+  extraCommands = noCommands,
   leaving,
 }: {
   /** Where the member is, as the address holds it: the view, and the conversation open in it. */
@@ -207,9 +220,10 @@ export function Workbench({
   isFetching: boolean;
   /** Says which rows the list shows, so the pages they lie on are fetched. */
   onListShown: (first: number, last: number, selected: number) => void;
-  sidebarFooter: ReactNode;
-  /** Commands from outside the workbench, such as the theme's, for the registry. */
-  extraCommands?: readonly Command[];
+  /** Settings, which opens as a page in the reader's place, at its top or where it's asked to. */
+  settings: (at: SettingsAt | undefined) => ReactNode;
+  /** Commands from outside the workbench, such as the accent's, made with a way to open Settings. */
+  extraCommands?: (openSettings: (at?: SettingsAt) => void) => readonly Command[];
   /** The sends this device follows, which the counts and the Drafts list read too. */
   leaving: LeavingSends;
 }) {
@@ -288,8 +302,8 @@ export function Workbench({
   // A new message is from the account the view holds, or else the first.
   const writeFrom = scope ?? accounts[0];
   const closeComposer = composing.close;
-  // An account's page, or the Members page, lies where a new message's composer would, so writing
-  // one closes it.
+  // An account's page, or Settings, lies where a new message's composer would, so writing one
+  // closes it.
   const [page, setPage] = useState<SheetPage>();
   const [removing, setRemoving] = useState<Account>();
   const [isErasing, setErasing] = useState(false);
@@ -559,11 +573,15 @@ export function Workbench({
     [openPage],
   );
   const addAccount = useCallback(() => openPage({ as: 'add' }), [openPage]);
-  // Only the operator has a Members page.
+  const openSettings = useCallback(
+    (at?: SettingsAt) => openPage(at ? { as: 'settings', at } : { as: 'settings' }),
+    [openPage],
+  );
+  // Only the operator has Members, in Settings.
   const isOperator = useQuery(operatorQuery).data === true;
   const openMembers = useMemo(
-    () => (isOperator ? () => openPage({ as: 'members' }) : undefined),
-    [isOperator, openPage],
+    () => (isOperator ? () => openSettings('members') : undefined),
+    [isOperator, openSettings],
   );
   // A removed account's page closes, and so does a view of its folders.
   const removed = (account: Account) => {
@@ -783,6 +801,7 @@ export function Workbench({
             isFolded: sidebar.isCollapsed,
             toggle: () => setSidebar({ ...sidebar, isCollapsed: !sidebar.isCollapsed }),
           },
+      openSettings: () => openSettings(),
       showShortcuts: () => setSheetOpen(true),
     }),
     ...composerCommands({
@@ -806,22 +825,12 @@ export function Workbench({
     ...accountsCommands,
     ...memberCommands(openMembers),
     ...writingCommands,
-    ...extraCommands,
+    ...extraCommands(openSettings),
   ]);
   useCommandKeys(commands);
-  const footer = useCallback(
-    (place: FooterPlace) => (
-      <>
-        <StatusLine
-          accounts={accounts}
-          isCollapsed={place === 'rail'}
-          note={isVisitor ? VISITORS_NOTE : undefined}
-        />
-        {sidebarFooter}
-      </>
-    ),
-    [accounts, isVisitor, sidebarFooter],
-  );
+  // Whether what the sidebar shows is on its way: before the page has caught up with its Mailroom,
+  // and while it checks an account.
+  const isChecking = !isCaughtUp || accounts.some(({ status }) => status === 'syncing');
   // What an account's menu in the sidebar lists: a new folder at its top, then its own commands.
   // It asks the registry as the menu opens, so the sidebar doesn't render again as that changes.
   const latestCommands = useRef(commands);
@@ -908,10 +917,11 @@ export function Workbench({
                 folderActions={folderEditing.actionsFor}
                 accountActions={accountActions}
                 onAddAccount={addAccount}
-                onMembers={openMembers}
                 header={isPhone ? undefined : NEW_MESSAGE}
                 search={isFieldInSidebar ? SEARCH_FIELD : undefined}
-                footer={footer}
+                settings={SETTINGS_GEAR}
+                note={isVisitor ? VISITORS_NOTE : undefined}
+                isBusy={isChecking}
               />
               <PanelEdge
                 spec={PANELS.sidebar}
@@ -928,9 +938,7 @@ export function Workbench({
                 icon={viewIcon(view, folders)}
                 title={title}
                 unread={unread}
-                offline={
-                  isPhone && reach !== 'online' ? mailStatus(accounts, reach)?.label : undefined
-                }
+                offline={reach === 'online' ? undefined : OFFLINE[reach]}
                 scope={scope}
                 below={
                   <>
@@ -1033,8 +1041,8 @@ export function Workbench({
                       : undefined
                   }
                   page={
-                    page?.as === 'members' ? (
-                      <MembersPage />
+                    page?.as === 'settings' ? (
+                      settings(page.at)
                     ) : page ? (
                       <AccountPage
                         page={page}

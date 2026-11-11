@@ -2,6 +2,7 @@ import { expect } from 'bun:test';
 import type { BrowserContext, BrowserContextOptions, Locator, Page } from 'playwright';
 import { PAGE_SIZE } from '../../src/features/mailroom/client/contract.ts';
 import { suite } from './suite.ts';
+import { mailIsIn } from '../mailIsIn.ts';
 
 /**
  * The conversation list: a long list as it changes under the member, as mail arrives while it is
@@ -43,7 +44,7 @@ async function open(
   });
   // A request held back keeps the network busy, so the page counts as loaded once it is drawn.
   await page.goto(app.url, { waitUntil: before ? 'domcontentloaded' : 'networkidle' });
-  await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
+  await mailIsIn(page);
   return { context, page, problems };
 }
 

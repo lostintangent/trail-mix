@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import type { BrowserContextOptions, Page, Route } from 'playwright';
 import { unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
+import { mailIsIn } from '../mailIsIn.ts';
 
 const SIZES = {
   desktop: { viewport: { width: 1440, height: 900 } },
@@ -80,7 +81,7 @@ for (const [size, options] of Object.entries(SIZES)) {
       page.on('pageerror', (error) => errors.push(error.message));
       await before(page);
       await page.goto(app.url);
-      await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
+      await mailIsIn(page);
       return page;
     }
 

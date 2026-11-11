@@ -8,11 +8,12 @@ import { readMessagePath } from '../../src/features/mailroom/client/urls.ts';
 import { pushOf, type Notice } from '../../src/features/notifications/core/index.ts';
 import { unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
+import { mailIsIn } from '../mailIsIn.ts';
 
 /**
- * Notifications in the browser: the bell and its command on a deployment that has a push key, the
- * installed app subscribing and the Mailroom knowing it, and the service worker showing a push and
- * acting on a tap or a button. A test can't reach Chromium's push service, and headless Chromium
+ * Notifications in the browser: Settings' switch and its command on a deployment that has a push
+ * key, the installed app subscribing and the Mailroom knowing it, and the service worker showing a
+ * push and acting on a tap or a button. A test can't reach Chromium's push service, and headless Chromium
  * shows no notifications, so three things stand in: the page's PushManager, which keeps one
  * subscription in the page's storage, the page's permission, which headless Chromium always says
  * is denied, and the worker's `showNotification`, which records what it would show. A push arrives
@@ -62,10 +63,28 @@ afterEach(() => {
   expect(errors.splice(0)).toEqual([]);
 });
 
-const bell = (page: Page, state: 'on' | 'off') =>
-  page.getByRole('button', {
-    name: `Turn ${state === 'on' ? 'off' : 'on'} notifications on this device`,
-  });
+/** Settings' switch for this device's notifications. */
+const notifying = (page: Page) =>
+  page
+    .getByRole('region', { name: 'Settings' })
+    .getByRole('switch', { name: 'Notifications on this device' });
+
+/** Opens Settings from the gear at the foot of the sidebar, which a phone slides into view first. */
+async function openSettings(page: Page) {
+  if ((page.viewportSize()?.width ?? 0) < 768) {
+    await page.getByRole('button', { name: 'Folders', exact: true }).click();
+  }
+  await page.getByRole('button', { name: 'Open settings' }).click();
+  await page.getByRole('heading', { name: 'Settings', level: 1 }).waitFor();
+}
+
+/** Waits until the switch shows notifications on, or off. */
+async function isOn(page: Page, on: boolean) {
+  for (let wait = 0; wait < 200 && (await notifying(page).isChecked()) !== on; wait++) {
+    await page.waitForTimeout(50);
+  }
+  expect(await notifying(page).isChecked()).toBe(on);
+}
 
 async function open(
   options: BrowserContextOptions,
@@ -76,7 +95,7 @@ async function open(
   const page = await context.newPage();
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(app.url);
-  await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
+  await mailIsIn(page);
   return { context, page };
 }
 
@@ -112,7 +131,7 @@ async function installed(options: BrowserContextOptions = DESKTOP) {
   return opened;
 }
 
-test('in a browser tab, the bell says notifications come to the installed app, and on an iPhone to its Home Screen', async () => {
+test('in a browser tab, Settings says notifications come to the installed app, and on an iPhone to its Home Screen', async () => {
   for (const [options, says] of [
     [{ ...DESKTOP, colorScheme: 'dark' }, 'Notifications come to Trail Mix installed as an app.'],
     [
@@ -121,19 +140,29 @@ test('in a browser tab, the bell says notifications come to the installed app, a
     ],
   ] as const) {
     const { page, context } = await open(options);
-    if (options.viewport.width < 768) {
-      await page.getByRole('button', { name: 'Folders', exact: true }).click();
+    await openSettings(page);
+    await page.getByRole('region', { name: 'Settings' }).getByText(says).waitFor();
+    expect(await notifying(page).isDisabled()).toBe(true);
+    // On a desktop, the palette's command says the same, as a toast beside it.
+    if (options.viewport.width >= 768) {
+      await page.getByRole('searchbox', { name: 'Search mail' }).click();
+      await page.keyboard.type('turn on notifications');
+      await page
+        .getByRole('listbox', { name: 'Commands' })
+        .getByRole('option')
+        .filter({ hasText: 'Turn on notifications on this device' })
+        .click();
+      await page.getByText(says).nth(1).waitFor();
     }
-    await bell(page, 'off').click();
-    await page.getByText(says).first().waitFor();
     await context.close();
   }
 }, 60_000);
 
-test('the installed app turns notifications on and off from the bell, and the Mailroom knows it across reloads', async () => {
+test('the installed app turns notifications on and off in Settings, and the Mailroom knows it across reloads', async () => {
   const { page } = await installed();
-  await bell(page, 'off').click();
-  await bell(page, 'on').waitFor();
+  await openSettings(page);
+  await notifying(page).click();
+  await isOn(page, true);
   // The browser was asked during the tap, not after waiting on code that hadn't loaded.
   expect(await page.evaluate(() => (window as unknown as { asked: string[] }).asked)).toEqual([
     'click',
@@ -145,16 +174,18 @@ test('the installed app turns notifications on and off from the bell, and the Ma
 
   // The Mailroom says this device is notified.
   await page.reload();
-  await bell(page, 'on').waitFor();
+  await openSettings(page);
+  await isOn(page, true);
 
-  await bell(page, 'on').click();
-  await bell(page, 'off').waitFor();
+  await notifying(page).click();
+  await isOn(page, false);
   expect(await page.evaluate(() => localStorage.getItem('test.push-subscription'))).toBeNull();
   await page.reload();
-  await bell(page, 'off').waitFor();
+  await openSettings(page);
+  await isOn(page, false);
 }, 60_000);
 
-test('on a phone, the bell in the sidebar is a 44-pixel target, in both themes', async () => {
+test('on a phone, Settings’ gear and switch are 44-pixel targets, in both themes', async () => {
   for (const colorScheme of ['light', 'dark'] as const) {
     const { page, context } = await installed(PHONE);
     await page.emulateMedia({ colorScheme });
@@ -163,9 +194,23 @@ test('on a phone, the bell in the sidebar is a 44-pixel target, in both themes',
     await page.waitForFunction(() =>
       document.getAnimations().every((animation) => animation.playState !== 'running'),
     );
-    const box = (await bell(page, 'off').boundingBox())!;
-    expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(44);
-    await shot(page, `phone-${colorScheme}-off`);
+    const gear = (await page.getByRole('button', { name: 'Open settings' }).boundingBox())!;
+    expect(Math.min(gear.width, gear.height)).toBeGreaterThanOrEqual(44);
+    await page.getByRole('button', { name: 'Open settings' }).click();
+    await notifying(page).waitFor();
+    await page.waitForFunction(() =>
+      document.getAnimations().every((animation) => animation.playState !== 'running'),
+    );
+    // The switch takes a tap anywhere on its line, label and all.
+    expect(
+      await notifying(page).evaluate((toggle) => {
+        const { height } = (toggle.closest('label') ?? toggle).getBoundingClientRect();
+        return height;
+      }),
+    ).toBeGreaterThanOrEqual(44);
+    await notifying(page).tap();
+    await isOn(page, true);
+    await shot(page, `phone-${colorScheme}-on`);
     await context.close();
   }
 }, 60_000);

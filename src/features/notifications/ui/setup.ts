@@ -1,7 +1,7 @@
 import { mailroom } from '../../mailroom/client/index.ts';
 import { toast } from '../../../shared/toasts.tsx';
 import { fromBase64Url, subscriptionOf, type Subscription } from '../core/subscription.ts';
-import type { Standing } from './device.ts';
+import { needsOf, type Standing } from './device.ts';
 
 /**
  * Turning this device's notifications on and off, which the first screen goes without. It loads
@@ -9,19 +9,9 @@ import type { Standing } from './device.ts';
  * browser's leave itself.
  */
 
-/** What each standing short of subscribing says when the member asks for notifications. */
-const NEEDS = {
-  'needs-install':
-    'Notifications come to Trail Mix installed as an app. Install it from your browser, then turn them on there.',
-  'needs-home-screen':
-    'On iPhone, notifications come to Trail Mix on the Home Screen. Tap Share, then Add to Home Screen, and turn them on there.',
-  blocked:
-    'Notifications are blocked for Trail Mix in this browser’s settings. Allow them there, then turn them on here.',
-} as const;
-
 /** Says what a device that can't subscribe yet needs first. */
 export function sayWhatIsNeeded(standing: Exclude<Standing, 'able'>): void {
-  void toast({ body: NEEDS[standing === 'unable' ? 'needs-install' : standing] });
+  void toast({ body: needsOf(standing) });
 }
 
 /**

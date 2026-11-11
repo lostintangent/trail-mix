@@ -3,6 +3,7 @@ import { startPreview } from '../e2e/preview.ts';
 import { slowDown } from './phone.ts';
 import { watch } from './steady.ts';
 import { percentile, type BenchArea } from './budget.ts';
+import { mailIsIn } from '../mailIsIn.ts';
 
 /**
  * The reader's budgets, as AGENTS.md sets them. Moving by key to a conversation whose newest
@@ -38,7 +39,7 @@ export const reader: BenchArea = {
     try {
       const filling = await browser.newPage();
       await filling.goto(preview.url);
-      await filling.getByText('Up to date').waitFor({ state: 'attached', timeout: 180_000 });
+      await mailIsIn(filling, 180_000);
       await filling.close();
 
       // Cold: after the app has idled as long as the prepared case does, the newsletter opened by

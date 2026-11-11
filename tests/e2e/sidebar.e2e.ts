@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { BrowserContextOptions, Page } from 'playwright';
 import { unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
+import { mailIsIn } from '../mailIsIn.ts';
 
 /**
  * The sidebar, end to end: the built app on workerd, on a member of its own, whose demo mailbox
@@ -33,17 +34,20 @@ async function open(options: BrowserContextOptions): Promise<Page> {
   const page = await (await app.context({ deviceScaleFactor: 2, ...options })).newPage();
   page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(app.url);
-  await page
-    .getByRole('status')
-    .filter({ hasText: 'Up to date' })
-    .first()
-    .waitFor({ state: 'attached', timeout: 30_000 });
+  await mailIsIn(page);
   return page;
 }
 
 const personal = (page: Page) => page.getByRole('region', { name: 'Personal' });
 const folderRow = (page: Page, name: string) =>
   personal(page).getByRole('button', { name: new RegExp(`^${name}( \\d+)?$`) });
+
+/** Waits out a pane's slide, so what's measured is where it comes to rest. */
+async function settled(page: Page) {
+  await page.waitForFunction(() =>
+    document.getAnimations().every(({ playState }) => playState !== 'running'),
+  );
+}
 
 async function readable(page: Page, screen: string) {
   await page.screenshot({ path: join(SHOTS, `sidebar-${screen}.png`) });
@@ -55,14 +59,18 @@ test('the sidebar folds to its rail and back by button and key, keeping every vi
   const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
   const fold = sidebar.getByRole('button', { name: 'Fold the sidebar' });
   const unfold = sidebar.getByRole('button', { name: 'Unfold the sidebar' });
+  const gear = sidebar.getByRole('button', { name: 'Open settings' });
   const at = await fold.boundingBox();
+  const gearAt = await gear.boundingBox();
   await fold.click();
   await page.waitForFunction(
     () =>
       getComputedStyle(document.documentElement).getPropertyValue('--workbench-sidebar') === '50px',
   );
-  // The button holds still across the fold, and the search moves above the list.
+  // The fold button at the top and the gear at the foot hold still across the fold, and the search
+  // moves above the list.
   expect(await unfold.boundingBox()).toEqual(at);
+  expect(await gear.boundingBox()).toEqual(gearAt);
   await page
     .getByRole('region', { name: 'Inbox' })
     .getByRole('searchbox', { name: 'Search mail' })
@@ -74,11 +82,12 @@ test('the sidebar folds to its rail and back by button and key, keeping every vi
     'Drafts',
     'Outbox',
     'Add account',
-    /^Theme/,
+    'Open settings',
   ]) {
     await sidebar.getByRole('button', { name }).waitFor({ timeout: 1_000 });
   }
   // An account's stamp opens its Inbox.
+  await settled(page);
   await readable(page, 'desktop-dark-rail');
   await sidebar.getByRole('button', { name: /^Work/ }).click();
   await page.getByRole('heading', { name: 'Inbox', level: 2 }).waitFor();
@@ -108,6 +117,84 @@ test('the sidebar folds to its rail and back by button and key, keeping every vi
     await page.evaluate(() => (window as unknown as { firstFold: string[] }).firstFold),
   ).toEqual(['Unfold the sidebar']);
 }, 30_000);
+
+test('the foot holds the Settings gear, a rule and Trail Mix, and says nothing about the mail', async () => {
+  for (const [size, options] of [
+    ['desktop', DESKTOP],
+    ['phone', PHONE],
+  ] as const) {
+    for (const colorScheme of ['light', 'dark'] as const) {
+      const page = await open({ ...options, colorScheme });
+      if (size === 'phone')
+        await page.getByRole('button', { name: 'Folders', exact: true }).click();
+      await settled(page);
+      const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
+      const name = sidebar.getByText('Trail Mix', { exact: true });
+      const gear = sidebar.getByRole('button', { name: 'Open settings' });
+      // The gear, then the name, side by side at the very foot, and nothing below or after them.
+      const [nameBox, gearBox, sidebarBox] = await Promise.all([
+        name.boundingBox(),
+        gear.boundingBox(),
+        sidebar.boundingBox(),
+      ]);
+      expect(
+        Math.abs(nameBox!.y + nameBox!.height / 2 - (gearBox!.y + gearBox!.height / 2)),
+      ).toBeLessThan(2);
+      expect(gearBox!.x).toBeLessThan(nameBox!.x);
+      expect(sidebarBox!.y + sidebarBox!.height - (gearBox!.y + gearBox!.height)).toBeLessThan(40);
+      const atFoot = {
+        size,
+        colorScheme,
+        controls: await sidebar.evaluate(
+          (nav, below) =>
+            [...nav.querySelectorAll('button, input')]
+              .filter((control) => {
+                const { top, left, width, height } = control.getBoundingClientRect();
+                // What the tree scrolls out of sight lies below too, under the foot.
+                const seen = document.elementFromPoint(left + width / 2, top + height / 2);
+                return top >= below && !!seen && control.contains(seen);
+              })
+              .map((control) => control.getAttribute('aria-label') ?? control.textContent),
+          gearBox!.y - 1,
+        ),
+      };
+      expect(atFoot).toEqual({ size, colorScheme, controls: ['Open settings'] });
+      expect((await sidebar.getByRole('status').allTextContents()).join('')).toBe('');
+      expect(await page.getByText(/Up to date|Checking for mail/).count()).toBe(0);
+      if (size === 'phone') {
+        expect(Math.min(gearBox!.width, gearBox!.height)).toBeGreaterThanOrEqual(44);
+      }
+      await readable(page, `${size}-${colorScheme}-foot`);
+      if (size === 'desktop') {
+        // Folded, the rail keeps the gear where it was, alone at its foot.
+        await page.keyboard.press('ControlOrMeta+b');
+        await sidebar.getByRole('button', { name: 'Unfold the sidebar' }).waitFor();
+        await settled(page);
+        expect(await gear.boundingBox()).toEqual(gearBox);
+        await readable(page, `${size}-${colorScheme}-rail-foot`);
+        await page.keyboard.press('ControlOrMeta+b');
+        await sidebar.getByRole('button', { name: 'Fold the sidebar' }).waitFor();
+      }
+
+      // The gear opens Settings in the reader's place.
+      await gear.click();
+      await page
+        .getByRole('region', { name: 'Reader' })
+        .getByRole('heading', { name: 'Settings', level: 1 })
+        .waitFor();
+      await settled(page);
+      if (size === 'phone') {
+        const swatch = await page.getByLabel('Accent color').evaluate((input) => {
+          const { width, height } = input.getBoundingClientRect();
+          return Math.min(width, height);
+        });
+        expect(swatch).toBeGreaterThanOrEqual(44);
+      }
+      await readable(page, `${size}-${colorScheme}-settings`);
+      await page.context().close();
+    }
+  }
+}, 90_000);
 
 test('every folder and account has its menu without a hover, for itself rather than the view', async () => {
   const page = await open({ ...DESKTOP, colorScheme: 'light' });
@@ -304,7 +391,7 @@ test('accounts and folders fold by click and by key, count what’s unread insid
 
   // This device remembers both, from its first render.
   await page.reload();
-  await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
+  await mailIsIn(page);
   await expect(account.getAttribute('aria-expanded')).resolves.toBe('false');
   await account.click();
   await folderRow(page, 'Projects').waitFor();

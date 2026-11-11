@@ -1,5 +1,5 @@
 /**
- * What the Members page reads and changes: the Cloudflare Access policy that admits people to Trail
+ * What Members reads and changes: the Cloudflare Access policy that admits people to Trail
  * Mix. Each `email` rule in its Include list is a member. Every other rule stays as Access holds it,
  * and the page shows it in words, since Trail Mix can't change it. Nothing here keeps a copy of the
  * list: each read comes from Access.

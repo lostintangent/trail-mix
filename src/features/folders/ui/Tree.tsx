@@ -101,6 +101,7 @@ export function AccountSection({
   const holdsView = view.in === 'folder' && view.folder.account === account.id;
   const unread = unreadInAccount(nodes);
   const hasUnreadInbox = own.some(({ role, unread }) => role === 'inbox' && unread > 0);
+  const trouble = troubleOf(account);
   return (
     <section aria-label={account.name} {...stylex.props(styles.account)}>
       <Line menu={{ label: `More for ${account.name}`, actions: () => accountActions(account) }}>
@@ -120,6 +121,12 @@ export function AccountSection({
               <StampDot stamp={account.stamp} />
             </span>
             <span {...stylex.props(styles.label, styles.accountName)}>{account.name}</span>
+            {trouble && (
+              <>
+                {' '}
+                <span {...stylex.props(styles.trouble)}>{trouble}</span>
+              </>
+            )}
             {!isOpen && unread > 0 && <Count count={unread} isUnread={hasUnreadInbox} />}
           </button>
         </h2>
@@ -144,6 +151,17 @@ export function AccountSection({
       </Folding>
     </section>
   );
+}
+
+/**
+ * What an account that needs the member says on its line, and the rail's tooltip for its stamp:
+ * that its sign-in ran out, or that its servers can't be reached. Its menu offers the fix. Nothing
+ * else about an account's mail is said, since a member should simply trust it's current.
+ */
+export function troubleOf({ status }: Account): string | undefined {
+  if (status === 'needs-sign-in') return 'Sign in again';
+  if (status === 'error') return 'Can’t reach';
+  return undefined;
 }
 
 /**
@@ -629,6 +647,13 @@ const styles = stylex.create({
   },
   countUnread: {
     color: colorVars['--color-text-accent'],
+  },
+  // An account that needs the member says so in the error's ink, whole, while its name gives way.
+  trouble: {
+    flexShrink: 0,
+    color: colorVars['--color-text-error'],
+    fontSize: typeScaleVars['--text-supporting-size'],
+    fontWeight: fontWeightVars['--font-weight-semibold'],
   },
   // A line on its way takes a folder line's place and nothing from the pointer.
   pending: {

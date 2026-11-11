@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import type { BrowserContextOptions, Page } from 'playwright';
 import { unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
+import { mailIsIn } from '../mailIsIn.ts';
 
 /**
  * The first-run screen, as a member with no accounts sees it: the built app without the demo
@@ -131,7 +132,7 @@ for (const [size, options] of Object.entries(SIZES)) {
       const page = await (await erasing.context({ ...options, colorScheme, ...more })).newPage();
       page.on('pageerror', (error) => errors.push(error.message));
       await page.goto(erasing.url);
-      await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
+      await mailIsIn(page);
       return page;
     }
 
