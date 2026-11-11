@@ -14,10 +14,12 @@ export const isAccountCommand = ({ id }: Command, account: Account) =>
 /**
  * Adding an account, and editing or removing each one the member has. An account whose vendor wants
  * its member to sign in again offers that too. Erasing everything Trail Mix holds for the member
- * reaches beyond any one account, so no account's menu lists it.
+ * reaches beyond any one account, so no account's menu lists it. A demo visitor's Mailroom keeps its
+ * accounts and erases itself, so there neither can be done.
  */
 export function accountCommands({
   accounts,
+  keeps = false,
   add,
   edit,
   remove,
@@ -25,6 +27,7 @@ export function accountCommands({
   erase,
 }: {
   accounts: readonly Account[];
+  keeps?: boolean;
   add: () => void;
   edit: (account: Account) => void;
   remove: (account: Account) => void;
@@ -40,6 +43,7 @@ export function accountCommands({
       group,
       icon: Eraser,
       isDestructive: true,
+      isEnabled: !keeps,
       run: erase,
     },
     ...accounts.flatMap((account): Command[] => [
@@ -67,6 +71,7 @@ export function accountCommands({
         group,
         icon: MailMinus,
         isDestructive: true,
+        isEnabled: !keeps,
         run: () => remove(account),
       },
     ]),

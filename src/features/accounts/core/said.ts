@@ -68,6 +68,14 @@ export function refusalSaid(message: string): string {
 export const DEMO_SAID =
   'This Trail Mix serves only the demo mailbox, so it can’t connect an account of your own.';
 
+/** What the public demo says of itself, where a visitor might look to change what it holds. */
+export const VISITOR_SAID = {
+  invitation:
+    'This is Trail Mix’s demo, a sample mailbox that’s yours for a day. To read your own mail, deploy a Trail Mix of your own and add your accounts there.',
+  keeps: 'The demo keeps its two accounts.',
+  erases: 'The demo erases everything it holds for you a day after your last visit.',
+} as const;
+
 /**
  * Why a member can't sign in at a vendor here: the operator hasn't registered Trail Mix with it. The
  * Mailroom says the same when asked to sign in anyway.

@@ -149,6 +149,25 @@ test('a visitor can’t add an account of their own, or remove or erase the demo
   expect(await said('removeAccount', crypto.randomUUID())).toContain('keeps its two accounts');
   expect(await said('eraseEverything')).toContain('keeps its two accounts');
   expect(mailrooms()).toBe(4);
+
+  // The app says as much: the demo names itself, invites rather than asks for an account, and
+  // offers no Remove account or Erase everything, saying why beside each.
+  await cy.getByText('A sample mailbox, yours for a day.').waitFor();
+  await cy.getByRole('button', { name: 'Add account' }).click();
+  await cy.getByText('deploy a Trail Mix of your own').waitFor();
+  expect(await cy.getByRole('form', { name: 'Add an account' }).count()).toBe(0);
+  await cy.getByRole('button', { name: 'Back to the mail' }).click();
+  await cy.getByRole('button', { name: 'More for Personal' }).click();
+  await cy.getByRole('menuitem', { name: /^Edit the Personal account/ }).click();
+  for (const [button, why] of [
+    ['Remove account…', 'The demo keeps its two accounts.'],
+    ['Erase everything…', 'a day after your last visit'],
+  ] as const) {
+    const shown = cy.getByRole('button', { name: button });
+    await expect(shown.isDisabled()).resolves.toBe(true);
+    const about = await shown.getAttribute('aria-describedby');
+    expect(await cy.locator(`[id="${about}"]`).textContent()).toContain(why);
+  }
 }, 60_000);
 
 test('holding E down archives the whole Inbox within the change limit, which stops a script', async () => {

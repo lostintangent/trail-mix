@@ -412,6 +412,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       cache,
       ...(key ? { pushKey: key.publicKey } : {}),
       notified: asked !== undefined && this.notifying.isNotified(asked),
+      ...(this.isVisitors ? { visitor: true as const } : {}),
     };
   }
 

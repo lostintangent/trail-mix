@@ -857,8 +857,9 @@ describe('The Mailroom with the demo mailbox', () => {
     const eve = member('eve', () => worker);
     const device = eve.device();
     await device.opened;
-    const { cache, notified } = await eve.call<ThisDevice>('thisDevice');
+    const { cache, notified, visitor } = await eve.call<ThisDevice>('thisDevice');
     expect(notified).toBe(false);
+    expect(visitor).toBeUndefined();
     expect((await eve.call<ThisDevice>('thisDevice')).cache).toBe(cache);
     // An opened body is in the bucket, which the hint must not come before.
     await eve.until(async () => (await eve.page({ in: 'inbox' })).length > 0);
@@ -1062,6 +1063,10 @@ describe('A visitor’s Mailroom on the public demo', () => {
     expect(open.alarm - Date.now()).toBeLessThanOrEqual(60_000);
     device.close();
   }, 120_000);
+
+  test('says it’s a visitor’s, where a member’s Mailroom doesn’t', async () => {
+    expect((await member('vi', () => worker).call<ThisDevice>('thisDevice')).visitor).toBe(true);
+  }, 30_000);
 
   test('keeps both demo accounts, since filling one again would write thousands of rows', async () => {
     const vi = member('vi', () => worker);

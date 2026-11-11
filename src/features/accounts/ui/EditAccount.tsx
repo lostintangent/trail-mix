@@ -17,6 +17,7 @@ import { useId, useState } from 'react';
 import { stampStyles } from '../../../app/theme/stamps.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, StampColor } from '../../mail/core/index.ts';
+import { VISITOR_SAID } from '../core/said.ts';
 import { accountsQuery, mailroom } from '../../mailroom/client/index.ts';
 
 /** The stamps an account can wear, in the order they're given out, and what each is called. */
@@ -40,10 +41,13 @@ export function EditAccount({
   account,
   onDone,
   onRemove,
+  keeps = false,
 }: {
   account: Account;
   onDone: () => void;
   onRemove: () => void;
+  /** Whether the Mailroom keeps its accounts, as a demo visitor's does, so none is removed. */
+  keeps?: boolean;
 }) {
   const queryClient = useQueryClient();
   const [kept, setKept] = useState<Kept>(() => ({
@@ -143,7 +147,18 @@ export function EditAccount({
         <Button type="submit" variant="primary" label="Save" />
         <Button label="Cancel" variant="ghost" onClick={onDone} />
         <span {...stylex.props(styles.apart)}>
-          <Button label="Remove account…" variant="ghost" onClick={onRemove} />
+          {keeps && (
+            <span id={`${signatureId}-kept`} {...stylex.props(styles.quiet)}>
+              {VISITOR_SAID.keeps}
+            </span>
+          )}
+          <Button
+            label="Remove account…"
+            variant="ghost"
+            isDisabled={keeps}
+            aria-describedby={keeps ? `${signatureId}-kept` : undefined}
+            onClick={onRemove}
+          />
         </span>
       </div>
     </form>
@@ -260,6 +275,9 @@ const styles = stylex.create({
     gap: spacingVars['--spacing-2'],
   },
   apart: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: spacingVars['--spacing-2'],
     marginInlineStart: 'auto',
   },
 });

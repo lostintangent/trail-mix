@@ -33,6 +33,7 @@ import {
   conversationsQuery,
   MATCHES_LISTED,
   outboxQuery,
+  thisDeviceQuery,
 } from '../../mailroom/client/index.ts';
 import {
   isDraftsView,
@@ -501,17 +502,20 @@ export function Workbench({
     setPhonePane('list');
     if (open !== undefined) move({ view }, 'replace');
   }, [onBack, move, pushed, written]);
+  // A demo visitor's Mailroom keeps its accounts, erases itself, and says so.
+  const isVisitor = useQuery(thisDeviceQuery).data?.visitor === true;
   const accountsCommands = useMemo(
     () =>
       accountCommands({
         accounts,
+        keeps: isVisitor,
         add: () => openPage({ as: 'add' }),
         edit: (account) => openPage({ as: 'edit', account: account.id }),
         remove: setRemoving,
         signIn: (account) => openPage({ as: 'edit', account: account.id, isSigningIn: true }),
         erase: () => setErasing(true),
       }),
-    [accounts, openPage],
+    [accounts, isVisitor, openPage],
   );
   // A send held because its account's sign-in lapsed offers signing in again from its row.
   const lapsed = useMemo(
@@ -775,11 +779,15 @@ export function Workbench({
   const footer = useCallback(
     (place: FooterPlace) => (
       <>
-        <StatusLine accounts={accounts} isCollapsed={place === 'rail'} />
+        <StatusLine
+          accounts={accounts}
+          isCollapsed={place === 'rail'}
+          note={isVisitor ? VISITORS_NOTE : undefined}
+        />
         {sidebarFooter}
       </>
     ),
-    [accounts, sidebarFooter],
+    [accounts, isVisitor, sidebarFooter],
   );
   // What an account's menu in the sidebar lists: a new folder at its top, then its own commands.
   // It asks the registry as the menu opens, so the sidebar doesn't render again as that changes.
@@ -995,6 +1003,7 @@ export function Workbench({
                       <AccountPage
                         page={page}
                         accounts={accounts}
+                        isVisitor={isVisitor}
                         onClose={closePage}
                         onRemove={setRemoving}
                         onErase={() => setErasing(true)}
@@ -1222,6 +1231,9 @@ function idsIn(rows: Listed<ConversationSummary>): ConversationId[] {
 }
 
 const NO_PLACES: ReadonlyMap<ConversationId, number> = new Map();
+
+/** How the public demo names itself, under a visitor's accounts. */
+const VISITORS_NOTE = 'A sample mailbox, yours for a day.';
 
 /**
  * A view's title, the unread count its header shows (Inbox's across accounts, or a folder's), and

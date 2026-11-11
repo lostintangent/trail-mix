@@ -49,9 +49,11 @@ export interface Queries {
  * `cache` names what an installed app keeps of this Mailroom. A new Mailroom, as an erase leaves,
  * has a new one, so a device that kept the old one's drops what it kept. `pushKey` is the public key
  * a device subscribes to notifications with, absent where notifications are off, as on previews and
- * the demo. `notified` says whether the device at the endpoint asked about is notified.
+ * the demo. `notified` says whether the device at the endpoint asked about is notified. `visitor`
+ * is set only on a visitor's Mailroom on the public demo, which keeps both demo accounts and erases
+ * itself a day after it was last opened.
  */
-export type ThisDevice = { cache: string; pushKey?: string; notified: boolean };
+export type ThisDevice = { cache: string; pushKey?: string; notified: boolean; visitor?: true };
 
 export interface Commands {
   /** The only call that carries a secret. */

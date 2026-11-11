@@ -9,15 +9,18 @@ import { mailStatus } from './status.ts';
 
 /**
  * How the member's mail stands, at the foot of the sidebar: a dot in the status's color and a line
- * saying it, which ends in an ellipsis where the sidebar is too narrow for all of it. On the rail
- * only the dot shows, and the line waits in its tooltip.
+ * saying it, which ends in an ellipsis where the sidebar is too narrow for all of it, and under it
+ * a quiet note where there is one, such as the public demo's naming itself, which wraps instead.
+ * On the rail only the dot shows, and the words wait in its tooltip.
  */
 export function StatusLine({
   accounts,
   isCollapsed,
+  note,
 }: {
   accounts: readonly Account[];
   isCollapsed: boolean;
+  note?: string;
 }) {
   const status = mailStatus(accounts, useReach());
   if (!status) return null;
@@ -27,20 +30,31 @@ export function StatusLine({
       {isCollapsed ? (
         <VisuallyHidden>{status.label}</VisuallyHidden>
       ) : (
-        <span {...stylex.props(styles.label)}>{status.label}</span>
+        <span {...stylex.props(styles.words)}>{status.label}</span>
       )}
     </p>
   );
   return isCollapsed ? (
-    <Tooltip content={status.label} placement="end">
+    <Tooltip content={note ? `${status.label}. ${note}` : status.label} placement="end">
       {line}
     </Tooltip>
   ) : (
-    line
+    <div {...stylex.props(styles.status)}>
+      {line}
+      {note && <p {...stylex.props(styles.note)}>{note}</p>}
+    </div>
   );
 }
 
+const DOT = '6px';
+
 const styles = stylex.create({
+  status: {
+    display: 'flex',
+    flexDirection: 'column',
+    flexGrow: 1,
+    minWidth: 0,
+  },
   line: {
     display: 'flex',
     flexGrow: 1,
@@ -52,8 +66,16 @@ const styles = stylex.create({
     color: tm.textQuiet,
     fontSize: typeScaleVars['--text-supporting-size'],
   },
+  // Under the status's words, past its dot.
+  note: {
+    margin: 0,
+    paddingInlineStart: `calc(${spacingVars['--spacing-2']} + ${DOT} + ${spacingVars['--spacing-1-5']})`,
+    paddingInlineEnd: spacingVars['--spacing-2'],
+    color: tm.textQuiet,
+    fontSize: typeScaleVars['--text-supporting-size'],
+  },
   // A flex container can't end its own text in an ellipsis, so the words have a box of their own.
-  label: {
+  words: {
     minWidth: 0,
     whiteSpace: 'nowrap',
     overflow: 'hidden',
@@ -61,8 +83,8 @@ const styles = stylex.create({
   },
   dot: {
     flexShrink: 0,
-    width: '6px',
-    height: '6px',
+    width: DOT,
+    height: DOT,
     borderRadius: '50%',
     forcedColorAdjust: 'none',
   },
