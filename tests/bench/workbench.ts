@@ -1,5 +1,5 @@
 import { gzipSync } from 'node:zlib';
-import { chromium, type Page } from 'playwright';
+import { chromium, type Page, type Response } from 'playwright';
 import { startPreview } from '../e2e/preview.ts';
 import { percentile, type BenchArea, type Measurement, type Slow } from './budget.ts';
 import { phone, slowDown } from './phone.ts';
@@ -70,17 +70,20 @@ export const workbench: BenchArea = {
       const phoneWatch = watch(page);
       await slowDown(page);
       const scripts: Promise<number>[] = [];
-      page.on('response', (response) => {
+      const sized = (response: Response) => {
         if (response.request().resourceType() === 'script') {
           scripts.push(response.body().then((body) => gzipSync(body).length / 1000));
         }
-      });
+      };
+      page.on('response', sized);
       const coldLoad = await phoneWatch.during('Cold load', async () => {
         await page.goto(preview.url);
         return firstRows(page);
       });
       console.log('The cold load, step by step, in ms from navigation:');
       console.table(await coldLoadSteps(page));
+      // Only the cold load's scripts count. A reload revalidates them, and a 304 has no body.
+      page.off('response', sized);
       const firstLoadJs = (await Promise.all(scripts)).reduce((sum, size) => sum + size, 0);
       await phoneWatch.steady();
       const scrollFrame = percentile(
