@@ -12,14 +12,19 @@ import { tm } from './tokens.stylex.ts';
 /**
  * The accent this device shows: a swatch of it that opens the system's color picker, and, once the
  * member has picked a color, a way back to ink blue. The swatch shows the accent as the theme
- * shows it, made readable, so it shows what the pick did.
+ * shows it, made readable, so it shows what the pick did. A label beside it names the picker by
+ * its `id`, and its words describe it.
  */
 export function AccentChoice({
   accent,
   onChange,
+  id,
+  describedBy,
 }: {
   accent: string | undefined;
   onChange: (color: string | undefined) => void;
+  id?: string;
+  describedBy?: string;
 }) {
   const target = useRef<HTMLSpanElement>(null);
   return (
@@ -28,8 +33,10 @@ export function AccentChoice({
         <span {...stylex.props(styles.swatch)} />
         <input
           ref={registerPicker}
+          id={id}
           type="color"
           aria-label="Accent color"
+          aria-describedby={describedBy}
           value={accent ?? DEFAULT_ACCENT_HEX}
           // The math a pick needs loads as the member reaches for the picker, before any pick.
           onPointerDown={preloadAccentMath}

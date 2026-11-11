@@ -170,7 +170,16 @@ test('the installed app turns notifications on and off in Settings, and the Mail
   expect(await page.evaluate(() => localStorage.getItem('test.push-subscription'))).toContain(
     'push.example/devices/e2e',
   );
+  await rowsAgree(page);
   await shot(page, 'desktop-light-on');
+  await page.emulateMedia({ colorScheme: 'dark' });
+  // A theme changes over 125 ms, and a screen read mid-change has colors from both.
+  await page.waitForFunction(() =>
+    document.getAnimations().every(({ playState }) => playState !== 'running'),
+  );
+  await rowsAgree(page);
+  await shot(page, 'desktop-dark-on');
+  await page.emulateMedia({ colorScheme: 'light' });
 
   // The Mailroom says this device is notified.
   await page.reload();
@@ -210,6 +219,7 @@ test('on a phone, Settings’ gear and switch are 44-pixel targets, in both them
     ).toBeGreaterThanOrEqual(44);
     await notifying(page).tap();
     await isOn(page, true);
+    await rowsAgree(page);
     await shot(page, `phone-${colorScheme}-on`);
     await context.close();
   }
@@ -357,6 +367,33 @@ async function click(context: BrowserContext, action: string) {
     });
     scope.dispatchEvent(event);
   }, action);
+}
+
+/**
+ * Every row of Settings has one shape: its label, in one ink and size, and what it does on the
+ * left, and its control on the right.
+ */
+async function rowsAgree(page: Page) {
+  const rows = await page.getByRole('region', { name: 'Settings' }).evaluate((settings) =>
+    ['Notifications on this device', 'Accent color'].map((name) => {
+      const label = [...settings.querySelectorAll('label')].find(
+        ({ textContent }) => textContent === name,
+      )!;
+      const { color, fontSize, fontWeight } = getComputedStyle(label);
+      const words = label.parentElement!.getBoundingClientRect();
+      const control = document.getElementById(label.htmlFor)!.getBoundingClientRect();
+      return {
+        name,
+        looks: `${color} ${fontSize} ${fontWeight}`,
+        isControlRight: control.left >= words.right,
+      };
+    }),
+  );
+  expect(rows.map(({ name, isControlRight }) => ({ name, isControlRight }))).toEqual([
+    { name: 'Notifications on this device', isControlRight: true },
+    { name: 'Accent color', isControlRight: true },
+  ]);
+  expect(rows[0]!.looks).toBe(rows[1]!.looks);
 }
 
 async function shot(page: Page, screen: string) {

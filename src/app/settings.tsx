@@ -1,3 +1,4 @@
+import { FieldLabel } from '@astryxdesign/core/Field';
 import { Switch } from '@astryxdesign/core/Switch';
 import {
   borderVars,
@@ -33,6 +34,7 @@ export function Settings({
   onAccent: (color: string | undefined) => void;
 }) {
   const titleId = useId();
+  const accentId = useId();
   const isOperator = useQuery(operatorQuery).data === true;
   useEffect(() => {
     if (isOperator) void preloadMembers();
@@ -62,6 +64,8 @@ export function Settings({
                 ? 'New mail in your Inboxes shows here, even while Trail Mix is closed.'
                 : needsOf(notifications.standing)
             }
+            labelPosition="start"
+            labelSpacing="spread"
             value={notifications.isOn}
             isDisabled={notifications.standing !== 'able'}
             isLoading={notifications.isBusy}
@@ -71,15 +75,19 @@ export function Settings({
       )}
       <Section title="Appearance" place={place('accent')}>
         <div {...stylex.props(styles.setting)}>
-          <div {...stylex.props(styles.about)}>
-            <p {...stylex.props(styles.label)}>Accent color</p>
-            <p {...stylex.props(styles.quiet)}>
-              Unread marks, links, focus rings and the main button take it, made readable in light
-              and dark, which follow your system.
-            </p>
-          </div>
+          <FieldLabel
+            label="Accent color"
+            inputID={accentId}
+            description="Unread marks, links, focus rings and the main button take it, made readable in light and dark, which follow your system."
+            descriptionID={`${accentId}-about`}
+          />
           <div {...stylex.props(styles.controls)}>
-            <AccentChoice accent={accent} onChange={onAccent} />
+            <AccentChoice
+              accent={accent}
+              onChange={onAccent}
+              id={accentId}
+              describedBy={`${accentId}-about`}
+            />
           </div>
         </div>
       </Section>
@@ -158,25 +166,13 @@ const styles = stylex.create({
     fontSize: typeScaleVars['--text-heading-3-size'],
     fontWeight: typeScaleVars['--text-heading-3-weight'],
   },
+  // A setting's row, in the shape of a switch's spread out: its label and what it does on the left,
+  // its control on the right.
   setting: {
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: spacingVars['--spacing-3'],
-  },
-  about: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: spacingVars['--spacing-0-5'],
-    minWidth: 0,
-  },
-  label: {
-    margin: 0,
-  },
-  quiet: {
-    margin: 0,
-    color: tm.textQuiet,
-    fontSize: typeScaleVars['--text-supporting-size'],
+    gap: spacingVars['--spacing-2'],
   },
   controls: {
     display: 'flex',
