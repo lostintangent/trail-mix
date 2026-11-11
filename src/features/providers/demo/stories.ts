@@ -17,8 +17,8 @@ import { isDemoVerified } from './pictures.ts';
  * newest cycle is the one the prototypes show: unread mail, a flagged message, attachments, a
  * GitHub thread, a newsletter, long threads, Sent replies and drafts, one of them to a host that
  * turns its first try away. Older cycles vary who writes and what they say, by lists of different
- * lengths, so no screenful of a folder in the public demo shows two messages alike, and most of their
- * mail is read.
+ * lengths, so no two rows of the public demo share a subject and how their preview opens, and most
+ * of their mail is read.
  *
  * A message is a pure function of its account, the mailbox's size, its creation time and its UID,
  * so no message exists until it is read, and the same inputs always give the same bytes.
@@ -389,7 +389,24 @@ const STORIES: Record<string, (cycle: number) => Thread> = {
             ...points.map((point) => `- ${point}`),
           ].join('\n'),
         },
-        { from: 0, quotes: true, unread: true, text: notes.join('\n') },
+        {
+          from: 0,
+          quotes: true,
+          unread: true,
+          // How the notes open turns at its own rate, so a plan's notes never read the same twice.
+          text: `${rotate(
+            [
+              '',
+              'Thanks for writing this up. ',
+              'Read it on the train. ',
+              'Sorry for the slow reply. ',
+              'Finally had a proper look. ',
+              'Good timing on this. ',
+              'Just read it twice. ',
+            ],
+            c,
+          )}${notes.join('\n')}`,
+        },
       ],
     };
   },
@@ -560,7 +577,13 @@ const STORIES: Record<string, (cycle: number) => Thread> = {
       cast: [person(2, c)],
       steps: [
         { from: 0, plain: true, text: `${ask}\n\n${person(2, c).name}` },
-        { from: 'me', quotes: true, draft: true, text: answer },
+        {
+          from: 'me',
+          quotes: true,
+          draft: true,
+          // How the answer opens turns at its own rate, so the same plan never gets the same answer.
+          text: `${rotate(['', 'Sounds good. ', 'Yes, please. ', 'Perfect. ', 'Great idea. '], c)}${answer}`,
+        },
       ],
     };
   },

@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
-import { seededMessage, seededSize, type DemoKind } from './stories.ts';
+import { applySyncEvent, memoryIndex } from '../../mail/core/index.ts';
+import { SEEDED_FOLDERS, seededMessage, seededSize, type DemoKind } from './stories.ts';
 
 /** The benches' mailbox: an Inbox of 50,000 messages in each account. */
 const BENCH_INBOX = 50_000;
@@ -7,9 +8,6 @@ const CREATED_AT = '2026-11-09T12:00:00.000Z';
 
 /** The public demo's mailbox, as `wrangler.jsonc` sizes it: Work's Inbox is a tenth of Personal's. */
 const DEMO_INBOX = { personal: 200, work: 20 };
-
-/** More rows of a list than any screen shows at once. */
-const SCREENFUL = 30;
 
 /** Every message of a bench-sized mailbox, newest first. */
 function mailbox(kind: DemoKind) {
@@ -45,30 +43,27 @@ test('each pull request has its own number and its own thread, and newer ones ar
   expect(firsts.every((number, at) => at === 0 || number < firsts[at - 1]!)).toBe(true);
 });
 
-test('the public demo never shows two messages alike within a screenful of a folder', () => {
-  // Alike as a row shows them: saying the same, or opening the same way under the same subject.
-  const alike: string[] = [];
+test('no two rows of the public demo share a subject and how their preview opens', () => {
+  // Every list's rows are conversations, each shown by its latest message, so every row any list
+  // could show is here: across both accounts, as the unified views mix them.
+  const folders = (['personal', 'work'] as const).flatMap((account) =>
+    SEEDED_FOLDERS[account].map((folder) => ({ account, ...folder })),
+  );
+  let index = memoryIndex(folders);
   for (const kind of ['personal', 'work'] as const) {
     const size = seededSize(kind, DEMO_INBOX[kind]);
-    const newestFirst = Array.from({ length: size }, (_, at) =>
-      seededMessage(kind, size, CREATED_AT, size - at)!,
-    );
-    for (const [folder, messages] of Map.groupBy(newestFirst, ({ folder }) => folder)) {
-      const rows = messages.map((message) => {
-        const { subject, preview } = message.content();
-        return { subject: subject.replace(/^Re: /, ''), preview, opening: preview.slice(0, 40) };
-      });
-      rows.forEach((row, at) => {
-        for (const other of rows.slice(at + 1, at + SCREENFUL)) {
-          if (
-            row.preview === other.preview ||
-            (row.subject === other.subject && row.opening === other.opening)
-          ) {
-            alike.push(`${kind} ${folder}: ${row.subject}: ${row.opening}`);
-          }
-        }
-      });
+    for (let uid = size; uid >= 1; uid--) {
+      const message = seededMessage(kind, size, CREATED_AT, uid)!;
+      const { folder: path, flags } = message;
+      const envelope = { ...message.content(), account: kind, path, uidValidity: 1, uid, flags };
+      index = index.apply(applySyncEvent(index, { type: 'message', envelope }));
     }
   }
-  expect(alike).toEqual([]);
+  const rows = [...Map.groupBy(index.messages, ({ conversation }) => conversation).values()].map(
+    (messages) => messages.toSorted((a, b) => b.date.localeCompare(a.date))[0]!,
+  );
+  // What a row shows of its preview, which is about its first 40 characters.
+  const shown = Map.groupBy(rows, ({ subject, preview }) => `${subject}: ${preview.slice(0, 40)}`);
+  expect([...shown].filter(([, alike]) => alike.length > 1).map(([row]) => row)).toEqual([]);
+  expect(rows.length).toBeGreaterThan(200);
 });
