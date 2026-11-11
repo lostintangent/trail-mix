@@ -204,7 +204,7 @@ test('offline, a conversation never opened says it opens once online, and Send k
   await context.close();
 }, 60_000);
 
-test('on a phone, an archive refused offline comes back to the conversation it took away', async () => {
+test('on a phone, an archive refused offline puts back the conversation it took away, or what was picked', async () => {
   const { context, page, errors } = await installed(SIZES.phone);
   const subject = await openConversation(page, 0);
   await page.waitForFunction(async () => (await keptCount()) >= 3, undefined, { polling: 200 });
@@ -222,6 +222,38 @@ test('on a phone, an archive refused offline comes back to the conversation it t
     const reader = document.querySelector('section[aria-label="Reader"]');
     return reader?.querySelector('h1')?.textContent === subject && !reader.closest('[inert]');
   }, subject);
+
+  // Rows picked come back picked, so a tap still picks rather than opens.
+  await page.getByRole('button', { name: 'Back', exact: true }).click();
+  // The list slides back in before a finger lands on it.
+  await page.waitForFunction(() =>
+    document.getAnimations().every(({ playState }) => playState !== 'running'),
+  );
+  await page.waitForFunction(
+    () => document.querySelector('section[aria-label="Reader"]')?.closest('[inert]') !== null,
+  );
+  const options = page.getByRole('option');
+  const cdp = await context.newCDPSession(page);
+  const press = async (at: number, ms: number) => {
+    const box = (await options.nth(at).boundingBox())!;
+    const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point] });
+    await page.waitForTimeout(ms);
+    await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  };
+  await press(1, 700);
+  await press(2, 40);
+  const picked = page.getByRole('toolbar', { name: 'Picked conversations' });
+  await picked.getByRole('button', { name: 'Archive' }).click();
+  await page
+    .getByText(/^Couldn.t archive\. This device is offline\.$/)
+    .first()
+    .waitFor();
+  await picked.waitFor();
+  expect(await picked.textContent()).toContain('2');
+  expect(
+    await Promise.all([1, 2].map((at) => options.nth(at).getAttribute('aria-selected'))),
+  ).toEqual(['true', 'true']);
   expect(errors).toEqual([]);
   await context.close();
 }, 60_000);

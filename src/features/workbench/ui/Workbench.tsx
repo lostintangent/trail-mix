@@ -335,10 +335,11 @@ export function Workbench({
     });
     return left;
   };
-  // The selection and the phone's pane as they are now, which a refused triage puts back.
-  const now = useRef({ selection, phonePane });
+  // The selection, whether the member is picking, and the phone's pane as they are now, which a
+  // refused triage puts back.
+  const now = useRef({ selection, isPicking, phonePane });
   useLayoutEffect(() => {
-    now.current = { selection, phonePane };
+    now.current = { selection, isPicking, phonePane };
   });
   /**
    * A triage the server refuses puts its rows back, so a selection it moved on to `left` comes back
@@ -349,6 +350,7 @@ export function Workbench({
     return () => {
       if (!isSameSelection(now.current.selection, left)) return;
       setSelection(before.selection);
+      setPicking(before.isPicking);
       setPhonePane(before.phonePane);
     };
   }, []);
