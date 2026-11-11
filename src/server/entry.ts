@@ -57,7 +57,7 @@ export default {
     const message = readMessagePath(url.pathname);
     if (message) return serveMessageBytes(message, mailroom());
     if (url.pathname === '/images') return proxyImage(request);
-    if (url.pathname === '/notifications/act') return act(request, mailroom);
+    if (url.pathname === '/notifications/act') return act(request, mailroom());
     const response = await start.fetch(request, {
       context: {
         mailroom,
