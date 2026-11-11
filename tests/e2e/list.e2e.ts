@@ -144,13 +144,16 @@ test('End selects the last conversation once its page arrives', async () => {
   await context.close();
 }, 30_000);
 
-test('a row leads with its sender’s logo when verified, or their initials, the same as the reader’s sheet', async () => {
+test('a row leads with its sender’s picture when verified, or their initials, the same as the reader’s sheet', async () => {
   const { context, page, problems } = await open();
-  // Kernel Weekly's mail is verified and has a logo. Kwame writes as himself.
-  const logo = avatarOf(page, 'Kernel Weekly').locator('img');
-  await expect(
-    logo.evaluate((image: HTMLImageElement) => image.naturalWidth),
-  ).resolves.toBeGreaterThan(0);
+  // Mail from Kernel Weekly, Ada and Fieldnote Studio is verified: Kernel Weekly has a logo, Ada a
+  // photo and Fieldnote Studio's site an icon. Kwame writes as himself.
+  for (const sender of ['Kernel Weekly', 'Ada, Sam', 'Fieldnote Studio']) {
+    const picture = avatarOf(page, sender).locator('img');
+    await expect(
+      picture.evaluate((image: HTMLImageElement) => image.naturalWidth),
+    ).resolves.toBeGreaterThan(0);
+  }
   expect(await avatarOf(page, 'Kwame Mensah').textContent()).toBe('KM');
   // The avatar is the newest sender who isn't the member: Sam is the member here.
   expect(await avatarOf(page, 'Sam, Jonas').textContent()).toBe('JW');

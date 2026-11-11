@@ -1,6 +1,6 @@
 export type { Cursor, MailProvider, Moved, SyncBatch, SyncEvent, SyncWindow } from './provider.ts';
 export { FIRST_SYNC_BATCH, SEARCH_LIMIT, SendFailure } from './provider.ts';
-export { DEMO_LOGOS } from './demo/logos.ts';
+export { DEMO_PICTURES } from './demo/pictures.ts';
 export {
   DEMO_ACCOUNTS,
   demoMailbox,

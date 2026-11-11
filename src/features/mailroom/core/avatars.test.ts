@@ -1,16 +1,21 @@
 import { describe, expect, test } from 'bun:test';
 import type { ConversationSummary, Envelope, Message, SyncEvent } from '../../mail/core/index.ts';
-import { DEMO_LOGOS } from '../../providers/index.ts';
+import { DEMO_PICTURES } from '../../providers/index.ts';
 import {
+  avatarOf,
   bimiOf,
   dmarcOf,
   enforces,
+  hostsPublicMailboxes,
+  iconLocations,
   isSafeLogo,
   LOGO_BYTES,
   avatarCandidates,
   namedMessages,
   namedRows,
   organizationalOf,
+  PICTURE_BYTES,
+  pictureOf,
   txtOf,
   verifiedSenders,
   walkOf,
@@ -54,8 +59,8 @@ const row = (id: string, avatar?: string): ConversationSummary => ({
   ...(avatar ? { avatar } : {}),
 });
 
-describe('who may show a logo', () => {
-  test('a batch’s verified senders are the From domains of its verified messages, once each', () => {
+describe('who may show a picture', () => {
+  test('a batch’s verified senders are the From addresses of its verified messages, once each', () => {
     const events: SyncEvent[] = [
       { type: 'message', envelope: envelope('news@Brand.Example', true, 1) },
       { type: 'message', envelope: envelope('deals@brand.example', true, 2) },
@@ -108,6 +113,167 @@ describe('who may show a logo', () => {
         ],
       ),
     ).toEqual(['news@brand.example', 'x@shop.example']);
+  });
+});
+
+describe('which picture a sender shows', () => {
+  test('their brand’s logo, else their photo, else their site’s icon, else none', () => {
+    expect(avatarOf({ logo: 'logo', photo: 'photo', icon: 'icon' })).toBe('logo');
+    expect(avatarOf({ logo: null, photo: 'photo', icon: 'icon' })).toBe('photo');
+    expect(avatarOf({ logo: null, photo: null, icon: 'icon' })).toBe('icon');
+    expect(avatarOf({ icon: 'icon' })).toBe('icon');
+    expect(avatarOf({ logo: null, photo: null, icon: null })).toBeUndefined();
+    expect(avatarOf({})).toBeUndefined();
+  });
+
+  test('a domain that hosts mailboxes for the public gives no one its icon', () => {
+    for (const domain of [
+      'gmail.com',
+      'Outlook.com',
+      'hotmail.co.uk',
+      'yahoo.co.jp',
+      'gmx.de',
+      'icloud.com',
+      'me.com',
+      'proton.me',
+      'fastmail.com',
+      'zoho.com',
+      'qq.com',
+    ]) {
+      expect(hostsPublicMailboxes(domain)).toBe(true);
+    }
+    for (const domain of [
+      'brand.example',
+      'github.com',
+      'gmail.brand.example',
+      'mail.example.com',
+    ]) {
+      expect(hostsPublicMailboxes(domain)).toBe(false);
+    }
+  });
+});
+
+describe('a picture Trail Mix keeps', () => {
+  const bytesOf = (...parts: (string | number[])[]) =>
+    new Uint8Array(
+      parts.flatMap((part) =>
+        typeof part === 'string' ? [...new TextEncoder().encode(part)] : part,
+      ),
+    );
+  const PNG = bytesOf([0x89], 'PNG\r\n\x1a\n', 'rest of the image');
+
+  test('is a PNG, JPEG, GIF, WebP or ICO by its first bytes', () => {
+    expect(pictureOf(PNG)?.type).toBe('image/png');
+    expect(pictureOf(bytesOf([0xff, 0xd8, 0xff, 0xe0], 'JFIF'))?.type).toBe('image/jpeg');
+    expect(pictureOf(bytesOf('GIF89a', [1, 0, 1, 0]))?.type).toBe('image/gif');
+    expect(pictureOf(bytesOf('GIF87a', [1, 0, 1, 0]))?.type).toBe('image/gif');
+    expect(pictureOf(bytesOf('RIFF', [0, 0, 0, 0], 'WEBPVP8 '))?.type).toBe('image/webp');
+    expect(pictureOf(bytesOf([0, 0, 1, 0, 1, 0], 'entries'))?.type).toBe('image/x-icon');
+    expect(pictureOf(PNG)?.bytes).toBe(PNG);
+  });
+
+  test('or an SVG that is a safe logo', () => {
+    const svg = '<svg xmlns="http://www.w3.org/2000/svg"><rect width="8" height="8"/></svg>';
+    expect(pictureOf(bytesOf(svg))?.type).toBe('image/svg+xml');
+    expect(pictureOf(bytesOf(svg.replace('<rect', '<script>alert(1)</script><rect')))).toBe(
+      undefined,
+    );
+    expect(pictureOf(bytesOf(`${svg}${' '.repeat(LOGO_BYTES)}`))).toBeUndefined();
+  });
+
+  test('is never a page, a document or anything else, whatever its host labels it', () => {
+    for (const bytes of [
+      bytesOf('<!doctype html><script>alert(1)</script>'),
+      bytesOf('%PDF-1.7'),
+      bytesOf('RIFF', [0, 0, 0, 0], 'WAVEfmt '),
+      bytesOf([0, 0, 2, 0, 1, 0]),
+      bytesOf([0, 0, 1, 0, 0, 0]),
+      bytesOf([0x89], 'PNX'),
+      bytesOf([0xe9, 0x3c]),
+      new Uint8Array(),
+    ]) {
+      expect(pictureOf(bytes)).toBeUndefined();
+    }
+  });
+
+  test('weighs at most 64 KB', () => {
+    const sized = (size: number) => {
+      const bytes = new Uint8Array(size);
+      bytes.set(PNG);
+      return bytes;
+    };
+    expect(pictureOf(sized(PICTURE_BYTES))?.type).toBe('image/png');
+    expect(pictureOf(sized(PICTURE_BYTES + 1))).toBeUndefined();
+  });
+});
+
+describe('where a site keeps its icon', () => {
+  const PAGE = 'https://www.brand.example/en/';
+  const SITE = 'https://brand.example/';
+  const TOUCH = 'https://brand.example/apple-touch-icon.png';
+  const FAVICON = 'https://brand.example/favicon.ico';
+  const CONVENTIONAL = [TOUCH, FAVICON];
+
+  test('the smallest it names of at least 64 pixels, then one that scales, then the largest of the rest', () => {
+    expect(
+      iconLocations(
+        [
+          { rel: 'icon', href: '/favicon-16.png', sizes: '16x16' },
+          { rel: 'icon', href: '/icon.svg', type: 'image/svg+xml' },
+          { rel: 'shortcut icon', href: '/favicon.ico' },
+          { rel: 'icon', href: '/favicon-32.png', sizes: '32x32' },
+          { rel: 'icon', href: '/icon-512.png', sizes: '512x512' },
+          { rel: 'apple-touch-icon', href: 'touch.png' },
+          { rel: 'icon', href: '/icon-96.png', sizes: '48x48 96x96' },
+        ],
+        PAGE,
+        SITE,
+      ),
+    ).toEqual([
+      'https://www.brand.example/icon-96.png',
+      'https://www.brand.example/en/touch.png',
+      'https://www.brand.example/icon-512.png',
+      'https://www.brand.example/icon.svg',
+      'https://www.brand.example/favicon-32.png',
+      'https://www.brand.example/favicon-16.png',
+      'https://www.brand.example/favicon.ico',
+      ...CONVENTIONAL,
+    ]);
+  });
+
+  test('then where sites keep one by convention, at the root of the site it asked', () => {
+    expect(iconLocations([], PAGE, SITE)).toEqual(CONVENTIONAL);
+    expect(
+      iconLocations(
+        [],
+        'https://127.0.0.1:4443/sites/brand.test/',
+        'https://127.0.0.1:4443/sites/brand.test/',
+      ),
+    ).toEqual([
+      'https://127.0.0.1:4443/sites/brand.test/apple-touch-icon.png',
+      'https://127.0.0.1:4443/sites/brand.test/favicon.ico',
+    ]);
+    // Named by the page as well, it is asked for once.
+    expect(
+      iconLocations([{ rel: 'icon', href: 'https://brand.example/favicon.ico' }], PAGE, SITE),
+    ).toEqual([FAVICON, TOUCH]);
+  });
+
+  test('never a link that isn’t an icon, or isn’t over HTTPS', () => {
+    expect(
+      iconLocations(
+        [
+          { rel: 'stylesheet', href: '/site.css' },
+          { rel: 'mask-icon', href: '/mask.svg' },
+          { rel: 'icon', href: 'http://brand.example/plain.png', sizes: '96x96' },
+          { rel: 'icon', href: 'data:image/png;base64,AAAA', sizes: '96x96' },
+          { rel: 'icon', href: 'javascript:alert(1)' },
+          { rel: 'ICON', href: '  /shouted.png  ', sizes: '64X64' },
+        ],
+        PAGE,
+        SITE,
+      ),
+    ).toEqual(['https://www.brand.example/shouted.png', ...CONVENTIONAL]);
   });
 });
 
@@ -243,7 +409,9 @@ describe('a logo Trail Mix keeps', () => {
     `${open}<title>Brand</title><rect width="64" height="64" fill="url(#g)"/>${inside}</svg>`;
 
   test('is an SVG drawn from shapes, as the demo’s and BIMI’s are', () => {
-    for (const logo of Object.values(DEMO_LOGOS)) expect(isSafeLogo(logo)).toBe(true);
+    for (const pictures of Object.values(DEMO_PICTURES)) {
+      for (const picture of Object.values(pictures)) expect(isSafeLogo(picture)).toBe(true);
+    }
     expect(isSafeLogo(svg())).toBe(true);
     expect(isSafeLogo(`<?xml version="1.0" encoding="UTF-8"?>\n<!-- Brand -->\n${svg()}`)).toBe(
       true,

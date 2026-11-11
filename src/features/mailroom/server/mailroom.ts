@@ -6,7 +6,6 @@ import * as signing from '../../accounts/core/index.ts';
 import { messageOf } from '../../composer/index.ts';
 import { createProblem, deleteProblem, inside, renameProblem } from '../../folders/core/index.ts';
 import {
-  domainOf,
   messageIdOf,
   referencesOf,
   sameRef,
@@ -38,7 +37,6 @@ import {
 import { deliver, pushKeyOf, type PushKey } from '../../notifications/server/index.ts';
 import {
   DEMO_ACCOUNTS,
-  DEMO_LOGOS,
   PRESETS,
   authServersFor,
   codeFrom,
@@ -105,7 +103,17 @@ import { memberKey, open, seal } from './credentials.ts';
 import { notifying, type Notifying } from './notifying.ts';
 import { envelopeIndex, pageAfter, type EnvelopeIndex } from './envelope-index.ts';
 import * as input from './input.ts';
-import { DNS_OVER_HTTPS, logoCache, logoNetwork, lookUpLogo, type LogoCache } from './logos.ts';
+import {
+  avatarCache,
+  avatarNetwork,
+  demoSources,
+  internetSources,
+  INTERNET,
+  keyed,
+  standInInternet,
+  type AvatarCache,
+  type DomainFound,
+} from './avatars.ts';
 import { upgrade, type Sql, type SqlValue } from './schema.ts';
 import { outboxQueue, type OutboxQueue } from './outbox.ts';
 import { foundOf, opened, type Found } from './search.ts';
@@ -157,8 +165,12 @@ export type MailroomEnv = {
    * host to names. Honored for hosts on this machine alone.
    */
   AUTH_SERVERS_STAND_IN?: string;
-  /** A test's stand-in for DNS over HTTPS, answering as Cloudflare's does, honored only on this machine. */
-  DNS_STAND_IN?: string;
+  /**
+   * A test's stand-in for where avatars are looked up, as one origin: DNS over HTTPS at
+   * `/dns-query`, answering as Cloudflare's does, Gravatar at `/gravatar/` and each domain's site
+   * at `/sites/<domain>/`. Honored only when it names this machine.
+   */
+  AVATARS_STAND_IN?: string;
 };
 
 /** Where each preset that can sign in finds the operator's app in the Worker's settings. */
@@ -191,8 +203,8 @@ const NOTIFYING_CHECKING_MS = 4 * 60_000;
 const ALARM_SLACK_MS = 1_000;
 /** How many refs of messages the member moved into an Inbox are held, oldest dropped first. */
 const MOVED_IN_HELD = 1_000;
-/** The most domains one wake looks up logos for. */
-const LOGOS_PER_WAKE = 8;
+/** The most domains and senders one wake looks up pictures for. */
+const AVATAR_LOOKUPS = { domains: 6, senders: 16 };
 /** Where the id that names what an installed app keeps is stored. */
 const CACHE_KEY = 'cache';
 
@@ -209,7 +221,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   protected readonly sql: Sql;
   protected readonly store: EnvelopeIndex;
   private readonly book: AccountBook;
-  private readonly logos: LogoCache;
+  private readonly avatars: AvatarCache;
   /** Sign-ins at a vendor while members enter their codes. */
   private readonly underWay: SignInBook;
   /** Each signed-in account's access token while it's fresh. Only memory holds them. */
@@ -259,7 +271,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     if (openedAt === undefined) this.writeOpened(this.openedAt);
     this.store = envelopeIndex(this.sql, () => this.book.all().map((account) => account.address));
     this.book = accountBook(this.sql);
-    this.logos = logoCache(this.sql);
+    this.avatars = avatarCache(this.sql);
     this.underWay = signInBook(this.sql);
     this.notifying = notifying(this.sql);
     this.queue = syncQueue({
@@ -276,7 +288,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       },
       landed: (folder, events) => {
         this.noteNews(folder, events);
-        this.logos.note(domainsOf(verifiedSenders(events)), Date.now());
+        this.avatars.note(verifiedSenders(events), Date.now());
       },
     });
     this.sending = outboxQueue({
@@ -503,8 +515,8 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     this.sql.transaction(() => {
       this.book.remove(account);
       this.store.forget(account);
-      // A logo stays only for a sender of the mail that's left.
-      this.logos.keep(new Set(domainsOf([...this.store.verifiedSenders()])));
+      // A picture stays only for a sender of the mail that's left.
+      this.avatars.keep(this.store.verifiedSenders());
       this.sending.forget(account);
       this.underWay.forget(account);
       this.notifying.forgetAccount(account);
@@ -768,12 +780,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   /** A verified sender's picture, from the Avatar cache, by the key a read named it with. */
   avatar(key: string): Promise<Picture | null> {
     this.noteOpened();
-    const svg = this.logos.logo(key);
-    return Promise.resolve(
-      svg === undefined
-        ? null
-        : { type: 'image/svg+xml', bytes: new Uint8Array(new TextEncoder().encode(svg)) },
-    );
+    return Promise.resolve(this.avatars.picture(key) ?? null);
   }
 
   async source(ref: MessageRef): Promise<ReadableStream<Uint8Array> | null> {
@@ -907,38 +914,68 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     await this.tellNews();
     // A new account's Inbox is known only once its folders are.
     await this.watchAll(this.devices() > 0);
-    await this.lookUpLogos();
+    const isOwingAvatars = await this.lookUpAvatars();
     const sendAt = this.sending.nextWake() ?? poll;
-    if (this.queue.owing() || sendAt <= Date.now()) await this.ctx.storage.setAlarm(Date.now());
-    else await this.ctx.storage.setAlarm(Math.min(poll, sendAt, this.signInWake() ?? poll));
+    if (this.queue.owing() || isOwingAvatars || sendAt <= Date.now()) {
+      await this.ctx.storage.setAlarm(Date.now());
+    } else await this.ctx.storage.setAlarm(Math.min(poll, sendAt, this.signInWake() ?? poll));
     return landed;
   }
 
   /**
-   * Looks up the logos owed, a few each wake, and hints every device when one comes or goes. The
-   * demo mailbox brings its own and looks nothing up.
+   * Looks up the pictures owed, a few each wake, and hints every device when one comes or goes. A
+   * wake that asked sites for icons logs how many it found, how many named none, and how many
+   * turned the Mailroom away, and names no one. The demo mailbox brings its own and looks nothing up.
+   * Returns whether more are owed now, as when mail from many senders arrives at once.
    */
-  private async lookUpLogos() {
-    const owed = this.logos.owed(Date.now(), LOGOS_PER_WAKE);
-    if (owed.length === 0) return;
-    const standIn = this.env.DNS_STAND_IN;
-    const network =
-      standIn && namesThisMachine(standIn)
-        ? logoNetwork(standIn, true)
-        : logoNetwork(DNS_OVER_HTTPS);
-    const changed = await Promise.all(
-      owed.map(async (domain) => {
+  private async lookUpAvatars(): Promise<boolean> {
+    const owed = this.avatars.owed(Date.now(), AVATAR_LOOKUPS);
+    if (owed.domains.length + owed.senders.length === 0) return false;
+    const sources = this.demo ? demoSources : internetSources(this.avatarNetwork());
+    const icons = { found: 0, none: 0, 'turned away': 0 };
+    const changed = await Promise.all([
+      ...owed.domains.map(async (domain) => {
         try {
-          const svg = this.demo ? DEMO_LOGOS[domain] : await lookUpLogo(domain, network);
-          return this.logos.found(domain, svg, Date.now());
+          const { logo, icon } = await sources.domain(domain);
+          if (icon !== undefined) icons[typeof icon === 'object' ? 'found' : icon] += 1;
+          const found: DomainFound = {
+            ...(logo ? { logo: await keyed(logo) } : {}),
+            ...(icon ? { icon: typeof icon === 'object' ? await keyed(icon) : icon } : {}),
+          };
+          return this.avatars.foundDomain(domain, found, Date.now());
         } catch (error) {
           report(error);
-          this.logos.failed(domain, Date.now());
+          this.avatars.failed({ domain }, Date.now());
           return false;
         }
       }),
-    );
+      ...owed.senders.map(async (sender) => {
+        try {
+          const photo = await sources.sender(sender);
+          return this.avatars.foundSender(sender, photo && (await keyed(photo)), Date.now());
+        } catch (error) {
+          report(error);
+          this.avatars.failed({ sender }, Date.now());
+          return false;
+        }
+      }),
+    ]);
+    if (!this.demo && icons.found + icons.none + icons['turned away'] > 0) {
+      console.log(
+        `Mailroom: site icons, ${icons.found} found, ${icons.none} named none, ${icons['turned away']} turned the Mailroom away.`,
+      );
+    }
     if (changed.includes(true)) this.hint({ changed: 'avatars' });
+    const more = this.avatars.owed(Date.now(), { domains: 1, senders: 1 });
+    return more.domains.length + more.senders.length > 0;
+  }
+
+  /** The internet as this Mailroom reaches it, or a test's stand-in on this machine. */
+  private avatarNetwork() {
+    const standIn = this.env.AVATARS_STAND_IN;
+    return standIn && namesThisMachine(standIn)
+      ? avatarNetwork(standInInternet(standIn), true)
+      : avatarNetwork(INTERNET);
   }
 
   /** A page with the pictures the cache holds named, and no others. */
@@ -948,10 +985,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 
   /** The key of each sender's picture the cache holds, by sender. */
   private pictures(senders: readonly string[]): Map<string, string> {
-    const held = this.logos.held(domainsOf(senders));
-    return new Map(
-      senders.flatMap((sender) => (held.has(domainOf(sender)) ? [[sender, domainOf(sender)]] : [])),
-    );
+    return this.avatars.pictures(senders);
   }
 
   private checkAll(at = Date.now()) {
@@ -1644,9 +1678,4 @@ async function attachmentOf(bytes: Uint8Array, index: number): Promise<MimeAttac
     content,
     ...(attachment.contentId ? { contentId: attachment.contentId.replace(/^<|>$/g, '') } : {}),
   };
-}
-
-/** The domains of these senders, once each. */
-function domainsOf(senders: readonly string[]): string[] {
-  return [...new Set(senders.map(domainOf))];
 }

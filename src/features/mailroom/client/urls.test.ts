@@ -72,20 +72,21 @@ test('a remote image goes through the proxy with its whole address as one parame
   expect(url.searchParams.get('url')).toBe(remote);
 });
 
-test('an avatar reads back as its key, and any other path names none', () => {
-  for (const key of ['news.example.com', 'xn--bcher-kva.example']) {
-    expect(readAvatarPath(pathOf(avatarUrl(key)))).toBe(key);
-  }
+test('an avatar reads back as its key, a SHA-256 in hex, and any other path names none', () => {
+  const key = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+  expect(readAvatarPath(pathOf(avatarUrl(key)))).toBe(key);
   for (const path of [
     '/avatars',
     '/avatars/',
-    '/avatars/a/b',
-    '/avatars/a%2Fb',
-    '/avatars/News.Example',
+    `/avatars/${key}/b`,
+    `/avatars/${key.toUpperCase()}`,
+    `/avatars/${key.slice(1)}`,
+    `/avatars/${key}0`,
+    `/avatars/${key.slice(1)}g`,
+    '/avatars/news.example.com',
     '/avatars/%E0%A4%A',
-    '/images',
+    `/images/${key}`,
   ]) {
     expect(readAvatarPath(path)).toBeNull();
   }
-  expect(readAvatarPath(`/avatars/${'a'.repeat(254)}`)).toBeNull();
 });

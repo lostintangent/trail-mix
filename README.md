@@ -89,6 +89,8 @@ To deploy from a clone instead of the button, sign in with `npx wrangler login`,
 
 The mail server stays the only authority for your mail. Trail Mix stores your account settings, your encrypted credentials, an index of your mail, the messages you've opened, and the messages waiting to be sent, all in the Cloudflare account it is deployed to. Whoever controls that Cloudflare account can read everything stored there, encryption included, because the key is theirs. If someone else runs Trail Mix for you, you are trusting them with your mail.
 
+To show who a message is from, Trail Mix looks up the picture of each sender whose mail their server verified: their brand's logo through DNS, their photo at Gravatar by a hash of their address, and their site's icon. Cloudflare asks, never your browser, at most once a week for each. Gravatar can match a hash to an address it knows, so it can learn who writes to you.
+
 A Mailroom nobody opens for 30 days stops checking mail, and after 90 days it erases itself. Anyone can erase everything Trail Mix holds for them at any time, from the foot of any account's page. [SECURITY.md](SECURITY.md) says how to report a problem.
 
 ## Try it locally

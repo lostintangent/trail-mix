@@ -16,7 +16,7 @@ These are what a report would show broken.
 
 - **Members are private from each other.** Each member's mail, accounts, drafts and settings live in a Mailroom of their own, which the Worker chooses from the sign-in Cloudflare Access verified on that request alone. Nothing a browser sends can name another member's Mailroom.
 - **A password enters once.** The password or token for a mail account crosses to the Mailroom once, when the account is added, and is sealed with a key derived for that member before it is stored. No query returns it, and it never sits in a log, a URL or the browser's storage.
-- **Mail can't run.** Message HTML is sanitized, then shown in a frame sandboxed without scripts under a restrictive content security policy. Every route that serves a message's bytes, a remote image or a sender's logo answers with a sandboxing policy and `nosniff`, so opening one directly runs nothing.
+- **Mail can't run.** Message HTML is sanitized, then shown in a frame sandboxed without scripts under a restrictive content security policy. Every route that serves a message's bytes, a remote image or a sender's picture answers with a sandboxing policy and `nosniff`, so opening one directly runs nothing.
 - **Mail tells no one it was read.** Remote images load only through the Worker's proxy, and only after the member allows their sender. The remote host sees the Worker, never the member.
 - **Closed until configured.** A deployment with no sign-in configured serves only its setup page, apart from `/health`, which reports the running version and nothing else.
 - **Nothing secret is in the repository.** The keys a deployment needs are made by its first deploy and kept as Worker secrets.

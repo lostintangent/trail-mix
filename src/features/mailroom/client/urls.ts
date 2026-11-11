@@ -18,14 +18,17 @@ export const partUrl = (ref: MessageRef, attachmentId: string) =>
 
 export const imageUrl = (url: string) => `/images?${new URLSearchParams({ url })}`;
 
-/** The picture a conversation or a message names, from the Avatar cache, by its key. */
+/**
+ * The picture a conversation or a message names, from the Avatar cache, by its key: the SHA-256 of
+ * its bytes, so the same address always means the same picture.
+ */
 export const avatarUrl = (key: string) => `/avatars/${segment(key)}`;
 
 /** The key an avatar's path names, or nothing if it names none. */
 export function readAvatarPath(pathname: string): string | null {
   const [root, key, ...rest] = pathname.split('/').slice(1);
   if (root !== 'avatars' || key === undefined || rest.length > 0) return null;
-  return /^[a-z0-9][a-z0-9.-]{0,252}$/.test(key) ? key : null;
+  return /^[0-9a-f]{64}$/.test(key) ? key : null;
 }
 
 /** The message, and the part if there is one, that a path names, or nothing if it names none. */

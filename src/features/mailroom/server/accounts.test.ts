@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { DEMO_ACCOUNTS, demoMailbox, PRESETS } from '../../providers/index.ts';
 import { accountBook, connectionOf, demoSettings, type Connection } from './accounts.ts';
-import { upgrade, versions } from './schema.ts';
+import { upgrade } from './schema.ts';
 import { testSql } from './test-sql.ts';
 
 const imap: Connection = {
@@ -112,7 +112,7 @@ test('an account on Zoho’s hosts from before Zoho was known to file in Sent wa
 });
 
 test('an account from before light paper shows every sender darkened, and keeps what it allowed', () => {
-  const sql = testSql(versions.length - 1);
+  const sql = testSql(13);
   const book = accountBook(sql);
   book.add(named('mail'), imap, sealed);
   // An account as an earlier release stored it, which never heard of light paper.

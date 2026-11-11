@@ -210,6 +210,34 @@ export const versions: readonly (readonly string[])[] = [
     `UPDATE accounts SET account = json_set(account, '$.lightPaperFrom', json('[]'))
      WHERE json_type(account, '$.lightPaperFrom') IS NULL`,
   ],
+  [
+    // The Avatar cache, in place of the Logo cache. Per domain that sent verified mail, the key of
+    // its BIMI logo and of its site's icon. Per verified sender, the key of their Gravatar photo.
+    // Each with when it was last looked up, and when it is next owed a lookup, in milliseconds
+    // since the epoch: one owed nothing waits for its next verified mail. And each picture's bytes,
+    // once, under the SHA-256 of them in hex.
+    `CREATE TABLE avatar_domains (
+      domain TEXT PRIMARY KEY,
+      logo TEXT,
+      icon TEXT,
+      checked_at INTEGER,
+      due_at INTEGER
+    )`,
+    `CREATE TABLE avatar_senders (
+      sender TEXT PRIMARY KEY,
+      photo TEXT,
+      checked_at INTEGER,
+      due_at INTEGER
+    )`,
+    `CREATE TABLE avatar_pictures (key TEXT PRIMARY KEY, type TEXT NOT NULL, bytes BLOB NOT NULL)`,
+    // The verified mail already indexed owes its senders and their domains a lookup now.
+    `INSERT OR IGNORE INTO avatar_senders (sender, due_at)
+     SELECT DISTINCT lower(trim(json_extract(message, '$.from.email'))), 0 FROM messages
+     WHERE json_extract(message, '$.verified') = 1 AND instr(json_extract(message, '$.from.email'), '@') > 0`,
+    `INSERT OR IGNORE INTO avatar_domains (domain, due_at)
+     SELECT DISTINCT substr(sender, instr(sender, '@') + 1), 0 FROM avatar_senders`,
+    `DROP TABLE logos`,
+  ],
 ];
 
 /**

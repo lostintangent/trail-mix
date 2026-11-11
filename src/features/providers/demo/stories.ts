@@ -1,5 +1,4 @@
 import {
-  domainOf,
   writeMime,
   type Address,
   type Envelope,
@@ -10,7 +9,7 @@ import {
   type StampColor,
 } from '../../mail/core/index.ts';
 import { seededRandom } from '../../../shared/random.ts';
-import { DEMO_LOGOS } from './logos.ts';
+import { isDemoVerified } from './pictures.ts';
 
 /**
  * What the demo mailbox says. Two accounts, Personal and Work, each a cycle of stories laid out
@@ -143,7 +142,7 @@ export function seededMessage(
       date: dateAt(index),
       preview: step.text.replace(/\s+/g, ' ').trim().slice(0, 200),
       hasAttachments: step.files !== undefined,
-      verified: domainOf(author(step.from).email) in DEMO_LOGOS,
+      verified: isDemoVerified(author(step.from).email),
       ...(thread.list
         ? { list: { id: thread.list.id, unsubscribe: thread.list.unsubscribe } }
         : {}),

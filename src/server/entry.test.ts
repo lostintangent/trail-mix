@@ -44,6 +44,9 @@ await mock.module('../features/mailroom/server/index.ts', () => ({ Mailroom: cla
 await mock.module('cloudflare:workers', () => ({ DurableObject: class {} }));
 const { default: worker } = await import('./entry.ts');
 
+/** The key of a picture a Mailroom's Avatar cache holds. */
+const PICTURE = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+
 /** Mailrooms by name, recording each one the Worker opened and each socket it was handed. */
 function mailrooms() {
   const opened: string[] = [];
@@ -69,7 +72,7 @@ function mailrooms() {
         avatar: (key: string) => {
           avatars.push([name, key]);
           return Promise.resolve(
-            key === 'news.example'
+            key === PICTURE
               ? { type: 'image/png', bytes: new TextEncoder().encode(`${name}'s picture`) }
               : null,
           );
@@ -322,7 +325,7 @@ test('a notification’s button that another site started is refused, and reache
 test('an avatar comes only from the signed-in member’s Avatar cache, as an image that runs nothing', async () => {
   const { env, opened, avatars } = developer();
   const response = await worker.fetch(
-    new Request(`${LOCAL}/avatars/news.example?member=eve@example.com`, { headers: SOMEONE_ELSE }),
+    new Request(`${LOCAL}/avatars/${PICTURE}?member=eve@example.com`, { headers: SOMEONE_ELSE }),
     env,
   );
 
@@ -331,9 +334,9 @@ test('an avatar comes only from the signed-in member’s Avatar cache, as an ima
   expect(response.headers.get('content-security-policy')).toStartWith('sandbox');
   expect(response.headers.get('x-content-type-options')).toBe('nosniff');
   expect(opened).toEqual(['ada@example.com']);
-  expect(avatars).toEqual([['ada@example.com', 'news.example']]);
+  expect(avatars).toEqual([['ada@example.com', PICTURE]]);
 
-  const missing = await worker.fetch(new Request(`${LOCAL}/avatars/elsewhere.example`), env);
+  const missing = await worker.fetch(new Request(`${LOCAL}/avatars/${'0'.repeat(64)}`), env);
   expect(missing.status).toBe(404);
   expect(missing.headers.get('content-security-policy')).toStartWith('sandbox');
 });
@@ -352,7 +355,7 @@ test('a message’s bytes, the image proxy and avatars refuse a request nobody s
     '/messages/personal/INBOX/1/7',
     '/messages/personal/INBOX/1/7/1',
     PROXIED,
-    '/avatars/news.example',
+    `/avatars/${PICTURE}`,
   ]) {
     const response = await worker.fetch(
       new Request(`${SITE}${path}`, { headers: SOMEONE_ELSE }),

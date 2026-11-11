@@ -44,6 +44,8 @@ const MAILROOM: MessageBytes = {
     Promise.resolve(PARTS[id] ? { ...PARTS[id], body: stream(PARTS[id].bytes) } : null),
 };
 
+/** The key of a picture with a script in it, as if one had slipped past the Avatar cache. */
+const HOSTILE = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
 let PARTS: Record<string, { type: string; name: string; bytes: string | Uint8Array<ArrayBuffer> }>;
 
 beforeAll(() => {
@@ -82,9 +84,8 @@ beforeAll(() => {
     fetch(request) {
       const url = new URL(request.url);
       if (url.pathname === '/images') return proxyImage(request, internet);
-      // A picture with a script in it, as if one had slipped past the Avatar cache.
-      if (url.pathname === '/avatars/hostile') {
-        return serveAvatar('hostile', {
+      if (url.pathname === `/avatars/${HOSTILE}`) {
+        return serveAvatar(HOSTILE, {
           avatar: () =>
             Promise.resolve({
               type: 'image/svg+xml',
@@ -264,7 +265,7 @@ for (const type of BROWSERS) {
         '/messages/disguised',
         '/messages/injected',
         `/images?url=${encodeURIComponent('http://images.example.com/disguised.png')}`,
-        '/avatars/hostile',
+        `/avatars/${HOSTILE}`,
       ]) {
         const page = await context.newPage();
         // A download aborts the navigation, which is what should happen to a document part.

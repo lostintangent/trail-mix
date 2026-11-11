@@ -6,22 +6,27 @@ import {
 } from '../../mail/core/index.ts';
 
 /**
- * The Avatar cache's rules: which senders may show a picture, what DNS says about a domain's logo,
- * which pictures are safe to keep, and how lists and conversations name them.
+ * The Avatar cache's rules: which senders may show a picture, where each picture comes from and in
+ * what order, which pictures are safe to keep, and how lists and conversations name them.
  *
  * A message is verified when its own server says DMARC passed for its From domain. Only a verified
- * sender shows a picture, and anyone else shows their initials. A brand's BIMI logo proves more
- * than who sent the mail, that the domain's owner wants that logo shown, so it is kept only while
- * the domain's DMARC policy quarantines or rejects mail that fails, in full, and its BIMI record
- * names an SVG over HTTPS. A picture is a picture and nothing more: one that could run or fetch
- * anything is refused.
+ * sender shows a picture, and anyone else shows their initials. A sender's picture is the first of
+ * three that exists. Their brand's BIMI logo proves more than who sent the mail, that the domain's
+ * owner wants that logo shown, so it is kept only while the domain's DMARC policy quarantines or
+ * rejects mail that fails, in full, and its BIMI record names an SVG over HTTPS. Then the photo
+ * the sender keeps at Gravatar, asked for by their address's SHA-256. Then the icon their
+ * organizational domain's home page names, unless that domain hosts mailboxes for the public, where
+ * an icon would say nothing about the person. A picture is a picture and nothing more: an SVG that
+ * could run or fetch anything is refused, and any other picture must be one by its first bytes.
  */
-
 /** How long a lookup stands before what it found is looked up again. */
 export const RECHECK_MS = 7 * 24 * 60 * 60_000;
 
-/** The most a logo may weigh, in bytes. */
+/** The most a logo, or any SVG, may weigh, in bytes. */
 export const LOGO_BYTES = 32 * 1024;
+
+/** The most any other picture may weigh, in bytes. */
+export const PICTURE_BYTES = 64 * 1024;
 
 /** The most domains a lookup asks DNS about for one sender's domain: it, and those above it. */
 const WALK = 5;
@@ -30,6 +35,13 @@ const WALK = 5;
 
 /** A picture the Avatar cache holds: its type, as its first bytes showed, and its bytes. */
 export type Picture = { type: string; bytes: Uint8Array<ArrayBuffer> };
+
+/** What the Avatar cache knows of one sender: their domain's logo and icon, and their photo. */
+export type Pictures = { logo?: string | null; photo?: string | null; icon?: string | null };
+
+/** The picture a sender shows, of those the cache holds: their logo, else photo, else icon. */
+export const avatarOf = ({ logo, photo, icon }: Pictures): string | undefined =>
+  logo ?? photo ?? icon ?? undefined;
 
 /** A sender's address as the Avatar cache keys it. */
 export const senderOf = (address: string) => address.trim().toLowerCase();
@@ -83,6 +95,166 @@ export function avatarCandidates(
   }
   return [...senders].filter((sender) => domainOf(sender));
 }
+
+// Which pictures are kept
+
+/**
+ * A picture as its bytes show it: an SVG that is a safe logo, or PNG, JPEG, GIF, WebP or ICO within
+ * `PICTURE_BYTES`, whatever its host said it was. Anything else is none.
+ */
+export function pictureOf(bytes: Uint8Array<ArrayBuffer>): Picture | undefined {
+  const type = RASTERS.find(({ signature }) => signature(bytes))?.type;
+  if (type) return bytes.byteLength <= PICTURE_BYTES ? { type, bytes } : undefined;
+  if (bytes.byteLength > LOGO_BYTES) return undefined;
+  const svg = utf8Of(bytes);
+  return svg !== undefined && isSafeLogo(svg) ? { type: 'image/svg+xml', bytes } : undefined;
+}
+
+const startsWith = (bytes: Uint8Array, prefix: readonly number[], at = 0) =>
+  prefix.every((byte, i) => bytes[at + i] === byte);
+const ascii = (text: string) => [...text].map((char) => char.charCodeAt(0));
+
+const RASTERS: readonly { type: string; signature: (bytes: Uint8Array) => boolean }[] = [
+  { type: 'image/png', signature: (b) => startsWith(b, [0x89, ...ascii('PNG\r\n\x1a\n')]) },
+  { type: 'image/jpeg', signature: (b) => startsWith(b, [0xff, 0xd8, 0xff]) },
+  {
+    type: 'image/gif',
+    signature: (b) => startsWith(b, ascii('GIF87a')) || startsWith(b, ascii('GIF89a')),
+  },
+  {
+    type: 'image/webp',
+    signature: (b) => startsWith(b, ascii('RIFF')) && startsWith(b, ascii('WEBP'), 8),
+  },
+  // An icon directory with at least one image in it.
+  {
+    type: 'image/x-icon',
+    signature: (b) => startsWith(b, [0, 0, 1, 0]) && (b[4] ?? 0) + (b[5] ?? 0) > 0,
+  },
+];
+
+function utf8Of(bytes: Uint8Array): string | undefined {
+  try {
+    return new TextDecoder('utf-8', { fatal: true, ignoreBOM: false }).decode(bytes);
+  } catch {
+    return undefined;
+  }
+}
+
+// Where a site keeps its icon
+
+/** A `<link>` a home page has, as far as finding its icon needs it. */
+export type IconLink = { rel: string; href: string; sizes?: string; type?: string };
+
+/** The most pixels across that an icon needs, to fill a 32-pixel avatar on a dense screen. */
+const ICON_PIXELS = 64;
+
+/**
+ * Where a site's icon may be, best first: the icons its home page names, as resolved against
+ * `page`, the smallest of those at least 64 pixels across first, then any that scale, then the
+ * rest, largest first. After them, where sites keep one by convention, at the root of `site`.
+ */
+export function iconLocations(links: readonly IconLink[], page: string, site: string): string[] {
+  const named = links.flatMap((link) => {
+    const rels = link.rel.toLowerCase().split(/\s+/);
+    const isTouch = rels.some((rel) => rel.startsWith('apple-touch-icon'));
+    if (!isTouch && !rels.includes('icon')) return [];
+    const location = URL.parse(link.href.trim(), page);
+    if (location?.protocol !== 'https:') return [];
+    return [{ location: location.href, pixels: pixelsOf(link, isTouch) }];
+  });
+  const tier = (pixels: number) => (pixels === Infinity ? 1 : pixels >= ICON_PIXELS ? 0 : 2);
+  const ranked = named
+    .toSorted(
+      (a, b) =>
+        tier(a.pixels) - tier(b.pixels) ||
+        (tier(a.pixels) === 0 ? a.pixels - b.pixels : b.pixels - a.pixels),
+    )
+    .map(({ location }) => location);
+  const conventional = ['apple-touch-icon.png', 'favicon.ico'].map(
+    (name) => new URL(name, site).href,
+  );
+  return [...new Set([...ranked, ...conventional])];
+}
+
+/** How many pixels across an icon says it is: its largest size, endless if it scales. */
+function pixelsOf({ sizes, type, href }: IconLink, isTouch: boolean): number {
+  const declared = (sizes ?? '').toLowerCase().split(/\s+/);
+  if (declared.includes('any')) return Infinity;
+  const widths = declared.flatMap((size) => /^(\d+)x\d+$/.exec(size)?.[1] ?? []).map(Number);
+  if (widths.length > 0) return Math.max(...widths);
+  if (type?.toLowerCase() === 'image/svg+xml' || /\.svg(\?|#|$)/i.test(href)) return Infinity;
+  // Apple draws a touch icon that says no size at 180 pixels, and a favicon is most often 16 or 32.
+  return isTouch ? 180 : 0;
+}
+
+/**
+ * Whether a domain hosts mailboxes for the public, so its icon says nothing about who wrote. Given
+ * the organizational domain, as the DMARC walk finds it.
+ */
+export function hostsPublicMailboxes(domain: string): boolean {
+  const labels = domain.toLowerCase().split('.');
+  return (
+    PUBLIC_MAILBOXES.has(domain.toLowerCase()) ||
+    // A provider's mailboxes under each of its country domains, such as yahoo.co.jp or gmx.de.
+    (labels.length <= 3 &&
+      PUBLIC_MAILBOX_BRANDS.has(labels[0]!) &&
+      labels.slice(1).every((label) => label.length <= 3))
+  );
+}
+
+const PUBLIC_MAILBOX_BRANDS = new Set([
+  'aol',
+  'gmail',
+  'gmx',
+  'googlemail',
+  'hotmail',
+  'icloud',
+  'live',
+  'outlook',
+  'protonmail',
+  'yahoo',
+  'yandex',
+  'ymail',
+  'zohomail',
+]);
+
+const PUBLIC_MAILBOXES = new Set([
+  '126.com',
+  '163.com',
+  'att.net',
+  'btinternet.com',
+  'comcast.net',
+  'duck.com',
+  'fastmail.com',
+  'fastmail.fm',
+  'free.fr',
+  'hanmail.net',
+  'hey.com',
+  'hushmail.com',
+  'laposte.net',
+  'libero.it',
+  'mac.com',
+  'mail.com',
+  'mail.ru',
+  'mailbox.org',
+  'me.com',
+  'msn.com',
+  'naver.com',
+  'orange.fr',
+  'pm.me',
+  'posteo.de',
+  'proton.me',
+  'qq.com',
+  'rediffmail.com',
+  'rocketmail.com',
+  'seznam.cz',
+  'tuta.io',
+  'tutanota.com',
+  'verizon.net',
+  'web.de',
+  'wp.pl',
+  'zoho.com',
+]);
 
 // What DNS says
 
