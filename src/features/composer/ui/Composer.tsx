@@ -9,7 +9,6 @@ import {
   spacingVars,
   typeScaleVars,
   typographyVars,
-  shadowVars,
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { useQuery } from '@tanstack/react-query';
@@ -33,7 +32,6 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { createPortal } from 'react-dom';
 import { StampDot } from '../../../app/theme/StampDot.tsx';
 import { useMediaQuery } from '../../../shared/useMediaQuery.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
@@ -53,6 +51,7 @@ import {
   type Writing,
 } from '../core/session.ts';
 import { Editor, type EditorProps } from './Editor.tsx';
+import { ComposerSkeleton, isDocked, Over, sheetStyles } from './sheet.tsx';
 import { useAutosave, type SaveState } from './useAutosave.ts';
 
 /**
@@ -121,19 +120,25 @@ export function Composer({ compose, ...props }: ComposerProps) {
     () => answering && account && body && recipientsOf(answering.to, body, account, answering.all),
     [answering, account, body],
   );
+  if (!start && !isError) {
+    return (
+      <ComposerSkeleton
+        isNew={!isDocked(compose)}
+        isSheet={props.isSheet}
+        onClose={props.onClose}
+      />
+    );
+  }
   if (!start) {
-    const opening = (
+    const failed = (
       <section
         aria-label="Message"
-        aria-busy={!isError}
-        {...stylex.props(styles.sheet, props.isSheet && styles.risen)}
+        {...stylex.props(sheetStyles.sheet, props.isSheet && sheetStyles.risen)}
       >
-        <p {...stylex.props(styles.status)}>
-          {isError ? 'This message couldn’t be loaded to write from.' : 'Opening…'}
-        </p>
+        <p {...stylex.props(styles.status)}>This message couldn’t be loaded to write from.</p>
       </section>
     );
-    return props.isSheet ? <Over onClose={props.onClose}>{opening}</Over> : opening;
+    return props.isSheet ? <Over onClose={props.onClose}>{failed}</Over> : failed;
   }
   return (
     <Writer
@@ -325,9 +330,9 @@ function Writer({
       aria-label={title}
       {...(isSheet ? { role: 'dialog', 'aria-modal': true } : {})}
       {...stylex.props(
-        styles.sheet,
-        isNew && styles.full,
-        isSheet && styles.risen,
+        sheetStyles.sheet,
+        isNew && sheetStyles.full,
+        isSheet && sheetStyles.risen,
         isSheet && styles.band(band.top, band.bottom),
       )}
     >
@@ -516,15 +521,6 @@ function Writer({
  * On a phone the sheet lies over the whole app, outside the sliding panes, with the app dimmed
  * behind it. A tap on what's dimmed closes it, keeping the draft.
  */
-function Over({ children, onClose }: { children: ReactNode; onClose: () => void }) {
-  return createPortal(
-    <>
-      <div aria-hidden onClick={onClose} {...stylex.props(styles.scrim)} />
-      {children}
-    </>,
-    document.body,
-  );
-}
 
 const SAVED: Record<SaveState, string> = {
   unsaved: '',
@@ -783,56 +779,7 @@ function refOf({ account, path, uidValidity, uid }: MessageRef): MessageRef {
 /** Where in the text something applies, from one position to another. */
 type Range = { from: number; to: number };
 
-const FOCUS_WIDTH = `calc(${borderVars['--border-width']} * 2)`;
-
-/** A phone's sheet rises from the bottom of the screen. */
-const rise = stylex.keyframes({
-  from: { transform: 'translateY(100%)' },
-  to: { transform: 'translateY(0)' },
-});
-
 const styles = stylex.create({
-  sheet: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: spacingVars['--spacing-2'],
-    padding: spacingVars['--spacing-4'],
-    borderRadius: tm.sheetRadius,
-    backgroundColor: colorVars['--color-background-surface'],
-    // While the member writes, the sheet wears the ink-blue ring that marks where typing goes.
-    boxShadow: {
-      default: tm.sheetEdge,
-      ':focus-within': `0 0 0 ${FOCUS_WIDTH} ${colorVars['--color-accent']}`,
-    },
-    outline: {
-      default: null,
-      [media.forcedColors]: {
-        default: `${borderVars['--border-width']} solid CanvasText`,
-        ':focus-within': `${FOCUS_WIDTH} solid Highlight`,
-      },
-    },
-  },
-  full: {
-    flexGrow: 1,
-  },
-  // On a phone: over everything, from just below the top of the screen to its bottom edge, with
-  // its header and toolbar fixed and what's written scrolling between them.
-  risen: {
-    position: 'fixed',
-    insetInline: 0,
-    bottom: 0,
-    top: `calc(${tm.safeTop} + ${spacingVars['--spacing-6']})`,
-    zIndex: 2,
-    gap: 0,
-    padding: 0,
-    paddingBottom: tm.safeBottom,
-    borderEndStartRadius: 0,
-    borderEndEndRadius: 0,
-    boxShadow: shadowVars['--shadow-high'],
-    animationName: { default: rise, [media.reducedMotion]: 'none' },
-    animationDuration: '300ms',
-    animationTimingFunction: tm.easeLayout,
-  },
   // Above the on-screen keyboard, within what the page still shows, so the toolbar stays in reach.
   band: (top: number, bottom: number) => ({
     top: `calc(${tm.safeTop} + ${spacingVars['--spacing-6']} + ${top}px)`,
@@ -851,12 +798,6 @@ const styles = stylex.create({
     borderWidth: borderVars['--border-width'],
     borderStyle: 'solid',
     borderColor: colorVars['--color-border'],
-  },
-  scrim: {
-    position: 'fixed',
-    inset: 0,
-    zIndex: 2,
-    backgroundColor: colorVars['--color-overlay'],
   },
   sheetHeader: {
     display: 'flex',

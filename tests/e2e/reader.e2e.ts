@@ -30,9 +30,13 @@ afterEach(() => {
   expect(errors.splice(0)).toEqual([]);
 });
 
-async function open(options: BrowserContextOptions): Promise<Page> {
+async function open(
+  options: BrowserContextOptions,
+  beforeLoad?: (page: Page) => Promise<unknown>,
+): Promise<Page> {
   const page = await (await app.context({ deviceScaleFactor: 2, ...options })).newPage();
   page.on('pageerror', (error) => errors.push(error.message));
+  await beforeLoad?.(page);
   await page.goto(app.url);
   await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
   return page;
@@ -190,9 +194,26 @@ for (const colorScheme of ['light', 'dark'] as const) {
 for (const [size, options] of Object.entries({ desktop: DESKTOP, phone: PHONE })) {
   for (const colorScheme of ['light', 'dark'] as const) {
     test(`mail on its way shows skeletons where it will lie, and mail that comes quickly shows none, ${size} ${colorScheme}`, async () => {
-      const page = await open({ ...options, colorScheme });
+      // The composer's code is held from the start, before anything could load it ahead.
+      let releaseComposer!: () => void;
+      const composerCode = new Promise<void>((resolve) => (releaseComposer = resolve));
+      const page = await open({ ...options, colorScheme }, (page) =>
+        page.route(/\/assets\/Composer-/, async (route) => {
+          await composerCode;
+          await route.continue().catch(() => {});
+        }),
+      );
       const shot = (screen: string) =>
         page.screenshot({ path: join(SHOTS, `skeleton-${screen}-${size}-${colorScheme}.png`) });
+
+      // A new message while the composer's code is on its way shows its sheet with lines.
+      await page.keyboard.press('c');
+      await shown(page, 'section[aria-label="Message"] [role="status"][aria-busy="true"]');
+      await shot('composer');
+      releaseComposer();
+      await page.locator('section[aria-label="New message"]').waitFor();
+      await page.keyboard.press('Escape');
+      await page.locator('section[aria-label="New message"]').waitFor({ state: 'detached' });
       await watchSkeletons(page);
 
       // Mail that answers within the skeletons' delay, if not at once: a conversation, an older
@@ -247,6 +268,22 @@ for (const [size, options] of Object.entries({ desktop: DESKTOP, phone: PHONE })
       await body();
       await bodies(page);
       expect(await boxOf(page, sheet)).toEqual(header);
+
+      // A draft opened while its words are on their way shows the composer's sheet with lines.
+      const words = await holding(page, 'body');
+      await goTo(page, 'Drafts');
+      await page.getByRole('option').first().click();
+      await reader(page)
+        .getByRole('button', { name: /^Draft/ })
+        .click();
+      await shown(page, 'section[aria-label="Message"] [role="status"][aria-busy="true"]');
+      await shot('draft');
+      expect(await page.getByText('Opening…').count()).toBe(0);
+      await words();
+      await page
+        .getByRole('button', { name: 'Send', exact: true })
+        .filter({ visible: true })
+        .waitFor();
     }, 60_000);
   }
 }
@@ -469,7 +506,7 @@ async function bodies(page: Page) {
 }
 
 /** Goes to a view: one of the unified ones, or one of Personal's folders. On a phone, by its folders. */
-async function goTo(page: Page, view: 'Inbox' | 'Sent' | 'Archive') {
+async function goTo(page: Page, view: 'Inbox' | 'Sent' | 'Archive' | 'Drafts') {
   const back = reader(page).getByRole('button', { name: 'Back', exact: true });
   if (await reachable(back)) await back.click();
   const button =

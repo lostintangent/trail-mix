@@ -79,8 +79,15 @@ import {
   useSteadyCommands,
   type Command,
 } from '../../commands/index.ts';
-import { Composer, composerCommands, type Sender, type Writing } from '../../composer/ui/index.ts';
-import { isDocked, newestOf, useComposing } from './useComposing.ts';
+import {
+  Composer,
+  composerCommands,
+  ComposerSkeleton,
+  isDocked,
+  type Sender,
+  type Writing,
+} from '../../composer/ui/index.ts';
+import { newestOf, useComposing } from './useComposing.ts';
 
 const NO_COMMANDS: readonly Command[] = [];
 
@@ -677,7 +684,15 @@ export function Workbench({
     compose &&
     ({
       composer: (
-        <Suspense>
+        <Suspense
+          fallback={
+            <ComposerSkeleton
+              isNew={!isDocked(compose)}
+              isSheet={isPhone}
+              onClose={closeComposer}
+            />
+          }
+        >
           <Composer
             key={composing.session}
             compose={compose}

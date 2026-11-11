@@ -111,17 +111,3 @@ export function newestOf(conversation: readonly Message[]): Message | undefined 
     .toSorted((a, b) => a.date.localeCompare(b.date))
     .at(-1);
 }
-
-/** Whether a composer lies under the conversation it answers, rather than filling the reader. */
-export function isDocked(compose: Compose): boolean {
-  switch (compose.as) {
-    case 'new':
-      return false;
-    case 'reply':
-      return true;
-    case 'draft':
-      return compose.conversation.some(({ flags }) => !flags.draft);
-    case 'resumed':
-      return compose.isDocked;
-  }
-}
