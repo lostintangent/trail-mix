@@ -66,7 +66,19 @@ for (const type of BROWSERS) {
 
       test('shows inline images from the message’s parts, and lists only the other attachments', async () => {
         await open('lunch');
-        expect(harness.parts).toContain('/messages/personal/INBOX/1/7/0');
+        // The map is drawn from the message's own part. Waiting on the picture rather than the
+        // part's request holds whenever the browser asks for it, or answers from its cache.
+        await page.waitForFunction(() =>
+          [...document.querySelectorAll('iframe')].some((frame) =>
+            [...(frame.contentDocument?.images ?? [])].some(
+              (image) =>
+                image.alt === 'A map of the station' &&
+                new URL(image.src).pathname === '/messages/personal/INBOX/1/7/0' &&
+                image.complete &&
+                image.naturalWidth > 0,
+            ),
+          ),
+        );
         const attachments = page.getByRole('list', { name: 'Attachments' }).getByRole('link');
         expect(await attachments.count()).toBe(1);
         expect(await attachments.first().textContent()).toContain('Autumn menu.pdf');
