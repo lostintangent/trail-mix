@@ -153,6 +153,21 @@ test('the sidebar works from the keyboard alone, its fold first and each menu as
     });
   await page.keyboard.press('Tab');
   await expect(focused()).resolves.toBe('BUTTON: Fold the sidebar');
+  // Its rows, chevrons and menus draw the focus ring every Astryx control does.
+  const ring = () =>
+    page.evaluate(() => {
+      const { outlineStyle, outlineWidth, outlineColor } = getComputedStyle(
+        document.activeElement!,
+      );
+      return `${outlineStyle} ${outlineWidth} ${outlineColor}`;
+    });
+  const astryx = await ring();
+  for (const name of ['Flagged', 'Fold Projects', 'More for Toy Box']) {
+    await page.getByRole('button', { name, exact: true }).first().focus();
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Tab');
+    expect({ name, ring: await ring() }).toEqual({ name, ring: astryx });
+  }
 
   // A row's menu loads as it's first opened, and still opens as a menu does from the keyboard.
   const more = page
@@ -166,6 +181,29 @@ test('the sidebar works from the keyboard alone, its fold first and each menu as
   await expect(focused()).resolves.toBe('menuitem: Rename Receipts');
   await page.keyboard.press('Escape');
   await expect(focused()).resolves.toBe('BUTTON: More for Receipts');
+}, 60_000);
+
+test('an account whose folders are on their way shows lines in their shape, which its folders take', async () => {
+  const context = await app.context({ ...DESKTOP, deviceScaleFactor: 2 });
+  const page = await context.newPage();
+  page.on('pageerror', (error) => errors.push(error.message));
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route('**/_serverFn/**', async (route) => {
+    if (decodeURIComponent(route.request().url()).includes('"folders"')) await held;
+    await route.fallback();
+  });
+  await page.goto(app.url);
+  const listing = page.getByRole('status').filter({ hasText: /^Listing .+’s folders$/ });
+  await listing.last().waitFor({ state: 'attached' });
+  await expect(listing.allTextContents()).resolves.toEqual([
+    'Listing Personal’s folders',
+    'Listing Work’s folders',
+  ]);
+  release();
+  await page.unrouteAll({ behavior: 'wait' });
+  await folderRow(page, 'Archive').waitFor();
+  await expect(listing.count()).resolves.toBe(0);
 }, 60_000);
 
 test('accounts and folders fold by click and by key, count what’s unread inside, and stay folded', async () => {

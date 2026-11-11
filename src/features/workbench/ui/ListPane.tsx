@@ -142,7 +142,14 @@ export function ListPane({
         <Heading level={2} id={titleId} xstyle={styles.title}>
           {title}
         </Heading>
-        {unread ? <span {...stylex.props(styles.unread)}>{unread} unread</span> : null}
+        {unread ? (
+          // Where the count can't fit whole, it moves past a break to a second line its box hides,
+          // so it goes before the title gives up a letter.
+          <span {...stylex.props(styles.unread)}>
+            {'\u200b'}
+            <span {...stylex.props(styles.unreadText)}>{unread} unread</span>
+          </span>
+        ) : null}
         <span {...stylex.props(styles.scope)}>
           {scope ? (
             <>
@@ -253,9 +260,6 @@ function Empty({ viewIn, icon, title }: { viewIn: View['in']; icon: LucideIcon; 
 
 const focusRing = `2px solid ${colorVars['--color-accent']}`;
 
-/** A header too narrow for its title, its unread count and the conversation's buttons together. */
-const NARROW = '@container (width < 20rem)';
-
 const styles = stylex.create({
   pane: {
     display: 'flex',
@@ -292,13 +296,12 @@ const styles = stylex.create({
     paddingBlock: spacingVars['--spacing-2'],
   },
   // A narrow list's header gives up its unread count, then truncates its title, so the
-  // conversation's buttons keep their place at its end.
+  // conversation's buttons keep their place at its end, at any width and under a finger too.
   header: {
     flexShrink: 0,
     display: 'flex',
     alignItems: 'baseline',
     gap: spacingVars['--spacing-2'],
-    containerType: 'inline-size',
     paddingTop: {
       default: spacingVars['--spacing-3'],
       [media.phone]: `calc(${tm.safeTop} + ${spacingVars['--spacing-2']})`,
@@ -371,10 +374,18 @@ const styles = stylex.create({
     fontWeight: fontWeightVars['--font-weight-semibold'],
     whiteSpace: 'nowrap',
   },
+  // It shrinks far ahead of the title, and one line tall, it shows its count whole or not at all.
   unread: {
-    display: { default: null, [NARROW]: 'none' },
+    flexShrink: 1_000_000,
+    minWidth: 0,
+    height: `calc(${typeScaleVars['--text-supporting-size']} * ${typeScaleVars['--text-supporting-leading']})`,
+    overflow: 'hidden',
     color: tm.textQuiet,
     fontSize: typeScaleVars['--text-supporting-size'],
+    lineHeight: typeScaleVars['--text-supporting-leading'],
+  },
+  unreadText: {
+    display: 'inline-block',
     whiteSpace: 'nowrap',
   },
   sheet: {

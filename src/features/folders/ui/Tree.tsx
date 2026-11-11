@@ -1,7 +1,9 @@
 import { Icon } from '@astryxdesign/core/Icon';
+import { Skeleton } from '@astryxdesign/core/Skeleton';
 import {
   colorVars,
   durationVars,
+  focusVars,
   fontWeightVars,
   radiusVars,
   spacingVars,
@@ -10,6 +12,7 @@ import {
 import * as stylex from '@stylexjs/stylex';
 import { ChevronRight, type LucideIcon } from 'lucide-react';
 import { Suspense, useState, type ReactNode } from 'react';
+import { Pending, TextSkeleton } from '../../../app/theme/Pending.tsx';
 import { StampDot } from '../../../app/theme/StampDot.tsx';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Command } from '../../commands/index.ts';
@@ -118,6 +121,7 @@ export function AccountSection({
         </h2>
       </Line>
       <Folding isOpen={isOpen}>
+        {own.length === 0 && isListing(account) && <FolderSkeletons account={account} />}
         <FolderRows
           nodes={nodes}
           depth={0}
@@ -137,6 +141,33 @@ export function AccountSection({
     </section>
   );
 }
+
+/**
+ * Whether an account's folders are on their way. Every mailbox has an Inbox, so an account with none
+ * has yet to be listed, unless it can't be reached, which its own status says.
+ */
+const isListing = ({ status }: Account) => status === 'ready' || status === 'syncing';
+
+/** Folder lines on their way, as a new account's first sync lists them, in their shape. */
+function FolderSkeletons({ account }: { account: Account }) {
+  return (
+    <Pending label={`Listing ${account.name}’s folders`} holdsPlace={false}>
+      {SKELETON_WIDTHS.map((width, line) => (
+        <div
+          key={line}
+          aria-hidden
+          {...stylex.props(styles.row, styles.folderRow(0), styles.pending)}
+        >
+          <Skeleton width="16px" height="16px" radius={1} index={line} />
+          <TextSkeleton width={width} index={line} />
+        </div>
+      ))}
+    </Pending>
+  );
+}
+
+/** The lengths of the folder names the skeleton lines stand in for: an Inbox, then a few others. */
+const SKELETON_WIDTHS = ['34%', '42%', '28%', '38%'] as const;
 
 /**
  * An account's folders, each one followed by the folders inside it, a step further in. A folder
@@ -415,6 +446,9 @@ function Row({
 const ICON = '1rem';
 const STEP = `calc(${ICON} + ${spacingVars['--spacing-1']})`;
 
+// The focus ring every Astryx control draws, for the sidebar's own buttons.
+const FOCUS_RING = `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`;
+
 const styles = stylex.create({
   rows: {
     display: 'flex',
@@ -477,6 +511,7 @@ const styles = stylex.create({
     fontSize: typeScaleVars['--text-body-size'],
     textAlign: 'start',
     cursor: 'pointer',
+    outline: { default: null, ':focus-visible': FOCUS_RING },
     outlineOffset: '-2px',
   },
   // A folder's icon starts after the column its chevron takes, a step further in for each folder
@@ -508,6 +543,7 @@ const styles = stylex.create({
       ':hover': { default: null, '@media (hover: hover)': colorVars['--color-text-primary'] },
     },
     cursor: 'pointer',
+    outline: { default: null, ':focus-visible': FOCUS_RING },
     outlineOffset: '-2px',
   },
   foldAt: (depth: number) => ({
@@ -557,6 +593,11 @@ const styles = stylex.create({
   },
   countUnread: {
     color: colorVars['--color-text-accent'],
+  },
+  // A line on its way takes a folder line's place and nothing from the pointer.
+  pending: {
+    cursor: 'default',
+    pointerEvents: 'none',
   },
 });
 

@@ -1,5 +1,10 @@
 import { Icon } from '@astryxdesign/core/Icon';
-import { colorVars, radiusVars, spacingVars } from '@astryxdesign/core/theme/tokens.stylex';
+import {
+  colorVars,
+  focusVars,
+  radiusVars,
+  spacingVars,
+} from '@astryxdesign/core/theme/tokens.stylex';
 import { Tooltip } from '@astryxdesign/core/Tooltip';
 import * as stylex from '@stylexjs/stylex';
 import { MailPlus, Users } from 'lucide-react';
@@ -124,6 +129,9 @@ function RailButton({
   );
 }
 
+// The focus ring every Astryx control draws, for the sidebar's own buttons.
+const FOCUS_RING = `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`;
+
 const styles = stylex.create({
   foldRoom: {
     flexShrink: 0,
@@ -158,6 +166,7 @@ const styles = stylex.create({
     },
     color: colorVars['--color-text-secondary'],
     cursor: 'pointer',
+    outline: { default: null, ':focus-visible': FOCUS_RING },
     outlineOffset: '-2px',
   },
   // Unread mail waits behind it: a dot of the accent at the icon's corner.

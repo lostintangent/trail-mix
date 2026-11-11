@@ -1,5 +1,10 @@
 import { Icon } from '@astryxdesign/core/Icon';
-import { colorVars, durationVars, radiusVars } from '@astryxdesign/core/theme/tokens.stylex';
+import {
+  colorVars,
+  durationVars,
+  focusVars,
+  radiusVars,
+} from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { Ellipsis } from 'lucide-react';
 import type { ComponentProps } from 'react';
@@ -23,6 +28,9 @@ export function MoreButton({ label, ...props }: { label: string } & ComponentPro
   );
 }
 
+// The focus ring every Astryx control draws, for the sidebar's own buttons.
+const FOCUS_RING = `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`;
+
 const styles = stylex.create({
   more: {
     display: 'grid',
@@ -44,6 +52,7 @@ const styles = stylex.create({
       ':is([aria-expanded="true"])': colorVars['--color-text-primary'],
     },
     cursor: 'pointer',
+    outline: { default: null, ':focus-visible': FOCUS_RING },
     outlineOffset: '-2px',
     transitionProperty: 'background-color, color',
     transitionDuration: {

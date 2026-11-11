@@ -468,9 +468,11 @@ export function Workbench({
     },
     [closeComposer],
   );
+  // Closing a page leaves the view as if it had just arrived: on a desktop, its newest opens.
   const closePage = useCallback(() => {
     setPage(undefined);
     if (isPhone) setPhonePane('list');
+    else if (opensNewest(latestPlace.current.view, false)) setOpening(latestPlace.current.view);
   }, [isPhone]);
   // The phone's ways between panes, the same functions every render, so the buttons they're on stay
   // drawn as they are while the list and the reader change.
@@ -616,18 +618,20 @@ export function Workbench({
   );
   // At the head of the list on a desktop: what can be done to the open conversation or the
   // selection, drawn disabled while there's neither, so nothing in the header moves.
-  const listTriage = isReaderAlone
-    ? undefined
-    : {
-        label: isMany ? 'Selected conversations' : 'Conversation',
-        actions: (
-          <Suspense>
-            <TriageActions
-              commands={selectedCommands.length > 0 ? selectedCommands : NOTHING_TO_TRIAGE}
-            />
-          </Suspense>
-        ),
-      };
+  // The Outbox lists sends, not conversations, so its header has nothing of theirs to act on.
+  const listTriage =
+    isReaderAlone || view.in === 'outbox'
+      ? undefined
+      : {
+          label: isMany ? 'Selected conversations' : 'Conversation',
+          actions: (
+            <Suspense>
+              <TriageActions
+                commands={selectedCommands.length > 0 ? selectedCommands : NOTHING_TO_TRIAGE}
+              />
+            </Suspense>
+          ),
+        };
 
   const outbox = useOutboxCommands();
 

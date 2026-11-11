@@ -660,6 +660,8 @@ test('the list’s header shows its view’s icon, and the buttons for what is o
     const [header, row] = await icons();
     expect(header).toBe(row);
   }
+  // The Outbox lists sends, so its header has no buttons for a conversation.
+  await expect(list.getByRole('toolbar', { name: 'Conversation' }).count()).resolves.toBe(0);
   await page
     .getByRole('region', { name: 'Personal' })
     .getByRole('button', { name: /^Sent/ })
@@ -736,6 +738,54 @@ test('the list’s header shows its view’s icon, and the buttons for what is o
   expect(problems).toEqual([]);
   await context.close();
 }, 30_000);
+
+test('a narrow list’s header gives up its unread count, whole, before a letter of its title, under a finger too', async () => {
+  const TABLET = { viewport: { width: 1180, height: 820 }, isMobile: true, hasTouch: true };
+  for (const [pointer, options] of [
+    ['fine', SIZES.desktop],
+    ['coarse', TABLET],
+  ] as const) {
+    for (const width of [380, 560]) {
+      const context = await app.context(options);
+      await context.addInitScript(
+        (width) =>
+          localStorage.setItem(
+            'trail-mix.panel.list',
+            JSON.stringify({ width, isCollapsed: false }),
+          ),
+        width,
+      );
+      const page = await context.newPage();
+      await page.goto(app.url);
+      await page.getByRole('option').first().waitFor();
+      await page.getByText(/^\d+ unread$/).waitFor({ state: 'attached' });
+      const header = await page.evaluate(() => {
+        const header = document.querySelector('section[aria-labelledby] header')!;
+        const title = header.querySelector('h2')!;
+        const count = [...header.querySelectorAll('span span')].find((span) =>
+          /unread$/.test(span.textContent ?? ''),
+        )!;
+        const box = count.parentElement!.getBoundingClientRect();
+        const text = count.getBoundingClientRect();
+        return {
+          title: title.scrollWidth <= title.clientWidth ? title.textContent : 'truncated',
+          // Shown whole, inside its box, or moved out of it.
+          count: text.bottom <= box.bottom && text.right <= box.right + 0.5 ? 'whole' : 'hidden',
+          shown: text.top < box.bottom ? 'on its line' : 'gone',
+        };
+      });
+      // The count is whole on its line or gone, never cut, and the title stays whole either way.
+      const whole = { title: 'Inbox', count: 'whole', shown: 'on its line' };
+      const gone = { title: 'Inbox', count: 'hidden', shown: 'gone' };
+      expect({ pointer, width, header }).toEqual({
+        pointer,
+        width,
+        header: width === 560 || header.count === 'whole' ? whole : gone,
+      });
+      await context.close();
+    }
+  }
+}, 60_000);
 
 test('on a phone, the list’s header has no buttons, and the reader’s island files what’s open', async () => {
   const { context, page, problems } = await open(SIZES.phone);
