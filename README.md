@@ -27,11 +27,12 @@ When it's done, open the address Cloudflare shows, `https://trail-mix.<subdomain
 Cloudflare Access stands in front of Trail Mix and emails each person a one-time code, so Trail Mix never holds a password of yours.
 
 1. Open **Zero Trust**. The first time, choose a team name, which becomes `<team>.cloudflareaccess.com`, and the **Free** plan.
-2. Under **Settings → Authentication → Login methods**, add **One-time PIN**. A new team starts without it.
-3. Under **Access → Applications**, select **Add an application → Self-hosted**:
+2. Under **Integrations → Identity providers**, select **Add new identity provider → One-time PIN**. A new team starts with only the **Cloudflare** provider, which lets in members of your Cloudflare account and nobody you invite.
+3. Under **Access controls → Applications**, select **Create new application → Self-hosted and private**, then **Add public hostname**:
    - **Name:** Trail Mix
    - **Public hostname:** your address from step 1, without `https://`
    - **Policy:** action **Allow**, with **Emails** set to your address
+   - **Login methods:** turn off **Accept all available identity providers** and choose only **One-time PIN**, so the people you invite aren't offered a Cloudflare sign-in that can't let them in
    - **Session duration:** 1 month, so an installed app asks for a code about once a month
 
    Save it, and copy the **Audience (AUD) Tag** from its overview. Use an application like this one, not the Worker's **Protect this Worker** switch, which refuses the connection each open Trail Mix tab keeps.
