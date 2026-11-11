@@ -120,6 +120,9 @@ export type View =
   | { in: 'inbox' | 'flagged' | 'drafts' | 'outbox' }
   | { in: 'search'; text: string; fullText?: boolean };
 
+/** Where a member is, as the address names it: the view open, and the conversation open in it. */
+export type Place = { view: View; open?: ConversationId };
+
 /**
  * A message on the WebSocket that names what changed, so the browser knows what to refetch. Hints
  * arrive at most once and in no guaranteed order.

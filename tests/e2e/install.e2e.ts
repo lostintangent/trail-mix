@@ -82,10 +82,11 @@ test('losing the network while open, the installed app still opens the conversat
   const designReview = /Design review notes/;
   const subject = await openConversation(page, designReview);
   await page.waitForFunction(async () => (await keptCount()) >= 5, undefined, { polling: 200 });
-  // A new start, so the conversation is kept on the device but not in the page, and the pointer
-  // off the list, so resting on its row doesn't fetch it ahead.
+  // A new start at the bare Inbox, whose address opens nothing, so the conversation is kept on the
+  // device but not in the page, and the pointer off the list, so resting on its row doesn't fetch
+  // it ahead.
   await page.mouse.move(0, 0);
-  await page.reload({ waitUntil: 'networkidle' });
+  await page.goto(app.url, { waitUntil: 'networkidle' });
   await context.setOffline(true);
   await page.getByText('Offline. Showing what this device kept').waitFor();
   expect(await openConversation(page, designReview)).toBe(subject);
@@ -139,15 +140,26 @@ async function installed() {
   return { context, page };
 }
 
-/** Opens a row's conversation and waits for its open message to show. Returns its subject. */
+/**
+ * Opens a row's conversation, by its place in the list or its subject, and waits for the reader to
+ * show it, with its open message drawn. Returns its subject. The reader may already show another
+ * conversation, as one the address opened.
+ */
 async function openConversation(page: Page, row: number | RegExp): Promise<string> {
   const rows = page.getByRole('option');
-  await (typeof row === 'number' ? rows.nth(row) : rows.filter({ hasText: row }).first()).click();
+  const option = typeof row === 'number' ? rows.nth(row) : rows.filter({ hasText: row }).first();
+  const listed = (await option.textContent()) ?? '';
+  await option.click();
   const subject = page.locator('section[aria-label="Reader"] h1');
-  // Its open messages show their bodies: HTML in a frame sized to it, or plain text, which has none.
-  await page.waitForFunction(() => {
-    const sheets = [...document.querySelectorAll('section[aria-label="Reader"] article')];
+  // It shows the row's conversation, and its open messages show their bodies: HTML in a frame sized
+  // to it, or plain text, which has none.
+  await page.waitForFunction((listed) => {
+    const reader = document.querySelector('section[aria-label="Reader"]');
+    const shown = reader?.querySelector('h1')?.textContent ?? '';
+    const sheets = [...(reader?.querySelectorAll('article') ?? [])];
     return (
+      shown !== '' &&
+      listed.includes(shown) &&
       sheets.length > 0 &&
       sheets.every(
         (sheet) =>
@@ -157,7 +169,7 @@ async function openConversation(page: Page, row: number | RegExp): Promise<strin
           ),
       )
     );
-  });
+  }, listed);
   return (await subject.textContent()) ?? '';
 }
 

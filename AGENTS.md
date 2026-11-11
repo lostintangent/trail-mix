@@ -55,6 +55,7 @@ Every layer uses the same nouns, with the same names in the index, the contracts
 | Draft        | A message in a folder whose role is `drafts`. It lives on the mail server, not in Trail Mix.                                           |
 | Outgoing     | An Outbox entry: a draft, when to send it, and how the attempt is going.                                                               |
 | View         | What a list shows: one folder, a unified Inbox, Flagged, Drafts or Outbox across every account, or a search.                           |
+| Place        | Where a member is: a view and the conversation open in it, which the address names, so a reload or a link opens the same place.        |
 | Hint         | A message on the WebSocket that names what changed, so the browser knows what to refetch.                                              |
 | Stamp        | An account's color. It marks each row in the unified views and the From chip in the composer.                                          |
 
@@ -139,7 +140,7 @@ src/
       built/           the theme compiled by `bun run theme`, which the app loads
       tokens.stylex.ts Trail Mix's own tokens
   features/
-    mail/core/         the shared vocabulary: model, conversation linking, the index fold, MIME
+    mail/core/         the shared vocabulary: model, conversation linking, the index fold, MIME, the address
     providers/         provider.ts is the MailProvider contract
       imap/            the IMAP and SMTP provider, with sync reconciliation and vendor presets in core/
       demo/            the demo provider and its seeded mailbox

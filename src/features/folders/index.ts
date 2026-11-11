@@ -6,4 +6,11 @@ export { CREATE, folderCommands, viewCommands, type FolderEdit } from './ui/comm
 export { useChangedFolders } from './ui/changes.ts';
 export { useFolderEditing } from './ui/editing.ts';
 export { DeleteQuestion, FolderMenu } from './ui/lazy.ts';
-export { childPath, followed, nameProblem, renamedPath, type FolderChange } from './core/index.ts';
+export {
+  childPath,
+  followed,
+  nameProblem,
+  renamedPath,
+  standing,
+  type FolderChange,
+} from './core/index.ts';

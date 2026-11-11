@@ -24,6 +24,7 @@ import {
   type Folder,
   type Message,
   type MessageRef,
+  type Place,
   type View,
 } from '../../mail/core/index.ts';
 import { conversationQuery, conversationsQuery, outboxQuery } from '../../mailroom/client/index.ts';
@@ -147,8 +148,9 @@ const COLUMNS = `var(${PANELS.sidebar.variable}) var(${PANELS.list.variable}) mi
  * the three panes ride a horizontal track, and one shows at a time.
  */
 export function Workbench({
-  view,
-  onViewChange,
+  place,
+  onPlaceChange,
+  onBack,
   accounts,
   folders,
   counts,
@@ -159,8 +161,12 @@ export function Workbench({
   sidebarFooter,
   extraCommands = NO_COMMANDS,
 }: {
-  view: View;
-  onViewChange: (view: View) => void;
+  /** Where the member is, as the address holds it: the view, and the conversation open in it. */
+  place: Place;
+  /** Moves the place, and the address with it: pushed, so Back returns to where it was, or replaced. */
+  onPlaceChange: (place: Place, history: 'push' | 'replace') => void;
+  /** Goes back to where the address was before, as the browser's Back does. */
+  onBack: () => void;
   accounts: readonly Account[];
   folders: readonly Folder[];
   counts: ViewCounts;
@@ -177,7 +183,9 @@ export function Workbench({
   extraCommands?: readonly Command[];
 }) {
   const queryClient = useQueryClient();
-  const [selection, setSelection] = useState<Selection>(NOTHING_SELECTED);
+  const { view } = place;
+  // The conversation the address opens is the one selected, from the first render.
+  const [selection, setSelection] = useState<Selection>(() => openOnly(place.open));
   const [isPicking, setPicking] = useState(false);
   // Picking ends with the last conversation picked.
   useEffect(() => {
@@ -187,7 +195,8 @@ export function Workbench({
   const selected = selection.ids.length === 1 ? selection.ids[0] : undefined;
   const isMany = selection.ids.length > 1;
   const stamps = useMemo(() => new Map(accounts.map(({ id, stamp }) => [id, stamp])), [accounts]);
-  const [phonePane, setPhonePane] = useState<Pane>('list');
+  // On a phone, an address with a conversation opens on the reader, with no slide to it.
+  const [phonePane, setPhonePane] = useState<Pane>(() => (place.open ? 'reader' : 'list'));
   const [sidebar, setSidebar] = usePanel(PANELS.sidebar);
   const [list, setList] = usePanel(PANELS.list);
   const [isResizing, setIsResizing] = useState(false);
@@ -195,6 +204,16 @@ export function Workbench({
   const sidebarId = useId();
   const listId = useId();
   const { title, unread, scope } = describeView(view, accounts, folders, counts);
+  const { onViewChange, written, pushed } = useAddress({
+    place,
+    onPlaceChange,
+    selected,
+    isMany,
+    follow: (open) => {
+      setSelection(openOnly(open));
+      setPhonePane(open ? 'reader' : 'list');
+    },
+  });
   const { search, marks, searchBodies } = useSearch(view, onViewChange);
   // On a desktop New message and the search field top the sidebar. Folded to its rail, New message
   // leads the rail and the field sits above the list, as it does on a phone.
@@ -379,7 +398,24 @@ export function Workbench({
   // The phone's ways between panes, the same functions every render, so the buttons they're on stay
   // drawn as they are while the list and the reader change.
   const showFolders = useCallback(() => setPhonePane('sidebar'), []);
-  const backToList = useCallback(() => setPhonePane('list'), []);
+  // Back from a conversation on a phone is the browser's Back where opening it pushed the address,
+  // and otherwise takes the conversation out of the address.
+  const latestPlace = useRef(place);
+  useLayoutEffect(() => {
+    latestPlace.current = place;
+  });
+  const backToList = useCallback(() => {
+    const { view, open } = latestPlace.current;
+    if (open !== undefined && pushed.current === open) {
+      pushed.current = undefined;
+      onBack();
+      return;
+    }
+    written.current = undefined;
+    setSelection(NOTHING_SELECTED);
+    setPhonePane('list');
+    if (open !== undefined) onPlaceChange({ view }, 'replace');
+  }, [onBack, onPlaceChange, pushed, written]);
   const accountsCommands = useMemo(
     () =>
       accountCommands({
@@ -416,11 +452,26 @@ export function Workbench({
   useLayoutEffect(() => {
     order.current = conversations?.map(({ id }) => id) ?? [];
   }, [conversations]);
-  const pick = useCallback((id: ConversationId, by: SelectBy) => {
-    setPage(undefined);
-    setSelection((current) => select(current, id, by, order.current));
-    if (by === 'only') setPhonePane('reader');
-  }, []);
+  // On a phone, opening a conversation pushes the address, so Back slides from it to its list.
+  const isPhoneNow = useRef(isPhone);
+  useLayoutEffect(() => {
+    isPhoneNow.current = isPhone;
+  });
+  const pick = useCallback(
+    (id: ConversationId, by: SelectBy) => {
+      setPage(undefined);
+      setSelection((current) => select(current, id, by, order.current));
+      if (by !== 'only') return;
+      setPhonePane('reader');
+      const { view, open } = latestPlace.current;
+      if (isPhoneNow.current && open !== id) {
+        written.current = id;
+        pushed.current = id;
+        onPlaceChange({ view, open: id }, 'push');
+      }
+    },
+    [onPlaceChange, pushed, written],
+  );
   const startPicking = useCallback((id: ConversationId) => {
     setPicking(true);
     setSelection({ ids: [id], anchor: id });
@@ -550,7 +601,9 @@ export function Workbench({
           : isPhone
             ? phonePane === 'list'
               ? undefined
-              : () => setPhonePane('list')
+              : phonePane === 'reader'
+                ? backToList
+                : () => setPhonePane('list')
             : isMany
               ? stopPicking
               : undefined,
@@ -836,6 +889,90 @@ export function Workbench({
       )}
     </Commands>
   );
+}
+
+/** A selection of the one conversation an address opens, or of none. */
+const openOnly = (open: ConversationId | undefined): Selection =>
+  open === undefined ? NOTHING_SELECTED : { ids: [open], anchor: open };
+
+/**
+ * The open conversation and the place, kept together. A change of view pushes the place, so Back
+ * returns to it, except while a search is typed, which replaces it at each key. The selection
+ * replaces it, so moving by key adds no history. When the place moves from outside, as Back and
+ * Forward move it, the selection follows. A place whose conversation has gone opens its view with
+ * nothing selected, and says so.
+ */
+function useAddress({
+  place,
+  onPlaceChange,
+  selected,
+  isMany,
+  follow,
+}: {
+  place: Place;
+  onPlaceChange: (place: Place, history: 'push' | 'replace') => void;
+  /** The one conversation selected, if one is. */
+  selected: ConversationId | undefined;
+  /** Whether several are, which the address leaves out. */
+  isMany: boolean;
+  /** Makes the address's conversation the one selected, or selects none. */
+  follow: (open: ConversationId | undefined) => void;
+}) {
+  const { view, open } = place;
+  // What this workbench last wrote, and last pushed, so a place it moved isn't followed back.
+  const written = useRef(open);
+  const pushed = useRef<ConversationId>(undefined);
+  // The conversation the place opened from outside, as a reload, a link or Back opens one, until
+  // the member moves on. It's looked up, since it may have gone since the address was written.
+  const [arrived, setArrived] = useState(open);
+  const latest = useRef({ view, selected, follow });
+  useLayoutEffect(() => {
+    latest.current = { view, selected, follow };
+  });
+
+  useEffect(() => {
+    if (open === written.current) return;
+    written.current = open;
+    setArrived(open);
+    latest.current.follow(open);
+  }, [open]);
+
+  // Only a change of selection moves the place, not the place moving under a selection that hasn't
+  // followed it yet.
+  useEffect(() => {
+    if (isMany || selected === written.current) return;
+    written.current = selected;
+    setArrived(undefined);
+    const { view } = latest.current;
+    onPlaceChange(selected === undefined ? { view } : { view, open: selected }, 'replace');
+  }, [isMany, selected, onPlaceChange]);
+
+  const { data: shown } = useQuery({
+    ...conversationQuery(arrived ?? ''),
+    enabled: arrived !== undefined,
+  });
+  useEffect(() => {
+    if (arrived === undefined || shown === undefined || shown.length > 0) return;
+    setArrived(undefined);
+    // The member may have moved on already, as archiving it does.
+    if (latest.current.selected !== arrived) return;
+    written.current = undefined;
+    latest.current.follow(undefined);
+    onPlaceChange({ view: latest.current.view }, 'replace');
+  }, [arrived, shown, onPlaceChange]);
+
+  const onViewChange = useCallback(
+    (next: View) => {
+      const { view, selected } = latest.current;
+      const history = view.in === 'search' ? 'replace' : 'push';
+      onPlaceChange(
+        selected === undefined ? { view: next } : { view: next, open: selected },
+        history,
+      );
+    },
+    [onPlaceChange],
+  );
+  return { onViewChange, written, pushed };
 }
 
 /**

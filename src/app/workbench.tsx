@@ -4,21 +4,39 @@ import { Icon } from '@astryxdesign/core/Icon';
 import { colorVars, spacingVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, useRouter } from '@tanstack/react-router';
 import { CloudOff } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import { FirstRun, preloadFirstRun } from '../features/accounts/index.ts';
 import type { Command } from '../features/commands/index.ts';
 import { useTriagedList } from '../features/conversations/index.ts';
-import { useChangedFolders, viewCounts } from '../features/folders/index.ts';
-import type { View } from '../features/mail/core/index.ts';
+import { standing, useChangedFolders, viewCounts } from '../features/folders/index.ts';
+import {
+  addressOf,
+  paramsOf,
+  placeAt,
+  placeOf,
+  type Place,
+  type PlaceParams,
+  type View,
+} from '../features/mail/core/index.ts';
 import {
   accountsQuery,
+  conversationQuery,
   conversationsQuery,
   foldersQuery,
   outboxQuery,
   useHints,
 } from '../features/mailroom/client/index.ts';
+import { REST_MS } from '../features/reader/index.ts';
 import { Workbench } from '../features/workbench/index.ts';
 import { AppTheme } from './theme/AppTheme.tsx';
 import { trailMixTheme } from './theme/built/trail-mix.js';
@@ -28,17 +46,21 @@ import { accentCommands, themeCommands } from './theme/commands.ts';
 import { useAccent } from './theme/useAccent.ts';
 import { useThemeMode } from './theme/useThemeMode.ts';
 
-/** Where the workbench opens. */
-const FIRST_VIEW: View = { in: 'inbox' };
-
 export const Route = createFileRoute('/')({
-  // The loader asks for what the first screen shows as soon as the route is known, without waiting
-  // for it, so the answers arrive while the app's code still runs and the first render has rows.
-  loader: ({ context: { queryClient } }) => {
+  // The address names the member's place, which a reload, a link or a notification opens.
+  validateSearch: (search): PlaceParams => paramsOf(placeOf(search)),
+  // The loader asks for what the place shows as soon as the route is known, without waiting for
+  // it, so the answers arrive while the app's code still runs and the first render has rows. It
+  // runs again only for a place it hasn't asked for.
+  loaderDeps: ({ search }) => search,
+  staleTime: Infinity,
+  loader: ({ context: { queryClient }, deps }) => {
+    const { view, open } = placeOf(deps);
     void queryClient.prefetchQuery(accountsQuery);
     void queryClient.prefetchQuery(foldersQuery);
     void queryClient.prefetchQuery(outboxQuery);
-    void queryClient.prefetchInfiniteQuery(conversationsQuery(FIRST_VIEW));
+    if (view.in !== 'outbox') void queryClient.prefetchInfiniteQuery(conversationsQuery(view));
+    if (open !== undefined) void queryClient.prefetchQuery(conversationQuery(open));
   },
   component: App,
 });
@@ -137,10 +159,25 @@ function Desk({
   sidebarFooter: ReactNode;
   extraCommands: readonly Command[];
 }) {
-  const [view, setView] = useState(FIRST_VIEW);
+  const { place, changePlace, goBack } = usePlace();
+  const { view } = place;
   const accounts = useQuery(accountsQuery).data ?? NONE;
   // Folder changes on their way show at once, laid over the Mailroom's snapshot.
-  const folders = useChangedFolders(useQuery(foldersQuery).data ?? NONE);
+  const held = useQuery(foldersQuery).data;
+  const folders = useChangedFolders(held ?? NONE);
+  // An address whose folder has gone opens the Inbox instead, and says so. It's checked as the
+  // view arrives, from the address or once the folders are first known, not as the folders change,
+  // since a folder renamed in view is laid over them a moment before the view follows it.
+  const isHeld = held !== undefined;
+  const foldersNow = useRef(folders);
+  useLayoutEffect(() => {
+    foldersNow.current = folders;
+  });
+  useEffect(() => {
+    if (!isHeld) return;
+    const kept = standing(view, foldersNow.current);
+    if (kept !== view) changePlace({ view: kept }, 'replace');
+  }, [view, isHeld, changePlace]);
   const outbox = useQuery(outboxQuery).data ?? NONE;
   const counts = useMemo(() => viewCounts(folders, outbox), [folders, outbox]);
   const { data, hasNextPage, isFetching, isFetchingNextPage, fetchNextPage } = useInfiniteQuery({
@@ -160,8 +197,9 @@ function Desk({
 
   return (
     <Workbench
-      view={view}
-      onViewChange={setView}
+      place={place}
+      onPlaceChange={changePlace}
+      onBack={goBack}
       accounts={accounts}
       folders={folders}
       counts={counts}
@@ -174,3 +212,75 @@ function Desk({
     />
   );
 }
+
+/**
+ * The member's place, and how to move it: pushed onto the address, so Back returns, or replacing
+ * it, as a search typed or a key's move does. The place changes at once, so the search field shows
+ * each key as it lands, and the address follows: a push at once, and a replace once the place has
+ * rested, so typing and moving by key don't write the address at every step. The place follows the
+ * address when the member moves through its history, keeping its view while only the open
+ * conversation changes, so what shows the view alone doesn't render again.
+ */
+function usePlace() {
+  const router = useRouter();
+  const navigate = Route.useNavigate();
+  const [place, setPlace] = useState(() => placeAt(router.history.location.href));
+  const resting = useRef<{ place: Place; timer: ReturnType<typeof setTimeout> }>(undefined);
+  const write = useCallback(
+    (place: Place, history: 'push' | 'replace') =>
+      void navigate({ search: paramsOf(place), replace: history === 'replace' }),
+    [navigate],
+  );
+  // Writes a resting place now. The browser takes the address a moment after it's written, and a
+  // push in the same moment would take its place, so it's handed to the browser at once.
+  const settle = useCallback(() => {
+    if (!resting.current) return;
+    clearTimeout(resting.current.timer);
+    write(resting.current.place, 'replace');
+    resting.current = undefined;
+    router.history.flush();
+  }, [write, router]);
+
+  useEffect(
+    () =>
+      router.history.subscribe(({ location, action }) => {
+        if (action.type === 'PUSH' || action.type === 'REPLACE') return;
+        // A place still resting belonged to the entry the member has left.
+        clearTimeout(resting.current?.timer);
+        resting.current = undefined;
+        const { view, open } = placeAt(location.href);
+        setPlace((current) => {
+          const kept = isSameView(view, current.view) ? current.view : view;
+          return open === undefined ? { view: kept } : { view: kept, open };
+        });
+      }),
+    [router],
+  );
+  useEffect(() => () => clearTimeout(resting.current?.timer), []);
+
+  const changePlace = useCallback(
+    (next: Place, history: 'push' | 'replace') => {
+      setPlace(next);
+      if (history === 'push') {
+        settle();
+        write(next, 'push');
+        return;
+      }
+      clearTimeout(resting.current?.timer);
+      const timer = setTimeout(() => {
+        resting.current = undefined;
+        write(next, 'replace');
+      }, REST_MS);
+      resting.current = { place: next, timer };
+    },
+    [settle, write],
+  );
+  const goBack = useCallback(() => {
+    settle();
+    router.history.back();
+  }, [settle, router]);
+  return { place, changePlace, goBack };
+}
+
+const isSameView = (one: View, other: View) =>
+  addressOf({ view: one }) === addressOf({ view: other });

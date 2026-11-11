@@ -75,3 +75,11 @@ export function followed(view: View, change: FolderChange): View {
     folder: { account, path: `${change.to}${path.slice(folder.path.length)}` },
   };
 }
+
+/**
+ * A view as the account's folders stand: a folder that's no longer there, or whose account has
+ * gone, gives way to the Inbox, as an address saved before it went does. Any other view stays.
+ */
+export function standing(view: View, folders: readonly Folder[]): View {
+  return view.in === 'folder' && !at(folders, view.folder) ? { in: 'inbox' } : view;
+}

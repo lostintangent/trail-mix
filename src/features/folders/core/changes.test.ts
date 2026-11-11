@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { Folder, View } from '../../mail/core/index.ts';
-import { changed, followed, isShown, type FolderChange } from './changes.ts';
+import { changed, followed, isShown, standing, type FolderChange } from './changes.ts';
 import { deleteSaid } from './question.ts';
 
 const folder = (path: string, extra: Partial<Folder> = {}): Folder => {
@@ -92,6 +92,19 @@ test('a view in a renamed folder follows it, and one in a deleted folder goes to
     expect(followed(view, rename)).toBe(view);
     expect(followed(view, { do: 'delete', folder: trips })).toBe(view);
   }
+});
+
+test('a view of a folder that has gone, or whose account has, gives way to the Inbox', () => {
+  const japanView: View = { in: 'folder', folder: { account: 'personal', path: 'Trips/Japan' } };
+  expect(standing(japanView, folders)).toBe(japanView);
+  expect(
+    standing({ in: 'folder', folder: { account: 'personal', path: 'Peru' } }, folders),
+  ).toEqual({ in: 'inbox' });
+  expect(standing({ in: 'folder', folder: { account: 'gone', path: 'Trips' } }, folders)).toEqual({
+    in: 'inbox',
+  });
+  const flagged: View = { in: 'flagged' };
+  expect(standing(flagged, [])).toBe(flagged);
 });
 
 test('the question before a delete says what goes with the folder', () => {

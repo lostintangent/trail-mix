@@ -1,5 +1,6 @@
 import { QueryClientProvider, type QueryClient } from '@tanstack/react-query';
 import { createRouter } from '@tanstack/react-router';
+import { readQuery, writeQuery } from '../features/mail/core/index.ts';
 import { isInstalled, keepSnapshots } from '../features/offline/index.ts';
 import { createQueryClient } from '../shared/query-client.ts';
 import { routeTree } from './routeTree.gen.ts';
@@ -14,6 +15,9 @@ export function getRouter() {
   return createRouter({
     routeTree,
     context: { queryClient } satisfies RouterContext,
+    // The address's query holds a place, written and read as the place's own codec does.
+    parseSearch: readQuery,
+    stringifySearch: writeQuery,
     Wrap: ({ children }) => (
       <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
     ),
