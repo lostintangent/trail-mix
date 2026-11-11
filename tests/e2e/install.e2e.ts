@@ -1,7 +1,7 @@
 import { expect } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Page } from 'playwright';
+import type { BrowserContextOptions, Page } from 'playwright';
 import { ICONS } from '../../src/app/icons.ts';
 import { suite } from './suite.ts';
 
@@ -16,6 +16,14 @@ mkdirSync(SHOTS, { recursive: true });
 
 const app = suite();
 const { test } = app;
+
+const SIZES = {
+  desktop: { viewport: { width: 1440, height: 900 } },
+  phone: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
+} satisfies Record<string, BrowserContextOptions>;
+const THEMES = ['light', 'dark'] as const;
+/** A conversation far enough down the Inbox that opening the first never prepares it ahead. */
+const NEVER_OPENED = /Trip photos/;
 
 test('Chromium can install Trail Mix, and asks for its manifest with the member’s cookie', async () => {
   const context = await app.context();
@@ -84,6 +92,114 @@ test('the installed app opens offline to the lists and conversations it showed',
   await context.close();
 }, 60_000);
 
+test('the installed app reads offline at both sizes in both themes: the Inbox and what it opened', async () => {
+  for (const [size, options] of Object.entries(SIZES)) {
+    for (const colorScheme of THEMES) {
+      const { context, page, errors } = await installed({ ...options, colorScheme });
+      const subject = await openConversation(page, 0);
+      await page.waitForFunction(async () => (await keptCount()) >= 3, undefined, { polling: 200 });
+
+      await context.setOffline(true);
+      await page.reload();
+      // The address names the conversation, which opens from what the device kept, beside the
+      // Inbox, or on a phone over it.
+      await page.getByText('Offline: kept mail').waitFor({ state: 'attached' });
+      await page.waitForFunction(
+        (subject) =>
+          document.querySelector('section[aria-label="Reader"] h1')?.textContent === subject &&
+          document.querySelector('section[aria-label="Reader"] article') !== null,
+        subject,
+      );
+      await page.screenshot({ path: join(SHOTS, `offline-${size}-${colorScheme}.png`) });
+      if (size === 'phone') {
+        await page.getByRole('button', { name: 'Back', exact: true }).click();
+        await page.getByRole('option').first().waitFor();
+        await page.waitForTimeout(400);
+        await page.screenshot({ path: join(SHOTS, `offline-phone-${colorScheme}-inbox.png`) });
+      }
+      expect({ size, colorScheme, rows: (await page.getByRole('option').count()) > 5 }).toEqual({
+        size,
+        colorScheme,
+        rows: true,
+      });
+      expect({ size, colorScheme, errors }).toEqual({ size, colorScheme, errors: [] });
+      await context.close();
+    }
+  }
+}, 120_000);
+
+test('offline, a conversation never opened says it opens once online, and Send keeps the message', async () => {
+  const { context, page, errors } = await installed();
+  await openConversation(page, 0);
+  await page.waitForFunction(async () => (await keptCount()) >= 3, undefined, { polling: 200 });
+  await context.setOffline(true);
+  await page.reload();
+  await page.getByText('Offline: kept mail').waitFor();
+
+  // Its subject is the list's, and the reader says why the rest can't come, never that nothing
+  // is open.
+  await page.getByRole('option').filter({ hasText: NEVER_OPENED }).first().click();
+  const reader = page.locator('section[aria-label="Reader"]');
+  await reader.getByRole('alert').filter({ hasText: 'It opens once you’re back online' }).waitFor();
+  expect(await reader.locator('h1').textContent()).toMatch(NEVER_OPENED);
+  await page.screenshot({ path: join(SHOTS, 'offline-desktop-light-unopened.png') });
+
+  // Writing offline is out of scope, so Send sends nothing, and what was written stays.
+  await page.keyboard.press('c');
+  const composer = page.getByRole('region', { name: 'New message' });
+  await composer.getByRole('textbox', { name: 'To' }).fill('sam@trailmix.test');
+  await composer.getByRole('textbox', { name: 'Subject' }).fill('Written offline');
+  await composer.getByRole('textbox', { name: 'Message' }).fill('Kept until the network is back.');
+  await composer.getByRole('status').filter({ hasText: 'Offline. Saves once online.' }).waitFor();
+  await composer.getByRole('button', { name: 'Send', exact: true }).click();
+  await page.waitForTimeout(1_000);
+  expect(await composer.getByRole('textbox', { name: 'Message' }).textContent()).toBe(
+    'Kept until the network is back.',
+  );
+  await page.screenshot({ path: join(SHOTS, 'offline-desktop-light-send.png') });
+  expect(errors).toEqual([]);
+  await context.close();
+}, 60_000);
+
+test('back online, the installed app catches up with what changed, with no reload', async () => {
+  const { context, page, errors } = await installed();
+  await openConversation(page, 0);
+  await page.waitForFunction(async () => (await keptCount()) >= 3, undefined, { polling: 200 });
+  await context.setOffline(true);
+  await page.reload();
+  await page.getByText('Offline: kept mail').waitFor();
+  await page.getByRole('option').filter({ hasText: NEVER_OPENED }).first().click();
+  const reader = page.locator('section[aria-label="Reader"]');
+  await reader.getByRole('alert').waitFor();
+  // The page that reloaded offline, which a reload would replace.
+  await page.evaluate(() => Object.assign(window, { offlineLoad: true }));
+
+  // Another device, online, archives a conversation this one still lists.
+  const archived = /Invoice for October/;
+  await page.getByRole('option').filter({ hasText: archived }).first().waitFor();
+  const other = await (await app.context(SIZES.desktop)).newPage();
+  await other.goto(app.url);
+  const row = other.getByRole('option').filter({ hasText: archived }).first();
+  await row.click();
+  await other.keyboard.press('e');
+  await row.waitFor({ state: 'detached' });
+
+  await context.setOffline(false);
+  await page.getByText('Up to date').waitFor();
+  await page
+    .getByRole('option')
+    .filter({ hasText: archived })
+    .first()
+    .waitFor({ state: 'detached', timeout: 15_000 });
+  // The conversation it couldn't open opens by itself.
+  await reader.locator('article').first().waitFor();
+  expect(await reader.getByRole('alert').count()).toBe(0);
+  expect(await page.evaluate(() => 'offlineLoad' in window)).toBe(true);
+  await page.screenshot({ path: join(SHOTS, 'online-desktop-light-caught-up.png') });
+  expect(errors).toEqual([]);
+  await context.close();
+}, 60_000);
+
 test('losing the network while open, the installed app still opens the conversations it kept', async () => {
   const { context, page } = await installed();
   // HTML mail, far enough down that a new start doesn't prepare it ahead. Rows move with the
@@ -136,17 +252,22 @@ test('a browser tab keeps nothing, and its page loads as it always has', async (
   await context.close();
 });
 
-/** A page of Trail Mix run as an installed app, once its worker has kept the build. */
-async function installed() {
-  const context = await app.context({ viewport: { width: 1440, height: 900 } });
+/**
+ * A page of Trail Mix run as an installed app, once its worker has kept the build, and the errors
+ * its pages throw.
+ */
+async function installed(options: BrowserContextOptions = SIZES.desktop) {
+  const context = await app.context(options);
   await context.addInitScript(runInstalled);
   await context.addInitScript(kept);
   const page = await context.newPage();
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(app.url, { waitUntil: 'networkidle' });
   await page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {
     timeout: 15_000,
   });
-  return { context, page };
+  return { context, page, errors };
 }
 
 /**

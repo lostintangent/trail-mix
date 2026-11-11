@@ -29,7 +29,9 @@ export function keeperFor(queryClient: QueryClient): QueryPersister {
     maxAge: KEEP_FOR_MS,
     buster: SHAPE,
     prefix: PREFIX,
-    refetchOnRestore: 'always',
+    // A restored snapshot is fetched again below, since the persister's own refetch leaves its
+    // failure uncaught, and with no network it fails.
+    refetchOnRestore: false,
     serialize: (persisted) => keptOf(persisted),
     deserialize: (kept) => kept as unknown as PersistedQuery,
   });
@@ -40,10 +42,22 @@ export function keeperFor(queryClient: QueryClient): QueryPersister {
     await persister.persisterGc();
     await evict();
   });
-  return async (queryFn, context, query) =>
-    isKept(query.queryKey) && (await isOwners)
-      ? persister.persisterFn(queryFn, context, query)
-      : queryFn(context);
+  return async (queryFn, context, query) => {
+    if (!isKept(query.queryKey) || !(await isOwners)) return queryFn(context);
+    let isFetched = false;
+    const data = await persister.persisterFn(
+      (fetching) => {
+        isFetched = true;
+        return queryFn(fetching);
+      },
+      context,
+      query,
+    );
+    // Once the restore is done, its snapshot is fetched again. With no network that waits, and a
+    // failure leaves the snapshot showing.
+    if (!isFetched) setTimeout(() => void query.fetch().catch(() => {}));
+    return data;
+  };
 }
 
 /** Whether what this device kept is the Mailroom's that answers now, and so may show. */

@@ -31,7 +31,14 @@ import { conversationQuery } from '../../mailroom/client/index.ts';
 import { preloadTriageMenus } from '../../conversations/index.ts';
 import { preloadComposer } from '../../composer/ui/index.ts';
 import { isAwaitingCopy, leavingIn, preloadSendActions, type Leaving } from '../../outbox/index.ts';
-import { preloadReader, Reader, ReaderSkeleton, REST_MS } from '../../reader/index.ts';
+import { useReach } from '../../offline/index.ts';
+import {
+  ConversationUnopened,
+  preloadReader,
+  Reader,
+  ReaderSkeleton,
+  REST_MS,
+} from '../../reader/index.ts';
 import { PhoneIsland } from './PhoneIsland.tsx';
 
 /** The conversation the reader shows, with its messages and the account they belong to. */
@@ -107,7 +114,13 @@ export function ReaderPane({
   onBack: () => void;
 }) {
   const { shown, isPassing } = useRestingSelection(selected);
-  const { data: conversation, isPending } = useQuery({
+  const isOffline = useReach() !== 'online';
+  const {
+    data: conversation,
+    isPending,
+    isError,
+    refetch,
+  } = useQuery({
     ...conversationQuery(shown ?? ''),
     enabled: shown !== undefined,
     // A reply gone from the Outbox waits for its copy, which a lost hint can't keep from showing.
@@ -130,10 +143,14 @@ export function ReaderPane({
   // On its way: asked for, and not here yet. Its skeleton stands where it will lie.
   const isOpening =
     shown !== undefined && !isShowing && (isPending || (conversation?.length ?? 0) > 0);
+  // Asked for and refused, as with no network for one this device didn't keep. A selection never
+  // shows the empty reader, so it says why under the subject instead.
+  const isUnopened = shown !== undefined && !isShowing && !isOpening && isError;
   // Where it sits in the list is known before it arrives, so the bar stands still as it does.
   const placed = useMemo(
-    () => (shown !== undefined && (isShowing || isOpening) ? place?.(shown) : undefined),
-    [shown, isShowing, isOpening, place],
+    () =>
+      shown !== undefined && (isShowing || isOpening || isUnopened) ? place?.(shown) : undefined,
+    [shown, isShowing, isOpening, isUnopened, place],
   );
   const openDraft = useMemo(
     () => reading && onOpenDraft && ((draft: Message) => onOpenDraft(draft, reading.conversation)),
@@ -211,6 +228,14 @@ export function ReaderPane({
       ) : isOpening ? (
         <div {...stylex.props(styles.scroll, actions && styles.underBar)}>
           <ReaderSkeleton subject={shown && subjectOf?.(shown)} />
+        </div>
+      ) : isUnopened ? (
+        <div {...stylex.props(styles.scroll, actions && styles.underBar)}>
+          <ConversationUnopened
+            subject={subjectOf?.(shown)}
+            isOffline={isOffline}
+            onTryAgain={() => void refetch()}
+          />
         </div>
       ) : (
         <div {...stylex.props(styles.empty)}>

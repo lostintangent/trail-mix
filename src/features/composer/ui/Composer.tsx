@@ -37,6 +37,7 @@ import { useMediaQuery } from '../../../shared/useMediaQuery.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, Message, MessageRef } from '../../mail/core/index.ts';
 import { bodyQuery, partUrl } from '../../mailroom/client/index.ts';
+import { useReach } from '../../offline/index.ts';
 import { contentIdFor } from '../core/draft.ts';
 import { visibleBand, type Band } from '../core/keyboard.ts';
 import { linkOf } from '../core/links.ts';
@@ -301,6 +302,7 @@ function Writer({
   const account = accounts.find((each) => each.id === writing.account);
   const files = writing.attachments.filter((attached) => attached.contentId === undefined);
   const isCoarse = useMediaQuery(media.coarse);
+  const isOffline = useReach() !== 'online';
   const [linking, setLinking] = useState<Range>();
   const band = useVisibleBand(isSheet);
 
@@ -316,7 +318,8 @@ function Writer({
         isSheet ? [styles.centered, styles.sheetStatus] : styles.grow,
       )}
     >
-      {SAVED[autosave.state] || '\u00a0'}
+      {(autosave.state === 'failed' && isOffline ? SAVED_OFFLINE : SAVED[autosave.state]) ||
+        '\u00a0'}
     </span>
   );
   const close = isSheet ? (
@@ -534,6 +537,8 @@ const SAVED: Record<SaveState, string> = {
   saved: 'Saved to Drafts',
   failed: 'Couldn’t save. Trying again…',
 };
+/** A save that failed with no network, which saves, and lets Send go, once the network is back. */
+const SAVED_OFFLINE = 'Offline. Saves once online.';
 
 /**
  * Bold, italic, code and a link, each pressed while the text at the cursor has it. Link asks for

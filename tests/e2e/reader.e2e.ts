@@ -289,6 +289,24 @@ for (const colorScheme of ['light', 'dark'] as const) {
   }, 30_000);
 }
 
+test('a conversation the Mailroom won’t give says so under its subject, and Try again opens it', async () => {
+  const page = await open({ ...DESKTOP, colorScheme: 'light' });
+  await page.route('**/_serverFn/**', async (route) => {
+    const asked = decodeURIComponent(route.request().url());
+    await (asked.includes('"conversation"') ? route.abort() : route.fallback());
+  });
+  await row(page, 'Trip photos').click();
+  // The empty reader would say no conversation is open, though one is chosen.
+  await reader(page)
+    .getByRole('alert')
+    .filter({ hasText: 'This conversation could not be opened.' })
+    .waitFor({ timeout: 15_000 });
+  expect(await reader(page).locator('h1').textContent()).toBe('Trip photos');
+  await page.unrouteAll({ behavior: 'wait' });
+  await reader(page).getByRole('button', { name: 'Try again' }).click();
+  await says(page, 'Personal · Inbox · 1 message');
+}, 30_000);
+
 test('the Outbox’s empty reader asks for a send', async () => {
   const page = await open({ ...DESKTOP, colorScheme: 'light' });
   await page

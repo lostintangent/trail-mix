@@ -6,4 +6,5 @@ export { lightPaperCommand, setLightPaper, useDarkTheme } from './ui/lightPaper.
 export { preloadReader, Reader, SourceDialog } from './ui/lazy.ts';
 export { askAhead } from './ui/ahead.ts';
 export { ReaderSkeleton } from './ui/skeletons.tsx';
+export { ConversationUnopened } from './ui/Unopened.tsx';
 export type { ReaderProps } from './ui/Reader.tsx';
