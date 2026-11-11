@@ -40,6 +40,7 @@ import {
 } from '../features/notifications/index.ts';
 import { useDraftsAway, useLeaving } from '../features/outbox/index.ts';
 import { REST_MS } from '../features/reader/index.ts';
+import { afterFirstScreen } from '../shared/afterFirstScreen.ts';
 import { useHeldWhile } from '../shared/useHeldWhile.ts';
 import { Workbench } from '../features/workbench/index.ts';
 import { preloadable } from '../shared/preloadable.ts';
@@ -133,24 +134,9 @@ const { Component: Unreachable, preload: preloadUnreachable } = preloadable(
   async () => (await import('./Unreachable.tsx')).Unreachable,
 );
 
-/** How long after the first screen mounts code it can do without starts loading, as toasts do. */
-const LOAD_AFTER_MS = 1_000;
-
 /** Loads `load` once the first screen has had its turn and the browser is idle. */
 function usePreloadWhenIdle(load: () => Promise<unknown>) {
-  useEffect(() => {
-    const preload = () => void load().catch(() => {});
-    let idle: number | undefined;
-    const timer = setTimeout(() => {
-      // Safari has no idle callback.
-      if ('requestIdleCallback' in window) idle = requestIdleCallback(preload, { timeout: 5_000 });
-      else preload();
-    }, LOAD_AFTER_MS);
-    return () => {
-      clearTimeout(timer);
-      if (idle !== undefined) cancelIdleCallback(idle);
-    };
-  }, [load]);
+  useEffect(() => afterFirstScreen(() => void load().catch(() => {})), [load]);
 }
 
 /** How long a device that doesn't know whether there's mail waits before saying it's opening. */
