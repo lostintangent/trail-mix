@@ -31,6 +31,7 @@ import {
   standingOfFollowed,
   type Standing,
 } from '../core/standing.ts';
+import { media } from '../../../app/theme/tokens.stylex.ts';
 import { Airmail } from './Airmail.tsx';
 import { offerUndo, withdrawUndo } from './undoable.ts';
 
@@ -163,41 +164,45 @@ export default function LeavingToast({
     <div {...stylex.props(styles.card)}>
       {isLeaving(standing) && <Airmail isRunning={isOnItsWay(standing)} />}
       <div {...stylex.props(styles.row)}>
-        <Icon icon={icon} size="sm" color="inherit" />
-        <span {...stylex.props(styles.text)}>{text}</span>
+        <div {...stylex.props(styles.said)}>
+          <Icon icon={icon} size="sm" color="inherit" />
+          <span {...stylex.props(styles.text)}>{text}</span>
+        </div>
         {/* The countdown's seconds aren't announced, and what follows them is, once. */}
         <VisuallyHidden role="status">
           {standing.is === 'counting' || standing.is === 'scheduled' ? '' : text}
         </VisuallyHidden>
-        {isUndoable(standing) && undo !== 'done' ? (
+        <div {...stylex.props(styles.actions)}>
+          {isUndoable(standing) && undo !== 'done' ? (
+            <Button
+              label="Undo"
+              variant="ghost"
+              size="sm"
+              isLoading={undo === 'asking'}
+              onClick={() => void takeBack()}
+              xstyle={styles.action}
+            />
+          ) : goToOutbox && (standing.is === 'failed' || standing.is === 'retrying') ? (
+            <Button
+              label="Open Outbox"
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                dismiss();
+                void goToOutbox.run();
+              }}
+              xstyle={styles.action}
+            />
+          ) : null}
           <Button
-            label="Undo"
+            label="Dismiss"
+            icon={<Icon icon={X} size="sm" color="inherit" />}
+            isIconOnly
             variant="ghost"
             size="sm"
-            isLoading={undo === 'asking'}
-            onClick={() => void takeBack()}
-            xstyle={styles.action}
+            onClick={dismiss}
           />
-        ) : goToOutbox && (standing.is === 'failed' || standing.is === 'retrying') ? (
-          <Button
-            label="Open Outbox"
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              dismiss();
-              void goToOutbox.run();
-            }}
-            xstyle={styles.action}
-          />
-        ) : null}
-        <Button
-          label="Dismiss"
-          icon={<Icon icon={X} size="sm" color="inherit" />}
-          isIconOnly
-          variant="ghost"
-          size="sm"
-          onClick={dismiss}
-        />
+        </div>
       </div>
     </div>
   );
@@ -230,23 +235,39 @@ const styles = stylex.create({
     overflow: 'hidden',
     borderRadius: radiusVars['--radius-container'],
   },
+  // What it says, then what it offers. On a phone, what it says takes the card's width when it
+  // can't share a line with them, and they sit at the end of a line beneath it.
   row: {
     display: 'flex',
+    flexWrap: { default: 'nowrap', [media.phone]: 'wrap' },
     alignItems: 'center',
-    gap: spacingVars['--spacing-2'],
+    columnGap: spacingVars['--spacing-2'],
+    rowGap: spacingVars['--spacing-1'],
     paddingBlock: spacingVars['--spacing-2'],
     paddingInlineStart: spacingVars['--spacing-4'],
     paddingInlineEnd: spacingVars['--spacing-2'],
   },
-  text: {
+  said: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: spacingVars['--spacing-2'],
     flexGrow: 1,
+    minWidth: 0,
+  },
+  text: {
     minWidth: 0,
     fontSize: typeScaleVars['--text-body-size'],
     fontVariantNumeric: 'tabular-nums',
   },
-  // A long reason wraps beside the action rather than squeezing it.
-  action: {
+  // Beside it, a long reason wraps rather than squeezing them.
+  actions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: spacingVars['--spacing-2'],
     flexShrink: 0,
+    marginInlineStart: 'auto',
+  },
+  action: {
     fontWeight: fontWeightVars['--font-weight-semibold'],
   },
 });

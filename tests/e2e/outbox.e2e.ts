@@ -100,6 +100,47 @@ const hasAirmail = (page: Page, to: RegExp) =>
       ),
     );
 
+/**
+ * That a toast reads across its card: what it says in three lines at most, and its actions beside
+ * it only while it fits on one line, else at the end of a line beneath it, each a 44-pixel target
+ * under a finger.
+ */
+async function readsAcross(page: Page, text: RegExp) {
+  const shape = await toast(page, text).evaluate((said) => {
+    const row = said.parentElement!.parentElement!;
+    const box = said.getBoundingClientRect();
+    const style = getComputedStyle(said);
+    const line = Number.parseFloat(style.lineHeight) || Number.parseFloat(style.fontSize) * 1.2;
+    const actions = [...row.querySelectorAll('button')].map((button) =>
+      button.getBoundingClientRect(),
+    );
+    return {
+      lines: Math.round(box.height / line),
+      share: box.width / row.getBoundingClientRect().width,
+      isBeneath: actions.every(({ top }) => top >= box.bottom - 1),
+      isReachable: actions.every(({ width, height }) => width >= 44 && height >= 44),
+    };
+  });
+  expect(shape.lines).toBeLessThanOrEqual(3);
+  expect(shape.isReachable).toBe(true);
+  if (shape.lines > 1) {
+    expect(shape.isBeneath).toBe(true);
+    expect(shape.share).toBeGreaterThan(0.75);
+  }
+}
+
+/** Has every snapshot of the Outbox show a failed send as one that tries again on its own. */
+const retrying = (page: Page) =>
+  page.route('**/_serverFn/**', async (route) => {
+    const asked = decodeURIComponent(route.request().url());
+    if (route.request().method() !== 'GET' || !asked.includes('{"t":1,"s":"outbox"}')) {
+      return route.fallback();
+    }
+    const response = await route.fetch();
+    const body = (await response.text()).replaceAll('"s":"failed"', '"s":"waiting"');
+    await route.fulfill({ response, body });
+  });
+
 async function readable(page: Page, screen: string) {
   await page.screenshot({ path: join(SHOTS, `outbox-${screen}.png`) });
   expect({ screen, unreadable: await unreadableText(page) }).toEqual({ screen, unreadable: [] });
@@ -198,10 +239,19 @@ test('a send the server refuses keeps its reason in the Outbox, and Retry sends 
   // The demo refuses a message's first try only, so one size sees the refusal.
   const page = await open({ ...PHONE, colorScheme: 'light' });
   await openDraft(page, /Cabin/);
+  // Seen first as a send that tries again on its own, then as the refusal it is.
+  await retrying(page);
   await send(page).click();
+  await toast(page, /^Not sent to Rae yet\. The mail server refused it: 554/).waitFor({
+    timeout: 30_000,
+  });
+  await readsAcross(page, /^Not sent to Rae yet\./);
+  await readable(page, 'phone-light-retrying');
+  await page.unrouteAll();
   await toast(page, /^Couldn’t send to Rae\. The mail server refused it: 554/).waitFor({
     timeout: 30_000,
   });
+  await readsAcross(page, /^Couldn’t send to Rae\./);
   await readable(page, 'phone-light-refused');
   await page.getByRole('button', { name: 'Open Outbox' }).click();
   const row = page.getByRole('listitem').filter({ hasText: /To Rae Holm/ });
@@ -210,6 +260,24 @@ test('a send the server refuses keeps its reason in the Outbox, and Retry sends 
   await readable(page, 'phone-light-failed');
   await row.getByRole('button', { name: 'Retry' }).click();
   await page.getByRole('heading', { name: 'Nothing is leaving' }).waitFor({ timeout: 30_000 });
+}, 60_000);
+
+test('a send later says when on a phone, across its toast, and Undo keeps the draft', async () => {
+  const page = await open({ ...PHONE, colorScheme: 'dark' });
+  await openDraft(page, /Offsite agenda/);
+  await page.getByRole('button', { name: 'Send later' }).filter({ visible: true }).click();
+  await page
+    .getByRole('menuitem', { name: /morning$/ })
+    .first()
+    .click();
+  const scheduled = /^Sending to Sofia and 2 others /;
+  // Once the list has slid back into view and the toast into place.
+  await page.getByRole('heading', { name: 'Drafts' }).first().click({ trial: true });
+  await toast(page, scheduled).click({ trial: true });
+  await readsAcross(page, scheduled);
+  await readable(page, 'phone-dark-scheduled');
+  await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
+  await toast(page, /^Undone\. Nothing was sent to Sofia and 2 others\.$/).waitFor();
 }, 60_000);
 
 test('a send later leaves the Outbox at its time, not before', async () => {
