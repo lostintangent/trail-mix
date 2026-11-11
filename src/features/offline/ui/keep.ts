@@ -3,8 +3,13 @@ import {
   type AsyncStorage,
   type PersistedQuery,
 } from '@tanstack/query-persist-client-core';
-import { QueryObserver, type QueryClient, type QueryPersister } from '@tanstack/react-query';
-import { thisDeviceQuery } from '../../mailroom/client/index.ts';
+import {
+  QueryObserver,
+  type QueryClient,
+  type QueryObserverResult,
+  type QueryPersister,
+} from '@tanstack/react-query';
+import { thisDeviceQuery, type ThisDevice } from '../../mailroom/client/index.ts';
 import { evictions, isKept, KEEP_FOR_MS, keptOf, type Kept } from '../core/kept.ts';
 import { snapshots } from './store.ts';
 
@@ -63,22 +68,33 @@ export function keeperFor(queryClient: QueryClient): QueryPersister {
 /** Whether what this device kept is the Mailroom's that answers now, and so may show. */
 async function ownerOf(queryClient: QueryClient): Promise<boolean> {
   const kept = readOwner();
-  try {
-    // Asked once, at once, whether or not the browser thinks it's online.
-    const { cache } = await queryClient.fetchQuery({
-      ...thisDeviceQuery,
-      retry: false,
-      networkMode: 'always',
-    });
-    if (cache !== kept) await forget(cache);
-  } catch {
-    return kept !== undefined;
-  }
+  const device = await firstAnswer(queryClient);
+  if (!device) return kept !== undefined;
+  if (device.cache !== kept) await forget(device.cache);
   // An erase while open names the Mailroom anew, and the hint it sends has this refetched.
   new QueryObserver(queryClient, thisDeviceQuery).subscribe(({ data }) => {
     if (data && data.cache !== readOwner()) void forget(data.cache);
   });
   return true;
+}
+
+/**
+ * The Mailroom's answer about this device, or nothing once the first ask for it fails, whether or
+ * not the browser thinks it's online. Every kept snapshot waits on it, so it never waits out
+ * retries, which a fetch already under way, as the page's own, would bring with it.
+ */
+function firstAnswer(queryClient: QueryClient): Promise<ThisDevice | undefined> {
+  void queryClient.prefetchQuery({ ...thisDeviceQuery, retry: false, networkMode: 'always' });
+  return new Promise((resolve) => {
+    const observer = new QueryObserver(queryClient, { ...thisDeviceQuery, enabled: false });
+    const settle = ({ data, failureCount }: QueryObserverResult<ThisDevice>) => {
+      if (data === undefined && failureCount === 0) return;
+      unsubscribe();
+      resolve(data);
+    };
+    const unsubscribe = observer.subscribe(settle);
+    settle(observer.getCurrentResult());
+  });
 }
 
 async function forget(owner: string) {

@@ -23,6 +23,11 @@ const SIZES = {
   phone: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
 } satisfies Record<string, BrowserContextOptions>;
 const THEMES = ['light', 'dark'] as const;
+/**
+ * How soon after an offline reload's start the kept Inbox and the conversation open in it show.
+ * Nothing they need waits on the network, so they come as fast as the page draws.
+ */
+const KEPT_WITHIN_MS = 1_000;
 /** A conversation far enough down the Inbox that opening the first never prepares it ahead. */
 const NEVER_OPENED = /Trip photos/;
 
@@ -100,6 +105,7 @@ test('the installed app reads offline at both sizes in both themes: the Inbox an
       const subject = await openConversation(page, 0);
       await page.waitForFunction(async () => (await keptCount()) >= 3, undefined, { polling: 200 });
 
+      await context.addInitScript(noteShown);
       await context.setOffline(true);
       await page.reload();
       // The address names the conversation, which opens from what the device kept, beside the
@@ -111,6 +117,11 @@ test('the installed app reads offline at both sizes in both themes: the Inbox an
           document.querySelector('section[aria-label="Reader"] article') !== null,
         subject,
       );
+      const shown = await page.evaluate(() => ({ rows: rowsShownAt, reader: readerShownAt }));
+      const late = Object.entries(shown).flatMap(([what, at]) =>
+        at === undefined || at > KEPT_WITHIN_MS ? [`${what} at ${Math.round(at ?? -1)} ms`] : [],
+      );
+      expect({ size, colorScheme, late }).toEqual({ size, colorScheme, late: [] });
       await page.screenshot({ path: join(SHOTS, `offline-${size}-${colorScheme}.png`) });
       if (size === 'phone') {
         await page.getByRole('button', { name: 'Back', exact: true }).click();
@@ -451,7 +462,20 @@ function kept() {
   });
 }
 
+/** Notes when the page first drew a list row, and an open conversation's message, from its start. */
+function noteShown() {
+  const shown = window as unknown as { rowsShownAt?: number; readerShownAt?: number };
+  new MutationObserver(() => {
+    if (document.querySelector('[role="option"]')) shown.rowsShownAt ??= performance.now();
+    if (document.querySelector('section[aria-label="Reader"] article')) {
+      shown.readerShownAt ??= performance.now();
+    }
+  }).observe(document, { childList: true, subtree: true });
+}
+
 declare global {
+  var rowsShownAt: number | undefined;
+  var readerShownAt: number | undefined;
   function keptCount(): Promise<number>;
   function keptNothing(): Promise<void>;
   function keptWith(kind: string, change: (data: never) => unknown): Promise<void>;
