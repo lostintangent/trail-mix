@@ -6,18 +6,19 @@ import { isStale, type Key } from './queries.ts';
 /**
  * Keeps what's on screen current while Trail Mix is open, through one WebSocket per tab to the
  * member's Mailroom. Each hint makes stale the snapshots it names, and those on screen refetch.
- * Hints sent while the socket was down are lost, so after every reconnect everything refetches.
+ * Hints sent while the socket isn't open are lost, before it first opens as after it drops, so each
+ * time it opens everything refetches. A new Mailroom, as a demo visitor's first query makes, can
+ * fill before the socket that page opened reaches it.
  */
 export function useHints(): void {
   const queryClient = useQueryClient();
   useEffect(() => listen(queryClient), [queryClient]);
 }
 
-function listen(queryClient: QueryClient): () => void {
+export function listen(queryClient: QueryClient): () => void {
   let socket: WebSocket | undefined;
   let retry: ReturnType<typeof setTimeout> | undefined;
   let failures = 0;
-  let hasConnected = false;
   let isDone = false;
 
   const connect = () => {
@@ -26,8 +27,7 @@ function listen(queryClient: QueryClient): () => void {
     socket = new WebSocket(new URL('/updates', location.href.replace(/^http/, 'ws')));
     socket.onopen = () => {
       failures = 0;
-      if (hasConnected) void queryClient.invalidateQueries();
-      hasConnected = true;
+      void queryClient.invalidateQueries();
     };
     socket.onmessage = ({ data }) => {
       const hint = readHint(data);
