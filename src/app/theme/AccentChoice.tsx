@@ -4,12 +4,9 @@ import { colorVars, focusVars, radiusVars, sizeVars } from '@astryxdesign/core/t
 import { Tooltip } from '@astryxdesign/core/Tooltip';
 import * as stylex from '@stylexjs/stylex';
 import { RotateCcw } from 'lucide-react';
-import { hexOf, parseColor } from '../../shared/color.ts';
-import { DEFAULT_ACCENT } from './palette.ts';
+import { preloadAccentMath } from './accent.ts';
+import { DEFAULT_ACCENT_HEX } from './palette.ts';
 import { tm } from './tokens.stylex.ts';
-
-/** Where the picker starts before the member has picked: ink blue, as paper shows it. */
-const DEFAULT_PICK = hexOf(parseColor(DEFAULT_ACCENT.light)!);
 
 /**
  * The accent this device shows: a swatch of it that opens the system's color picker, and, once the
@@ -32,7 +29,10 @@ export function AccentChoice({
             ref={registerPicker}
             type="color"
             aria-label="Accent color"
-            value={accent ?? DEFAULT_PICK}
+            value={accent ?? DEFAULT_ACCENT_HEX}
+            // The math a pick needs loads as the member reaches for the picker, before any pick.
+            onPointerDown={preloadAccentMath}
+            onFocus={preloadAccentMath}
             onChange={(event) => onChange(event.currentTarget.value)}
             {...stylex.props(styles.input)}
           />

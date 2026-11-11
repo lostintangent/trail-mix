@@ -444,6 +444,9 @@ test('an accent picked beside the theme choice shows at once, outlasts a reload,
     });
   expect(await buttonOf()).toBe(inkBlue);
 
+  // A member reaches for the swatch, which opens the system's picker, before any color comes.
+  await picker.click();
+  await page.waitForLoadState('networkidle');
   await picker.fill('#c2185b');
   const picked = shownAs(accentTokens(parseHex('#c2185b')!, 'light').accent);
   expect(await accentShown(page)).toBe(picked);
@@ -471,6 +474,41 @@ test('an accent picked beside the theme choice shows at once, outlasts a reload,
   await page.reload({ waitUntil: 'networkidle' });
   expect(await accentShown(page)).toBe(inkBlue);
   expect(problems).toEqual([]);
+  await context.close();
+}, 30_000);
+
+/** The least time a person takes to choose a color in the system's picker, once it opens. */
+const CHOOSING_MS = 300;
+
+test('reaching for the accent the moment the list shows, on a slowed CPU, loads its math before any pick can come', async () => {
+  const context = await app.context({ ...SIZES.desktop, deviceScaleFactor: 1 });
+  const page = await context.newPage();
+  const cdp = await context.newCDPSession(page);
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 6 });
+  await page.goto(app.url);
+  await page.getByRole('option').first().waitFor();
+  const picker = page.getByLabel('Accent color');
+  await picker.click();
+  // The math a pick needs, named by the module it's built from, as the browser fetched it.
+  const loadedIn = await page.evaluate(
+    async (reached) =>
+      new Promise<number>((resolve) => {
+        const look = () => {
+          const math = performance
+            .getEntriesByType('resource')
+            .find(({ name }) => /\/assets\/readableAccent-/.test(name));
+          if (math) resolve(performance.now() - reached);
+          else requestAnimationFrame(look);
+        };
+        look();
+      }),
+    await page.evaluate(() => performance.now()),
+  );
+  // Choosing a color in the system's picker takes a person longer than this, so a pick comes later.
+  expect(loadedIn).toBeLessThan(CHOOSING_MS);
+  await page.waitForTimeout(CHOOSING_MS - loadedIn);
+  await picker.fill('#c2185b');
+  expect(await accentShown(page)).toBe(shownAs(accentTokens(parseHex('#c2185b')!, 'light').accent));
   await context.close();
 }, 30_000);
 
