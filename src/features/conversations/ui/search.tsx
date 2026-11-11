@@ -50,6 +50,7 @@ export function SearchField({ isCompact = false }: { isCompact?: boolean }) {
   const input = useRef<HTMLInputElement>(null);
   // On a desktop the field is the way to the commands too, and says so, with its key.
   const isPhone = useMediaQuery(media.phone);
+  const placeholder = isPhone ? 'Search mail' : isCompact ? 'Search' : 'Search and commands';
   // The commands show while the member works in the field: at once when ⌘K opened it, and
   // otherwise for whatever typed text names one.
   const [commands, setCommands] = useState<'closed' | 'typed' | 'all'>('closed');
@@ -105,29 +106,31 @@ export function SearchField({ isCompact = false }: { isCompact?: boolean }) {
     >
       <label {...stylex.props(styles.field)}>
         <Icon icon={Search} size="sm" color="secondary" />
-        <input
-          ref={input}
-          type="search"
-          aria-label="Search mail"
-          placeholder={isPhone ? 'Search mail' : isCompact ? 'Search' : 'Search and commands'}
-          value={text}
-          aria-controls={isOpen ? listId : undefined}
-          aria-activedescendant={isOpen ? active : undefined}
-          onChange={(event) => onSearch(event.target.value)}
-          onFocus={() => {
-            void loadScope().catch(() => {});
-            preloadCommandMatches();
-          }}
-          enterKeyHint="search"
-          autoComplete="off"
-          spellCheck={false}
-          {...stylex.props(styles.input)}
-        />
-        {!text && (
-          <kbd aria-hidden {...stylex.props(styles.hint)}>
-            {shortcutLabel('Mod+K', isApple)}
-          </kbd>
-        )}
+        <span {...stylex.props(styles.words)}>
+          <input
+            ref={input}
+            type="search"
+            aria-label="Search mail"
+            placeholder={placeholder}
+            value={text}
+            aria-controls={isOpen ? listId : undefined}
+            aria-activedescendant={isOpen ? active : undefined}
+            onChange={(event) => onSearch(event.target.value)}
+            onFocus={() => {
+              void loadScope().catch(() => {});
+              preloadCommandMatches();
+            }}
+            enterKeyHint="search"
+            autoComplete="off"
+            spellCheck={false}
+            {...stylex.props(styles.input, styles.room(placeholder.length))}
+          />
+          {!text && (
+            <kbd aria-hidden {...stylex.props(styles.hint)}>
+              {shortcutLabel('Mod+K', isApple)}
+            </kbd>
+          )}
+        </span>
         {text && (
           <IconButton
             label="Clear search"
@@ -236,9 +239,24 @@ const styles = stylex.create({
     transitionTimingFunction: easeVars['--ease-standard'],
     cursor: 'text',
   },
+  // The field's words and the key beside them, on one line it shows. Where the words wouldn't show
+  // whole beside the key, as in a narrow sidebar on a wide font, the key gives way first, onto a
+  // line below that the box hides.
+  words: {
+    flexGrow: 1,
+    minWidth: 0,
+    display: 'flex',
+    flexWrap: 'wrap',
+    alignItems: 'center',
+    columnGap: spacingVars['--spacing-2'],
+    height: `calc(${typeScaleVars['--text-body-size']} * ${typeScaleVars['--text-body-leading']})`,
+    overflow: 'hidden',
+  },
   input: {
     flexGrow: 1,
     minWidth: 0,
+    height: `calc(${typeScaleVars['--text-body-size']} * ${typeScaleVars['--text-body-leading']})`,
+    lineHeight: typeScaleVars['--text-body-leading'],
     padding: 0,
     borderWidth: 0,
     outline: 'none',
@@ -252,6 +270,8 @@ const styles = stylex.create({
     // The clear button is the field's own, the same in every browser.
     '::-webkit-search-cancel-button': { appearance: 'none' },
   },
+  // Room for the placeholder, in its own font's widest digits, so the key gives way before it's cut.
+  room: (characters: number) => ({ flexBasis: `${characters}ch` }),
   hint: {
     display: { default: 'inline', [media.phone]: 'none' },
     color: colorVars['--color-text-secondary'],

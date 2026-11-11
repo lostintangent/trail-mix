@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, expect } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { BrowserContextOptions, Page } from 'playwright';
+import type { BrowserContext, BrowserContextOptions, Page } from 'playwright';
 import { unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
@@ -44,8 +44,23 @@ const personal = (page: Page) => page.getByRole('region', { name: 'Personal' });
 const folderRow = (page: Page, name: string) =>
   personal(page).getByRole('button', { name: new RegExp(`^${name}( \\d+)?$`) });
 
-/** How a desktop's foot fits: everything whole, in order, apart, and inside the sidebar. */
-const FITS = { isNameWhole: true, isInOrder: true, isInside: true, isLevel: true };
+/** How a desktop's foot fits: the name whole, everything in order and apart, inside the sidebar. */
+const FITS = { name: 'whole', isInOrder: true, isInside: true, isLevel: true };
+/** How it fits where a wide font leaves the name no room: the name gives way, and only that. */
+const GIVES_WAY = { ...FITS, name: 'gives way' };
+
+/** A font about as wide as the sans a Linux runner draws with, which Apple's systems don't. */
+const WIDE_FONT = `nav * { font-family: Verdana, "DejaVu Sans", sans-serif !important; }`;
+
+/** Draws a page as a Linux runner does, with its wider sans and Ctrl+K, wherever the test runs. */
+async function asLinux(context: BrowserContext) {
+  await context.addInitScript((font) => {
+    Object.defineProperty(Navigator.prototype, 'platform', { get: () => 'Linux x86_64' });
+    addEventListener('DOMContentLoaded', () => {
+      document.head.append(Object.assign(document.createElement('style'), { textContent: font }));
+    });
+  }, WIDE_FONT);
+}
 
 async function footFits(page: Page) {
   return page.getByRole('navigation', { name: 'Mailboxes' }).evaluate((nav) => {
@@ -62,9 +77,16 @@ async function footFits(page: Page) {
     ) as [DOMRect, DOMRect, DOMRect];
     const edge = nav.getBoundingClientRect();
     const middle = ({ top, height }: DOMRect) => top + height / 2;
+    const isWhole = name.scrollWidth <= name.clientWidth;
     return {
-      isNameWhole: name.scrollWidth <= name.clientWidth,
-      isInOrder: gear.right <= words.left && words.left + name.scrollWidth <= compose.left,
+      // Cut, it ends in an ellipsis, so it reads as giving way rather than as broken.
+      name: isWhole
+        ? 'whole'
+        : getComputedStyle(name).textOverflow === 'ellipsis'
+          ? 'gives way'
+          : 'cut',
+      // What shows of it never reaches under New message.
+      isInOrder: gear.right <= words.left && words.right <= compose.left,
       isInside: gear.left >= edge.left && compose.right <= edge.right,
       isLevel: Math.abs(middle(gear) - middle(compose)) < 1,
     };
@@ -303,16 +325,20 @@ test('the foot holds the Settings gear, a rule and Trail Mix, and says nothing a
   }
 }, 90_000);
 
-test('at its narrowest, the foot still holds the gear, the rule, the name and New message, uncut, under a mouse or a finger', async () => {
-  for (const [pointer, options] of [
-    ['mouse', { colorScheme: 'light' }],
-    ['finger', { colorScheme: 'dark', hasTouch: true }],
+test('at its narrowest, the foot holds the gear, the rule, the name and New message, apart, under a mouse or a finger, on any font', async () => {
+  // Apple's font fits the name whole beside 44-pixel targets, and a wider one may only cut the name.
+  const isApple = process.platform === 'darwin';
+  for (const [pointer, options, isWide] of [
+    ['mouse', { colorScheme: 'light' }, false],
+    ['finger', { colorScheme: 'dark', hasTouch: true }, false],
+    ['finger', { colorScheme: 'light', hasTouch: true }, true],
   ] as const) {
     const context = await app.context({ ...DESKTOP, deviceScaleFactor: 2, ...options });
     await context.addInitScript(
       ([key, width]) => localStorage.setItem(key, JSON.stringify({ width, isCollapsed: false })),
       [PANELS.sidebar.key, PANELS.sidebar.min] as const,
     );
+    if (isWide) await asLinux(context);
     const page = await context.newPage();
     page.on('pageerror', (error) => errors.push(error.message));
     await page.goto(app.url);
@@ -320,7 +346,11 @@ test('at its narrowest, the foot still holds the gear, the rule, the name and Ne
     await atRest(page);
     const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
     expect(Math.round((await sidebar.boundingBox())!.width)).toBe(PANELS.sidebar.min);
-    expect({ pointer, fits: await footFits(page) }).toEqual({ pointer, fits: FITS });
+    const fits = await footFits(page);
+    const promised = isWide || (!isApple && pointer === 'finger') ? [FITS, GIVES_WAY] : [FITS];
+    const kept = promised.find((each) => Bun.deepEquals(each, fits)) ?? FITS;
+    expect({ pointer, isWide, fits }).toEqual({ pointer, isWide, fits: kept });
+    // The search's words show whole, its key giving way first where they need its room.
     expect(await searchSays(page)).toEqual({ words: 'Search', isWhole: true });
     const target = pointer === 'finger' ? 44 : 32;
     for (const name of ['Open settings', 'New message']) {
@@ -331,7 +361,10 @@ test('at its narrowest, the foot still holds the gear, the rule, the name and Ne
         height: target,
       });
     }
-    await readable(page, `desktop-${options.colorScheme}-narrowest-${pointer}`);
+    await readable(
+      page,
+      `desktop-${options.colorScheme}-narrowest-${pointer}${isWide ? '-wide' : ''}`,
+    );
     await context.close();
   }
 }, 60_000);
