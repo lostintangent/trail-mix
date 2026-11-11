@@ -252,10 +252,13 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await page.keyboard.press('c');
     const sheet = page.locator('section[aria-label="New message"]');
     await sheet.waitFor();
+    // Places are measured from the header's top, since the sheet may still be rising.
     const centers = await sheet.locator('header').evaluate((element) => {
       const middle = (found: Element | null | undefined) => {
         const box = found?.getBoundingClientRect();
-        return box ? Math.round(box.top + box.height / 2) : NaN;
+        return box
+          ? Math.round(box.top + box.height / 2 - element.getBoundingClientRect().top)
+          : NaN;
       };
       return {
         title: middle(element.querySelector('h2')),
@@ -278,7 +281,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
       return {
         under: (said?.top ?? 0) >= (title?.bottom ?? 0) - 1,
         inside: (said?.bottom ?? Infinity) <= (header?.bottom ?? 0),
-        titleMiddle: Math.round((title?.top ?? 0) + (title?.height ?? 0) / 2),
+        titleMiddle: Math.round((title?.top ?? 0) + (title?.height ?? 0) / 2 - (header?.top ?? 0)),
       };
     });
     expect(placed).toEqual({ under: true, inside: true, titleMiddle: centers.title });
