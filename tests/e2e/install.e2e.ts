@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BrowserContextOptions, Page } from 'playwright';
 import { ICONS } from '../../src/app/icons.ts';
+import { atRest } from '../atRest.ts';
 import { suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 
@@ -262,9 +263,7 @@ test('on a phone, an archive refused offline puts back the conversation it took 
   // Rows picked come back picked, so a tap still picks rather than opens.
   await page.getByRole('button', { name: 'Back', exact: true }).click();
   // The list slides back in before a finger lands on it.
-  await page.waitForFunction(() =>
-    document.getAnimations().every(({ playState }) => playState !== 'running'),
-  );
+  await atRest(page);
   await page.waitForFunction(
     () => document.querySelector('section[aria-label="Reader"]')?.closest('[inert]') !== null,
   );
