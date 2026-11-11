@@ -46,10 +46,23 @@ async function session<T>(
 }
 const capabilities = () =>
   session((client) => Promise.resolve(new Set(client.capabilities.keys())));
+/**
+ * RFC 6154's attributes, which name a folder's role. Dovecot adds others, such as `\UnMarked` on a
+ * folder it has seen before, so a laptop that ran the tests earlier lists them where CI doesn't.
+ */
+const ROLES = new Set([
+  '\\All',
+  '\\Archive',
+  '\\Drafts',
+  '\\Flagged',
+  '\\Junk',
+  '\\Sent',
+  '\\Trash',
+]);
 const foldersWithRoles = () =>
   session(async (client) =>
     (await client.list())
-      .filter((f) => [...f.flags].some((flag) => !/^\\Has(No)?Children$/.test(flag)))
+      .filter((f) => [...f.flags].some((flag) => ROLES.has(flag)))
       .map((f) => f.path),
   );
 /** UIDVALIDITY and the message count of bob's Inbox. */
