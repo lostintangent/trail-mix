@@ -76,7 +76,11 @@ function movedTo({ conversation: _conversation, ...envelope }: Message, to: stri
 const OWED = -2;
 const LIST = -1;
 
-/** In a check, the folders a member looks at first sync first, so the lists they see fill first. */
+/**
+ * In a check, the folders a member looks at first sync first, so the lists they see fill first.
+ * Folders of one rank take turns a batch at a time, so the unified Inbox fills newest first from
+ * every account at once.
+ */
 const ORDER: (FolderRole | undefined)[] = [
   'inbox',
   'sent',
@@ -101,9 +105,14 @@ export function syncQueue(syncing: Syncing) {
   let moves: Move[] = [];
 
   function owe(job: Omit<Job, 'again' | 'changed' | 'cancelled'>) {
-    const at = jobs.findIndex((held) => held.rank > job.rank);
-    const added = { ...job, again: false, changed: false, cancelled: false };
-    jobs = at < 0 ? [...jobs, added] : [...jobs.slice(0, at), added, ...jobs.slice(at)];
+    place({ ...job, again: false, changed: false, cancelled: false });
+  }
+
+  /** Places a job last among those of its rank. */
+  function place(job: Job) {
+    const rest = jobs.filter((held) => held !== job);
+    const at = rest.findIndex((held) => held.rank > job.rank);
+    jobs = at < 0 ? [...rest, job] : [...rest.slice(0, at), job, ...rest.slice(at)];
   }
 
   function drop(job: Job) {
@@ -187,7 +196,10 @@ export function syncQueue(syncing: Syncing) {
     });
     for (const folder of changed) hint({ changed: 'conversations', folder });
     job.changed ||= batch.events.length > 0;
-    if (batch.more) return;
+    if (batch.more) {
+      place(job);
+      return;
+    }
     if (job.again) {
       job.again = false;
       return;

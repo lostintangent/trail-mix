@@ -85,6 +85,22 @@ test('a first sync lands over several wakes within budget, and gives what one lo
   ]);
 });
 
+test('Inboxes take turns a batch at a time, so the unified Inbox’s first page lands first', async () => {
+  const room = mailroom(600);
+  room.queue.check('personal');
+  room.queue.check('work');
+  // Each account's folders, then each Inbox's newest batch.
+  await room.queue.run({ steps: 4, ms: Infinity });
+  const first = room.store.page({ in: 'inbox' }).items;
+  await room.queue.run(ALL);
+  const full = room.store.page({ in: 'inbox' }).items;
+  // Rows move as Sent and Archive fill in, but the first page holds the conversations it will.
+  const ids = (rows: typeof first) => rows.map(({ id }) => id).sort();
+  expect(ids(first)).toEqual(ids(full));
+  // The newest mail is both accounts'.
+  expect(new Set(first.map(({ account }) => account))).toEqual(new Set(['personal', 'work']));
+});
+
 test('mail a watcher reports goes ahead of a first sync still under way', async () => {
   const room = mailroom(1200);
   room.queue.check('personal');

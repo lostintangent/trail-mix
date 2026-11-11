@@ -17,7 +17,13 @@ import type {
 import { RESTARTED, UNDO_SECONDS } from '../../outbox/core/index.ts';
 import { SIGN_IN_PATIENCE_MS } from '../../providers/index.ts';
 import PostalMime from 'postal-mime';
-import type { AccountSetup, Answered, Page, ThisDevice } from '../client/contract.ts';
+import {
+  PAGE_SIZE,
+  type AccountSetup,
+  type Answered,
+  type Page,
+  type ThisDevice,
+} from '../client/contract.ts';
 import {
   caFile,
   empty,
@@ -1043,6 +1049,20 @@ describe('A visitor’s Mailroom on the public demo', () => {
     });
   }, 120_000);
   afterAll(() => worker?.stop());
+
+  test('a new visitor’s first look shows their Inbox, with no wait for the alarm to fill it', async () => {
+    const flo = member('flo', () => worker);
+    const first = await flo.call<Page>('conversations', { in: 'inbox' }, 0);
+    expect(first.items).toHaveLength(PAGE_SIZE);
+    await flo.until(async () =>
+      (await flo.call<Account[]>('accounts')).every(({ status }) => status === 'ready'),
+    );
+    // The page holds what it will once the Mailroom is full, the Work account's newest mail too.
+    const full = await flo.call<Page>('conversations', { in: 'inbox' }, 0);
+    const ids = (page: Page) => page.items.map(({ id }) => id).sort();
+    expect(ids(first)).toEqual(ids(full));
+    expect(new Set(first.items.map(({ account }) => account)).size).toBe(2);
+  }, 30_000);
 
   test('checks mail only while the visitor has it open, and otherwise sleeps until it erases itself', async () => {
     const vi = member('vi', () => worker);

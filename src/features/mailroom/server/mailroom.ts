@@ -118,7 +118,7 @@ import { upgrade, type Sql, type SqlValue } from './schema.ts';
 import { outboxQueue, type OutboxQueue } from './outbox.ts';
 import { foundOf, opened, type Found } from './search.ts';
 import { signInBook, type SignInBook } from './sign-ins.ts';
-import { syncQueue, type SyncQueue } from './sync.ts';
+import { syncQueue, WAKE, type SyncQueue } from './sync.ts';
 
 export type MailroomEnv = {
   /** The body cache: raw messages, by member, account and ref. */
@@ -314,7 +314,9 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     if (found === 0 && this.demo) {
       this.addDemo();
       this.addDemo();
-      // The alarm fills the index, whether or not a device opens.
+      // The first look shows mail at once, rather than an empty Inbox until the alarm, a hint and
+      // a second ask. The alarm fills the rest, whether or not a device opens.
+      void ctx.blockConcurrencyWhile(() => this.firstLook());
       void ctx.storage.setAlarm(Date.now());
     }
   }
@@ -853,8 +855,9 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 
   /**
    * The alarm is the Mailroom's heartbeat, and the first thing that runs after a deploy or an
-   * eviction drops what it held in memory. It is also the only place sync runs: everything else
-   * owes sync and sets the alarm for now, so every wake lands a bounded share.
+   * eviction drops what it held in memory. It is also where sync runs: everything else owes sync
+   * and sets the alarm for now, so every wake lands a bounded share. The one exception is a new
+   * demo Mailroom's first look, a few steps that land before it answers anything.
    */
   override async alarm(): Promise<void> {
     this.isRunning = true;
@@ -987,6 +990,16 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   /** The key of each sender's picture the cache holds, by sender. */
   private pictures(senders: readonly string[]): Map<string, string> {
     return this.avatars.pictures(senders);
+  }
+
+  /**
+   * A new demo Mailroom's first steps, which land before it answers anything: each account's
+   * folders, then each Inbox's newest batch, which sync lands ahead of any other folder's. The
+   * unified Inbox's first page then holds the conversations it will once the Mailroom is full.
+   */
+  private async firstLook(): Promise<void> {
+    this.checkAll();
+    await this.queue.run({ steps: 2 * this.book.all().length, ms: WAKE.ms }).catch(report);
   }
 
   private checkAll(at = Date.now()) {
