@@ -56,6 +56,7 @@ function message(
     preview: '',
     flags: { seen, flagged, answered: false, draft: false },
     hasAttachments: false,
+    verified: false,
     conversation: 'c1',
     ...rest,
   } satisfies Message;

@@ -44,6 +44,7 @@ function message(
     preview: '',
     flags: { seen: true, flagged: false, answered: false, draft: false },
     hasAttachments: false,
+    verified: false,
     conversation: 'lunch',
     ...fields,
   };

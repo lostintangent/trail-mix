@@ -361,6 +361,7 @@ function message(uidValidity: number, uid: number, date: string, flags: Flags): 
     preview: '',
     flags,
     hasAttachments: false,
+    verified: false,
   };
 }
 

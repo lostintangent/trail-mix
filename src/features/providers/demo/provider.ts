@@ -379,6 +379,8 @@ async function written(bytes: Uint8Array): Promise<server.Written> {
       cc: addresses(parsed.cc ?? []),
       subject: parsed.subject ?? '',
       date: new Date(date ?? Date.now()).toISOString().replace(/\.\d{3}Z$/, '.000Z'),
+      // What a member writes, as a draft or a copy in Sent, no server has vouched for.
+      verified: false,
       preview:
         parsed.text === undefined ? previewOf(parsed.html ?? '', true) : previewOf(text, false),
       // As IMAP's providers judge it: a file marked as one, or anything but an inline image.

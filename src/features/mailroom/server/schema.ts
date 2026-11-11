@@ -194,6 +194,17 @@ export const versions: readonly (readonly string[])[] = [
       PRIMARY KEY (account, path)
     )`,
   ],
+  [
+    // The Logo cache: per domain that sent verified mail, the logo its BIMI record names while its
+    // DMARC policy enforces, when it was last looked up, and when it is next owed a lookup, in
+    // milliseconds since the epoch. A domain owed nothing waits for its next verified mail.
+    `CREATE TABLE logos (
+      domain TEXT PRIMARY KEY,
+      svg TEXT,
+      checked_at INTEGER,
+      due_at INTEGER
+    )`,
+  ],
 ];
 
 /**

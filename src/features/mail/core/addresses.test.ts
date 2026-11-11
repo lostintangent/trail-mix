@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { addressesIn } from './addresses.ts';
+import { addressesIn, domainOf } from './addresses.ts';
 
 test('a name and an angle address, or a bare address, are each one address', () => {
   expect(addressesIn('Ada Lovelace <ada@example.com>')).toEqual([
@@ -82,4 +82,10 @@ test('a mailbox with no address gives nothing', () => {
   expect(addressesIn('')).toEqual([]);
   expect(addressesIn('Ada Lovelace')).toEqual([]);
   expect(addressesIn('Ada <>, Grace <grace>, <@example.com>')).toEqual([]);
+});
+
+test('a domain is an address’s, after its last @, in lowercase', () => {
+  expect(domainOf('Ada@Example.COM')).toBe('example.com');
+  expect(domainOf('"a@b"@example.com')).toBe('example.com');
+  expect(domainOf('no-domain')).toBe('');
 });

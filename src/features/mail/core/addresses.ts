@@ -9,6 +9,17 @@ import type { Address } from './model.ts';
  * a name that is only a comment after a bare address, encoded words inside quotes, and an angle
  * address that is never closed.
  */
+/** The domain of an address, after its last `@`, in lowercase, or empty when it has none. */
+export function domainOf(address: string): string {
+  const at = address.lastIndexOf('@');
+  return at < 0
+    ? ''
+    : address
+        .slice(at + 1)
+        .trim()
+        .toLowerCase();
+}
+
 export function addressesIn(header: string): Address[] {
   const found: Address[] = [];
   let mailbox: Token[] = [];

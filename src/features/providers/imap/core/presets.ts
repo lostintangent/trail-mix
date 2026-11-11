@@ -17,6 +17,12 @@ export type Preset = {
    * the Outbox waits for it before filing one itself.
    */
   filesSent: boolean;
+  /**
+   * The names the vendor's receiving servers sign Authentication-Results with, at the top of each
+   * message they deliver, by the domain of the hosts an account reaches. None for a vendor whose
+   * servers write it without a name, whose senders then never count as verified.
+   */
+  authServers: Readonly<Record<string, readonly string[]>>;
 };
 
 export const PRESETS = {
@@ -30,6 +36,18 @@ export const PRESETS = {
     imap: { host: 'imappro.zoho.com', port: 993, secure: true },
     smtp: { host: 'smtppro.zoho.com', port: 465, secure: true },
     filesSent: true,
+    // Each data center signs with its own name, and an account trusts only its own center's, so a
+    // header a sender wrote in another center's name never counts. The US name is the one Zoho's
+    // headers show. The others follow its pattern, and a wrong one would only show initials.
+    authServers: {
+      'zoho.com': ['mx.zohomail.com'],
+      'zoho.eu': ['mx.zohomail.eu', 'mx.zoho.eu'],
+      'zoho.in': ['mx.zohomail.in', 'mx.zoho.in'],
+      'zoho.com.au': ['mx.zohomail.com.au', 'mx.zoho.com.au'],
+      'zoho.jp': ['mx.zohomail.jp', 'mx.zoho.jp'],
+      'zohocloud.ca': ['mx.zohocloud.ca'],
+      'zoho.sa': ['mx.zoho.sa'],
+    },
   },
   outlook: {
     imap: { host: 'outlook.office365.com', port: 993, secure: true },
@@ -48,10 +66,41 @@ export const PRESETS = {
       whenRefused: 'If IMAP is off in Outlook.com’s settings, turn it on, then get a new code.',
     },
     filesSent: true,
+    // Microsoft's servers write Authentication-Results without a name of their own, so a sender
+    // could write one that reads the same. Until a real message shows a safe reading, none.
+    authServers: {},
   },
 } as const satisfies Record<string, Preset>;
 
 export type PresetName = keyof typeof PRESETS;
+
+/**
+ * The names an account's receiving servers sign Authentication-Results with, from the preset whose
+ * hosts share the domain of the account's IMAP host, whether or not the account was set up with
+ * that preset. A test's stand-in names its servers on this machine as JSON, such as
+ * `{"localhost":["mx.trailmix.test"]}`, and is honored for hosts on this machine alone.
+ */
+export function authServersFor(host: string, standIn?: string): readonly string[] {
+  const name = host.toLowerCase().replace(/\.$/, '');
+  if (LOOPBACK.includes(name)) {
+    const given = parsed(standIn);
+    const names =
+      typeof given === 'object' && given !== null
+        ? (given as Record<string, unknown>)[name]
+        : undefined;
+    return Array.isArray(names)
+      ? names.filter((each): each is string => typeof each === 'string')
+      : [];
+  }
+  for (const preset of Object.values(PRESETS) as Preset[]) {
+    for (const [domain, names] of Object.entries(preset.authServers)) {
+      if (name === domain || name.endsWith(`.${domain}`)) return names;
+    }
+  }
+  return [];
+}
+
+const LOOPBACK = ['localhost', '127.0.0.1', '::1'];
 
 /**
  * A preset with a test's stand-ins for its vendor, given as JSON: where it signs in, and its hosts,
@@ -79,7 +128,7 @@ function isLocal(value: unknown): value is Endpoint {
   const { host, port, secure } = value as Record<string, unknown>;
   return (
     typeof host === 'string' &&
-    ['localhost', '127.0.0.1', '::1'].includes(host) &&
+    LOOPBACK.includes(host) &&
     Number.isInteger(port) &&
     typeof secure === 'boolean'
   );

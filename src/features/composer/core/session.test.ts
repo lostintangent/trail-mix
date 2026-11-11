@@ -40,6 +40,7 @@ const parent: Message = {
   preview: 'Shall we',
   flags: { seen: true, flagged: false, answered: false, draft: false },
   hasAttachments: false,
+  verified: false,
   conversation: 'c1',
 };
 

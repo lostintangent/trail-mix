@@ -24,6 +24,7 @@ function arrived(uid: number, change: Partial<Envelope> = {}): SyncEvent {
       preview: '',
       flags: { seen: false, flagged: false, answered: false, draft: false },
       hasAttachments: false,
+      verified: false,
       ...change,
     },
   };

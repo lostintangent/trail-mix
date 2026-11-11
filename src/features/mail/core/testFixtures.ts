@@ -35,6 +35,7 @@ export function envelope(subject: string, init: Partial<Envelope> = {}): Envelop
     preview: '',
     flags: { seen: false, flagged: false, answered: false, draft: false },
     hasAttachments: false,
+    verified: false,
     ...init,
   };
 }

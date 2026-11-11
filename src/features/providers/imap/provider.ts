@@ -50,6 +50,11 @@ export type ImapAccount = {
    * perhaps a while after. Filing then leaves Sent to the host while the Outbox waits for it.
    */
   filesSent?: boolean;
+  /**
+   * The names the host signs Authentication-Results with, as its preset gives them, under which the
+   * topmost one says whether a sender passed DMARC. Without any, no message counts as verified.
+   */
+  authServers?: readonly string[];
 };
 
 /**
@@ -211,7 +216,7 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
         envelope: true,
         bodyStructure: true,
         internalDate: true,
-        headers: ['references', 'list-id', 'list-unsubscribe'],
+        headers: ['references', 'list-id', 'list-unsubscribe', 'authentication-results'],
       },
       { uid: true },
     )) {
@@ -219,15 +224,18 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
     }
     const previews = await previewsOf(connection, fetched);
     return fetched.map((message) =>
-      envelopeOf({
-        ref: { account: id, path, uidValidity, uid: message.uid },
-        flags: flagsOf(message.flags ?? []),
-        envelope: message.envelope ?? {},
-        headers: message.headers?.toString('utf8') ?? '',
-        ...(message.bodyStructure ? { structure: message.bodyStructure } : {}),
-        ...(message.internalDate ? { internalDate: message.internalDate } : {}),
-        previewText: previews.get(message.uid) ?? '',
-      } satisfies ImapMessage),
+      envelopeOf(
+        {
+          ref: { account: id, path, uidValidity, uid: message.uid },
+          flags: flagsOf(message.flags ?? []),
+          envelope: message.envelope ?? {},
+          headers: message.headers?.toString('utf8') ?? '',
+          ...(message.bodyStructure ? { structure: message.bodyStructure } : {}),
+          ...(message.internalDate ? { internalDate: message.internalDate } : {}),
+          previewText: previews.get(message.uid) ?? '',
+        } satisfies ImapMessage,
+        account.authServers ?? [],
+      ),
     );
   }
 

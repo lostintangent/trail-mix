@@ -103,7 +103,22 @@ describe('an envelope', () => {
       flags,
       hasAttachments: false,
       list: { id: 'plans.example.com', unsubscribe: '<mailto:leave@example.com>' },
+      verified: false,
     });
+  });
+
+  test('is verified when the account’s server, writing on top, found DMARC passing for its From', () => {
+    const vouched = {
+      ref,
+      flags,
+      envelope: { from: [{ name: 'Kernel Weekly', address: 'hello@kernelweekly.example.com' }] },
+      headers:
+        'Authentication-Results: mx.zohomail.com; dmarc=pass header.from=kernelweekly.example.com\r\nReferences: <a@example.com>\r\n',
+      previewText: '',
+    };
+    expect(envelopeOf(vouched, ['mx.zohomail.com']).verified).toBe(true);
+    // An account whose preset names no server vouches for nobody.
+    expect(envelopeOf(vouched).verified).toBe(false);
   });
 
   test('falls back to the arrival date, and has no list without a List-Id', () => {

@@ -22,6 +22,7 @@ function message(uid: number, change: Partial<Message> = {}): Message {
     preview: 'Here are the ones from the ridge.',
     flags: { seen: false, flagged: false, answered: false, draft: false },
     hasAttachments: false,
+    verified: false,
     conversation: `personal:mail:${uid}`,
     ...change,
   };

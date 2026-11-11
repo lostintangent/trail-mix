@@ -6,12 +6,14 @@ import {
   type Flags,
   type MessageRef,
 } from '../../../mail/core/index.ts';
+import { isVerified } from './authentication.ts';
 import { previewOf } from './preview.ts';
 
 /**
  * Envelopes from what an IMAP server reports. Fetching is the provider's work, and this turns the
  * answer into the vocabulary: addresses, the headers that link conversations and lists, whether a
- * message has attachments, and a preview. The shapes below are the parts of IMAP's answer used.
+ * message has attachments, a preview, and whether the account's own server vouched for its sender.
+ * The shapes below are the parts of IMAP's answer used.
  */
 
 /** A node of BODYSTRUCTURE. */
@@ -41,7 +43,7 @@ export type ImapMessage = {
   ref: MessageRef;
   flags: Flags;
   envelope: ImapEnvelope;
-  /** The raw References, List-Id and List-Unsubscribe header lines, as fetched. */
+  /** The raw References, List-Id, List-Unsubscribe and Authentication-Results lines, in order. */
   headers: string;
   structure?: Structure;
   /** When IMAP's envelope has no date. */
@@ -50,17 +52,22 @@ export type ImapMessage = {
   previewText: string;
 };
 
-export function envelopeOf(message: ImapMessage): Envelope {
+/**
+ * A message's envelope. `authServers` are the names the account's server signs its
+ * Authentication-Results with, as its preset gives them.
+ */
+export function envelopeOf(message: ImapMessage, authServers: readonly string[] = []): Envelope {
   const { ref, flags, envelope, structure } = message;
   const headers = headerValues(message.headers);
   const listId = idIn(headers.get('list-id'));
   const unsubscribe = headers.get('list-unsubscribe');
   const date = envelope.date ?? message.internalDate;
+  const from = addressesOf(envelope.from)[0] ?? { email: '' };
   return {
     ...ref,
     messageId: messageIdOf(envelope.messageId),
     references: referencesOf(headers.get('references'), envelope.inReplyTo),
-    from: addressesOf(envelope.from)[0] ?? { email: '' },
+    from,
     to: addressesOf(envelope.to),
     cc: addressesOf(envelope.cc),
     subject: envelope.subject ?? '',
@@ -69,6 +76,7 @@ export function envelopeOf(message: ImapMessage): Envelope {
     flags,
     hasAttachments: structure ? hasAttachments(structure) : false,
     ...(listId ? { list: { id: listId, ...(unsubscribe ? { unsubscribe } : {}) } } : {}),
+    verified: isVerified(message.headers, authServers, from.email),
   };
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { PRESETS, withStandIn } from './presets.ts';
+import { authServersFor, PRESETS, withStandIn } from './presets.ts';
 
 const outlook = PRESETS.outlook;
 const imap = { host: 'localhost', port: 4993, secure: true };
@@ -54,5 +54,41 @@ describe('a test’s stand-in for a vendor', () => {
   test('is ignored for a preset with no sign-in of its own', () => {
     const zoho = PRESETS.zoho;
     expect(withStandIn(zoho, standIn('http://127.0.0.1:4080/consumers'))).toEqual(zoho);
+  });
+});
+
+describe('the servers an account trusts to sign Authentication-Results', () => {
+  test('are its own Zoho data center’s, by the domain of its host, set up with a preset or not', () => {
+    for (const host of ['imappro.zoho.com', 'imap.zoho.com', 'IMAP.Zoho.com.']) {
+      expect(authServersFor(host)).toEqual(['mx.zohomail.com']);
+    }
+    expect(authServersFor('imappro.zoho.eu')).toEqual(['mx.zohomail.eu', 'mx.zoho.eu']);
+    expect(authServersFor('imap.zoho.com.au')).not.toContain('mx.zohomail.com');
+  });
+
+  test('are none for a server no preset names, or one that writes them unnamed', () => {
+    for (const host of [
+      PRESETS.outlook.imap.host,
+      'mail.example.org',
+      'imap.notzoho.com',
+      'zoho.com.example.org',
+      'localhost',
+    ]) {
+      expect(authServersFor(host)).toEqual([]);
+    }
+  });
+
+  test('come from a test’s stand-in only for a host on this machine', () => {
+    const standIn = JSON.stringify({
+      localhost: ['mx.trailmix.test'],
+      '127.0.0.1': 'mx.trailmix.test',
+      'imap.example.org': ['mx.evil.test'],
+    });
+    expect(authServersFor('localhost', standIn)).toEqual(['mx.trailmix.test']);
+    expect(authServersFor('127.0.0.1', standIn)).toEqual([]);
+    expect(authServersFor('::1', standIn)).toEqual([]);
+    expect(authServersFor('imap.example.org', standIn)).toEqual([]);
+    expect(authServersFor('imappro.zoho.com', standIn)).toEqual(['mx.zohomail.com']);
+    expect(authServersFor('localhost', 'not json')).toEqual([]);
   });
 });

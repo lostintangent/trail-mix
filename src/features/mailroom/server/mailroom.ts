@@ -37,7 +37,9 @@ import {
 import { deliver, pushKeyOf, type PushKey } from '../../notifications/server/index.ts';
 import {
   DEMO_ACCOUNTS,
+  DEMO_LOGOS,
   PRESETS,
+  authServersFor,
   codeFrom,
   codeRequest,
   demoMailbox,
@@ -45,6 +47,7 @@ import {
   checkSignIn,
   imapProvider,
   isFresh,
+  namesThisMachine,
   pollRequest,
   polled,
   refreshRequest,
@@ -82,6 +85,7 @@ import {
   type ThisDevice,
 } from '../client/contract.ts';
 import { erasesAt, idlenessOf, isWorthNoting, windDownOf, type WindDown } from '../core/idle.ts';
+import { logoCandidates, namedMessages, namedRows, verifiedDomains } from '../core/logos.ts';
 import {
   accountBook,
   connectionOf,
@@ -94,6 +98,7 @@ import { memberKey, open, seal } from './credentials.ts';
 import { notifying, type Notifying } from './notifying.ts';
 import { envelopeIndex, pageAfter, type EnvelopeIndex } from './envelope-index.ts';
 import * as input from './input.ts';
+import { DNS_OVER_HTTPS, logoCache, logoNetwork, lookUpLogo, type LogoCache } from './logos.ts';
 import { upgrade, type Sql, type SqlValue } from './schema.ts';
 import { outboxQueue, type OutboxQueue } from './outbox.ts';
 import { foundOf, opened, type Found } from './search.ts';
@@ -128,6 +133,13 @@ export type MailroomEnv = {
    * every address in it names this machine.
    */
   OUTLOOK_STAND_IN?: string;
+  /**
+   * A test's names for the servers on this machine that sign Authentication-Results, as JSON from
+   * host to names. Honored for hosts on this machine alone.
+   */
+  AUTH_SERVERS_STAND_IN?: string;
+  /** A test's stand-in for DNS over HTTPS, answering as Cloudflare's does, honored only on this machine. */
+  DNS_STAND_IN?: string;
 };
 
 /** Where each preset that can sign in finds the operator's app in the Worker's settings. */
@@ -156,6 +168,8 @@ const NOTIFYING_CHECKING_MS = 4 * 60_000;
 const ALARM_SLACK_MS = 1_000;
 /** How many refs of messages the member moved into an Inbox are held, oldest dropped first. */
 const MOVED_IN_HELD = 1_000;
+/** The most domains one wake looks up logos for. */
+const LOGOS_PER_WAKE = 8;
 /** Where the id that names what an installed app keeps is stored. */
 const CACHE_KEY = 'cache';
 
@@ -172,6 +186,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   protected readonly sql: Sql;
   protected readonly store: EnvelopeIndex;
   private readonly book: AccountBook;
+  private readonly logos: LogoCache;
   /** Sign-ins at a vendor while members enter their codes. */
   private readonly underWay: SignInBook;
   /** Each signed-in account's access token while it's fresh. Only memory holds them. */
@@ -213,8 +228,9 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     const openedAt = openedAtIn(this.sql);
     this.openedAt = openedAt ?? Date.now();
     if (openedAt === undefined) this.writeOpened(this.openedAt);
-    this.store = envelopeIndex(this.sql);
+    this.store = envelopeIndex(this.sql, () => this.book.all().map((account) => account.address));
     this.book = accountBook(this.sql);
+    this.logos = logoCache(this.sql);
     this.underWay = signInBook(this.sql);
     this.notifying = notifying(this.sql);
     this.queue = syncQueue({
@@ -229,7 +245,10 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
         if (this.book.get(account)?.account.status === 'needs-sign-in') return;
         this.setStatus(account, error ? 'error' : 'ready');
       },
-      landed: (folder, events) => this.noteNews(folder, events),
+      landed: (folder, events) => {
+        this.noteNews(folder, events);
+        this.logos.note(verifiedDomains(events), Date.now());
+      },
     });
     this.sending = outboxQueue({
       sql: this.sql,
@@ -290,17 +309,18 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     const checked = input.viewOf(view);
     const place = input.placeOf(at);
     if (checked.in === 'outbox') throw new TypeError('The Outbox is listed by outbox().');
-    if (checked.in !== 'search') return this.store.page(checked, place);
-    if (!checked.fullText) return this.store.search(checked.text, place);
+    if (checked.in !== 'search') return this.named(this.store.page(checked, place));
+    if (!checked.fullText) return this.named(this.store.search(checked.text, place));
     // The first page asks the servers again. Pages further down read what that one found.
     if (place === 0 || this.found?.text !== checked.text) {
       this.found = await this.searchServers(checked.text);
     }
-    return pageAfter(this.found.rows, place);
+    return this.named(pageAfter(this.found.rows, place));
   }
 
   conversation(id: ConversationId): Promise<Message[]> {
-    return Promise.resolve(opened(input.conversationOf(id), this.store, this.found?.outside ?? []));
+    const messages = opened(input.conversationOf(id), this.store, this.found?.outside ?? []);
+    return Promise.resolve(namedMessages(messages, this.logos.held(logoCandidates([], messages))));
   }
 
   async body(ref: MessageRef): Promise<Body> {
@@ -453,6 +473,8 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     this.sql.transaction(() => {
       this.book.remove(account);
       this.store.forget(account);
+      // A logo stays only for a sender of the mail that's left.
+      this.logos.keep(this.store.verifiedDomains());
       this.sending.forget(account);
       this.underWay.forget(account);
       this.notifying.forgetAccount(account);
@@ -700,6 +722,12 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 
   // A message's bytes, for the Worker's routes. Null means the message or part is gone.
 
+  /** A verified sender's logo, from the Logo cache, as SVG. */
+  logo(domain: string): Promise<string | null> {
+    this.noteOpened();
+    return Promise.resolve(this.logos.logo(domain) ?? null);
+  }
+
   async source(ref: MessageRef): Promise<ReadableStream<Uint8Array> | null> {
     this.noteOpened();
     const bytes = await this.bytes(input.refOf(ref));
@@ -824,10 +852,43 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     await this.tellNews();
     // A new account's Inbox is known only once its folders are.
     await this.watchAll(this.devices() > 0);
+    await this.lookUpLogos();
     const sendAt = this.sending.nextWake() ?? poll;
     if (this.queue.owing() || sendAt <= Date.now()) await this.ctx.storage.setAlarm(Date.now());
     else await this.ctx.storage.setAlarm(Math.min(poll, sendAt, this.signInWake() ?? poll));
     return landed;
+  }
+
+  /**
+   * Looks up the logos owed, a few each wake, and hints every device when one comes or goes. The
+   * demo mailbox brings its own and looks nothing up.
+   */
+  private async lookUpLogos() {
+    const owed = this.logos.owed(Date.now(), LOGOS_PER_WAKE);
+    if (owed.length === 0) return;
+    const standIn = this.env.DNS_STAND_IN;
+    const network =
+      standIn && namesThisMachine(standIn)
+        ? logoNetwork(standIn, true)
+        : logoNetwork(DNS_OVER_HTTPS);
+    const changed = await Promise.all(
+      owed.map(async (domain) => {
+        try {
+          const svg = this.demo ? DEMO_LOGOS[domain] : await lookUpLogo(domain, network);
+          return this.logos.found(domain, svg, Date.now());
+        } catch (error) {
+          report(error);
+          this.logos.failed(domain, Date.now());
+          return false;
+        }
+      }),
+    );
+    if (changed.includes(true)) this.hint({ changed: 'logos' });
+  }
+
+  /** A page with the logos the cache holds named, and no others. */
+  private named(page: Page): Page {
+    return { ...page, items: namedRows(page.items, this.logos.held(logoCandidates(page.items))) };
   }
 
   private checkAll(at = Date.now()) {
@@ -1016,13 +1077,15 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
           return demoServer(account, mailbox, (next) => this.book.saveDemo(account, next)).provider;
         }
         if (!connection) throw new Error('There is no such account.');
+        const signers = authServersFor(connection.imap.host, this.env.AUTH_SERVERS_STAND_IN);
         if (deviceOf(this.book.get(account)?.account.preset)) {
-          return imapOver(account, connection, { accessToken: () => this.accessToken(account) });
+          const accessToken = () => this.accessToken(account);
+          return imapOver(account, connection, { accessToken }, signers);
         }
         const sealed = this.book.sealed(account);
         if (!sealed) throw new Error('There is no such account.');
         const pass = await open(await this.memberKey(), sealed, account);
-        return imapOver(account, connection, { pass });
+        return imapOver(account, connection, { pass }, signers);
       })().then((made) => this.reached(made));
       this.providers.set(account, provider);
       provider.catch(() => this.providers.delete(account));
@@ -1401,8 +1464,9 @@ function imapOver(
   account: AccountId,
   connection: Extract<Connection, { provider: 'imap' }>,
   secret: Secret,
+  authServers: readonly string[],
 ): MailProvider {
-  return imapProvider(imapAccount(account, connection, secret), network);
+  return imapProvider({ ...imapAccount(account, connection, secret), authServers }, network);
 }
 
 /** A password, or what gives each connection an access token from the account's vendor. */

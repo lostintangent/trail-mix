@@ -74,13 +74,22 @@ export type Envelope = MessageRef & {
   hasAttachments: boolean;
   /** List-Id and List-Unsubscribe. */
   list?: { id: string; unsubscribe?: string };
+  /** Whether the account's own mail server found DMARC passing for the domain in From. */
+  verified: boolean;
 };
 
 /**
  * What the index holds for one message. The fold assigns its conversation, linking one account's
  * Inbox, Sent, Archive and Drafts. Any other folder links only within itself.
  */
-export type Message = Envelope & { conversation: ConversationId };
+export type Message = Envelope & {
+  conversation: ConversationId;
+  /**
+   * The domain in From, when the message is verified and the Logo cache holds that domain's logo,
+   * which `/logos/<domain>` serves. Filled on each read.
+   */
+  logo?: string;
+};
 
 /**
  * One row of a list. Rows are one fixed height, so a list virtualizes without measuring. In a
@@ -103,6 +112,8 @@ export type ConversationSummary = {
   flagged: boolean;
   /** Whether any message has attachments. */
   hasAttachments: boolean;
+  /** The logo of its newest sender other than the member, as a Message names it. */
+  logo?: string;
 };
 
 /** The content of one message, fetched on first open. It never changes for a `MessageRef`. */
@@ -132,6 +143,8 @@ export type Hint =
   | { changed: 'folders'; account: AccountId }
   | { changed: 'conversations'; folder: FolderRef }
   | { changed: 'outbox' }
+  // A sender's logo came or went: the lists on screen name it, or no longer do.
+  | { changed: 'logos' }
   // After an erase: nothing a device has, or kept, is the member's any more.
   | { changed: 'everything' };
 

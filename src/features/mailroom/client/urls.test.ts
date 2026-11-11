@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { MessageRef } from '../../mail/core/index.ts';
-import { imageUrl, messageUrl, partUrl, readMessagePath } from './urls.ts';
+import { imageUrl, logoUrl, messageUrl, partUrl, readLogoPath, readMessagePath } from './urls.ts';
 
 const ref = (path: string, account = 'personal'): MessageRef => ({
   account,
@@ -63,4 +63,22 @@ test('a remote image goes through the proxy with its whole address as one parame
 
   expect(url.pathname).toBe('/images');
   expect(url.searchParams.get('url')).toBe(remote);
+});
+
+test('a logo reads back as its domain, in lowercase, and any other path names none', () => {
+  for (const domain of ['news.example.com', 'xn--bcher-kva.example', 'bücher.example']) {
+    expect(readLogoPath(pathOf(logoUrl(domain)))).toBe(domain);
+  }
+  expect(readLogoPath('/logos/News.Example.COM')).toBe('news.example.com');
+  for (const path of [
+    '/logos',
+    '/logos/',
+    '/logos/a/b',
+    '/logos/a%2Fb',
+    '/logos/%E0%A4%A',
+    '/images',
+  ]) {
+    expect(readLogoPath(path)).toBeNull();
+  }
+  expect(readLogoPath(`/logos/${'a'.repeat(254)}`)).toBeNull();
 });

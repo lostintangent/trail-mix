@@ -22,6 +22,7 @@ function envelope(id: string, init: Partial<Envelope> = {}): Envelope {
     preview: id,
     flags: { seen: true, flagged: false, answered: false, draft: false },
     hasAttachments: false,
+    verified: false,
     ...init,
   };
 }

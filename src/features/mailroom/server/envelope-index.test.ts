@@ -20,8 +20,8 @@ const FOLDERS: { account: string; path: string; role?: FolderRole }[] = [
   { account: 'work', path: 'INBOX', role: 'inbox' },
 ];
 
-function fresh(): EnvelopeIndex {
-  const store = envelopeIndex(testSql());
+function fresh(own: readonly string[] = []): EnvelopeIndex {
+  const store = envelopeIndex(testSql(), () => own);
   for (const account of ['personal', 'work']) {
     store.listFolders(
       account,
@@ -53,6 +53,7 @@ function envelope(id: string, init: Partial<Envelope> = {}): Envelope {
     preview: id,
     flags: { seen: false, flagged: false, answered: false, draft: false },
     hasAttachments: false,
+    verified: false,
     ...init,
   };
 }
@@ -179,6 +180,62 @@ describe('a conversation’s row', () => {
       flagged: true,
       hasAttachments: true,
     });
+  });
+
+  test('names the logo of its newest sender other than the member, when that message is verified', () => {
+    const store = fresh(['Me@TrailMix.test']);
+    const news = envelope('news', {
+      from: { email: 'news@Brand.Example' },
+      date: '2026-11-09T09:00:00.000Z',
+      verified: true,
+    });
+    const reply = envelope('re-news', {
+      path: 'Sent',
+      references: [news.messageId],
+      from: { email: 'me@trailmix.test' },
+      date: '2026-11-09T10:00:00.000Z',
+      verified: true,
+    });
+    store.fold(arrive(news, reply));
+    const id = store.reads.message(news)!.conversation;
+    expect(store.page({ in: 'inbox' }).items[0]?.logo).toBe('brand.example');
+    expect(store.summaryOf(id, store.conversation(id))?.logo).toBe('brand.example');
+
+    // A newer sender who isn't verified takes the row, logo and all.
+    const forwarded = envelope('fwd-news', {
+      references: [news.messageId, reply.messageId],
+      from: { email: 'pat@person.example' },
+      date: '2026-11-09T11:00:00.000Z',
+    });
+    store.fold(arrive(forwarded));
+    expect(store.page({ in: 'inbox' }).items[0]).not.toHaveProperty('logo');
+  });
+
+  test('names no logo for a conversation of the member’s own verified mail alone', () => {
+    const store = fresh(['me@trailmix.test']);
+    store.fold(arrive(envelope('note', { from: { email: 'me@trailmix.test' }, verified: true })));
+    expect(store.page({ in: 'inbox' }).items[0]).not.toHaveProperty('logo');
+  });
+
+  test('reads mail indexed before senders were verified as unverified', () => {
+    const sql = testSql();
+    const store = envelopeIndex(sql);
+    const old = envelope('old', { verified: true });
+    store.fold(arrive(old));
+    sql.run(`UPDATE messages SET message = json_remove(message, '$.verified')`);
+    expect(store.reads.message(old)?.verified).toBe(false);
+  });
+
+  test('knows the domains of the verified mail it holds', () => {
+    const store = fresh();
+    store.fold(
+      arrive(
+        envelope('a', { from: { email: 'news@Brand.Example' }, verified: true }),
+        envelope('b', { from: { email: 'deals@brand.example' }, verified: true }),
+        envelope('c', { from: { email: 'pat@person.example' } }),
+      ),
+    );
+    expect(store.verifiedDomains()).toEqual(new Set(['brand.example']));
   });
 
   test('leaves every list once its last message is gone', () => {

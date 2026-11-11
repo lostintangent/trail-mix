@@ -6,7 +6,7 @@ import {
   type Envelope,
   type Message,
 } from '../../mail/core/index.ts';
-import { matchedRow, summaryOf, type EnvelopeIndex } from './envelope-index.ts';
+import { matchedRow, type EnvelopeIndex } from './envelope-index.ts';
 
 /**
  * Full-text search: what the mail servers found, as rows a list shows. It reads the index to place
@@ -31,7 +31,7 @@ export const FOUND_LIMIT = 200;
 export function foundOf(
   text: string,
   hits: readonly Envelope[],
-  store: Pick<EnvelopeIndex, 'reads' | 'conversation'>,
+  store: Pick<EnvelopeIndex, 'reads' | 'conversation' | 'summaryOf'>,
 ): Found {
   const newest = [...hits]
     .sort((a, b) => b.date.localeCompare(a.date) || b.uid - a.uid)
@@ -54,7 +54,7 @@ export function foundOf(
   }
   const rows = [...shownBy]
     .flatMap(([id, hit]) => {
-      const summary = summaryOf(id, opened(id, store, outside));
+      const summary = store.summaryOf(id, opened(id, store, outside));
       return summary ? [matchedRow(summary, hit)] : [];
     })
     .sort((a, b) => b.date.localeCompare(a.date) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));

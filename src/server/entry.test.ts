@@ -3,6 +3,7 @@ import { exportJWK, generateKeyPair, SignJWT } from 'jose';
 import type { Mailroom, Timed } from '../features/mailroom/client/contract.ts';
 import type { Members } from '../features/members/core/index.ts';
 import { cloudflareStandIn, STAND_IN_AUD } from '../../tests/cloudflare-stand-in.ts';
+import type { LogoBytes } from './routes/logos.ts';
 import type { MessageBytes } from './routes/messages.ts';
 
 /**
@@ -33,6 +34,7 @@ function mailrooms() {
   const opened: string[] = [];
   const sockets: Request[] = [];
   const sources: string[] = [];
+  const logos: [member: string, domain: string][] = [];
   /** What the Worker did to a Mailroom beyond opening it. */
   const did: [member: string, what: string][] = [];
   const MAILROOM = {
@@ -49,6 +51,10 @@ function mailrooms() {
           sources.push(name);
           return Promise.resolve(new Response(`the source of ${name}'s message`).body);
         },
+        logo: (domain: string) => {
+          logos.push([name, domain]);
+          return Promise.resolve(domain === 'news.example' ? `<svg>${name}</svg>` : null);
+        },
         closeDevices: () => {
           did.push([name, 'closeDevices']);
           return Promise.resolve();
@@ -63,10 +69,10 @@ function mailrooms() {
             ? Promise.reject(new Error('That message is no longer in this mailbox.'))
             : Promise.resolve({ value: undefined, reached: 0, ran: 0, cold: false });
         },
-      } as unknown as Mailroom & MessageBytes;
+      } as unknown as Mailroom & MessageBytes & LogoBytes;
     },
   };
-  return { MAILROOM, opened, sockets, sources, did };
+  return { MAILROOM, opened, sockets, sources, logos, did };
 }
 
 const LOCAL = 'http://localhost:5173';
@@ -282,6 +288,25 @@ test('a notification’s button that another site started is refused, and reache
   expect(opened).toEqual([]);
 });
 
+test('a logo comes only from the signed-in member’s Logo cache, as an image that runs nothing', async () => {
+  const { env, opened, logos } = developer();
+  const response = await worker.fetch(
+    new Request(`${LOCAL}/logos/News.Example?member=eve@example.com`, { headers: SOMEONE_ELSE }),
+    env,
+  );
+
+  expect(await response.text()).toBe('<svg>ada@example.com</svg>');
+  expect(response.headers.get('content-type')).toBe('image/svg+xml');
+  expect(response.headers.get('content-security-policy')).toStartWith('sandbox');
+  expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+  expect(opened).toEqual(['ada@example.com']);
+  expect(logos).toEqual([['ada@example.com', 'news.example']]);
+
+  const missing = await worker.fetch(new Request(`${LOCAL}/logos/elsewhere.example`), env);
+  expect(missing.status).toBe(404);
+  expect(missing.headers.get('content-security-policy')).toStartWith('sandbox');
+});
+
 /** The internet, answering the proxy's one request with an image. */
 const anImage = () =>
   spyOn(globalThis, 'fetch').mockResolvedValue(
@@ -289,10 +314,15 @@ const anImage = () =>
   );
 const PROXIED = `/images?url=${encodeURIComponent('https://images.example.com/photo.png')}`;
 
-test('a message’s bytes and the image proxy refuse a request nobody signed in to', async () => {
+test('a message’s bytes, the image proxy and logos refuse a request nobody signed in to', async () => {
   const internet = anImage();
-  const { env, opened, sources } = developer();
-  for (const path of ['/messages/personal/INBOX/1/7', '/messages/personal/INBOX/1/7/1', PROXIED]) {
+  const { env, opened, sources, logos } = developer();
+  for (const path of [
+    '/messages/personal/INBOX/1/7',
+    '/messages/personal/INBOX/1/7/1',
+    PROXIED,
+    '/logos/news.example',
+  ]) {
     const response = await worker.fetch(
       new Request(`${SITE}${path}`, { headers: SOMEONE_ELSE }),
       env,
@@ -302,6 +332,7 @@ test('a message’s bytes and the image proxy refuse a request nobody signed in 
 
   expect(opened).toEqual([]);
   expect(sources).toEqual([]);
+  expect(logos).toEqual([]);
   expect(internet).not.toHaveBeenCalled();
   internet.mockRestore();
 });

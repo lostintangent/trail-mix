@@ -165,6 +165,7 @@ function message(
     preview: '',
     flags: { seen: true, flagged: false, answered: false, draft: isDraft },
     hasAttachments: false,
+    verified: false,
     references: [],
     ...fields,
   };

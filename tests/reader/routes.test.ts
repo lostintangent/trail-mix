@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import type { Browser } from 'playwright';
 import type { MessageRef } from '../../src/features/mail/core/index.ts';
 import { MAX_IMAGE_BYTES, proxyImage } from '../../src/server/routes/images.ts';
+import { serveLogo } from '../../src/server/routes/logos.ts';
 import {
   byteHeaders,
   serveMessageBytes,
@@ -81,6 +82,12 @@ beforeAll(() => {
     fetch(request) {
       const url = new URL(request.url);
       if (url.pathname === '/images') return proxyImage(request, internet);
+      // A logo with a script in it, as if one had slipped past the Logo cache.
+      if (url.pathname === '/logos/hostile.example') {
+        return serveLogo('hostile.example', {
+          logo: () => Promise.resolve(PARTS.svg!.bytes as string),
+        });
+      }
       const [, route, attachmentId] = url.pathname.split('/');
       // A part served inline under the byte headers, as if a sender's type had slipped through.
       if (route === 'inline') {
@@ -253,6 +260,7 @@ for (const type of BROWSERS) {
         '/messages/disguised',
         '/messages/injected',
         `/images?url=${encodeURIComponent('http://images.example.com/disguised.png')}`,
+        '/logos/hostile.example',
       ]) {
         const page = await context.newPage();
         // A download aborts the navigation, which is what should happen to a document part.

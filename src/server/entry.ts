@@ -1,9 +1,10 @@
 import start from '@tanstack/react-start/server-entry';
 import type { Mailroom, Timed } from '../features/mailroom/client/contract.ts';
-import { readMessagePath } from '../features/mailroom/client/urls.ts';
+import { readLogoPath, readMessagePath } from '../features/mailroom/client/urls.ts';
 import { CLOUDFLARE_API, cloudflareApi, membersFor } from '../features/members/server/index.ts';
 import { signInFor, signsInDevelopers, type SignInConfig } from './access.ts';
 import { proxyImage } from './routes/images.ts';
+import { serveLogo, type LogoBytes } from './routes/logos.ts';
 import { serveMessageBytes, type MessageBytes } from './routes/messages.ts';
 import { act } from './routes/notifications.ts';
 import { updates } from './routes/updates.ts';
@@ -12,7 +13,10 @@ export { Mailroom } from '../features/mailroom/server/index.ts';
 
 export type Env = SignInConfig & {
   /** One Mailroom per member, named by their verified email address. */
-  MAILROOM: { idFromName(name: string): unknown; get(id: unknown): Mailroom & MessageBytes };
+  MAILROOM: {
+    idFromName(name: string): unknown;
+    get(id: unknown): Mailroom & MessageBytes & LogoBytes;
+  };
   /** The commit this deployment runs. */
   VERSION?: string;
   /** Who manages members. Without it, nobody does. */
@@ -56,6 +60,8 @@ export default {
     if (url.pathname === '/updates') return updates(request, mailroom());
     const message = readMessagePath(url.pathname);
     if (message) return serveMessageBytes(message, mailroom());
+    const logo = readLogoPath(url.pathname);
+    if (logo) return serveLogo(logo, mailroom());
     if (url.pathname === '/images') return proxyImage(request);
     if (url.pathname === '/notifications/act') return act(request, mailroom());
     const response = await start.fetch(request, {

@@ -151,5 +151,6 @@ function envelope(subject: string, uid: number): Envelope {
     preview: '',
     flags: { seen: false, flagged: false, answered: false, draft: false },
     hasAttachments: false,
+    verified: false,
   };
 }

@@ -1,9 +1,10 @@
 import type { MessageRef } from '../../mail/core/index.ts';
 
 /**
- * The plain GET routes that carry bytes: a message's source, one of its parts, and a remote image
- * through the proxy. These helpers are the only place their URLs are built, and the routes read
- * them back with `readMessagePath`, so the two can't disagree.
+ * The plain GET routes that carry bytes: a message's source, one of its parts, a remote image
+ * through the proxy, and a verified sender's logo. These helpers are the only place their URLs are
+ * built, and the routes read them back with `readMessagePath` and `readLogoPath`, so the two can't
+ * disagree.
  *
  * A message is `/messages/<account>/<path>/<uidValidity>/<uid>`, and a part adds `/<attachment>`.
  * Each segment is encoded on its own, so a folder like "Projects/Toy Box" stays one segment.
@@ -16,6 +17,17 @@ export const partUrl = (ref: MessageRef, attachmentId: string) =>
   `${messageUrl(ref)}/${segment(attachmentId)}`;
 
 export const imageUrl = (url: string) => `/images?${new URLSearchParams({ url })}`;
+
+/** The logo a conversation or a message names, from the Logo cache. */
+export const logoUrl = (domain: string) => `/logos/${segment(domain)}`;
+
+/** The domain a logo's path names, or nothing if it names none. */
+export function readLogoPath(pathname: string): string | null {
+  const [root, encoded, ...rest] = pathname.split('/').slice(1);
+  if (root !== 'logos' || encoded === undefined || rest.length > 0) return null;
+  const domain = decode(encoded)?.toLowerCase();
+  return domain && domain.length <= 253 && !domain.includes('/') ? domain : null;
+}
 
 /** The message, and the part if there is one, that a path names, or nothing if it names none. */
 export function readMessagePath(

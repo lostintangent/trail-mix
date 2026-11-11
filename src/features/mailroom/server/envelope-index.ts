@@ -1,5 +1,6 @@
 import {
   applySyncEvent,
+  domainOf,
   linkIdsOf,
   searchWords,
   type ConversationId,
@@ -30,7 +31,12 @@ export type EnvelopeIndex = ReturnType<typeof envelopeIndex>;
  */
 const SECOND = 2 ** 20;
 
-export function envelopeIndex(sql: Sql) {
+/**
+ * `own` gives the member's addresses, so a conversation's row can name the logo of its newest
+ * sender other than the member.
+ */
+export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => []) {
+  const ownNow = () => new Set(own().map((address) => address.toLowerCase()));
   /** Folder roles by folder, read once for each fold, since nothing in a fold changes them. */
   let roles: Map<string, FolderRole | undefined> | undefined;
   const rolesNow = () =>
@@ -149,10 +155,14 @@ export function envelopeIndex(sql: Sql) {
    * Brings a conversation's row and its placements in line with the messages it now holds, and
    * returns its latest message in each folder it is placed in now.
    */
-  function summarize(id: ConversationId, roles: Map<string, FolderRole | undefined>): Message[] {
+  function summarize(
+    id: ConversationId,
+    roles: Map<string, FolderRole | undefined>,
+    mine: ReadonlySet<string>,
+  ): Message[] {
     sql.run(`DELETE FROM placements WHERE conversation = ?`, id);
     const messages = reads.conversation(id);
-    const summary = summaryOf(id, messages);
+    const summary = summaryOf(id, messages, mine);
     if (!summary) {
       sql.run(`DELETE FROM conversations WHERE id = ?`, id);
       return [];
@@ -207,12 +217,13 @@ export function envelopeIndex(sql: Sql) {
         const changed = new Map<string, FolderRef>();
         const note = ({ account, path }: FolderRef) =>
           changed.set(placeOf({ account, path }), { account, path });
+        const mine = ownNow();
         for (const id of touched) {
           // Where it was placed, and where it is placed now.
           sql
             .all<FolderRef>(`SELECT account, path FROM placements WHERE conversation = ?`, id)
             .forEach(note);
-          summarize(id, roles).forEach(note);
+          summarize(id, roles, mine).forEach(note);
         }
         return [...changed.values()];
       } finally {
@@ -351,6 +362,22 @@ export function envelopeIndex(sql: Sql) {
     conversation: (id: ConversationId): Message[] =>
       [...reads.conversation(id)].sort((a, b) => a.date.localeCompare(b.date)),
 
+    /** A conversation's row as the index would keep it, from the messages given. */
+    summaryOf: (id: ConversationId, messages: readonly Message[]) =>
+      summaryOf(id, messages, ownNow()),
+
+    /** The From domains of the verified mail the index holds. */
+    verifiedDomains(): Set<string> {
+      return new Set(
+        sql
+          .all<{ sender: string }>(
+            `SELECT DISTINCT json_extract(message, '$.from.email') AS sender FROM messages
+             WHERE json_extract(message, '$.verified') = 1`,
+          )
+          .map((row) => domainOf(row.sender)),
+      );
+    },
+
     /** Forgets an account's mail and folders, leaving nothing of them on disk. */
     forget(account: string) {
       const ids = sql.all<{ conversation: string }>(
@@ -371,15 +398,23 @@ export function envelopeIndex(sql: Sql) {
   };
 }
 
-/** A conversation's row: its latest message speaks for it, and the rest add up. */
+/**
+ * A conversation's row: its latest message speaks for it, and the rest add up. Its logo is its
+ * newest sender's other than the member, whose addresses are `mine`, when that message is verified.
+ * The index keeps it whether or not the Logo cache holds that logo yet, and a read names it only
+ * once the cache does.
+ */
 export function summaryOf(
   id: ConversationId,
   messages: readonly Message[],
+  mine: ReadonlySet<string> = new Set(),
 ): ConversationSummary | undefined {
   const newestFirst = [...messages].sort((a, b) => b.date.localeCompare(a.date));
   const latest = newestFirst[0];
   if (!latest) return undefined;
   const senders = new Map(newestFirst.map((m) => [m.from.email.toLowerCase(), m.from]));
+  const theirs = newestFirst.find((m) => !mine.has(m.from.email.toLowerCase()));
+  const logo = theirs?.verified ? domainOf(theirs.from.email) : '';
   return {
     id,
     account: latest.account,
@@ -391,6 +426,7 @@ export function summaryOf(
     unread: messages.filter((m) => !m.flags.seen).length,
     flagged: messages.some((m) => m.flags.flagged),
     hasAttachments: messages.some((m) => m.hasAttachments),
+    ...(logo ? { logo } : {}),
   };
 }
 
@@ -446,7 +482,10 @@ type Row = { message: string; conversation: string };
 const COLUMNS = 'message, conversation';
 const BY_REF = 'account = ? AND path = ? AND uid_validity = ? AND uid = ?';
 const keyOf = (ref: MessageRef): SqlValue[] => [ref.account, ref.path, ref.uidValidity, ref.uid];
-const messageOf = (row: Row): Message => ({
-  ...(JSON.parse(row.message) as Omit<Message, 'conversation'>),
-  conversation: row.conversation,
-});
+const messageOf = (row: Row): Message => {
+  const envelope = JSON.parse(row.message) as Omit<Message, 'conversation' | 'verified'> & {
+    verified?: boolean;
+  };
+  // Mail indexed before senders were verified counts as unverified.
+  return { ...envelope, verified: envelope.verified === true, conversation: row.conversation };
+};

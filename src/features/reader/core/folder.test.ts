@@ -40,6 +40,7 @@ function message(path: string, day: number, account = 'personal'): Message {
     preview: '',
     flags: { seen: true, flagged: false, answered: false, draft: false },
     hasAttachments: false,
+    verified: false,
     conversation: 'c1',
   };
 }

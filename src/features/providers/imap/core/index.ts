@@ -1,8 +1,16 @@
 // What the browser may use of the IMAP provider: the vendors' presets, with no mail library behind them.
-export { PRESETS, withStandIn, type Endpoint, type Preset, type PresetName } from './presets.ts';
+export {
+  PRESETS,
+  authServersFor,
+  withStandIn,
+  type Endpoint,
+  type Preset,
+  type PresetName,
+} from './presets.ts';
 export {
   EXPIRED,
   codeFrom,
+  namesThisMachine,
   codeRequest,
   isFresh,
   pollRequest,

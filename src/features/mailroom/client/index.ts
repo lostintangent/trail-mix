@@ -28,4 +28,4 @@ export {
   thisDeviceQuery,
 } from './queries.ts';
 export { mailroom, type Unanswered } from './rpc.ts';
-export { imageUrl, messageUrl, partUrl, readMessagePath } from './urls.ts';
+export { imageUrl, logoUrl, messageUrl, partUrl, readLogoPath, readMessagePath } from './urls.ts';
