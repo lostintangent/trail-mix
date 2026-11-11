@@ -51,7 +51,7 @@ test('offline, the line says so above all else, and whether it shows what the de
   expect(mailStatus(accounts, 'offline')).toEqual({ tone: 'busy', label: 'Offline' });
   expect(mailStatus(accounts, 'offline-kept')).toEqual({
     tone: 'busy',
-    label: 'Offline. Showing what this device kept',
+    label: 'Offline: kept mail',
   });
   expect(mailStatus([], 'offline')).toBeUndefined();
 });

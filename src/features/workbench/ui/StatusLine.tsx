@@ -9,7 +9,8 @@ import { mailStatus } from './status.ts';
 
 /**
  * How the member's mail stands, at the foot of the sidebar: a dot in the status's color and a line
- * saying it. On the rail only the dot shows, and the line waits in its tooltip.
+ * saying it, which ends in an ellipsis where the sidebar is too narrow for all of it. On the rail
+ * only the dot shows, and the line waits in its tooltip.
  */
 export function StatusLine({
   accounts,
@@ -23,7 +24,11 @@ export function StatusLine({
   const line = (
     <p role="status" {...stylex.props(styles.line)}>
       <span {...stylex.props(styles.dot, tones[status.tone])} />
-      {isCollapsed ? <VisuallyHidden>{status.label}</VisuallyHidden> : status.label}
+      {isCollapsed ? (
+        <VisuallyHidden>{status.label}</VisuallyHidden>
+      ) : (
+        <span {...stylex.props(styles.label)}>{status.label}</span>
+      )}
     </p>
   );
   return isCollapsed ? (
@@ -46,6 +51,10 @@ const styles = stylex.create({
     paddingInline: spacingVars['--spacing-2'],
     color: tm.textQuiet,
     fontSize: typeScaleVars['--text-supporting-size'],
+  },
+  // A flex container can't end its own text in an ellipsis, so the words have a box of their own.
+  label: {
+    minWidth: 0,
     whiteSpace: 'nowrap',
     overflow: 'hidden',
     textOverflow: 'ellipsis',

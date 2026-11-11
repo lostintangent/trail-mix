@@ -1,7 +1,12 @@
 import { expect } from 'bun:test';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Page } from 'playwright';
 import { ICONS } from '../../src/app/icons.ts';
 import { suite } from './suite.ts';
+
+const SHOTS = join(import.meta.dir, '../../test-results');
+mkdirSync(SHOTS, { recursive: true });
 
 /**
  * Installing Trail Mix: Chromium finds nothing that stops it, and the manifest and icons it asks
@@ -68,7 +73,11 @@ test('the installed app opens offline to the lists and conversations it showed',
 
   await context.setOffline(true);
   await page.reload();
-  await page.getByText('Offline. Showing what this device kept').waitFor();
+  const status = page.getByText('Offline: kept mail');
+  await status.waitFor();
+  // The sidebar at its first width says all of it.
+  expect(await status.evaluate((line) => line.scrollWidth <= line.clientWidth)).toBe(true);
+  await page.screenshot({ path: join(SHOTS, 'desktop-light-offline.png') });
   for (const [row, subject] of subjects.entries()) {
     expect({ row, opened: await openConversation(page, row) }).toEqual({ row, opened: subject });
   }
@@ -88,7 +97,7 @@ test('losing the network while open, the installed app still opens the conversat
   await page.mouse.move(0, 0);
   await page.goto(app.url, { waitUntil: 'networkidle' });
   await context.setOffline(true);
-  await page.getByText('Offline. Showing what this device kept').waitFor();
+  await page.getByText('Offline: kept mail').waitFor();
   expect(await openConversation(page, designReview)).toBe(subject);
   await context.close();
 }, 60_000);

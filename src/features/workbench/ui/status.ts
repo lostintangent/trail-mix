@@ -14,7 +14,7 @@ export function mailStatus(
   reach: Reach = 'online',
 ): MailStatus | undefined {
   if (reach !== 'online' && accounts.length > 0) {
-    const label = reach === 'offline-kept' ? 'Offline. Showing what this device kept' : 'Offline';
+    const label = reach === 'offline-kept' ? 'Offline: kept mail' : 'Offline';
     return { tone: 'busy', label };
   }
   const [first, ...others] = accounts.filter(
