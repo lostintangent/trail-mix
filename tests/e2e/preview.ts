@@ -34,7 +34,10 @@ const KEPT_LINES = 300;
  * accounts that still check the test mail server, never wake into this one.
  *
  * `build` names another build to serve, such as the public demo's, which runs as it is deployed:
- * with its own configuration's variables and `vars`, and none from `.dev.vars.example`.
+ * with its own configuration's variables and `vars`, and none from `dev.vars.example`.
+ *
+ * One preview runs at a time. Each writes its build's `.dev.vars` and points `vite preview` at its
+ * build, one file each, so a second would change what the first restarts with.
  */
 export async function startPreview(
   vars: Record<string, string> = {},
@@ -44,6 +47,10 @@ export async function startPreview(
   if (!existsSync(join(ROOT, build.directory, 'server/wrangler.json'))) {
     throw new Error(`There is no build to drive. Run \`${build.command}\` first.`);
   }
+  if (isRunning) {
+    throw new Error('A preview is already running. Stop it before starting another.');
+  }
+  isRunning = true;
   const restoreVars = writeVars(build, build === BUILDS.app ? { ...exampleVars(), ...vars } : vars);
   const restoreBuild = pointAt(build);
   const state = mkdtempSync(join(tmpdir(), 'trail-mix-preview-'));
@@ -69,20 +76,34 @@ export async function startPreview(
   const kept: string[] = [];
   // What the Worker reports goes to the app's error output, which is still printed as it comes.
   void keep(server.stderr, kept, (text) => process.stderr.write(text));
-  const url = await listeningUrl(server.stdout, kept);
-  return {
-    url,
-    state,
-    stop: async () => {
+  let isStopped = false;
+  const stop = async () => {
+    if (isStopped) return;
+    isStopped = true;
+    try {
       server.kill();
       await server.exited;
       restoreVars();
       restoreBuild();
       rmSync(state, { recursive: true, force: true });
-    },
+    } finally {
+      isRunning = false;
+    }
+  };
+  const url = await listeningUrl(server.stdout, kept).catch(async (error: unknown) => {
+    await stop();
+    throw error;
+  });
+  return {
+    url,
+    state,
+    stop,
     log: () => kept.join('\n'),
   };
 }
+
+/** Whether a preview this process started is running. */
+let isRunning = false;
 
 /** A build the tests drive: where it is, and the command that makes it. */
 export type Build = { directory: string; command: string };

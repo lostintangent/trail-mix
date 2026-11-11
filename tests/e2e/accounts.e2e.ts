@@ -17,12 +17,6 @@ const SIZES = {
   phone: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
 };
 
-const app = suite({
-  vars: { DEMO_MAILBOX: '', DEV_MEMBER: `first-run-${Date.now()}@trailmix.test` },
-});
-// A test that fails leaves a screenshot of each page and what it showed, for CI to keep.
-const { test } = app;
-
 beforeAll(() => {
   mkdirSync(SHOTS, { recursive: true });
 });
@@ -33,86 +27,96 @@ afterEach(() => {
   expect(errors.splice(0)).toEqual([]);
 });
 
-test('a member with no accounts is welcomed, never sees the workbench, and finds the sheet in place, at both sizes in both themes', async () => {
-  for (const [size, options] of Object.entries(SIZES)) {
-    for (const colorScheme of ['light', 'dark'] as const) {
-      const context = await app.context({ deviceScaleFactor: 2, ...options, colorScheme });
-      // Watched from before the app's first script, so a workbench drawn for a moment counts.
-      await context.addInitScript(() => {
-        const page = window as unknown as { workbenchSeen: boolean };
-        page.workbenchSeen = false;
-        new MutationObserver(() => {
-          if (document.querySelector('nav[aria-label="Mailboxes"], [role="listbox"]')) {
-            page.workbenchSeen = true;
-          }
-        }).observe(document, { childList: true, subtree: true });
-      });
-      const page = await context.newPage();
-      page.on('pageerror', (error) => errors.push(error.message));
-      await page.goto(app.url);
-      const sheet = page.getByRole('article', { name: 'Welcome to Trail Mix' });
-      await page.getByRole('form', { name: 'Add an account' }).waitFor();
-      await page.screenshot({ path: join(SHOTS, `${size}-${colorScheme}-first-run.png`) });
-      const screen = `${size} ${colorScheme} first run`;
-      const place = await sheet.evaluate((element, isPhone) => {
-        const { top, height } = element.getBoundingClientRect();
-        return isPhone
-          ? top === 0 && height >= innerHeight
-          : Math.abs(top - (innerHeight - height) / 2) <= 1;
-      }, size === 'phone');
-      expect({
-        screen,
-        workbench: await page.evaluate(
-          () => (window as unknown as { workbenchSeen: boolean }).workbenchSeen,
-        ),
-        // On a desktop in the desk's middle, and on a phone the whole screen.
-        place,
-        unreadable: await unreadableText(page),
-      }).toEqual({ screen, workbench: false, place: true, unreadable: [] });
-      await page.close();
+// Each describe runs its own app, which stops before the next one starts: a preview's variables
+// and its build's pointer are one file each, so two at once would read each other's.
+describe('The first-run screen', () => {
+  const app = suite({
+    vars: { DEMO_MAILBOX: '', DEV_MEMBER: `first-run-${Date.now()}@trailmix.test` },
+  });
+  // A test that fails leaves a screenshot of each page and what it showed, for CI to keep.
+  const { test } = app;
+
+  test('a member with no accounts is welcomed, never sees the workbench, and finds the sheet in place, at both sizes in both themes', async () => {
+    for (const [size, options] of Object.entries(SIZES)) {
+      for (const colorScheme of ['light', 'dark'] as const) {
+        const context = await app.context({ deviceScaleFactor: 2, ...options, colorScheme });
+        // Watched from before the app's first script, so a workbench drawn for a moment counts.
+        await context.addInitScript(() => {
+          const page = window as unknown as { workbenchSeen: boolean };
+          page.workbenchSeen = false;
+          new MutationObserver(() => {
+            if (document.querySelector('nav[aria-label="Mailboxes"], [role="listbox"]')) {
+              page.workbenchSeen = true;
+            }
+          }).observe(document, { childList: true, subtree: true });
+        });
+        const page = await context.newPage();
+        page.on('pageerror', (error) => errors.push(error.message));
+        await page.goto(app.url);
+        const sheet = page.getByRole('article', { name: 'Welcome to Trail Mix' });
+        await page.getByRole('form', { name: 'Add an account' }).waitFor();
+        await page.screenshot({ path: join(SHOTS, `${size}-${colorScheme}-first-run.png`) });
+        const screen = `${size} ${colorScheme} first run`;
+        const place = await sheet.evaluate((element, isPhone) => {
+          const { top, height } = element.getBoundingClientRect();
+          return isPhone
+            ? top === 0 && height >= innerHeight
+            : Math.abs(top - (innerHeight - height) / 2) <= 1;
+        }, size === 'phone');
+        expect({
+          screen,
+          workbench: await page.evaluate(
+            () => (window as unknown as { workbenchSeen: boolean }).workbenchSeen,
+          ),
+          // On a desktop in the desk's middle, and on a phone the whole screen.
+          place,
+          unreadable: await unreadableText(page),
+        }).toEqual({ screen, workbench: false, place: true, unreadable: [] });
+        await page.close();
+      }
     }
-  }
-}, 60_000);
+  }, 60_000);
 
-test('a Mailroom that can’t be reached says so, and Try again comes back to it', async () => {
-  const page = await (await app.context(SIZES.desktop)).newPage();
-  // Every query fails, as when the network is down or a sign-in has run out.
-  await page.route('**/_serverFn/**', (route) =>
-    route.request().method() === 'GET' ? route.abort() : route.fallback(),
-  );
-  await page.goto(app.url);
-  // Once its tries are spent.
-  await page
-    .getByRole('heading', { name: 'Trail Mix can’t reach your mail' })
-    .waitFor({ timeout: 15_000 });
-  await page.screenshot({ path: join(SHOTS, 'desktop-light-unreachable.png') });
-  await page.unroute('**/_serverFn/**');
-  await page.getByRole('button', { name: 'Try again' }).click();
-  await page.getByRole('heading', { name: 'Welcome to Trail Mix' }).waitFor();
-}, 30_000);
+  test('a Mailroom that can’t be reached says so, and Try again comes back to it', async () => {
+    const page = await (await app.context(SIZES.desktop)).newPage();
+    // Every query fails, as when the network is down or a sign-in has run out.
+    await page.route('**/_serverFn/**', (route) =>
+      route.request().method() === 'GET' ? route.abort() : route.fallback(),
+    );
+    await page.goto(app.url);
+    // Once its tries are spent.
+    await page
+      .getByRole('heading', { name: 'Trail Mix can’t reach your mail' })
+      .waitFor({ timeout: 15_000 });
+    await page.screenshot({ path: join(SHOTS, 'desktop-light-unreachable.png') });
+    await page.unroute('**/_serverFn/**');
+    await page.getByRole('button', { name: 'Try again' }).click();
+    await page.getByRole('heading', { name: 'Welcome to Trail Mix' }).waitFor();
+  }, 30_000);
 
-test('a Mailroom that answered with an error says what failed, and comes back once the tab is seen', async () => {
-  const page = await (await app.context(SIZES.desktop)).newPage();
-  // Every query is answered with an error, as when a deploy restarts the Mailroom.
-  await page.route('**/_serverFn/**', (route) =>
-    route.request().method() === 'GET'
-      ? route.fulfill({
-          status: 503,
-          contentType: 'text/plain',
-          body: 'The Mailroom is restarting.',
-        })
-      : route.fallback(),
-  );
-  await page.goto(app.url);
-  await page
-    .getByRole('heading', { name: 'Trail Mix can’t reach your mail' })
-    .waitFor({ timeout: 15_000 });
-  await page.getByText('Trail Mix answered 503: The Mailroom is restarting.').waitFor();
-  await page.unroute('**/_serverFn/**');
-  // Coming back to the tab asks again, with no button pressed.
-  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-  await page.getByRole('heading', { name: 'Welcome to Trail Mix' }).waitFor();
-}, 30_000);
+  test('a Mailroom that answered with an error says what failed, and comes back once the tab is seen', async () => {
+    const page = await (await app.context(SIZES.desktop)).newPage();
+    // Every query is answered with an error, as when a deploy restarts the Mailroom.
+    await page.route('**/_serverFn/**', (route) =>
+      route.request().method() === 'GET'
+        ? route.fulfill({
+            status: 503,
+            contentType: 'text/plain',
+            body: 'The Mailroom is restarting.',
+          })
+        : route.fallback(),
+    );
+    await page.goto(app.url);
+    await page
+      .getByRole('heading', { name: 'Trail Mix can’t reach your mail' })
+      .waitFor({ timeout: 15_000 });
+    await page.getByText('Trail Mix answered 503: The Mailroom is restarting.').waitFor();
+    await page.unroute('**/_serverFn/**');
+    // Coming back to the tab asks again, with no button pressed.
+    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await page.getByRole('heading', { name: 'Welcome to Trail Mix' }).waitFor();
+  }, 30_000);
+});
 
 // Erasing everything Trail Mix holds for a member, from the palette and from an account's page, on
 // two devices at once: each a member of their own, with the demo mailbox to erase.
