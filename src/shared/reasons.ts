@@ -7,12 +7,17 @@ export function reasonOf(
   error: unknown,
   isOnline = typeof navigator === 'undefined' || navigator.onLine,
 ): string {
-  const reason = error instanceof Error ? error.message.trim() : '';
-  if (error instanceof TypeError && UNREACHED.test(reason)) {
+  if (isUnreached(error)) {
     return isOnline ? 'Trail Mix couldn’t reach its server.' : 'This device is offline.';
   }
+  const reason = error instanceof Error ? error.message.trim() : '';
   if (!reason) return 'The mail server gave no reason.';
   return /[.!?]$/.test(reason) ? reason : `${reason}.`;
+}
+
+/** Whether a request got no answer at all, which the browser reports as a fetch that failed. */
+export function isUnreached(error: unknown): boolean {
+  return error instanceof TypeError && UNREACHED.test(error.message.trim());
 }
 
 /** What Chromium, Firefox and Safari say when a fetch gets no answer. */

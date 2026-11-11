@@ -24,10 +24,11 @@ const SIZES = {
 } satisfies Record<string, BrowserContextOptions>;
 const THEMES = ['light', 'dark'] as const;
 /**
- * How soon after an offline reload's start the kept Inbox and the conversation open in it show.
- * Nothing they need waits on the network, so they come as fast as the page draws.
+ * How soon after an offline reload's start the kept Inbox and the conversation open in it show, or,
+ * on a device that kept nothing, the word that the app can't reach the mail. Nothing they need
+ * waits on the network, so they come as fast as the page draws.
  */
-const KEPT_WITHIN_MS = 1_000;
+const OFFLINE_WITHIN_MS = 1_000;
 /** A conversation far enough down the Inbox that opening the first never prepares it ahead. */
 const NEVER_OPENED = /Trip photos/;
 
@@ -65,18 +66,39 @@ test('every icon is a PNG at its size, the touch icon included', async () => {
   await context.close();
 });
 
-test('the installed app with nothing kept opens offline, and says it can’t reach the mail', async () => {
-  const { context, page } = await installed();
-  await page.evaluate(() => keptNothing());
+test('the installed app with nothing kept opens offline, and says at once it can’t reach the mail', async () => {
+  for (const [size, colorScheme] of [
+    ['desktop', 'light'],
+    ['phone', 'dark'],
+  ] as const) {
+    const { context, page, errors } = await installed({ ...SIZES[size], colorScheme });
+    await page.evaluate(() => keptNothing());
 
-  await context.setOffline(true);
-  await page.reload();
-  // The shell and the app's code came from the worker, so the app runs and says what it can't do.
-  await page
-    .getByRole('heading', { name: 'Trail Mix can’t reach your mail' })
-    .waitFor({ timeout: 15_000 });
-  await context.close();
-}, 45_000);
+    await context.addInitScript(noteShown);
+    await context.setOffline(true);
+    await page.reload();
+    // The shell and the app's code came from the worker, so the app runs and says what it can't
+    // do, without waiting to ask a network the browser says it hasn't got.
+    await page
+      .getByRole('heading', { name: 'Trail Mix can’t reach your mail' })
+      .waitFor({ timeout: 15_000 });
+    // Nor does it take away what it drew first while that word's code comes.
+    const { at, bare } = await page.evaluate(() => ({
+      at: window.unreachableShownAt,
+      bare: window.bareAt,
+    }));
+    const missed = [
+      ...(at === undefined || at > OFFLINE_WITHIN_MS
+        ? [`said so at ${Math.round(at ?? -1)} ms`]
+        : []),
+      ...(bare === undefined ? [] : [`a bare desk at ${Math.round(bare)} ms`]),
+    ];
+    expect({ size, missed }).toEqual({ size, missed: [] });
+    await page.screenshot({ path: join(SHOTS, `offline-${size}-${colorScheme}-unreachable.png`) });
+    expect({ size, errors }).toEqual({ size, errors: [] });
+    await context.close();
+  }
+}, 60_000);
 
 test('the installed app opens offline to the lists and conversations it showed', async () => {
   const { context, page } = await installed();
@@ -119,7 +141,7 @@ test('the installed app reads offline at both sizes in both themes: the Inbox an
       );
       const shown = await page.evaluate(() => ({ rows: rowsShownAt, reader: readerShownAt }));
       const late = Object.entries(shown).flatMap(([what, at]) =>
-        at === undefined || at > KEPT_WITHIN_MS ? [`${what} at ${Math.round(at ?? -1)} ms`] : [],
+        at === undefined || at > OFFLINE_WITHIN_MS ? [`${what} at ${Math.round(at ?? -1)} ms`] : [],
       );
       expect({ size, colorScheme, late }).toEqual({ size, colorScheme, late: [] });
       await page.screenshot({ path: join(SHOTS, `offline-${size}-${colorScheme}.png`) });
@@ -462,20 +484,38 @@ function kept() {
   });
 }
 
-/** Notes when the page first drew a list row, and an open conversation's message, from its start. */
+/**
+ * Notes when the page first drew a list row, an open conversation's message, and the word that it
+ * can't reach the mail, from its start, and when it first drew nothing after it had drawn something,
+ * as when React hides a screen while the next one's code comes.
+ */
 function noteShown() {
-  const shown = window as unknown as { rowsShownAt?: number; readerShownAt?: number };
+  const shown = window as unknown as {
+    rowsShownAt?: number;
+    readerShownAt?: number;
+    unreachableShownAt?: number;
+    drawnAt?: number;
+    bareAt?: number;
+  };
   new MutationObserver(() => {
-    if (document.querySelector('[role="option"]')) shown.rowsShownAt ??= performance.now();
-    if (document.querySelector('section[aria-label="Reader"] article')) {
-      shown.readerShownAt ??= performance.now();
+    const now = performance.now();
+    if (document.querySelector('[role="option"]')) shown.rowsShownAt ??= now;
+    if (document.querySelector('section[aria-label="Reader"] article')) shown.readerShownAt ??= now;
+    const headings = [...document.querySelectorAll('h1')];
+    if (headings.some(({ textContent }) => textContent === 'Trail Mix can’t reach your mail')) {
+      shown.unreachableShownAt ??= now;
     }
-  }).observe(document, { childList: true, subtree: true });
+    const screens = [...document.querySelectorAll('nav, main, section')];
+    if (screens.some((screen) => screen.checkVisibility())) shown.drawnAt ??= now;
+    else if (shown.drawnAt !== undefined) shown.bareAt ??= now;
+  }).observe(document, { childList: true, subtree: true, attributeFilter: ['style'] });
 }
 
 declare global {
   var rowsShownAt: number | undefined;
   var readerShownAt: number | undefined;
+  var unreachableShownAt: number | undefined;
+  var bareAt: number | undefined;
   function keptCount(): Promise<number>;
   function keptNothing(): Promise<void>;
   function keptWith(kind: string, change: (data: never) => unknown): Promise<void>;

@@ -5,6 +5,7 @@ import { createFileRoute, useRouter } from '@tanstack/react-router';
 import {
   Suspense,
   useCallback,
+  useDeferredValue,
   useEffect,
   useLayoutEffect,
   useMemo,
@@ -86,6 +87,10 @@ function App() {
   const accounts = useQuery(accountsQuery);
   const { refetch } = accounts;
   const askAgain = useCallback(() => void refetch(), [refetch]);
+  const isUnreached = accounts.data === undefined && accounts.isError;
+  // Saying so may wait for its code, as when the network went before the page was idle, so the
+  // screen before stays until it has come, rather than a bare desk.
+  const saysUnreached = useDeferredValue(isUnreached) && isUnreached;
   const isFirstRun = accounts.data?.length === 0;
   const welcome = useLoaded(preloadFirstRun, isFirstRun);
   const hasMail = useHasMail(accounts.data);
@@ -106,18 +111,17 @@ function App() {
     ],
     [notifications, accent, setAccent],
   );
-  const screen =
-    accounts.data === undefined && accounts.isError ? (
-      <Unreachable failed={accounts.error} onTryAgain={askAgain} />
-    ) : accounts.data === undefined && !hasMail ? (
-      <Opening />
-    ) : !isFirstRun ? (
-      <Desk settings={settings} extraCommands={extraCommands} />
-    ) : welcome === 'failed' ? (
-      <Unreachable />
-    ) : (
-      welcome === 'loaded' && <FirstRun />
-    );
+  const screen = saysUnreached ? (
+    <Unreachable failed={accounts.error} onTryAgain={askAgain} />
+  ) : accounts.data === undefined && !hasMail ? (
+    <Opening />
+  ) : !isFirstRun ? (
+    <Desk settings={settings} extraCommands={extraCommands} />
+  ) : welcome === 'failed' ? (
+    <Unreachable />
+  ) : (
+    welcome === 'loaded' && <FirstRun />
+  );
   return (
     <AppTheme theme={trailMixTheme}>
       <Suspense>{screen}</Suspense>

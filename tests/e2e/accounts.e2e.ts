@@ -81,14 +81,19 @@ describe('The first-run screen', () => {
   test('a Mailroom that can’t be reached says so, and Try again comes back to it', async () => {
     const page = await (await app.context(SIZES.desktop)).newPage();
     // Every query fails, as when the network is down or a sign-in has run out.
-    await page.route('**/_serverFn/**', (route) =>
-      route.request().method() === 'GET' ? route.abort() : route.fallback(),
-    );
+    const asked: number[] = [];
+    await page.route('**/_serverFn/**', (route) => {
+      if (route.request().url().includes('%22accounts%22')) asked.push(Date.now());
+      return route.request().method() === 'GET' ? route.abort() : route.fallback();
+    });
     await page.goto(app.url);
-    // Once its tries are spent.
+    // Once its tries are spent: the browser says it's online, so the request it lost is asked
+    // again, three times over seven seconds.
     await page
       .getByRole('heading', { name: 'Trail Mix can’t reach your mail' })
       .waitFor({ timeout: 15_000 });
+    const waited = (asked.at(-1) ?? 0) - (asked[0] ?? 0);
+    expect({ asks: asked.length, isSpread: waited > 5_000 }).toEqual({ asks: 4, isSpread: true });
     await page.screenshot({ path: join(SHOTS, 'desktop-light-unreachable.png') });
     await page.unroute('**/_serverFn/**');
     await page.getByRole('button', { name: 'Try again' }).click();

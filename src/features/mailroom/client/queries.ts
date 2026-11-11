@@ -1,4 +1,5 @@
 import { queryOptions } from '@tanstack/react-query';
+import { asksAgain } from '../../../shared/query-client.ts';
 import type { ConversationId, FolderRef, Hint, MessageRef, View } from '../../mail/core/index.ts';
 import { mailroom, type Unanswered } from './rpc.ts';
 
@@ -75,7 +76,7 @@ export const accountsQuery = queryOptions({
   queryKey: keys.accounts,
   queryFn: () => mailroom.accounts(),
   // The public demo answers 429 while it lets no more visitors in, which asking again won't change.
-  retry: (failures, error: Unanswered) => error.status !== 429 && failures < 3,
+  retry: (failures, error: Unanswered) => error.status !== 429 && asksAgain(failures, error),
 });
 
 /**
