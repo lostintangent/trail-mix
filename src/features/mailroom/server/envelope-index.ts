@@ -84,13 +84,14 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
 
   /**
    * Writes one change: its removals, then its messages. A message already held changes in place,
-   * since only its flags or its conversation can change, so its links and search row stand. A new
-   * one arrives with them. Returns the conversations it touched.
+   * its flags or its conversation, or what it says when it is read again, so its links stand and
+   * its search row changes only with its words. A new one arrives with them. Returns the
+   * conversations it touched.
    */
   function write(change: ReturnType<typeof applySyncEvent>, touched: Set<ConversationId>) {
     const held = (ref: MessageRef) =>
-      sql.all<{ rowid: number; conversation: string }>(
-        `SELECT rowid, conversation FROM messages WHERE ${BY_REF}`,
+      sql.all<{ rowid: number; conversation: string; message: string }>(
+        `SELECT rowid, conversation, message FROM messages WHERE ${BY_REF}`,
         ...keyOf(ref),
       )[0];
     for (const ref of change.remove) {
@@ -113,6 +114,14 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
           JSON.stringify(envelope),
           before.rowid,
         );
+        const words = searchRowOf(message);
+        const was = searchRowOf({ ...(JSON.parse(before.message) as Message), conversation });
+        if (words.join('\n') !== was.join('\n')) {
+          if (!unwritten.has(before.rowid)) {
+            sql.run(`DELETE FROM search WHERE rowid = ?`, before.rowid);
+          }
+          unwritten.set(before.rowid, words);
+        }
         continue;
       }
       const first = firstRowidOf(message.date);
@@ -131,13 +140,7 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
         conversation,
         JSON.stringify(envelope),
       );
-      const { senders, recipients } = searchTextOf(message);
-      unwritten.set(inserted!.rowid, [
-        searchable(senders),
-        searchable(recipients),
-        searchable(message.subject),
-        searchable(message.preview),
-      ]);
+      unwritten.set(inserted!.rowid, searchRowOf(message));
       for (const id of linkIdsOf(message)) {
         sql.run(
           `INSERT OR IGNORE INTO links (account, id, path, uid_validity, uid) VALUES (?, ?, ?, ?, ?)`,
@@ -193,6 +196,17 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
       );
     }
     return [...latest.values()];
+  }
+
+  /** Whether a folder is being read again, as `REREAD` asks, and its pass hasn't ended. */
+  function isRereading(account: string, path: string): boolean {
+    return (
+      sql.all<{ rereading: number }>(
+        `SELECT rereading FROM folders WHERE account = ? AND path = ?`,
+        account,
+        path,
+      )[0]?.rereading === 1
+    );
   }
 
   return {
@@ -269,6 +283,48 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
 
     dropFolder(account: string, path: string) {
       sql.run(`DELETE FROM folders WHERE account = ? AND path = ?`, account, path);
+      sql.run(`DELETE FROM reread WHERE account = ? AND path = ?`, account, path);
+    },
+
+    isRereading,
+
+    /**
+     * Notes the messages a folder's pass reported, so what it didn't can go when it ends. A batch
+     * that starts the folder over starts the pass over too.
+     */
+    noteReread(account: string, path: string, refs: readonly MessageRef[], startsOver: boolean) {
+      if (startsOver) sql.run(`DELETE FROM reread WHERE account = ? AND path = ?`, account, path);
+      for (const ref of refs) {
+        sql.run(
+          `INSERT OR IGNORE INTO reread (account, path, uid_validity, uid) VALUES (?, ?, ?, ?)`,
+          ...keyOf(ref),
+        );
+      }
+    },
+
+    /** Ends a folder's pass, and returns what the index holds there that it didn't report. */
+    endReread(account: string, path: string): MessageRef[] {
+      const left = sql
+        .all<{ uid_validity: number; uid: number }>(
+          `SELECT m.uid_validity, m.uid FROM messages m
+            WHERE m.account = ? AND m.path = ? AND NOT EXISTS (
+              SELECT 1 FROM reread r
+               WHERE r.account = m.account AND r.path = m.path
+                 AND r.uid_validity = m.uid_validity AND r.uid = m.uid)`,
+          account,
+          path,
+        )
+        .map(({ uid_validity, uid }) => ({ account, path, uidValidity: uid_validity, uid }));
+      sql.run(`DELETE FROM reread WHERE account = ? AND path = ?`, account, path);
+      sql.run(`UPDATE folders SET rereading = 0 WHERE account = ? AND path = ?`, account, path);
+      return left;
+    },
+
+    /** Carries a folder's pass to the path a rename gave it, where its messages moved. */
+    carryReread(account: string, from: string, to: string) {
+      if (!isRereading(account, from)) return;
+      sql.run(`UPDATE reread SET path = ? WHERE account = ? AND path = ?`, to, account, from);
+      sql.run(`UPDATE folders SET rereading = 1 WHERE account = ? AND path = ?`, account, to);
     },
 
     cursor(account: string, path: string): string | null {
@@ -388,7 +444,7 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
         `DELETE FROM search WHERE rowid IN (SELECT rowid FROM messages WHERE account = ?)`,
         account,
       );
-      for (const table of ['messages', 'links', 'folders', 'placements'])
+      for (const table of ['messages', 'links', 'folders', 'placements', 'reread'])
         sql.run(`DELETE FROM ${table} WHERE account = ?`, account);
       for (const { conversation } of ids)
         sql.run(`DELETE FROM conversations WHERE id = ?`, conversation);
@@ -472,6 +528,17 @@ const placeOf = ({ account, path }: FolderRef) => JSON.stringify([account, path]
 export const searchable = (text: string) => text.normalize('NFKC');
 
 /** What search reads of a message's people: names and addresses, each as written. */
+/** A message's row in the search table: its senders, recipients, subject and preview. */
+function searchRowOf(message: Message): string[] {
+  const { senders, recipients } = searchTextOf(message);
+  return [
+    searchable(senders),
+    searchable(recipients),
+    searchable(message.subject),
+    searchable(message.preview),
+  ];
+}
+
 function searchTextOf({ from, to, cc }: Message) {
   const people = (addresses: Message['to']) =>
     addresses.map(({ name, email }) => (name ? `${name} ${email}` : email)).join(' ');

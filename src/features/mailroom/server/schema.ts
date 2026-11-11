@@ -19,6 +19,13 @@ export type Sql = {
 };
 export type SqlValue = string | number | null | ArrayBuffer | Uint8Array;
 
+/**
+ * Has every folder read again from its server, keeping what the index holds meanwhile, as a version
+ * does when what an envelope says has been read better since. Its sync starts over, each message it
+ * reports folds in place, and what the pass didn't report goes once it ends.
+ */
+export const REREAD = `UPDATE folders SET cursor = NULL, rereading = 1`;
+
 export const versions: readonly (readonly string[])[] = [
   [
     `CREATE TABLE accounts (
@@ -237,6 +244,19 @@ export const versions: readonly (readonly string[])[] = [
     `INSERT OR IGNORE INTO avatar_domains (domain, due_at)
      SELECT DISTINCT substr(sender, instr(sender, '@') + 1), 0 FROM avatar_senders`,
     `DROP TABLE logos`,
+  ],
+  [
+    // A folder being read again, and what its pass has reported so far. Mail indexed before
+    // senders were verified, and before previews read HTML and its entities, is read once more.
+    `ALTER TABLE folders ADD COLUMN rereading INTEGER NOT NULL DEFAULT 0`,
+    `CREATE TABLE reread (
+      account TEXT NOT NULL,
+      path TEXT NOT NULL,
+      uid_validity INTEGER NOT NULL,
+      uid INTEGER NOT NULL,
+      PRIMARY KEY (account, path, uid_validity, uid)
+    )`,
+    REREAD,
   ],
 ];
 

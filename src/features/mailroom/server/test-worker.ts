@@ -2,6 +2,7 @@ import { COMMANDS, QUERIES, receivedCall } from '../client/contract.ts';
 import { HOST_FILING_SECONDS } from '../../outbox/core/index.ts';
 import type { MailProvider, Preset, PresetName } from '../../providers/index.ts';
 import { Mailroom, type MailroomEnv } from './mailroom.ts';
+import { REREAD } from './schema.ts';
 
 /**
  * The Mailroom on workerd, for tests. A path's first segment names the member, standing in for the
@@ -77,6 +78,25 @@ export class TestMailroom extends Mailroom {
   restart(): Promise<void> {
     this.ctx.abort('A test restarted the Mailroom.');
     return Promise.resolve();
+  }
+
+  /**
+   * Has the index hold its mail as a release from before verified senders and readable previews
+   * did: no sender verified, a preview that reads `as before`, and no row naming an avatar.
+   */
+  indexAsBefore(): Promise<void> {
+    this.sql.run(
+      `UPDATE messages SET message = json_set(json_remove(message, '$.verified'), '$.preview', 'as before')`,
+    );
+    this.sql.run(`UPDATE conversations SET summary = json_remove(summary, '$.avatar')`);
+    return Promise.resolve();
+  }
+
+  /** Reads every folder again, as the version that asks for it does, from a cold start. */
+  async rereadAsUpgraded(): Promise<void> {
+    this.sql.run(REREAD);
+    await this.ctx.storage.sync();
+    await this.restart();
   }
 
   private restartOnAcceptance = false;

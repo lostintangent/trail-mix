@@ -7,7 +7,7 @@ import type {
   Message,
   SyncEvent,
 } from '../../mail/core/index.ts';
-import type { MailProvider, SyncWindow } from '../../providers/index.ts';
+import type { MailProvider, SyncBatch, SyncWindow } from '../../providers/index.ts';
 import type { EnvelopeIndex } from './envelope-index.ts';
 import type { Sql } from './schema.ts';
 
@@ -144,6 +144,7 @@ export function syncQueue(syncing: Syncing) {
         );
         const cursor = to === undefined ? null : store.cursor(account, path);
         if (to !== undefined && cursor !== null) store.saveCursor(account, to, cursor);
+        if (to !== undefined) store.carryReread(account, path, to);
         store.dropFolder(account, path);
         return changed;
       }),
@@ -176,7 +177,9 @@ export function syncQueue(syncing: Syncing) {
     const batch = await provider.sync(path, store.cursor(account, path), syncing.window(account));
     if (job.cancelled) return;
     const changed = sql.transaction(() => {
-      const folders = store.fold(batch.events);
+      const folders = store.isRereading(account, path)
+        ? reread(account, path, batch)
+        : store.fold(batch.events);
       store.saveCursor(account, path, batch.cursor);
       // In the same transaction, so what it notes of the batch lands with the cursor or not at all.
       syncing.landed?.({ account, path }, batch.events);
@@ -192,6 +195,22 @@ export function syncQueue(syncing: Syncing) {
     drop(job);
     // The folder's counts are the server's, and changed with it.
     if (job.changed && job.recount) await list(job, provider);
+  }
+
+  /**
+   * Folds a batch of a folder being read again. Its first batch starts the folder over, but what
+   * the index holds stays, so no list empties: each message the pass reports folds in place, and
+   * once the pass ends, what it didn't report goes, as a sync would have let it go.
+   */
+  function reread(account: AccountId, path: string, batch: SyncBatch): FolderRef[] {
+    const startsOver = batch.events.some(({ type }) => type === 'reset');
+    const events = batch.events.filter(({ type }) => type !== 'reset');
+    const reported = events.flatMap((event) => (event.type === 'message' ? [event.envelope] : []));
+    store.noteReread(account, path, reported, startsOver);
+    const folded = store.fold(events);
+    if (batch.more) return folded;
+    const left = store.endReread(account, path);
+    return [...folded, ...store.fold(left.map((ref): SyncEvent => ({ type: 'gone', ref })))];
   }
 
   async function step(job: Job) {

@@ -18,15 +18,30 @@ test('a flag change rewrites that message alone', () => {
   expect(change).toEqual({ put: [{ ...index.message(question)!, flags: read }], remove: [] });
 });
 
-test('a message the index already holds can only change its flags', () => {
+test('a message the index already holds takes what it reads again, in its conversation, linked as it was', () => {
   const question = envelope('question');
   const index = fold(arrive(question));
+  const held = index.message(question)!;
 
-  const again = { ...question, subject: 'edited', flags: read };
+  const again = {
+    ...question,
+    preview: 'Read better since',
+    verified: true,
+    flags: read,
+    references: ['<elsewhere@example.com>'],
+    messageId: '<renamed@example.com>',
+  };
 
   expect(applySyncEvent(index, { type: 'message', envelope: again }).put).toEqual([
-    { ...index.message(question)!, flags: read },
+    {
+      ...held,
+      preview: 'Read better since',
+      verified: true,
+      flags: read,
+    },
   ]);
+  // Read the same, it changes nothing.
+  expect(applySyncEvent(index, { type: 'message', envelope: { ...question } })).toEqual(NOTHING);
 });
 
 test('events about messages the index never held change nothing', () => {

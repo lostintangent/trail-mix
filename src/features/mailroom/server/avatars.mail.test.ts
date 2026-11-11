@@ -13,6 +13,7 @@ import { LOGO_BYTES, PICTURE_BYTES } from '../core/avatars.ts';
 import { caFile, empty, ports, start, stop, users } from '../../../../tests/mail-server/server.ts';
 import { mailrooms, member } from '../../../../tests/mailrooms.ts';
 import type { LocalWorker } from '../../../../tests/workerd.ts';
+import type { Wake } from './test-worker.ts';
 
 const { bob } = users;
 /** The name the test mail server signs its Authentication-Results with, as a preset would give. */
@@ -214,6 +215,42 @@ describe('Verified senders’ avatars', () => {
     expect(await shown('iconic.test')).toEqual({ type: 'image/png', bytes: PNG('iconic icon') });
     expect(asked).toContain(`/gravatar/${sha256Of('pat@people.test')}`);
     expect(asked).not.toContain('/sites/iconic.test/favicon-16.png');
+  }, 60_000);
+
+  test('mail indexed before senders were verified is read once more, and shows its picture with no row lost or moved', async () => {
+    const rows = await ada.page({ in: 'inbox' });
+    const picture = rowFrom(rows, 'brand.test')!.avatar;
+    expect(picture).toBeDefined();
+    const messages = (await ada.call<Wake[]>('wakeLog')).at(-1)!.accounts[0]!.messages;
+    await ada.call('indexAsBefore');
+    const row = rowFrom(await ada.page({ in: 'inbox' }), 'brand.test')!;
+    expect(row).not.toHaveProperty('avatar');
+    expect((await ada.call<Message[]>('conversation', row.id))[0]).toMatchObject({
+      verified: false,
+      preview: 'as before',
+    });
+
+    // After a restart, as a deploy's, every folder is read again once the Mailroom checks for
+    // mail, which a device opening has it do at once. Its list is the same all the while.
+    await ada.call('rereadAsUpgraded').catch(() => {});
+    const device = ada.device();
+    await device.opened;
+    const shown: string[][] = [];
+    await ada.until(async () => {
+      const now = await ada.page({ in: 'inbox' });
+      shown.push(now.map(({ id }) => id));
+      return rowFrom(now, 'brand.test')?.avatar === picture;
+    });
+    for (const ids of shown) expect(ids).toEqual(rows.map(({ id }) => id));
+    const [message] = await ada.call<Message[]>('conversation', row.id);
+    expect(message).toMatchObject({ verified: true, avatar: picture });
+    expect(message?.preview).not.toBe('as before');
+    // No wake of the pass held less mail than before it.
+    await ada.until(async () => (await ada.call<Wake[]>('wakeLog')).length > 0);
+    for (const wake of await ada.call<Wake[]>('wakeLog')) {
+      expect(wake.accounts[0]?.messages).toBe(messages);
+    }
+    device.close();
   }, 60_000);
 
   test('show initials for unverified mail, a public mailbox, and pictures that are too big, aren’t pictures, or are kept from the Mailroom', async () => {

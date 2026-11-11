@@ -28,7 +28,7 @@ import type {
  */
 
 export type SyncEvent =
-  /** New, or newly inside the sync window. */
+  /** New, newly inside the sync window, or read again. */
   | { type: 'message'; envelope: Envelope }
   | { type: 'flags'; ref: MessageRef; flags: Flags }
   /** Expunged, moved to another folder, or aged out of the sync window. */
@@ -73,8 +73,7 @@ const NOTHING: IndexChange = { put: [], remove: [] };
  */
 function receive(index: Index, envelope: Envelope): IndexChange {
   const held = index.message(envelope);
-  // An envelope never changes for a MessageRef, except its flags.
-  if (held) return reflag(held, envelope.flags);
+  if (held) return reread(held, envelope);
 
   const gathering = gatheringOf(envelope, index.role(envelope));
   const roots = new Map<ConversationId, string>();
@@ -92,6 +91,27 @@ function receive(index: Index, envelope: Envelope): IndexChange {
     .flatMap((id) => index.conversation(id))
     .map((message) => ({ ...message, conversation }));
   return { put: [{ ...envelope, conversation }, ...renamed], remove: [] };
+}
+
+/**
+ * What a server says of a message never changes for its ref but its flags, but how it is read can,
+ * as when its preview or its sender's verdict is read better since. A message held takes the
+ * envelope read again, in the conversation it is in, and nothing changes if it reads the same.
+ * What it links through stays as it was first read, so its conversation never depends on when.
+ */
+function reread({ conversation, ...held }: Message, envelope: Envelope): IndexChange {
+  const read = { ...envelope, messageId: held.messageId, references: held.references };
+  if (canonical(held) === canonical(read)) return NOTHING;
+  return { put: [{ ...read, conversation }], remove: [] };
+}
+
+/** A value as JSON with every object's keys in order, so two that hold the same read the same. */
+function canonical(value: unknown): string {
+  return JSON.stringify(value, (_, part: unknown) =>
+    part && typeof part === 'object' && !Array.isArray(part)
+      ? Object.fromEntries(Object.entries(part).toSorted(([a], [b]) => a.localeCompare(b)))
+      : part,
+  );
 }
 
 function reflag(held: Message | undefined, flags: Flags): IndexChange {
