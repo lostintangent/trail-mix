@@ -210,6 +210,13 @@ export function Workbench({
   const selected = selection.ids.length === 1 ? selection.ids[0] : undefined;
   const isMany = selection.ids.length > 1;
   const stamps = useMemo(() => new Map(accounts.map(({ id, stamp }) => [id, stamp])), [accounts]);
+  // A row's avatar is its newest sender other than the member, by any of their addresses.
+  const selves = useMemo(
+    () => new Set(accounts.map(({ address }) => address.toLowerCase())),
+    [accounts],
+  );
+  // Stamps mark rows only in a list that mixes accounts.
+  const mixesAccounts = view.in !== 'folder' && accounts.length > 1;
   // On a phone, an address with a conversation opens on the reader, with no slide to it.
   const [phonePane, setPhonePane] = useState<Pane>(() => (place.open ? 'reader' : 'list'));
   const [sidebar, setSidebar] = usePanel(PANELS.sidebar);
@@ -502,6 +509,11 @@ export function Workbench({
     setPicking(true);
     setSelection({ ids: [id], anchor: id });
   }, []);
+  // A finger tapping a row's avatar starts picking with it, or adds it or lets it go while picking.
+  const pickRow = useCallback(
+    (id: ConversationId) => (isPicking ? pick(id, 'toggle') : startPicking(id)),
+    [isPicking, pick, startPicking],
+  );
   // A swipe archives the row it moved, which leaves any selection that held it.
   const swipe = useCallback(
     (id: ConversationId) => {
@@ -817,11 +829,13 @@ export function Workbench({
                 conversations={conversations}
                 isUpdating={isFetching}
                 marks={marks}
-                stamps={stamps}
+                stamps={mixesAccounts ? stamps : undefined}
+                selves={selves}
                 selection={selection}
                 isPicking={isPicking}
                 onSelect={pick}
                 onLongPress={startPicking}
+                onPick={pickRow}
                 onSwipe={swipe}
                 onAhead={ahead}
                 picked={

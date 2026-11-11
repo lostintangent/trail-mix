@@ -14,10 +14,17 @@ import * as stylex from '@stylexjs/stylex';
 import { Ellipsis, FileText, ImageIcon, ImageOff } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
+import { SenderAvatar } from '../../../app/theme/SenderAvatar.tsx';
 import { tm } from '../../../app/theme/tokens.stylex.ts';
 import { CommandButton, type Command } from '../../commands/index.ts';
 import type { Account, Address, Message } from '../../mail/core/index.ts';
-import { accountsQuery, bodyQuery, mailroom, partUrl } from '../../mailroom/client/index.ts';
+import {
+  accountsQuery,
+  bodyQuery,
+  logoUrl,
+  mailroom,
+  partUrl,
+} from '../../mailroom/client/index.ts';
 import { foldQuote } from '../core/quotes.ts';
 import { sheetStyles } from './layout.ts';
 import { MessageFrame } from './MessageFrame.tsx';
@@ -61,9 +68,10 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
       {...stylex.props(sheetStyles.sheet, mail?.paper === 'light' && styles.fixedPaper)}
     >
       <header {...stylex.props(sheetStyles.from)}>
-        <span aria-hidden {...stylex.props(sheetStyles.avatar)}>
-          {initials(message.from)}
-        </span>
+        <SenderAvatar
+          name={displayName(message.from)}
+          logo={message.logo && logoUrl(message.logo)}
+        />
         <div {...stylex.props(sheetStyles.who)}>
           <strong {...stylex.props(sheetStyles.name)}>{displayName(message.from)}</strong>
           <small {...stylex.props(sheetStyles.quiet)}>
@@ -194,18 +202,6 @@ function useAllowImages(account: Account) {
 
 export function displayName({ name, email }: Address): string {
   return name?.trim() || email;
-}
-
-function initials(address: Address): string {
-  const words = displayName(address)
-    .replace(/[^\p{L}\p{N}\s]/gu, ' ')
-    .split(/\s+/)
-    .filter(Boolean);
-  const letters = words.length > 1 ? [words[0], words.at(-1)] : [words[0]?.slice(0, 2)];
-  return letters
-    .map((word) => word?.[0] ?? '')
-    .join('')
-    .toUpperCase();
 }
 
 function recipients(message: Message, account: Account): string {

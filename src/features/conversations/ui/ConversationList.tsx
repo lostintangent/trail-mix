@@ -30,7 +30,7 @@ import {
   type RefObject,
 } from 'react';
 import { Pending, pendingStyles, TextSkeleton } from '../../../app/theme/Pending.tsx';
-import { stampStyles } from '../../../app/theme/stamps.ts';
+import { SenderAvatar } from '../../../app/theme/SenderAvatar.tsx';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type {
   ConversationId,
@@ -38,6 +38,7 @@ import type {
   Marks,
   StampColor,
 } from '../../mail/core/index.ts';
+import { logoUrl } from '../../mailroom/client/index.ts';
 import type { Listed } from '../core/pages.ts';
 import type { SelectBy, Selection } from '../core/selection.ts';
 import { formatListDate } from './dates.ts';
@@ -79,10 +80,12 @@ export function ConversationList({
   marks = NO_MARKS,
   isUpdating = false,
   stamps,
+  selves,
   selection,
   isPicking = false,
   onSelect,
   onLongPress,
+  onPick,
   onSwipe,
   onAhead,
   onShown,
@@ -96,13 +99,17 @@ export function ConversationList({
   marks?: Marks;
   /** Whether newer rows are on their way, as while a search is typed. */
   isUpdating?: boolean;
-  /** Each account's stamp color, by account id. */
-  stamps: ReadonlyMap<string, StampColor>;
+  /** Each account's stamp color, by account id, where the list mixes accounts. Elsewhere none shows. */
+  stamps?: ReadonlyMap<string, StampColor>;
+  /** The member's own addresses, lowercased, whom a row's avatar passes over for its other senders. */
+  selves: ReadonlySet<string>;
   selection: Selection;
   /** Whether a tap adds a row to the selection, as after a long press, instead of opening it. */
   isPicking?: boolean;
   onSelect: (id: ConversationId, by: SelectBy) => void;
   onLongPress?: (id: ConversationId) => void;
+  /** Picks a row, or lets it go while picking, as a finger tapping its avatar does. */
+  onPick?: (id: ConversationId) => void;
   onSwipe?: (id: ConversationId) => void;
   /**
    * Called as a conversation is about to be opened, ahead of the click: once the pointer rests on
@@ -264,7 +271,8 @@ export function ConversationList({
               id={optionId(index)}
               conversation={conversation}
               marks={marks}
-              stamp={stamps.get(conversation.account) ?? 'slate'}
+              stamp={stamps?.get(conversation.account)}
+              selves={selves}
               top={start}
               position={index + 1}
               size={conversations.length}
@@ -272,6 +280,7 @@ export function ConversationList({
               isPicking={isPicking}
               onSelect={onSelect}
               onLongPress={onLongPress}
+              onPick={onPick}
               onSwipe={onSwipe}
               onAhead={onAhead}
             />
@@ -288,6 +297,7 @@ const Row = memo(function Row({
   conversation,
   marks,
   stamp,
+  selves,
   top,
   position,
   size,
@@ -295,13 +305,15 @@ const Row = memo(function Row({
   isPicking,
   onSelect,
   onLongPress,
+  onPick,
   onSwipe,
   onAhead,
 }: {
   id: string;
   conversation: ConversationSummary;
   marks: Marks;
-  stamp: StampColor;
+  stamp: StampColor | undefined;
+  selves: ReadonlySet<string>;
   top: number;
   position: number;
   size: number;
@@ -309,10 +321,15 @@ const Row = memo(function Row({
   isPicking: boolean;
   onSelect: (id: ConversationId, by: SelectBy) => void;
   onLongPress: ((id: ConversationId) => void) | undefined;
+  onPick: ((id: ConversationId) => void) | undefined;
   onSwipe: ((id: ConversationId) => void) | undefined;
   onAhead: ((id: ConversationId, isPressed: boolean) => void) | undefined;
 }) {
-  const { subject, senders, preview, date, unread, flagged, hasAttachments } = conversation;
+  const { subject, senders, preview, date, unread, flagged, hasAttachments, logo } = conversation;
+  // The newest sender who isn't the member, or the member when only they wrote.
+  const who = senders.find(({ email }) => !selves.has(email.toLowerCase())) ?? senders[0];
+  // A finger that taps the avatar picks the row instead of opening it.
+  const pointer = useRef('');
   const isUnread = unread > 0;
   const touch = useTouch(
     () => onLongPress?.(conversation.id),
@@ -345,7 +362,21 @@ const Row = memo(function Row({
       onPointerLeave={ahead.onPointerLeave}
       {...stylex.props(styles.row, styles.placed(top), isSelected && styles.selected)}
     >
-      <span {...stylex.props(styles.stamp, stampStyles[stamp])} />
+      <span
+        onPointerDown={(event) => (pointer.current = event.pointerType)}
+        onClick={(event) => {
+          if (pointer.current !== 'touch' || !onPick) return;
+          event.stopPropagation();
+          if (!touch.tookClick()) onPick(conversation.id);
+        }}
+        {...stylex.props(styles.avatar)}
+      >
+        <SenderAvatar
+          name={who ? who.name || who.email : ''}
+          logo={logo && logoUrl(logo)}
+          stamp={stamp}
+        />
+      </span>
       <span {...stylex.props(styles.lines)}>
         <span {...stylex.props(styles.top, styles.line)}>
           {isUnread && <span {...stylex.props(styles.dot)} />}
@@ -399,7 +430,9 @@ function SkeletonRow({ row, xstyle }: { row: number; xstyle: stylex.StyleXStyles
   const width = (widths: readonly string[]) => widths[row % widths.length] ?? '50%';
   return (
     <div aria-hidden {...stylex.props(styles.row, styles.pending, xstyle)}>
-      <Skeleton width="3px" radius="none" index={row} xstyle={styles.stamp} />
+      <span {...stylex.props(styles.avatar)}>
+        <Skeleton width="32px" height="32px" radius="rounded" index={row} />
+      </span>
       <span {...stylex.props(styles.lines)}>
         <span {...stylex.props(styles.top, styles.line)}>
           <span {...stylex.props(styles.sender, styles.grow)}>
@@ -550,7 +583,7 @@ const classesOf = (style: stylex.StyleXStyles) => stylex.props(style).className?
 function RowRuler({ ref }: { ref: RefObject<HTMLDivElement | null> }) {
   return (
     <div ref={ref} aria-hidden {...stylex.props(styles.row, styles.ruler)}>
-      <span />
+      <span {...stylex.props(styles.avatar)} />
       <span {...stylex.props(styles.lines)}>
         <span {...stylex.props(styles.top, styles.line)} />
         <span {...stylex.props(styles.line)} />
@@ -618,7 +651,7 @@ const styles = stylex.create({
     position: 'absolute',
     insetInline: 0,
     display: 'grid',
-    gridTemplateColumns: '3px minmax(0, 1fr)',
+    gridTemplateColumns: 'auto minmax(0, 1fr)',
     gap: spacingVars['--spacing-2'],
     paddingBlock: tm.rowPad,
     paddingInlineStart: spacingVars['--spacing-1-5'],
@@ -658,9 +691,15 @@ const styles = stylex.create({
     color: { default: null, [media.forcedColors]: 'HighlightText' },
     forcedColorAdjust: 'none',
   },
-  stamp: {
-    borderRadius: '2px',
-    forcedColorAdjust: 'none',
+  // The sender's avatar leads the row from its top. Under a finger it's a 44-pixel target, reaching
+  // past its 32 pixels without moving anything around it.
+  avatar: {
+    display: 'grid',
+    placeItems: 'center',
+    alignSelf: 'start',
+    width: { default: '32px', [media.coarse]: '44px' },
+    height: { default: '32px', [media.coarse]: '44px' },
+    margin: { default: 0, [media.coarse]: '-6px' },
   },
   lines: {
     display: 'flex',

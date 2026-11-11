@@ -53,10 +53,12 @@ export function ListPane({
   isUpdating,
   marks,
   stamps,
+  selves,
   selection,
   isPicking,
   onSelect,
   onLongPress,
+  onPick,
   onSwipe,
   onAhead,
   picked,
@@ -89,11 +91,15 @@ export function ListPane({
   isUpdating: boolean;
   /** What a search matched, marked in each row. */
   marks: Marks;
-  stamps: ReadonlyMap<string, StampColor>;
+  /** Each account's stamp color, by account id, where the list mixes accounts. */
+  stamps?: ReadonlyMap<string, StampColor>;
+  /** The member's own addresses, lowercased. */
+  selves: ReadonlySet<string>;
   selection: Selection;
   isPicking: boolean;
   onSelect: (id: ConversationId, by: SelectBy) => void;
   onLongPress: (id: ConversationId) => void;
+  onPick: (id: ConversationId) => void;
   onSwipe: (id: ConversationId) => void;
   /** Asks for a conversation the member is about to open, before the click. */
   onAhead?: (id: ConversationId, isPressed: boolean) => void;
@@ -176,10 +182,12 @@ export function ListPane({
             isUpdating={isUpdating}
             marks={marks}
             stamps={stamps}
+            selves={selves}
             selection={selection}
             isPicking={isPicking}
             onSelect={onSelect}
             onLongPress={onLongPress}
+            onPick={onPick}
             onSwipe={onSwipe}
             onAhead={onAhead}
             onShown={onShown}

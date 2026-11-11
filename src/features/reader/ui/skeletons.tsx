@@ -2,7 +2,6 @@ import { Skeleton } from '@astryxdesign/core/Skeleton';
 import { typeScaleVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { Pending, TextSkeleton } from '../../../app/theme/Pending.tsx';
-import { tm } from '../../../app/theme/tokens.stylex.ts';
 import { bareSubject } from '../core/subject.ts';
 import { sheetStyles, threadStyles } from './layout.ts';
 
@@ -27,7 +26,7 @@ export function ReaderSkeleton({ subject }: { subject?: string }) {
       </div>
       <div {...stylex.props(sheetStyles.sheet)}>
         <div {...stylex.props(sheetStyles.from)}>
-          <Skeleton width={tm.target} height={tm.target} radius="rounded" index={3} />
+          <Skeleton width="32px" height="32px" radius="rounded" index={3} />
           <div {...stylex.props(sheetStyles.who)}>
             <span>
               <TextSkeleton width="30%" index={3} />

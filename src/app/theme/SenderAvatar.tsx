@@ -1,0 +1,109 @@
+import {
+  colorVars,
+  fontWeightVars,
+  radiusVars,
+  typographyVars,
+} from '@astryxdesign/core/theme/tokens.stylex';
+import * as stylex from '@stylexjs/stylex';
+import { useState } from 'react';
+import type { StampColor } from '../../features/mail/core/index.ts';
+import { stampStyles } from './stamps.ts';
+
+/**
+ * Who a message is from, as a round mark 32 pixels across: their brand's logo when their mail is
+ * verified, or their initials on a quiet plate, also when the logo fails to load. Where a list
+ * mixes accounts, the account's stamp lies on its corner like a postmark. It repeats the name
+ * beside it, so assistive technology passes over it.
+ *
+ * It draws Astryx's Avatar plate itself, with Astryx's tokens. Every row of the list leads with
+ * one, so it loads with the first screen, and Avatar's tooltip, link and status-label machinery,
+ * which none of them uses, would take about 3 KB of the first load's 250.
+ */
+export function SenderAvatar({
+  name,
+  logo,
+  stamp,
+}: {
+  name: string;
+  /** Where the sender's logo is served, when there is one to show. */
+  logo?: string;
+  stamp?: StampColor;
+}) {
+  const [failed, setFailed] = useState<string>();
+  const showsLogo = logo !== undefined && failed !== logo;
+  return (
+    <span aria-hidden data-avatar {...stylex.props(styles.avatar)}>
+      <span {...stylex.props(styles.plate, !showsLogo && styles.initials)}>
+        {showsLogo ? (
+          <img src={logo} alt="" onError={() => setFailed(logo)} {...stylex.props(styles.logo)} />
+        ) : (
+          initialsOf(name)
+        )}
+      </span>
+      {stamp && <span data-stamp={stamp} {...stylex.props(styles.stamp, stampStyles[stamp])} />}
+    </span>
+  );
+}
+
+/**
+ * Up to two letters for a name: the first of its first word and of its last, as Astryx's Avatar
+ * takes them. Words are runs that start with a letter or a digit, so an address gives its first.
+ */
+export function initialsOf(name: string): string {
+  const words = name.split(/\s+/).filter((word) => /^[\p{L}\p{N}]/u.test(word));
+  const [first, last] = [words[0], words.length > 1 ? words.at(-1) : undefined];
+  return [first, last]
+    .map((word) => (word ? [...word][0] : ''))
+    .join('')
+    .toUpperCase();
+}
+
+const styles = stylex.create({
+  avatar: {
+    position: 'relative',
+    display: 'inline-flex',
+    flexShrink: 0,
+    width: '32px',
+    height: '32px',
+  },
+  plate: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+    height: '100%',
+    overflow: 'hidden',
+    borderRadius: radiusVars['--radius-full'],
+  },
+  // Primary text on the neutral plate, as Astryx's Avatar sets it, reads at 4.5:1 in both themes.
+  initials: {
+    backgroundColor: colorVars['--color-neutral'],
+    color: {
+      default: colorVars['--color-text-primary'],
+      '@media (forced-colors: active)': 'CanvasText',
+    },
+    fontFamily: typographyVars['--font-family-body'],
+    // Two letters fit the circle at 40% of its size, as on Astryx's Avatar.
+    fontSize: '12.8px',
+    fontWeight: fontWeightVars['--font-weight-medium'],
+    lineHeight: 1,
+  },
+  logo: {
+    width: '100%',
+    height: '100%',
+    objectFit: 'cover',
+  },
+  // A postmark on the circle's lower corner, ringed in the sheet's paper so it reads on any logo.
+  // Its center lies where the circle's edge crosses the diagonal, 32 × (1 − 1/√2) / 2 ≈ 4.7 pixels
+  // in from each side, less half its 10 pixels.
+  stamp: {
+    position: 'absolute',
+    insetInlineEnd: '-0.3px',
+    bottom: '-0.3px',
+    width: '10px',
+    height: '10px',
+    borderRadius: radiusVars['--radius-full'],
+    boxShadow: `0 0 0 2px ${colorVars['--color-background-surface']}`,
+    forcedColorAdjust: 'none',
+  },
+});
