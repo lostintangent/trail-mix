@@ -23,6 +23,7 @@ export const tm = stylex.defineVars({
   rowPad: { default: '8px', [COARSE]: '11px' },
   measure: '72ch', // longest line of message text
   swatch: '14px', // a color to pick, the size of an icon
+  statusDot: '6px', // the dot before the mail's status, in the sidebar and a phone's list
 
   // Color roles beyond Astryx's
   textQuiet: 'light-dark(oklch(0.52 0.015 265), oklch(0.66 0 0))', // previews, times: still 4.5:1

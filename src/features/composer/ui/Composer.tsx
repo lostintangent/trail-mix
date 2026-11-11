@@ -318,8 +318,7 @@ function Writer({
         isSheet ? [styles.centered, styles.sheetStatus] : styles.grow,
       )}
     >
-      {(autosave.state === 'failed' && isOffline ? SAVED_OFFLINE : SAVED[autosave.state]) ||
-        '\u00a0'}
+      {(isOffline ? OFFLINE : SAVED[autosave.state]) || '\u00a0'}
     </span>
   );
   const close = isSheet ? (
@@ -537,8 +536,11 @@ const SAVED: Record<SaveState, string> = {
   saved: 'Saved to Drafts',
   failed: 'Couldn’t save. Trying again…',
 };
-/** A save that failed with no network, which saves, and lets Send go, once the network is back. */
-const SAVED_OFFLINE = 'Offline. Saves once online.';
+/**
+ * What the composer says with no network, whatever its save: Send and Send later wait, and what's
+ * written saves once the network is back.
+ */
+const OFFLINE = 'Offline. Send once you’re back.';
 
 /**
  * Bold, italic, code and a link, each pressed while the text at the cursor has it. Link asks for

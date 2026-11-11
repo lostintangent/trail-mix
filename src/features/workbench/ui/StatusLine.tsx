@@ -52,8 +52,6 @@ export function StatusLine({
   );
 }
 
-const DOT = '6px';
-
 const styles = stylex.create({
   status: {
     display: 'flex',
@@ -75,7 +73,7 @@ const styles = stylex.create({
   // Under the status's words, past its dot.
   note: {
     margin: 0,
-    paddingInlineStart: `calc(${spacingVars['--spacing-2']} + ${DOT} + ${spacingVars['--spacing-1-5']})`,
+    paddingInlineStart: `calc(${spacingVars['--spacing-2']} + ${tm.statusDot} + ${spacingVars['--spacing-1-5']})`,
     paddingInlineEnd: spacingVars['--spacing-2'],
     color: tm.textQuiet,
     fontSize: typeScaleVars['--text-supporting-size'],
@@ -89,8 +87,8 @@ const styles = stylex.create({
   },
   dot: {
     flexShrink: 0,
-    width: DOT,
-    height: DOT,
+    width: tm.statusDot,
+    height: tm.statusDot,
     borderRadius: '50%',
     forcedColorAdjust: 'none',
   },

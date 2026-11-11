@@ -1,9 +1,20 @@
 /**
  * The server's own reason for a refusal, as a sentence. The Mailroom passes it on as the error's
- * message.
+ * message. A request that never reached the server has no reason of its own, and the browser's
+ * words for it, which differ from browser to browser, say only that the fetch failed.
  */
-export function reasonOf(error: unknown): string {
+export function reasonOf(
+  error: unknown,
+  isOnline = typeof navigator === 'undefined' || navigator.onLine,
+): string {
   const reason = error instanceof Error ? error.message.trim() : '';
+  if (error instanceof TypeError && UNREACHED.test(reason)) {
+    return isOnline ? 'Trail Mix couldn’t reach its server.' : 'This device is offline.';
+  }
   if (!reason) return 'The mail server gave no reason.';
   return /[.!?]$/.test(reason) ? reason : `${reason}.`;
 }
+
+/** What Chromium, Firefox and Safari say when a fetch gets no answer. */
+const UNREACHED =
+  /^(?:Failed to fetch|NetworkError when attempting to fetch resource\.|Load failed)$/;

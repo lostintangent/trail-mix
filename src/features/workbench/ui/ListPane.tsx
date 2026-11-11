@@ -44,6 +44,7 @@ export function ListPane({
   icon,
   title,
   unread,
+  offline,
   scope,
   below,
   list,
@@ -75,6 +76,11 @@ export function ListPane({
   icon: LucideIcon;
   title: string;
   unread: number | undefined;
+  /**
+   * On a phone, what the sidebar's status says while the device has no network. Its sidebar is off
+   * the screen, so the list says it in place of the unread count, as mail read then may be old.
+   */
+  offline?: string;
   /** The one account the view holds, or nothing when it gathers every account. */
   scope: Account | undefined;
   /** What sits under the title, such as the search field on a phone and what a search covers. */
@@ -142,10 +148,16 @@ export function ListPane({
         <Heading level={2} id={titleId} xstyle={styles.title}>
           {title}
         </Heading>
+        {offline && (
+          <span role="status" {...stylex.props(styles.offline)}>
+            <span {...stylex.props(styles.offlineDot)} />
+            {offline}
+          </span>
+        )}
         {unread ? (
           // Where the count can't fit whole, it moves past a break to a second line its box hides,
           // so it goes before the title gives up a letter.
-          <span {...stylex.props(styles.unread)}>
+          <span {...stylex.props(styles.unread, offline !== undefined && styles.besideOffline)}>
             {'\u200b'}
             <span {...stylex.props(styles.unreadText)}>{unread} unread</span>
           </span>
@@ -387,6 +399,28 @@ const styles = stylex.create({
   unreadText: {
     display: 'inline-block',
     whiteSpace: 'nowrap',
+  },
+  // A list that says it's offline says nothing else beside its title.
+  besideOffline: {
+    display: 'none',
+  },
+  // It stays whole while the title gives up letters, since it matters more.
+  offline: {
+    display: 'inline-flex',
+    flexShrink: 0,
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: spacingVars['--spacing-1-5'],
+    color: tm.textQuiet,
+    fontSize: typeScaleVars['--text-supporting-size'],
+    whiteSpace: 'nowrap',
+  },
+  offlineDot: {
+    width: tm.statusDot,
+    height: tm.statusDot,
+    borderRadius: '50%',
+    backgroundColor: tm.textQuiet,
+    forcedColorAdjust: 'none',
   },
   sheet: {
     flexGrow: 1,

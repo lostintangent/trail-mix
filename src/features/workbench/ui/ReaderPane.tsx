@@ -119,6 +119,8 @@ export function ReaderPane({
     data: conversation,
     isPending,
     isError,
+    fetchStatus,
+    failureCount,
     refetch,
   } = useQuery({
     ...conversationQuery(shown ?? ''),
@@ -140,12 +142,20 @@ export function ReaderPane({
   const top = useMemo(() => reading && actions?.(reading, 'top'), [reading, actions]);
   const island = useMemo(() => reading && actions?.(reading, 'island'), [reading, actions]);
   const isShowing = reading !== undefined;
+  // Asked for and refused, or with no network asked for once in vain and waiting to ask again, as
+  // for one this device didn't keep. A selection never shows the empty reader, so it says why
+  // under the subject instead.
+  const isUnopened =
+    shown !== undefined &&
+    !isShowing &&
+    conversation === undefined &&
+    (isError || fetchStatus === 'paused' || (isOffline && failureCount > 0));
   // On its way: asked for, and not here yet. Its skeleton stands where it will lie.
   const isOpening =
-    shown !== undefined && !isShowing && (isPending || (conversation?.length ?? 0) > 0);
-  // Asked for and refused, as with no network for one this device didn't keep. A selection never
-  // shows the empty reader, so it says why under the subject instead.
-  const isUnopened = shown !== undefined && !isShowing && !isOpening && isError;
+    shown !== undefined &&
+    !isShowing &&
+    !isUnopened &&
+    (isPending || (conversation?.length ?? 0) > 0);
   // Where it sits in the list is known before it arrives, so the bar stands still as it does.
   const placed = useMemo(
     () =>

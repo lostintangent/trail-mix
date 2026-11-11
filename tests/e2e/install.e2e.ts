@@ -103,7 +103,7 @@ test('the installed app reads offline at both sizes in both themes: the Inbox an
       await page.reload();
       // The address names the conversation, which opens from what the device kept, beside the
       // Inbox, or on a phone over it.
-      await page.getByText('Offline: kept mail').waitFor({ state: 'attached' });
+      await page.getByText('Offline: kept mail').first().waitFor({ state: 'attached' });
       await page.waitForFunction(
         (subject) =>
           document.querySelector('section[aria-label="Reader"] h1')?.textContent === subject &&
@@ -114,6 +114,12 @@ test('the installed app reads offline at both sizes in both themes: the Inbox an
       if (size === 'phone') {
         await page.getByRole('button', { name: 'Back', exact: true }).click();
         await page.getByRole('option').first().waitFor();
+        // The sidebar that says it on a desktop is off the screen, so the list says it.
+        await page
+          .getByRole('region', { name: 'Inbox' })
+          .getByRole('status')
+          .filter({ hasText: 'Offline: kept mail' })
+          .waitFor();
         await page.waitForTimeout(400);
         await page.screenshot({ path: join(SHOTS, `offline-phone-${colorScheme}-inbox.png`) });
       }
@@ -144,19 +150,48 @@ test('offline, a conversation never opened says it opens once online, and Send k
   expect(await reader.locator('h1').textContent()).toMatch(NEVER_OPENED);
   await page.screenshot({ path: join(SHOTS, 'offline-desktop-light-unopened.png') });
 
-  // Writing offline is out of scope, so Send sends nothing, and what was written stays.
+  // Archive can't reach the mail server, so the row stays, and the toast says why in plain words.
+  await page.keyboard.press('e');
+  await page
+    .getByText(/^Couldn.t archive\. This device is offline\.$/)
+    .first()
+    .waitFor();
+  expect(await page.getByRole('option').filter({ hasText: NEVER_OPENED }).count()).toBe(1);
+  // The selection moved on as the row left, and the conversation it moved to says it isn't here
+  // either, rather than standing as a skeleton while the page asks again.
+  await reader.getByRole('alert').filter({ hasText: 'It opens once you’re back online' }).waitFor();
+  await page.screenshot({ path: join(SHOTS, 'offline-desktop-light-archive.png') });
+
+  // Writing offline is out of scope, so Send and Send later wait, plainly, and say why, and what was
+  // written stays.
   await page.keyboard.press('c');
   const composer = page.getByRole('region', { name: 'New message' });
   await composer.getByRole('textbox', { name: 'To' }).fill('sam@trailmix.test');
   await composer.getByRole('textbox', { name: 'Subject' }).fill('Written offline');
-  await composer.getByRole('textbox', { name: 'Message' }).fill('Kept until the network is back.');
-  await composer.getByRole('status').filter({ hasText: 'Offline. Saves once online.' }).waitFor();
-  await composer.getByRole('button', { name: 'Send', exact: true }).click();
+  const message = composer.getByRole('textbox', { name: 'Message' });
+  await message.fill('Kept until the network is back.');
+  await composer
+    .getByRole('status')
+    .filter({ hasText: 'Offline. Send once you’re back.' })
+    .waitFor();
+  const send = composer.getByRole('button', { name: 'Send', exact: true });
+  const later = composer.getByRole('button', { name: 'Send later', exact: true });
+  expect({ send: await send.isDisabled(), later: await later.isDisabled() }).toEqual({
+    send: true,
+    later: true,
+  });
+  await message.press('ControlOrMeta+Enter');
   await page.waitForTimeout(1_000);
-  expect(await composer.getByRole('textbox', { name: 'Message' }).textContent()).toBe(
-    'Kept until the network is back.',
-  );
+  expect(await message.textContent()).toBe('Kept until the network is back.');
   await page.screenshot({ path: join(SHOTS, 'offline-desktop-light-send.png') });
+
+  // The conversation the reload opened, from what was kept, asked for no read mark it couldn't make.
+  expect(await page.getByText(/Couldn.t mark read/).count()).toBe(0);
+
+  // Back online, what was written saves, and Send can go.
+  await context.setOffline(false);
+  await composer.getByRole('status').filter({ hasText: 'Saved to Drafts' }).waitFor();
+  expect(await send.isDisabled()).toBe(false);
   expect(errors).toEqual([]);
   await context.close();
 }, 60_000);
@@ -215,6 +250,24 @@ test('losing the network while open, the installed app still opens the conversat
   await context.setOffline(true);
   await page.getByText('Offline: kept mail').waitFor();
   expect(await openConversation(page, designReview)).toBe(subject);
+  // One it didn't keep says so, rather than standing as a skeleton while the page waits to ask.
+  // Design review notes prepared the conversations around it, so this one lies further down.
+  await page
+    .getByRole('option')
+    .filter({ hasText: /Sync service rewrite/ })
+    .first()
+    .click();
+  const reader = page.locator('section[aria-label="Reader"]');
+  const unkept = reader.getByRole('alert').filter({ hasText: 'It opens once you’re back online' });
+  await unkept.waitFor();
+  // So does the next, reached by key, whose page waits for the network to ask again.
+  const before = await reader.locator('h1').textContent();
+  await page.keyboard.press('j');
+  await page.waitForFunction(
+    (before) => document.querySelector('section[aria-label="Reader"] h1')?.textContent !== before,
+    before,
+  );
+  await unkept.waitFor({ timeout: 5_000 });
   await context.close();
 }, 60_000);
 

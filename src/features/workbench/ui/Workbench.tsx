@@ -114,6 +114,8 @@ const NOTHING_TO_TRIAGE = triageCommands({
   onTriage: () => {},
 }).map((command) => ({ ...command, isEnabled: false }));
 import { StatusLine } from './StatusLine.tsx';
+import { mailStatus } from './status.ts';
+import { useReach } from '../../offline/index.ts';
 import {
   CREATE,
   folderName,
@@ -354,8 +356,11 @@ export function Workbench({
     }
     triage(action, selection.ids);
   };
+  // Opening a conversation with no network, as from what the installed app kept, leaves it
+  // unread, since the mark couldn't land and nobody asked for it.
+  const reach = useReach();
   const markRead = (id: ConversationId) => {
-    if (rowOf(id)?.unread) {
+    if (reach === 'online' && rowOf(id)?.unread) {
       triage({ do: 'read' }, [id], { quietly: true });
     }
   };
@@ -695,9 +700,11 @@ export function Workbench({
       if (!outgoing) leaving.forgotten(draft);
     });
   };
+  // With no network nothing can be sent, and writing offline is out of scope, so Send and Send
+  // later wait, and the composer says why.
   const writingCommands = useSendCommands(compose !== undefined, {
     onSend: (at) => sender.current?.(at),
-    isEnabled: isSendable,
+    isEnabled: isSendable && reach === 'online',
     shortcut: 'Mod+Enter',
   });
 
@@ -894,6 +901,9 @@ export function Workbench({
                 icon={viewIcon(view, folders)}
                 title={title}
                 unread={unread}
+                offline={
+                  isPhone && reach !== 'online' ? mailStatus(accounts, reach)?.label : undefined
+                }
                 scope={scope}
                 below={
                   <>
