@@ -212,17 +212,17 @@ test('an accepted send waits for the server’s copy out of Drafts, its count an
 }, 60_000);
 
 test('a count the folders lower before the Outbox lets the send go never drops twice', async () => {
-  const page = await open({ ...PHONE, colorScheme: 'dark' });
+  // At a desktop's size, where the list stays drawn while the reader shows the draft.
+  const page = await open({ ...DESKTOP, colorScheme: 'light' });
   const [drafts] = await counted(page, 'drafts');
   const outbox = outboxSnapshots(page);
   // The Outbox's snapshots lag the folders' by a second, so Drafts' count falls before it says why.
   await slow(page, 'outbox', 1_000);
   await sendDraft(page, /Offsite agenda/);
   await toast(page, /^Sending to Sofia and 2 others in \d+s$/).waitFor();
-  await goTo(page, 'Drafts');
   await row(page, /Offsite agenda/).waitFor({ state: 'detached', timeout: 2_000 });
   await waitUntil(() => outbox.some(({ states }) => states.includes('accepted')), 20_000);
-  await readable(page, 'phone-dark-accepted');
+  await readable(page, 'desktop-light-accepted');
   await waitUntil(() => outbox.at(-1)?.states.length === 0, 20_000);
   await page.waitForTimeout(3_000);
 
@@ -231,6 +231,8 @@ test('a count the folders lower before the Outbox lets the send go never drops t
   const accepted = outbox.find(({ states }) => states.includes('accepted'))!.at;
   const dropped = (await drawn(page)).find((drawn) => Number(drawn.drafts) === drafts! - 1)!;
   expect(dropped.at).toBeLessThan(accepted - 2_000);
+  // A new message's draft left the list in the frame its count fell, before the Mailroom answered.
+  expect(dropped.rows.some((row) => row.includes('Offsite agenda'))).toBe(false);
 }, 60_000);
 
 test('a send the server refuses is back in Drafts, and counted there again', async () => {

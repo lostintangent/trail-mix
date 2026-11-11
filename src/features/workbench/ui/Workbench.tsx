@@ -575,13 +575,18 @@ export function Workbench({
   useLayoutEffect(() => {
     shownNow.current = selected;
   });
-  // A reply is on its way at the end of its conversation in the frame its composer closes, and
-  // leaves it again if the Mailroom refuses it or Undo takes it back.
+  // A reply is on its way at the end of its conversation in the frame its composer closes, as is a
+  // draft opened in its own, and leaves it again if the Mailroom refuses it or Undo takes it back. A
+  // new message has no conversation until the Outbox names one.
   const sendWritten = (draft: MessageRef, at: string | undefined, writing: Writing) => {
     const from = { conversation: selected, isDocked: compose !== undefined && isDocked(compose) };
     const pressedAt = Date.now();
     leaving.pressed(draft, {
-      in: from.isDocked ? from.conversation : undefined,
+      in: from.isDocked
+        ? from.conversation
+        : compose?.as === 'draft'
+          ? compose.draft.conversation
+          : undefined,
       written: writing.markdown,
       at,
       pressedAt,
