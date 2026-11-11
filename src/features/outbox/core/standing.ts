@@ -99,6 +99,17 @@ export function standingOfFollowed(
   return seen.goneAt < closes ? { is: 'undone' } : { is: 'sending' };
 }
 
+/**
+ * Whether a followed send is under way by `now` on this device's clock: its window has closed, or
+ * the Outbox has begun it, failed it or seen it go. A send that failed was past its window, even if
+ * this device's countdown last looked a moment before it closed.
+ */
+export const isUnderWay = (seen: Followed, closes: number, now: number): boolean =>
+  seen.goneAt !== undefined ||
+  seen.last.state !== 'waiting' ||
+  seen.last.error !== undefined ||
+  now >= closes;
+
 /** Whether a send that stands so can still be undone. */
 export const isUndoable = (standing: Standing) =>
   standing.is === 'counting' || standing.is === 'scheduled';

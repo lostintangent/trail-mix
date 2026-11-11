@@ -11,6 +11,7 @@ import {
   isLeaving,
   isOnItsWay,
   isUndoable,
+  isUnderWay,
   standingOf,
   standingOfFollowed,
 } from './standing.ts';
@@ -150,4 +151,22 @@ test('a toast names recipients by first name, and a row names them in full', () 
   expect(briefly([])).toBe('undisclosed recipients');
   expect(fully([mina, desk])).toBe('Mina Okafor, bookings@unreachable.example');
   expect(fully([])).toBe('Undisclosed recipients');
+});
+
+test('a send is under way once its window closes, or once the Outbox begins, fails or loses it', () => {
+  const waiting = followed(schedule(entry, iso(0)));
+  const closes = at(10);
+  expect(isUnderWay(waiting, closes, at(9.9))).toBe(false);
+  expect(isUnderWay(waiting, closes, at(10))).toBe(true);
+  expect(isUnderWay(followed(begin(schedule(entry, iso(0)))), closes, at(9.9))).toBe(true);
+  expect(isUnderWay(follow(waiting, undefined, at(5)), closes, at(5))).toBe(true);
+  // A send that failed for now, seen while this device's countdown last looked just before its
+  // window closed, still went, so it is followed until it's sent.
+  const retrying = submitted(
+    begin(schedule(entry, iso(0))),
+    { error: '451 try later', passing: true },
+    iso(10),
+  );
+  expect(retrying.state).toBe('waiting');
+  expect(isUnderWay(follow(waiting, retrying, at(10.1)), closes, at(9.9))).toBe(true);
 });

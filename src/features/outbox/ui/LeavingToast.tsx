@@ -28,6 +28,7 @@ import {
   isLeaving,
   isOnItsWay,
   isUndoable,
+  isUnderWay as isUnderWayAt,
   standingOfFollowed,
   type Standing,
 } from '../core/standing.ts';
@@ -71,7 +72,8 @@ export default function LeavingToast({
   const [undo, setUndo] = useState<'idle' | 'asking' | 'done' | { refused: string }>('idle');
   const [now, setNow] = useState(Date.now);
 
-  const isUnderWay = seen.goneAt !== undefined || seen.last.state !== 'waiting' || now >= closes;
+  // While it's under way, it asks after the send, in case a hint is lost.
+  const isUnderWay = isUnderWayAt(seen, closes, now);
   const { data: outbox, dataUpdatedAt } = useQuery({
     ...outboxQuery,
     refetchInterval: isUnderWay && seen.goneAt === undefined ? CHECK_MS : false,
