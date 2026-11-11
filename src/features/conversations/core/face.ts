@@ -32,7 +32,6 @@ export function peopleOf(
   return to[0] ? { names: `To ${namesOf(to)}`, face: to[0] } : { names: undefined, face };
 }
 
-/** "Ada Park" for one person, and first names for several, in order. */
 /**
  * Whether an address has a domain after its last `@`, as `domainOf` reads one. It's written out
  * here, since the module `domainOf` lives in carries the address-list parser, which the first
@@ -41,6 +40,7 @@ export function peopleOf(
 const hasDomain = (email: string) =>
   email.includes('@') && email.slice(email.lastIndexOf('@') + 1).trim() !== '';
 
+/** "Ada Park" for one person, and first names for several, in order. */
 function namesOf(people: readonly Address[]): string {
   const names = people.map(({ name, email }) => name || email);
   if (names.length <= 1) return names[0] ?? '';
