@@ -109,6 +109,10 @@ jobs:
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    # Both builds the suite drives throw wherever Astryx reads a field of the built theme that the
+    # build leaves out, so an Astryx upgrade that starts reading one fails here.
+    env:
+      THEME_TRAPS: 1
     steps:
       - uses: actions/checkout@v7
 
