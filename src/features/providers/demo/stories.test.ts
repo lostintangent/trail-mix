@@ -5,6 +5,12 @@ import { seededMessage, seededSize, type DemoKind } from './stories.ts';
 const BENCH_INBOX = 50_000;
 const CREATED_AT = '2026-11-09T12:00:00.000Z';
 
+/** The public demo's mailbox, as `wrangler.jsonc` sizes it: Work's Inbox is a tenth of Personal's. */
+const DEMO_INBOX = { personal: 200, work: 20 };
+
+/** More rows of a list than any screen shows at once. */
+const SCREENFUL = 30;
+
 /** Every message of a bench-sized mailbox, newest first. */
 function mailbox(kind: DemoKind) {
   const size = seededSize(kind, BENCH_INBOX);
@@ -37,4 +43,32 @@ test('each pull request has its own number and its own thread, and newer ones ar
   expect(Math.min(...numbers.keys())).toBeGreaterThan(0);
   // Newest first, every pull request's number is lower than the one before it.
   expect(firsts.every((number, at) => at === 0 || number < firsts[at - 1]!)).toBe(true);
+});
+
+test('the public demo never shows two messages alike within a screenful of a folder', () => {
+  // Alike as a row shows them: saying the same, or opening the same way under the same subject.
+  const alike: string[] = [];
+  for (const kind of ['personal', 'work'] as const) {
+    const size = seededSize(kind, DEMO_INBOX[kind]);
+    const newestFirst = Array.from({ length: size }, (_, at) =>
+      seededMessage(kind, size, CREATED_AT, size - at)!,
+    );
+    for (const [folder, messages] of Map.groupBy(newestFirst, ({ folder }) => folder)) {
+      const rows = messages.map((message) => {
+        const { subject, preview } = message.content();
+        return { subject: subject.replace(/^Re: /, ''), preview, opening: preview.slice(0, 40) };
+      });
+      rows.forEach((row, at) => {
+        for (const other of rows.slice(at + 1, at + SCREENFUL)) {
+          if (
+            row.preview === other.preview ||
+            (row.subject === other.subject && row.opening === other.opening)
+          ) {
+            alike.push(`${kind} ${folder}: ${row.subject}: ${row.opening}`);
+          }
+        }
+      });
+    }
+  }
+  expect(alike).toEqual([]);
 });

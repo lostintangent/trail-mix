@@ -16,8 +16,9 @@ import { isDemoVerified } from './pictures.ts';
  * newest first and repeated back in time until the Inbox holds as many messages as asked. The
  * newest cycle is the one the prototypes show: unread mail, a flagged message, attachments, a
  * GitHub thread, a newsletter, long threads, Sent replies and drafts, one of them to a host that
- * turns its first try away. Older cycles vary their people and subjects, and most of their mail is
- * read.
+ * turns its first try away. Older cycles vary who writes and what they say, by lists of different
+ * lengths, so no screenful of a folder in the public demo shows two messages alike, and most of their
+ * mail is read.
  *
  * A message is a pure function of its account, the mailbox's size, its creation time and its UID,
  * so no message exists until it is read, and the same inputs always give the same bytes.
@@ -273,6 +274,9 @@ const person = (index: number, cycle: number) => PEOPLE[(index + cycle) % PEOPLE
 /** The first item in the newest cycle, and the others in turn further back. */
 const rotate = <T>(items: readonly T[], cycle: number) => items[cycle % items.length]!;
 
+/** Text as it starts a sentence. */
+const capital = (text: string) => `${text[0]!.toUpperCase()}${text.slice(1)}`;
+
 const GITHUB = {
   name: 'trailmix-demo/toy-box',
   id: 'toy-box.trailmix-demo.github.com',
@@ -292,49 +296,136 @@ const pullNumber = (cycle: number, story: 'review' | 'checks') =>
   NEWEST_PULL - 4 * cycle - (story === 'checks' ? 3 : 0);
 
 const STORIES: Record<string, (cycle: number) => Thread> = {
-  plan: (c) => ({
-    subject: rotate(['Workers migration plan', 'Sync service rewrite', 'Storage move plan'], c),
-    cast: [person(0, c)],
-    steps: [
-      {
-        from: 0,
-        text: 'Could you write up how sync would move into the Worker? I would like to see the outbox part before we commit to it.',
-      },
-      {
-        from: 'me',
-        quotes: true,
-        text: [
-          'Here is the draft plan for moving sync into one Durable Object per owner. The part I am least sure about is the outbox: when a send is undone, the draft has to come back untouched.',
-          '',
-          '- One Mailroom per member, holding the index and the outbox',
-          '- Sync folds events from a cursor, so a cold start just resumes',
-          '- Undo send and send later share one schedule',
-        ].join('\n'),
-      },
-      {
-        from: 0,
-        quotes: true,
-        unread: true,
-        text: [
-          'The Durable Object approach looks right. Two notes on the outbox:',
-          '',
-          '- Store the message before the undo timer starts.',
-          '- Remove the draft only after the server accepts the send.',
-          '',
-          '    outbox.enqueue(draft, { sendAt: now + 10_000 })',
-        ].join('\n'),
-      },
-    ],
-  }),
+  plan: (c) => {
+    // The newest cycle's plan, then others, each opened a little differently as I send it.
+    const { subject, ask, what, doubt, points, notes } = rotate(
+      [
+        {
+          subject: 'Workers migration plan',
+          ask: 'Could you write up how sync would move into the Worker? I would like to see the outbox part before we commit to it.',
+          what: 'moving sync into one Durable Object per owner',
+          doubt:
+            'The part I am least sure about is the outbox: when a send is undone, the draft has to come back untouched.',
+          points: [
+            'One Mailroom per member, holding the index and the outbox',
+            'Sync folds events from a cursor, so a cold start just resumes',
+            'Undo send and send later share one schedule',
+          ],
+          notes: [
+            'The Durable Object approach looks right. Two notes on the outbox:',
+            '',
+            '- Store the message before the undo timer starts.',
+            '- Remove the draft only after the server accepts the send.',
+            '',
+            '    outbox.enqueue(draft, { sendAt: now + 10_000 })',
+          ],
+        },
+        {
+          subject: 'Sync service rewrite',
+          ask: 'Could you sketch how sync would work if we rewrote it around cursors? I would like to see how a reconnect resumes before we start.',
+          what: 'rewriting sync around one cursor per folder',
+          doubt:
+            'The part I am least sure about is a cursor that outlives its folder, as when another device renames it.',
+          points: [
+            'Each folder keeps its own cursor and UIDVALIDITY',
+            'A reconnect resumes from the stored cursor',
+            'A changed UIDVALIDITY starts that folder over',
+          ],
+          notes: [
+            'This reads well. Two things before we start:',
+            '',
+            '- Store the cursor only after the fold is stored.',
+            '- Log every start-over, so we can see how often it happens.',
+            '',
+            '    sync.resume(folder, { from: cursor })',
+          ],
+        },
+        {
+          subject: 'Storage move plan',
+          ask: 'Could you write up how we would move opened bodies into object storage? I would like to see what happens to the old cache before we decide.',
+          what: 'moving opened bodies into object storage',
+          doubt:
+            'The part I am least sure about is the cache that is already there, since moving it all at once would take hours.',
+          points: [
+            'New bodies go to object storage from day one',
+            'Old ones move as they are next opened',
+            'Nothing is deleted until both copies match',
+          ],
+          notes: [
+            'Moving them as they are opened is the right call. Two notes:',
+            '',
+            '- Key each body by its message, never by a path.',
+            '- Keep the old cache readable until the move is done.',
+            '',
+            "    bodies.put(ref, raw, { onlyIf: 'absent' })",
+          ],
+        },
+      ],
+      c,
+    );
+    const opening = rotate(
+      [
+        'Here is the draft plan',
+        'Here is a first pass at the plan',
+        'Here is the plan as far as I have it',
+        'Here is my write-up of the plan',
+        'Here is a rough plan',
+        'Here is the plan we talked about',
+        'Here is an outline of the plan',
+      ],
+      c,
+    );
+    return {
+      subject,
+      cast: [person(0, c)],
+      steps: [
+        { from: 0, text: ask },
+        {
+          from: 'me',
+          quotes: true,
+          text: [
+            `${opening} for ${what}. ${doubt}`,
+            '',
+            ...points.map((point) => `- ${point}`),
+          ].join('\n'),
+        },
+        { from: 0, quotes: true, unread: true, text: notes.join('\n') },
+      ],
+    };
+  },
 
   pr412: (c) => {
     const number = pullNumber(c, 'review');
-    const title = rotate(
+    const { title, change, question } = rotate(
       [
-        'Replayable stream cursors',
-        'Snap side panels to a rail',
-        'Cache opened bodies',
-        'Retry sends with backoff',
+        {
+          title: 'Replayable stream cursors',
+          change:
+            'the cursor now names where a replay starts, so a reconnect resumes instead of starting over.',
+          question:
+            'Looks good overall. One question on the encoding: should a cursor from an older version start over instead of failing?',
+        },
+        {
+          title: 'Snap side panels to a rail',
+          change:
+            'a panel dragged below its midpoint now snaps to its rail, and keeps its width for when it comes back.',
+          question:
+            'Nice. Could the snap point follow the window, so a narrow window does not snap every panel at once?',
+        },
+        {
+          title: 'Cache opened bodies',
+          change:
+            'a body is fetched from the server the first time it is opened, and kept after that.',
+          question:
+            'This is a big win on slow connections. Should a cached body ever expire, or does it live as long as its message?',
+        },
+        {
+          title: 'Retry sends with backoff',
+          change:
+            'a send the server turns away is tried again after 30 seconds, then 2 minutes, then 10.',
+          question:
+            'Looks right to me. Should the third failure tell the sender, rather than waiting for the fourth?',
+        },
       ],
       c,
     );
@@ -351,14 +442,14 @@ const STORIES: Record<string, (cycle: number) => Thread> = {
           id: id(0),
           unread: true,
           headers: [['X-GitHub-Reason', 'review_requested']],
-          text: `@sam-rivera, your review was requested on #${number}.\n\n${title}: the cursor now names where a replay starts, so a reconnect resumes instead of starting over.`,
+          text: `@sam-rivera, your review was requested on #${number}.\n\n${title}: ${change}`,
         },
         {
           from: 1,
           id: id(1),
           unread: true,
           headers: [['X-GitHub-Reason', 'comment']],
-          text: 'Looks good overall. One question on the encoding: should a cursor from an older version start over instead of failing?',
+          text: question,
         },
       ],
     };
@@ -385,43 +476,94 @@ const STORIES: Record<string, (cycle: number) => Thread> = {
     };
   },
 
-  photos: (c) => ({
-    subject: rotate(['Trip photos', 'Photos from the weekend', 'The lake, finally'], c),
-    cast: [person(1, c)],
-    filed: 'Archive',
-    steps: [
-      {
-        from: 0,
-        unread: true,
-        flagged: true,
-        text: 'Here are the ones from the ridge. The second is my favorite of the whole week.',
-        html: () =>
-          '<p>Here are the ones from the ridge. The second is my favorite of the whole week.</p><p><img src="cid:ridge@example.org" alt="The ridge at dawn" width="320"></p>',
-        files: () => [
-          {
-            name: 'ridge.png',
-            type: 'image/png',
-            content: RIDGE(),
-            contentId: 'ridge@example.org',
-          },
-          { name: 'lake.png', type: 'image/png', content: LAKE() },
-        ],
-      },
-    ],
-  }),
+  photos: (c) => {
+    // The place and what's said of it turn at different rates, so no two cycles say the same.
+    const place = rotate(['ridge', 'lake', 'coast', 'old harbor', 'pass'], c);
+    const text = `Here are the ones from the ${place}. ${rotate(
+      [
+        'The second is my favorite of the whole week.',
+        'The light was better than I expected.',
+        'I like the last one best, even with my thumb in it.',
+        'Two are blurry, but I kept them anyway.',
+      ],
+      c,
+    )}`;
+    return {
+      subject: rotate(['Trip photos', `Photos from the ${place}`, `The ${place}, finally`], c),
+      cast: [person(1, c)],
+      filed: 'Archive',
+      steps: [
+        {
+          from: 0,
+          unread: true,
+          flagged: true,
+          text,
+          html: () =>
+            `<p>${text}</p><p><img src="cid:ridge@example.org" alt="The ${place} at dawn" width="320"></p>`,
+          files: () => [
+            {
+              name: 'ridge.png',
+              type: 'image/png',
+              content: RIDGE(),
+              contentId: 'ridge@example.org',
+            },
+            { name: 'lake.png', type: 'image/png', content: LAKE() },
+          ],
+        },
+      ],
+    };
+  },
 
-  lunch: (c) => ({
-    subject: rotate(['Lunch Thursday?', 'Coffee this week?', 'Dinner on Friday?'], c),
-    cast: [person(2, c)],
-    steps: [
-      {
-        from: 0,
-        plain: true,
-        text: `There is a new place by the station that does a proper set lunch. Thursday at 12:30?\n\n${person(2, c).name}`,
-      },
-      { from: 'me', quotes: true, draft: true, text: 'Thursday works. I will meet you there.' },
-    ],
-  }),
+  lunch: (c) => {
+    const { subject, ask, answer } = rotate(
+      [
+        {
+          subject: 'Lunch Thursday?',
+          ask: 'There is a new place by the station that does a proper set lunch. Thursday at 12:30?',
+          answer: 'Thursday works. I will meet you there.',
+        },
+        {
+          subject: 'Coffee this week?',
+          ask: 'I am near your office on Wednesday. Coffee at 10 at the corner place?',
+          answer: 'Wednesday at 10 is good. I will save us a table.',
+        },
+        {
+          subject: 'Dinner on Friday?',
+          ask: 'A few of us are going to the noodle bar on Friday at 7. Want to come?',
+          answer: 'Count me in for Friday. I might be ten minutes late.',
+        },
+        {
+          subject: 'Lunch next week?',
+          ask: 'It has been ages. Could you do lunch on Tuesday, somewhere near you?',
+          answer: 'Tuesday is perfect. There is a good soup place across the street.',
+        },
+        {
+          subject: 'Breakfast before the trip?',
+          ask: 'Breakfast at the bakery on Saturday at 8, before we head out?',
+          answer: 'Saturday at 8 works. I will bring the maps.',
+        },
+        {
+          subject: 'Drinks after work?',
+          ask: 'The terrace by the river opens again on Thursday. Drinks after work?',
+          answer: 'Thursday by the river sounds great. See you around 6.',
+        },
+        {
+          subject: 'A walk on Sunday?',
+          ask: 'The weather looks good for Sunday. A walk along the canal, and lunch after?',
+          answer: 'Yes to Sunday. I will meet you at the bridge at 11.',
+        },
+      ],
+      c,
+    );
+    return {
+      subject,
+      cast: [person(2, c)],
+      steps: [
+        { from: 0, plain: true, text: `${ask}\n\n${person(2, c).name}` },
+        { from: 'me', quotes: true, draft: true, text: answer },
+      ],
+    };
+  },
 
   weekly: (c) => {
     const issue = 212 - c;
@@ -454,86 +596,239 @@ const STORIES: Record<string, (cycle: number) => Thread> = {
     };
   },
 
-  trip: (c) => ({
-    subject: rotate(
-      ["Ridge trip: who's bringing what", 'Camping weekend plan', 'Hut trip packing list'],
+  trip: (c) => {
+    const trip = rotate(
+      [
+        {
+          subject: "Ridge trip: who's bringing what",
+          date: '14th',
+          bring: 'the tent and the water filter',
+          take: 'the stove and fuel',
+          ask: 'bear canister',
+          have: 'canister',
+          food: 'breakfast for both mornings',
+          forecast: 'clear until Sunday afternoon',
+          off: 'ridge',
+          by: 'noon',
+          map: 'trail map',
+          past: 'lake',
+        },
+        {
+          subject: 'Camping weekend plan',
+          date: '21st',
+          bring: 'the big tent and the first-aid kit',
+          take: 'the cook set and the gas',
+          ask: 'water filter',
+          have: 'filter',
+          food: 'lunch for the first day',
+          forecast: 'rain on Saturday night and dry after',
+          off: 'campsite',
+          by: 'ten',
+          map: 'route',
+          past: 'last village',
+        },
+        {
+          subject: 'Hut trip packing list',
+          date: '6th',
+          bring: 'the rope and the hut booking',
+          take: 'the stove and two pots',
+          ask: 'spare tarp',
+          have: 'tarp',
+          food: 'dinner for the first night',
+          forecast: 'snow above the hut until Saturday',
+          off: 'hut',
+          by: 'eleven',
+          map: 'hut directions',
+          past: 'car park',
+        },
+      ],
       c,
-    ),
-    cast: [person(1, c), person(3, c), person(4, c)],
-    group: true,
-    steps: [
-      {
-        from: 0,
-        text: 'Trip is on for the 14th. Let us split the gear so nobody carries two stoves. I can bring the tent and the water filter.',
-      },
-      { from: 1, text: 'I will take the stove and fuel. Who has the bear canister?' },
-      {
-        from: 'me',
-        text: 'I have the canister and a spare headlamp. I can drive from the station at 7.',
-      },
-      { from: 2, text: 'Count me in for the car. I will bring breakfast for both mornings.' },
-      {
-        from: 0,
-        text: 'Perfect. The forecast says clear until Sunday afternoon, so let us be off the ridge by noon.',
-      },
-      {
-        from: 1,
-        text: 'Noon works. I will print the trail map, since there is no signal past the lake.',
-      },
-      { from: 'me', text: 'Great. See you all at 7 at the station.' },
-    ],
-  }),
+    );
+    // Where and when I meet everyone turn at their own rates, so my replies differ for months.
+    const meet = rotate(['station', 'bakery', 'library', 'market'], c);
+    const time = rotate(['7', '6:30', '8', '7:30', '6'], c);
+    const spare = rotate(
+      ['headlamp', 'sleeping mat', 'rain shell', 'pair of poles', 'stove lighter'],
+      c,
+    );
+    return {
+      subject: trip.subject,
+      cast: [person(1, c), person(3, c), person(4, c)],
+      group: true,
+      steps: [
+        {
+          from: 0,
+          text: `Trip is on for the ${trip.date}. Let us split the gear so nobody carries two stoves. I can bring ${trip.bring}.`,
+        },
+        { from: 1, text: `I will take ${trip.take}. Who has the ${trip.ask}?` },
+        {
+          from: 'me',
+          text: `I have the ${trip.have} and a spare ${spare}. I can drive from the ${meet} at ${time}.`,
+        },
+        { from: 2, text: `Count me in for the car. I will bring ${trip.food}.` },
+        {
+          from: 0,
+          text: `Perfect. The forecast says ${trip.forecast}, so let us be off the ${trip.off} by ${trip.by}.`,
+        },
+        {
+          from: 1,
+          text: `${capital(trip.by)} works. I will print the ${trip.map}, since there is no signal past the ${trip.past}.`,
+        },
+        { from: 'me', text: `Great. See you all at ${time} at the ${meet}.` },
+      ],
+    };
+  },
 
   // A draft to a host the demo's mail server can't reach on the first try, so sending it shows how
   // the Outbox holds a refused message and sends it on Retry.
-  cabin: (c) => ({
-    subject: rotate(['Cabin for the long weekend', 'Booking the cabin', 'Cabin dates'], c),
-    cast: [{ name: 'Rae Holm', email: `bookings@${UNREACHABLE}` }],
-    steps: [
-      {
-        from: 'me',
-        draft: true,
-        plain: true,
-        text: 'Hi Rae, is the cabin free from the 21st to the 23rd? Two adults and a dog.\n\nSam',
-      },
-    ],
-  }),
+  cabin: (c) => {
+    const [from, to] = rotate(
+      [
+        ['21st', '23rd'],
+        ['4th', '6th'],
+        ['12th', '14th'],
+        ['27th', '29th'],
+        ['8th', '10th'],
+        ['15th', '17th'],
+        ['1st', '3rd'],
+      ],
+      c,
+    );
+    const party = rotate(
+      ['Two adults and a dog.', 'Four adults, no pets.', 'Two adults and two children.'],
+      c,
+    );
+    return {
+      subject: rotate(['Cabin for the long weekend', 'Booking the cabin', 'Cabin dates'], c),
+      cast: [{ name: 'Rae Holm', email: `bookings@${UNREACHABLE}` }],
+      steps: [
+        {
+          from: 'me',
+          draft: true,
+          plain: true,
+          text: `Hi Rae, is the cabin free from the ${from} to the ${to}? ${party}\n\nSam`,
+        },
+      ],
+    };
+  },
 
-  parcel: () => ({
-    subject: 'Your parcel is waiting',
-    cast: [{ name: 'Parcel Service', email: 'notice@parcel-delivery.example.net' }],
-    folder: 'Junk',
-    steps: [
-      {
-        from: 0,
-        text: 'We tried to deliver your parcel today. Confirm your address within 24 hours to arrange a new delivery.',
-      },
-    ],
-  }),
+  // Junk, as any mailbox gathers it: each kind comes round every sixth cycle, and what it names
+  // every seventh, so no two are alike.
+  parcel: (c) => {
+    const pick = <T>(items: readonly T[]) => rotate(items, c);
+    const prize = pick([
+      'a tablet',
+      'a gift card',
+      'a weekend away',
+      'new headphones',
+      'a coffee machine',
+      'a smart watch',
+      'an e-reader',
+    ]);
+    const place = pick(['Lagos', 'Minsk', 'Lima', 'Hanoi', 'Quito', 'Riga', 'Accra']);
+    const gain = pick(['4,180', '3,960', '5,020', '2,870', '6,340', '3,310', '4,770']);
+    const due = pick(['389.00', '1,240.50', '96.20', '512.75', '2,048.00', '77.90', '640.10']);
+    const full = pick(['96', '98', '97', '99', '95', '93', '94']);
+    const when = pick([
+      'today',
+      'this morning',
+      'yesterday',
+      'on Monday',
+      'twice this week',
+      'this afternoon',
+      'on Friday',
+    ]);
+    const { subject, sender, text } = rotate(
+      [
+        {
+          subject: 'Your parcel is waiting',
+          sender: { name: 'Parcel Service', email: 'notice@parcel-delivery.example.net' },
+          text: `We tried to deliver your parcel ${when}. Confirm your address within 24 hours to arrange a new delivery.`,
+        },
+        {
+          subject: `You have won ${prize}`,
+          sender: { name: 'Rewards Team', email: 'prizes@lucky-draw.example.biz' },
+          text: `Congratulations! Your address was drawn to receive ${prize}. Claim it before midnight by confirming your details.`,
+        },
+        {
+          subject: `Sign-in attempt from ${place}`,
+          sender: { name: 'Account Security', email: 'alert@account-verify.example.net' },
+          text: `We blocked a sign-in to your mailbox from ${place}. Verify your account within 48 hours or it will be suspended.`,
+        },
+        {
+          subject: `$250 became $${gain} this week`,
+          sender: { name: 'Coin Desk Pro', email: 'growth@moonshot-coins.example.org' },
+          text: `Our trading bot turned $250 into $${gain} for people like you this week. Reply YES to activate your account.`,
+        },
+        {
+          subject: `Payment of $${due} overdue`,
+          sender: { name: 'Billing Department', email: 'billing@invoice-center.example.com' },
+          text: `Your payment of $${due} is overdue. Open the invoice to avoid a late fee.`,
+        },
+        {
+          subject: `Your mailbox is ${full}% full`,
+          sender: { name: 'Mailbox Storage', email: 'quota@mail-storage.example.net' },
+          text: `Your mailbox is ${full}% full, and new mail will be held until you upgrade. Upgrade within 24 hours to keep receiving messages.`,
+        },
+      ],
+      c,
+    );
+    return { subject, cast: [sender], folder: 'Junk', steps: [{ from: 0, text }] };
+  },
 
-  release: (c) => ({
-    subject: `Toy Box 0.${Math.max(1, 4 - Math.floor(c / 50))} release notes`,
-    cast: [person(8, c)],
-    folder: 'Projects',
-    steps: [
-      {
-        from: 0,
-        text: 'Here is the draft of the release notes. Could you check the upgrade section before Friday?',
-      },
-    ],
-  }),
+  release: (c) => {
+    // One release a cycle, counting back from 0.4: 0.3.9, 0.3.8 and on to 0.3, then 0.2.9.
+    const back = 40 - c;
+    const version =
+      back > 0 ? `0.${Math.floor(back / 10)}${back % 10 ? `.${back % 10}` : ''}` : 'preview';
+    return {
+      subject: `Toy Box ${version} release notes`,
+      cast: [person(8, c)],
+      folder: 'Projects',
+      steps: [
+        {
+          from: 0,
+          text: `Here is the draft of the release notes. Could you check the ${rotate(['upgrade section', 'list of fixes', 'known issues', 'thanks section'], c)} before ${rotate(['Friday', 'Monday', 'Wednesday', 'the release', 'Thursday'], c)}?`,
+        },
+      ],
+    };
+  },
 
-  shipped: () => ({
-    subject: 'Your order has shipped',
-    cast: [{ name: 'Orders', email: 'orders@shop.example.com' }],
-    folder: 'Trash',
-    steps: [
-      {
-        from: 0,
-        text: 'Good news: your order is on its way and should arrive within three days.',
-      },
-    ],
-  }),
+  // What one shop sends about each order, which goes straight to Trash.
+  shipped: (c) => {
+    const order = `#${(482_130 + c * 7_919) % 1_000_000}`;
+    const { subject, text } = rotate(
+      [
+        {
+          subject: 'Your order has shipped',
+          text: `Good news: ${c === 0 ? 'your order' : `order ${order}`} is on its way and should arrive within three days.`,
+        },
+        {
+          subject: 'Your order was delivered',
+          text: `Order ${order} was left at your front door this afternoon.`,
+        },
+        {
+          subject: 'How did we do?',
+          text: `Tell us what you think of order ${order}. It takes a minute, and every review helps.`,
+        },
+        {
+          subject: 'Your return was received',
+          text: `We received the return for order ${order}. Your refund will reach your card within five days.`,
+        },
+        {
+          subject: 'Your receipt',
+          text: `Thank you for order ${order}. Your receipt is below, and we will write again when it ships.`,
+        },
+      ],
+      c,
+    );
+    return {
+      subject,
+      cast: [{ name: 'Orders', email: 'orders@shop.example.com' }],
+      folder: 'Trash',
+      steps: [{ from: 0, text }],
+    };
+  },
 
   invoice: (c) => {
     const month = MONTH_NAMES[(((9 - c) % 12) + 12) % 12]!;
@@ -555,88 +850,186 @@ const STORIES: Record<string, (cycle: number) => Thread> = {
     };
   },
 
-  review: (c) => ({
-    subject: rotate(['Design review notes', 'Notes from the review', 'Review follow-ups'], c),
-    cast: [person(5, c)],
-    steps: [
-      {
-        from: 0,
-        flagged: true,
-        text: [
-          'Notes from today’s review:',
-          '',
-          '- Keep the list rows one fixed height',
-          '- Stamps mark the account in unified views',
-          '- The reader opens on the newest message',
-          '',
-          'I will turn these into issues tomorrow.',
-        ].join('\n'),
-      },
-    ],
-  }),
+  review: (c) => {
+    const { subject, when, notes, after } = rotate(
+      [
+        {
+          subject: 'Design review notes',
+          when: 'today’s',
+          notes: [
+            'Keep the list rows one fixed height',
+            'Stamps mark the account in unified views',
+            'The reader opens on the newest message',
+          ],
+          after: 'I will turn these into issues tomorrow.',
+        },
+        {
+          subject: 'Notes from the review',
+          when: 'this morning’s',
+          notes: [
+            'Search shows matches as it is typed',
+            'Undo send waits ten seconds',
+            'The composer saves a draft at every pause',
+          ],
+          after: 'Shout if I missed anything.',
+        },
+        {
+          subject: 'Review follow-ups',
+          when: 'Tuesday’s',
+          notes: [
+            'Check contrast on every screen in both themes',
+            'Give every target 44 pixels under a finger',
+            'Write down which keys the sidebar takes',
+          ],
+          after: 'I will check in on these on Friday.',
+        },
+      ],
+      c,
+    );
+    return {
+      subject,
+      cast: [person(5, c)],
+      steps: [
+        {
+          from: 0,
+          flagged: true,
+          text: [
+            `Notes from ${when} review:`,
+            '',
+            ...notes.map((note) => `- ${note}`),
+            '',
+            after,
+          ].join('\n'),
+        },
+      ],
+    };
+  },
 
-  q4: (c) => ({
-    subject: rotate(['Q4 planning', 'Q3 planning', 'Q2 planning', 'Q1 planning'], c),
-    cast: [person(7, c), person(6, c), person(5, c)],
-    group: true,
-    steps: [
-      {
-        from: 0,
-        text: 'Let us settle the plan this week. Please add your top three priorities to the doc by Wednesday.',
-      },
-      {
-        from: 1,
-        text: 'Mine are in: the sync rewrite, the on-call handover, and the billing export.',
-      },
-      {
-        from: 'me',
-        text: 'Added mine. The sync rewrite overlaps with yours, so I merged them into one line.',
-      },
-      {
-        from: 2,
-        text: 'Design needs a week for the mobile layout before anything ships. Can we put that first?',
-      },
-      {
-        from: 0,
-        text: 'Agreed. Mobile layout first, then the sync rewrite. I will share the final plan on Friday.',
-      },
-      { from: 1, unread: true, text: 'Sounds right. I will set up the kickoff for Monday.' },
-    ],
-  }),
+  q4: (c) => {
+    const { quarter, by, first, others, design, share, kickoff } = rotate(
+      [
+        {
+          quarter: 'Q4',
+          by: 'Wednesday',
+          first: 'the sync rewrite',
+          others: 'the on-call handover, and the billing export',
+          design: 'mobile layout',
+          share: 'Friday',
+          kickoff: 'Monday',
+        },
+        {
+          quarter: 'Q3',
+          by: 'Tuesday',
+          first: 'the search index',
+          others: 'the support rota, and the data export',
+          design: 'settings screens',
+          share: 'Thursday',
+          kickoff: 'Wednesday',
+        },
+        {
+          quarter: 'Q2',
+          by: 'Thursday',
+          first: 'the push service',
+          others: 'the hiring loop, and the audit log',
+          design: 'onboarding flow',
+          share: 'Monday',
+          kickoff: 'Tuesday',
+        },
+        {
+          quarter: 'Q1',
+          by: 'Friday',
+          first: 'the outbox',
+          others: 'the incident review, and the price change',
+          design: 'dark theme',
+          share: 'Wednesday',
+          kickoff: 'Thursday',
+        },
+      ],
+      c,
+    );
+    return {
+      subject: `${quarter} planning`,
+      cast: [person(7, c), person(6, c), person(5, c)],
+      group: true,
+      steps: [
+        {
+          from: 0,
+          text: `Let us settle the plan this week. Please add your top three priorities to the doc by ${by}.`,
+        },
+        { from: 1, text: `Mine are in: ${first}, ${others}.` },
+        {
+          from: 'me',
+          text: `Added mine. ${capital(first)} overlaps with yours, so I merged them into one line.`,
+        },
+        {
+          from: 2,
+          text: `Design needs a week for the ${design} before anything ships. Can we put that first?`,
+        },
+        {
+          from: 0,
+          text: `Agreed. ${capital(design)} first, then ${first}. I will share the final plan on ${share}.`,
+        },
+        { from: 1, unread: true, text: `Sounds right. I will set up the kickoff for ${kickoff}.` },
+      ],
+    };
+  },
 
-  standup: (c) => ({
-    subject: 'Standup moved to 10:00',
-    cast: [person(6, c)],
-    steps: [
-      {
-        from: 0,
-        plain: true,
-        text: 'Tomorrow’s standup moves to 10:00 so we can join the vendor call at 9.',
-      },
-    ],
-  }),
+  standup: (c) => {
+    const { subject, text } = rotate(
+      [
+        {
+          subject: 'Standup moved to 10:00',
+          text: 'Tomorrow’s standup moves to 10:00 so we can join the vendor call at 9.',
+        },
+        {
+          subject: 'Standup moved to 9:30',
+          text: 'Tomorrow’s standup moves to 9:30, since the room is booked from 10.',
+        },
+        {
+          subject: 'No standup on Friday',
+          text: 'No standup on Friday, because of the offsite. Post your update in the channel instead.',
+        },
+        {
+          subject: 'Standup moved to 11:00',
+          text: 'Tomorrow’s standup moves to 11:00, so the new starters can join after their first session.',
+        },
+      ],
+      c,
+    );
+    return { subject, cast: [person(6, c)], steps: [{ from: 0, plain: true, text }] };
+  },
 
-  offsite: (c) => ({
-    subject: 'Offsite agenda',
-    cast: [person(7, c), person(5, c), person(6, c)],
-    steps: [
-      {
-        from: 'me',
-        draft: true,
-        // Another client's draft, which only Trail Mix's editor can turn back into Markdown.
-        htmlOnly: true,
-        html: () =>
-          '<div dir="ltr">Draft agenda for the <b>offsite</b>:<ul><li>Morning: walk through <a href="https://example.org/plan">the plan</a></li><li>Lunch</li><li>Afternoon: review the <i>mobile layout</i></li></ul></div>',
-        text: [
-          'Draft agenda for the offsite:',
-          '',
-          '- Morning: walk through the plan',
-          '- Lunch',
-          '- Afternoon: review the mobile layout',
-        ].join('\n'),
-      },
-    ],
-  }),
+  offsite: (c) => {
+    const [event, topic] = rotate(
+      [
+        ['offsite', 'mobile layout'],
+        ['kickoff', 'search index'],
+        ['team day', 'onboarding flow'],
+      ],
+      c,
+    );
+    return {
+      subject: `${capital(event)} agenda`,
+      cast: [person(7, c), person(5, c), person(6, c)],
+      steps: [
+        {
+          from: 'me',
+          draft: true,
+          // Another client's draft, which only Trail Mix's editor can turn back into Markdown.
+          htmlOnly: true,
+          html: () =>
+            `<div dir="ltr">Draft agenda for the <b>${event}</b>:<ul><li>Morning: walk through <a href="https://example.org/plan">the plan</a></li><li>Lunch</li><li>Afternoon: review the <i>${topic}</i></li></ul></div>`,
+          text: [
+            `Draft agenda for the ${event}:`,
+            '',
+            '- Morning: walk through the plan',
+            '- Lunch',
+            `- Afternoon: review the ${topic}`,
+          ].join('\n'),
+        },
+      ],
+    };
+  },
 };
 
 /** Each account's cycle, newest first: a story and which of its steps. A reply is always newer. */
