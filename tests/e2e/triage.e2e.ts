@@ -469,22 +469,24 @@ test('keys run the registry’s commands: from the list, from inside a message, 
 
 test('straight after Z, a conversation opens with its messages, under the refs Undo gave them', async () => {
   const here = await inbox();
-  const sheets = reader(here).locator('article');
   const folded = reader(here).locator('h1 ~ button').filter({ hasNotText: 'Go on writing' });
+  // Where the reader says the conversation is, which its newest message from someone else decides.
+  const where = async () => (await reader(here).locator('h1 + p').textContent())?.split(' · ')[1];
   const failed: string[] = [];
   here.on('response', (response) => {
     if (response.url().includes('%22body%22') && !response.ok()) failed.push(response.url());
   });
-  // The first conversation on screen with an earlier message, which lies folded.
-  let place = 1;
-  for (; (await folded.count()) === 0; place += 1) {
+  // The first conversation on screen with an earlier message, which lies folded. A picked row's
+  // subject shows before its messages arrive, so each is judged once its newest message shows.
+  let place = 0;
+  do {
+    place += 1;
     if (place > 10) throw new Error('No conversation on screen has an earlier message.');
     await at(here, place).click();
     await shownSubject(here);
-  }
-  place -= 1;
+    await bodiesShown(here, 1);
+  } while ((await folded.count()) === 0);
   const [conversation, below] = [await textAt(here, place), await textAt(here, place + 1)];
-  await bodiesShown(here, 1);
 
   // The browser hears of the moves only from the Mailroom's answers to its own commands.
   const refetches = await hold(here, (request) => request.url().includes('%22conversation%22'));
@@ -496,14 +498,16 @@ test('straight after Z, a conversation opens with its messages, under the refs U
   await here.keyboard.press('z');
   await until(async () => (await textAt(here, place)) === conversation, 1_000);
   await at(here, place).click();
+  // Until the reader shows the picked conversation, it shows the one that took its place.
+  await shownSubject(here);
   await bodiesShown(here, 1);
-  const before = await sheets.elementHandle();
+  expect(await where()).toBe('Archive');
   await folded.first().click();
   await bodiesShown(here, 2);
 
-  // Back in the Inbox, each message has a new ref, and both stay open under it.
+  // Back in the Inbox, the messages Undo moved have its refs, and both stay open under them.
   await commands();
-  await before.waitForElementState('hidden', { timeout: ELSEWHERE_MS });
+  await until(async () => (await where()) === 'Inbox', ELSEWHERE_MS);
   await bodiesShown(here, 2);
   await refetches();
   expect(failed).toEqual([]);
