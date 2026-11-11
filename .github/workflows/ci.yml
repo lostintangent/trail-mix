@@ -17,8 +17,7 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    # The smoke suite waits through real undo windows, and the benches follow it.
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
 
@@ -56,7 +55,7 @@ jobs:
           key: playwright-${{ runner.os }}-chromium-${{ hashFiles('bun.lock') }}
 
       # The reader's tests render hostile mail in Chromium here, and in WebKit in their own job. The
-      # smoke suite and the bench below drive the built app in it too.
+      # bench below drives the built app in it too.
       - name: Install Chromium
         run: bunx playwright install --with-deps chromium
 
@@ -93,16 +92,54 @@ jobs:
       - name: Check the Worker starts
         run: node node_modules/wrangler/bin/wrangler.js check startup
 
-      # Drives the built app on workerd at both sizes in both themes, and saves a screenshot of each.
-      - name: Smoke test
-        run: bun run e2e
-
       # Measures the workbench's and the reader's budgets in AGENTS.md, and fails when one is over.
       # The Mailroom's are measured in the mail job, which has the test mail server.
       - name: Benchmark the workbench and the reader
         run: bun run bench workbench reader
 
-      - name: Upload the screenshots and benchmark numbers
+      - name: Upload the benchmark numbers
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: bench
+          path: test-results/
+
+  # The smoke suite, which waits through real undo windows and grows with every screen, so it runs
+  # beside the checks instead of after them.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: canary
+
+      - name: Install
+        run: bun install --frozen-lockfile
+
+      - uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-chromium-${{ hashFiles('bun.lock') }}
+
+      - name: Install Chromium
+        run: bunx playwright install --with-deps chromium
+
+      - name: Build
+        run: bun run build
+
+      # The preview the suite drives runs on Node, as everything that starts the Workers runtime does.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      # Drives the built app on workerd at both sizes in both themes, and saves a screenshot of each.
+      - name: Smoke test
+        run: bun run e2e
+
+      - name: Upload the screenshots
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
@@ -297,9 +334,9 @@ jobs:
         run: tail -n 50 .mail-server/state/dovecot.log .mail-server/state/serve.log
 
   # Production for a push to main, and a preview for a pull request from this repository, once all
-  # three jobs pass. deploy.yml deploys nothing where the Cloudflare secrets don't exist.
+  # four jobs pass. deploy.yml deploys nothing where the Cloudflare secrets don't exist.
   deploy:
-    needs: [check, webkit, mail]
+    needs: [check, e2e, webkit, mail]
     uses: ./.github/workflows/deploy.yml
     secrets: inherit
     permissions:
