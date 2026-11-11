@@ -1,5 +1,5 @@
 import { expect } from 'bun:test';
-import type { BrowserContextOptions, Locator, Page } from 'playwright';
+import type { BrowserContext, BrowserContextOptions, Locator, Page } from 'playwright';
 import { PAGE_SIZE } from '../../src/features/mailroom/client/contract.ts';
 import { suite } from './suite.ts';
 
@@ -22,9 +22,16 @@ const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch:
  */
 const SCROLLED = '[role="option"]:not([aria-selected="true"])';
 
-/** The Inbox, at a desktop's size unless told, recording every error and failed response. */
-async function open(options: BrowserContextOptions = DESKTOP) {
+/**
+ * The Inbox, at a desktop's size unless told, recording every error and failed response. Anything
+ * `before` sets on the browser is set before the page first loads.
+ */
+async function open(
+  options: BrowserContextOptions = DESKTOP,
+  before?: (context: BrowserContext) => Promise<unknown>,
+) {
   const context = await app.context(options);
+  await before?.(context);
   const page = await context.newPage();
   const problems: string[] = [];
   page.on('pageerror', (error) => problems.push(`page error: ${error.message}`));
@@ -34,7 +41,8 @@ async function open(options: BrowserContextOptions = DESKTOP) {
   page.on('response', (response) => {
     if (response.status() >= 400) problems.push(`${response.status()} ${response.url()}`);
   });
-  await page.goto(app.url, { waitUntil: 'networkidle' });
+  // A request held back keeps the network busy, so the page counts as loaded once it is drawn.
+  await page.goto(app.url, { waitUntil: before ? 'domcontentloaded' : 'networkidle' });
   await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
   return { context, page, problems };
 }
@@ -176,6 +184,102 @@ test('a row leads with its sender’s picture when verified, or their initials, 
   expect(problems).toEqual([]);
   await context.close();
 }, 30_000);
+
+test('a picture on its way leaves its initials until it has loaded, and one the browser holds shows at once', async () => {
+  // Dark, where an empty light plate would show as a white disc, with the pictures held back from
+  // a browser that has never had them, since it would keep them for good.
+  const { promise: arrived, resolve: arrive } = Promise.withResolvers<void>();
+  const { context, page, problems } = await open(
+    { ...DESKTOP, colorScheme: 'dark', serviceWorkers: 'block' },
+    (context) =>
+      context.route('**/avatars/**', async (route) => {
+        await arrived;
+        await route.continue();
+      }),
+  );
+  const kernel = avatarOf(page, 'Kernel Weekly').locator('[data-avatar]');
+  await kernel.waitFor();
+  const plateOf = (avatar: Locator) =>
+    avatar
+      .locator(':scope > span')
+      .first()
+      .evaluate((plate) => getComputedStyle(plate).backgroundColor);
+  expect(await kernel.getAttribute('data-avatar')).toBe('initials');
+  expect(await kernel.textContent()).toBe('KW');
+  expect(await plateOf(kernel)).toBe(
+    await plateOf(avatarOf(page, 'Kwame Mensah').locator('[data-avatar]')),
+  );
+
+  // Every frame from here, as each avatar on screen paints in it.
+  await page.evaluate(() => {
+    const frames: Frame[] = [];
+    Object.assign(window, { frames_: frames });
+    const sample = () => {
+      for (const avatar of document.querySelectorAll<HTMLElement>('[data-avatar]')) {
+        const image = avatar.querySelector('img');
+        frames.push({
+          row: avatar.closest('[role="option"]')?.textContent?.slice(0, 24) ?? 'sheet',
+          state: avatar.dataset.avatar ?? '',
+          initials: avatar.textContent ?? '',
+          loaded: image ? image.complete && image.naturalWidth > 0 : false,
+          seen: image ? getComputedStyle(image).opacity !== '0' : false,
+        });
+      }
+      requestAnimationFrame(sample);
+    };
+    requestAnimationFrame(sample);
+  });
+  // The pictures come only once a frame has painted without them, which a fast machine can
+  // otherwise beat.
+  await page.waitForFunction(() => (window as unknown as { frames_: Frame[] }).frames_.length > 0);
+  arrive();
+  await page.waitForFunction(() =>
+    [...document.querySelectorAll('[role="option"]')].some(
+      (row) =>
+        row.textContent?.includes('Kernel Weekly') && row.querySelector('[data-avatar="picture"]'),
+    ),
+  );
+  const frames = await page.evaluate(() => (window as unknown as { frames_: Frame[] }).frames_);
+  // Never an empty disc: initials until the picture has loaded, then the picture alone.
+  for (const frame of frames) {
+    if (frame.state === 'picture')
+      expect(frame).toMatchObject({ loaded: true, seen: true, initials: '' });
+    else expect(frame).toMatchObject({ state: 'initials', seen: false });
+    if (frame.state === 'initials') expect(frame.initials).not.toBe('');
+  }
+  const kernels = frames
+    .filter(({ row }) => row.includes('Kernel Weekly'))
+    .map(({ state }) => state);
+  expect(kernels[0]).toBe('initials');
+  expect(kernels.at(-1)).toBe('picture');
+
+  // Back in a view after another, its pictures show from the first frame its rows paint in.
+  const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
+  await sidebar
+    .getByRole('region', { name: 'Personal' })
+    .getByRole('button', { name: /^Sent( \d+)?$/ })
+    .click();
+  await page.getByRole('heading', { name: 'Sent', level: 2 }).waitFor();
+  await page.evaluate(() => {
+    (window as unknown as { frames_: Frame[] }).frames_.length = 0;
+  });
+  await sidebar
+    .getByRole('button', { name: /^Inbox( \d+)?$/ })
+    .first()
+    .click();
+  await page.waitForFunction(() =>
+    (window as unknown as { frames_: Frame[] }).frames_.some(({ row }) =>
+      row.includes('Kernel Weekly'),
+    ),
+  );
+  const back = await page.evaluate(() => (window as unknown as { frames_: Frame[] }).frames_);
+  expect(back.find(({ row }) => row.includes('Kernel Weekly'))?.state).toBe('picture');
+  expect(problems).toEqual([]);
+  await context.close();
+}, 30_000);
+
+/** How an avatar painted in one frame. */
+type Frame = { row: string; state: string; initials: string; loaded: boolean; seen: boolean };
 
 test('on a phone, tapping a row’s avatar picks the row, on a target 44 pixels across', async () => {
   const { context, page, problems } = await open(PHONE);
