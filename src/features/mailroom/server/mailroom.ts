@@ -523,6 +523,18 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     return Promise.resolve();
   }
 
+  setLightPaper(account: AccountId, sender: string, on: boolean): Promise<void> {
+    const address = input.senderOf(sender);
+    const wanted = input.switchOf(on);
+    const known = this.book.update(input.accountOf(account), (held) => {
+      const others = held.lightPaperFrom.filter((each) => each !== address);
+      return { ...held, lightPaperFrom: wanted ? [...others, address] : others };
+    });
+    if (!known) throw new Error('There is no such account.');
+    this.hint({ changed: 'accounts' });
+    return Promise.resolve();
+  }
+
   eraseEverything(): Promise<void> {
     if (this.isVisitors) return Promise.reject(new Error(VISITORS_KEEP));
     return this.erase();

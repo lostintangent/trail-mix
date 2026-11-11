@@ -1,6 +1,17 @@
 import { describe, expect, test } from 'bun:test';
 import { contrast, hexOf, oklchOf, parseColor, parseHex, type Rgb } from '../../../shared/color.ts';
-import { isPaperWhite, liftedColor, onWhite, READS, schemeOf, type DarkPaper } from './colors.ts';
+import {
+  isPaperWhite,
+  liftedColor,
+  onWhite,
+  READS,
+  schemeOf,
+  SHADED,
+  shadedPaper,
+  shadingOf,
+  wantsLightInk,
+  type DarkPaper,
+} from './colors.ts';
 
 const color = (css: string): Rgb => {
   const rgb = parseColor(css);
@@ -9,7 +20,11 @@ const color = (css: string): Rgb => {
 };
 
 /** Charcoal paper and the ink on it, as the dark theme sets them. */
-const dark: DarkPaper = { paper: color('oklch(0.25 0 0)'), ink: color('oklch(0.93 0 0)') };
+const dark: DarkPaper = {
+  paper: color('oklch(0.25 0 0)'),
+  ink: color('oklch(0.93 0 0)'),
+  lightInk: color('oklch(0.22 0.02 265)'),
+};
 const white = color('#ffffff');
 const strongest = contrast(dark.ink, dark.paper);
 
@@ -58,6 +73,66 @@ describe('a color mail sets, on the dark theme’s paper', () => {
     const gray = liftedColor(color('#333333'), dark);
     expect(oklchOf(gray).c).toBeLessThan(0.001);
     expect(contrast(gray, dark.paper)).toBeLessThan(strongest);
+  });
+});
+
+describe('a background mail paints, in the dark theme', () => {
+  const darkened = (css: string) => {
+    const shading = shadingOf(color(css), dark);
+    if (shading.as !== 'darkened') throw new Error(`${css} is ${shading.as}`);
+    return shading.color;
+  };
+
+  test('is the theme’s paper where it was white', () => {
+    expect(shadingOf(color('#ffffff'), dark)).toEqual({ as: 'paper' });
+    expect(shadingOf(color('#fdfdfd'), dark)).toEqual({ as: 'paper' });
+  });
+
+  test('darkens where it was light, standing from the paper as it stood from white', () => {
+    for (const css of ['#f4f4f4', '#f3f2f1', '#eef2f5', '#fff8e1', '#e8f0fe']) {
+      const before = color(css);
+      const after = darkened(css);
+      const stood = Math.min(contrast(before, white), SHADED);
+      expect(contrast(after, dark.paper)).toBeLessThanOrEqual(stood + 0.01);
+      expect(contrast(after, dark.paper)).toBeGreaterThan(stood - 0.06);
+      expect(oklchOf(after).l).toBeLessThan(oklchOf(dark.ink).l);
+    }
+  });
+
+  test('keeps its hue, muted, where it was tinted', () => {
+    for (const css of ['#fff8e1', '#e8f0fe', '#eef3f8', '#fde8e8']) {
+      const [before, after] = [oklchOf(color(css)), oklchOf(darkened(css))];
+      expect(Math.abs(((after.h - before.h + 540) % 360) - 180)).toBeLessThan(12);
+      expect(after.c).toBeLessThan(before.c);
+    }
+  });
+
+  test('stands no further from the paper than SHADED, however dark it was', () => {
+    for (const css of ['#dddddd', '#d6e4f0', '#cccccc']) {
+      expect(contrast(darkened(css), dark.paper)).toBeLessThanOrEqual(SHADED + 0.01);
+    }
+    expect(contrast(shadedPaper(dark), dark.paper)).toBeCloseTo(SHADED, 1);
+  });
+
+  test('is kept as sent where it is strong or dark', () => {
+    for (const css of [
+      '#1a73e8',
+      '#ffcc00',
+      '#ffe066',
+      '#c4512b',
+      '#2f2f2f',
+      '#000000',
+      '#999999',
+    ]) {
+      expect(shadingOf(color(css), dark)).toEqual({ as: 'kept' });
+    }
+  });
+
+  test('takes the light theme’s ink on a kept light color, and the dark theme’s on a dark one', () => {
+    expect(wantsLightInk(color('#ffcc00'), dark)).toBe(true);
+    expect(wantsLightInk(color('#ffe066'), dark)).toBe(true);
+    expect(wantsLightInk(color('#2f2f2f'), dark)).toBe(false);
+    expect(wantsLightInk(color('#0b3d91'), dark)).toBe(false);
   });
 });
 

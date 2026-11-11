@@ -226,6 +226,12 @@ export function senderOf(value: unknown): string {
   return addressOf(value).toLowerCase();
 }
 
+/** A switch turned on or off. */
+export function switchOf(value: unknown): boolean {
+  if (typeof value !== 'boolean') throw new TypeError('That isn’t on or off.');
+  return value;
+}
+
 function addressesOf(value: unknown): Address[] {
   if (!Array.isArray(value) || value.length > 500) throw new TypeError('Recipients are a list.');
   return value.map((entry: unknown) => {

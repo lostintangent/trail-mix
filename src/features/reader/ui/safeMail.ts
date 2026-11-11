@@ -52,31 +52,41 @@ const sanitized = new Map<string, SafeMail>();
 const absolute = (url: string) => new URL(url, location.origin).href;
 
 /**
- * The dark theme's paper and ink, which the colors mail sets are lifted to read on. They are the
- * theme's own, read once from an element in the dark scheme, whichever theme shows now.
+ * The dark theme's paper and ink, which the colors mail sets are lifted to read on, and the light
+ * theme's ink, which text on mail's own light colors takes. They are the theme's own, read once
+ * from an element in each scheme, whichever theme shows now.
  */
 export function darkPaper(): DarkPaper {
   if (dark) return dark;
-  const probe = document.createElement('div');
-  probe.className = stylex.props(styles.dark).className ?? '';
-  document.body.appendChild(probe);
-  const computed = getComputedStyle(probe);
   const read = colorReader();
-  const [paper, ink] = [read(computed.backgroundColor), read(computed.color)];
-  probe.remove();
-  if (!paper || !ink) throw new Error('The theme’s dark paper and ink can’t be read');
-  dark = { paper: paper.rgb, ink: ink.rgb };
+  const [inDark, inLight] = [styles.dark, styles.light].map((scheme) => {
+    const probe = document.createElement('div');
+    probe.className = stylex.props(styles.probe, scheme).className ?? '';
+    document.body.appendChild(probe);
+    const computed = getComputedStyle(probe);
+    const seen = { paper: read(computed.backgroundColor), ink: read(computed.color) };
+    probe.remove();
+    return seen;
+  });
+  const [paper, ink, lightInk] = [inDark?.paper, inDark?.ink, inLight?.ink];
+  if (!paper || !ink || !lightInk) throw new Error('The theme’s paper and inks can’t be read');
+  dark = { paper: paper.rgb, ink: ink.rgb, lightInk: lightInk.rgb };
   return dark;
 }
 
 let dark: DarkPaper | undefined;
 
 const styles = stylex.create({
-  dark: {
+  probe: {
     position: 'absolute',
     visibility: 'hidden',
-    colorScheme: 'dark',
     backgroundColor: colorVars['--color-background-card'],
     color: colorVars['--color-text-primary'],
+  },
+  dark: {
+    colorScheme: 'dark',
+  },
+  light: {
+    colorScheme: 'light',
   },
 });

@@ -1,6 +1,7 @@
 import { Button } from '@astryxdesign/core/Button';
 import { DropdownMenu } from '@astryxdesign/core/DropdownMenu';
 import { Icon } from '@astryxdesign/core/Icon';
+import { ToggleButton } from '@astryxdesign/core/ToggleButton';
 import {
   borderVars,
   colorVars,
@@ -11,7 +12,7 @@ import {
   typographyVars,
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { Ellipsis, FileText, ImageIcon, ImageOff } from 'lucide-react';
+import { Ellipsis, FileText, ImageIcon, ImageOff, Sun } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { SenderAvatar } from '../../../app/theme/SenderAvatar.tsx';
@@ -26,6 +27,8 @@ import {
   partUrl,
 } from '../../mailroom/client/index.ts';
 import { foldQuote } from '../core/quotes.ts';
+import { isLightPaper } from '../core/lightPaper.ts';
+import { setLightPaper, useDarkTheme } from './lightPaper.ts';
 import { sheetStyles } from './layout.ts';
 import { MessageFrame } from './MessageFrame.tsx';
 import { PlainText } from './PlainText.tsx';
@@ -47,6 +50,10 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
   const [showOnce, setShowOnce] = useState(false);
   const allowed = showOnce || imagesAllowed(message, account.allowImagesFrom);
   const allowImages = useAllowImages(account);
+  const queryClient = useQueryClient();
+  // In the dark theme, the member may show a sender's HTML mail on light paper, as designed.
+  const isDark = useDarkTheme();
+  const lightPaper = isDark && isLightPaper(message.from.email, account.lightPaperFrom);
   const [quotes, setQuotes] = useState<'folded' | 'shown'>('folded');
   const reply = actions.find(({ id }) => id === 'message.reply');
   const more = actions.filter((action) => action !== reply && action.isEnabled !== false);
@@ -65,7 +72,10 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
   return (
     <article
       aria-label={`Message from ${displayName(message.from)}`}
-      {...stylex.props(sheetStyles.sheet, mail?.paper === 'light' && styles.fixedPaper)}
+      {...stylex.props(
+        sheetStyles.sheet,
+        mail && (mail.paper === 'light' || lightPaper) && styles.fixedPaper,
+      )}
     >
       <header {...stylex.props(sheetStyles.from)}>
         <SenderAvatar
@@ -79,6 +89,25 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
             <time dateTime={message.date}>{when(message.date)}</time>
           </small>
         </div>
+        {mail && isDark && (
+          <ToggleButton
+            label="Light paper"
+            tooltip={
+              mail.paper === 'light'
+                ? 'This message’s colors can’t be darkened, so it stays on light paper'
+                : lightPaper
+                  ? `Darken mail from ${message.from.email} again`
+                  : `Show mail from ${message.from.email} on light paper`
+            }
+            icon={<Icon icon={Sun} />}
+            isIconOnly
+            isPressed={mail.paper === 'light' || lightPaper}
+            isDisabled={mail.paper === 'light'}
+            onPressedChange={(on) =>
+              setLightPaper(queryClient, { account: account.id, sender: message.from.email, on })
+            }
+          />
+        )}
         {reply && <CommandButton command={reply} />}
         {more.length > 0 && (
           <DropdownMenu
@@ -126,6 +155,7 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
           mail={mail}
           quotes={quotes}
           title={`Message from ${displayName(message.from)}`}
+          isLightPaper={lightPaper}
         />
       ) : text ? (
         <PlainText text={text.text} />

@@ -313,9 +313,11 @@ const REAL: Record<string, { reply: string; quoted?: string; paper: Paper }> = {
     quoted: 'Could you send over the quarterly numbers',
     paper: 'theme',
   },
+  'painted-newsletter.html': { reply: 'Warm when wet', paper: 'theme' },
   'pasted-colors.html': { reply: 'Bring a headlamp', paper: 'theme' },
   'plain-html.html': { reply: 'The cabin is booked', paper: 'theme' },
-  'receipt.html': { reply: 'Trail runners, size 42', paper: 'light' },
+  'receipt.html': { reply: 'Trail runners, size 42', paper: 'theme' },
+  'tinted-reply.html': { reply: 'See you at the trailhead', paper: 'theme' },
   'thunderbird-reply.html': {
     reply: 'The patch looks right',
     quoted: 'Here is the patch',

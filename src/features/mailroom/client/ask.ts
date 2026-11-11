@@ -44,6 +44,7 @@ const REPEATABLE: ReadonlySet<string> = new Set<QueryName | CommandName>([
   ...QUERIES,
   'updateAccount',
   'allowImages',
+  'setLightPaper',
   'setFlags',
   'send',
   'deleteFolder',

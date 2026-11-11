@@ -79,7 +79,7 @@ export function accountBook(sql: Sql) {
      * account's sealed secret, or a demo account's server.
      */
     add(
-      account: Omit<Account, 'stamp' | 'status' | 'allowImagesFrom'>,
+      account: Omit<Account, 'stamp' | 'status' | 'allowImagesFrom' | 'lightPaperFrom'>,
       connection: Connection,
       start: { sealed: Uint8Array } | { demo: DemoMailbox },
     ): Account {
@@ -91,6 +91,7 @@ export function accountBook(sql: Sql) {
           stamp: STAMPS.find((stamp) => !taken.has(stamp)) ?? STAMPS[held.length % STAMPS.length]!,
           status: 'syncing',
           allowImagesFrom: [],
+          lightPaperFrom: [],
         };
         const [last] = sql.all<{ position: number | null }>(
           `SELECT MAX(position) AS position FROM accounts`,

@@ -875,6 +875,35 @@ describe('The Mailroom with the demo mailbox', () => {
     expect((await eve.call<ThisDevice>('thisDevice')).cache).not.toBe(cache);
   }, 60_000);
 
+  test('a sender’s mail goes on light paper for every device, once, and darkens again when turned off', async () => {
+    const fay = member('fay', () => worker);
+    const device = fay.device();
+    await device.opened;
+    const [account] = await fay.call<Account[]>('accounts');
+    const lightFrom = async () =>
+      (await fay.call<Account[]>('accounts')).find(({ id }) => id === account!.id)?.lightPaperFrom;
+    expect(await lightFrom()).toEqual([]);
+
+    // Every open device hears of it, so each shows that sender's mail on light paper.
+    const heard = device.next((hint) => hint.changed === 'accounts');
+    await fay.call('setLightPaper', account!.id, 'News@Example.com', true);
+    await heard;
+    expect(await lightFrom()).toEqual(['news@example.com']);
+    await fay.call('setLightPaper', account!.id, 'news@example.com', true);
+    await fay.call('setLightPaper', account!.id, 'kwame@example.net', true);
+    expect(await lightFrom()).toEqual(['news@example.com', 'kwame@example.net']);
+
+    await fay.call('setLightPaper', account!.id, 'news@example.com', false);
+    expect(await lightFrom()).toEqual(['kwame@example.net']);
+    await expect(
+      fay.call('setLightPaper', account!.id, 'kwame@example.net', 'off'),
+    ).rejects.toThrow('That isn’t on or off.');
+    await expect(fay.call('setLightPaper', 'nowhere', 'kwame@example.net', false)).rejects.toThrow(
+      'There is no such account.',
+    );
+    expect(await lightFrom()).toEqual(['kwame@example.net']);
+  }, 60_000);
+
   test('a Mailroom left unopened for 30 days stops checking mail, and opening it picks up again', async () => {
     const gil = member('gil', () => worker);
     await gil.until(async () =>

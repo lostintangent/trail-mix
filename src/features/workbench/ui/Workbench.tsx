@@ -47,7 +47,14 @@ import { PANELS } from './panels.ts';
 import { useReadMark } from './useReadMark.ts';
 import { ReaderPane, type ActionsPlace, type Reading } from './ReaderPane.tsx';
 import { ReaderPlace } from './ReaderPlace.tsx';
-import { askAhead, sourceCommand, SourceDialog } from '../../reader/index.ts';
+import {
+  askAhead,
+  lightPaperCommand,
+  setLightPaper,
+  sourceCommand,
+  SourceDialog,
+  useDarkTheme,
+} from '../../reader/index.ts';
 import {
   ConversationListSkeleton,
   NOTHING_SELECTED,
@@ -671,6 +678,14 @@ export function Workbench({
     const row = conversations?.[at];
     return row && (() => pick(row.id, 'only'));
   };
+  // In the dark theme, light paper for the conversation open, which a search may have left the list.
+  const isDark = useDarkTheme();
+  const reading = isDark ? selected : undefined;
+  const { data: read } = useQuery({
+    ...conversationQuery(reading ?? ''),
+    enabled: reading !== undefined,
+  });
+
   // The registry is made anew each render, as the selection moves, but its commands keep their
   // identity while they look the same, so what draws them and the palette render only on a change.
   // A new message fills the reader, over the conversation open behind it, so neither keys nor the
@@ -718,6 +733,9 @@ export function Workbench({
               .ensureQueryData(conversationQuery(selected))
               .then((conversation) => setSource(newestOf(conversation)))
         : undefined,
+    ),
+    lightPaperCommand(reading === undefined ? undefined : read, accounts, selves, (choice) =>
+      setLightPaper(queryClient, choice),
     ),
     ...viewCommands(accounts, folders, openView),
     ...outbox.commands,

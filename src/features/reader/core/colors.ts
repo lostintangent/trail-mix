@@ -1,23 +1,38 @@
-import { contrast, hexOf, oklchOf, over, readableShade, type Rgb } from '../../../shared/color.ts';
+import {
+  contrast,
+  hexOf,
+  oklchOf,
+  over,
+  readableShade,
+  rgbOf,
+  type Rgb,
+} from '../../../shared/color.ts';
 
 /**
  * Mail's own colors on the theme's paper.
  *
- * Mail is written for white paper. In the dark theme it sits on charcoal instead, and each color
- * it sets on text or a line is lifted to read there: its hue kept, and lightened until it reads as
- * strongly as it did on white, and at least 4.5:1. Black and near-black become the theme's ink.
- * A white background is only the sender's paper, and gives way to the theme's.
+ * Mail is written for white paper. In the dark theme it sits on charcoal instead. A white
+ * background is only the sender's paper, and becomes the theme's. Each light background it
+ * paints, a gray wrapper or a pale callout, darkens in its own hue, standing as far from the
+ * charcoal as it stood from white, up to `SHADED`. Each color it sets on text or a line is lifted
+ * to read on the lightest of those: its hue kept, and lightened until it reads as strongly as it
+ * did on white, and at least 4.5:1. Black and near-black become the theme's ink.
  *
- * Three kinds of mail are left as they are. Mail that declares a dark color scheme shows its own
- * dark styles. Mail that paints backgrounds of its own, asks for light only, or sets a color no
- * browser reads the same way stays on light paper in both themes.
+ * Strong colors and dark ones, such as a button or a footer, and every image are kept as sent,
+ * and so is what lies on them: their element takes the light color scheme, so the colors inside
+ * it are the sender's own, and text with no color of its own on a light one takes the light
+ * theme's ink.
  *
- * Each color is rewritten as `light-dark(original, lifted)`, so one sanitized message serves both
+ * Mail that declares a dark color scheme shows its own dark styles. Mail that asks for light only,
+ * paints an image with no color under it, or sets a color no browser reads the same way stays on
+ * light paper in both themes.
+ *
+ * Each color is rewritten as `light-dark(original, dark)`, so one sanitized message serves both
  * themes, and its frame's color scheme picks between them.
  */
 
-/** The dark theme's paper, and the ink written on it. */
-export type DarkPaper = { paper: Rgb; ink: Rgb };
+/** The dark theme's paper and the ink written on it, and the light theme's ink. */
+export type DarkPaper = { paper: Rgb; ink: Rgb; lightInk: Rgb };
 
 /** The paper a message sits on: the theme's, or light paper in both themes. */
 export type Paper = 'theme' | 'light';
@@ -42,6 +57,49 @@ export function liftedColor(color: Rgb, dark: DarkPaper): Rgb {
 /** Whether a background is just the white paper mail is written on, within a hair of white. */
 export function isPaperWhite(color: Rgb): boolean {
   return contrast(color, WHITE) < 1.05;
+}
+
+/**
+ * The furthest a darkened background stands from the dark theme's paper, as a contrast ratio. A
+ * light gray stands about this far from white, and the text lifted onto charcoal reads on it too.
+ */
+export const SHADED = 1.4;
+
+/** How a background mail paints shows in the dark theme. */
+export type Shading =
+  /** White paper, which becomes the theme's. */
+  | { as: 'paper' }
+  /** A light background, darkened in its own hue. */
+  | { as: 'darkened'; color: Rgb }
+  /** A strong or dark color, kept as sent, as what lies on it is. */
+  | { as: 'kept' };
+
+/**
+ * What becomes of a background mail paints, in the dark theme. A light one, at least `LIGHT` in
+ * OKLCH lightness and no more saturated than a tint, darkens: its hue kept, its chroma muted, and
+ * as much lighter than the paper as it was darker than white, up to `SHADED`.
+ */
+export function shadingOf(color: Rgb, dark: DarkPaper): Shading {
+  if (isPaperWhite(color)) return { as: 'paper' };
+  const { l, c, h } = oklchOf(color);
+  if (l < LIGHT || c > TINT) return { as: 'kept' };
+  const lightest = Math.min(contrast(color, WHITE), SHADED) * contrast(dark.paper, BLACK);
+  const muted = rgbOf({ l, c: c * MUTED, h });
+  return {
+    as: 'darkened',
+    color: readableShade(muted, 'darker', (shade) => contrast(shade, BLACK) <= lightest),
+  };
+}
+
+/** The lightest a darkened background can be: the dark theme's paper, `SHADED` lighter. */
+export function shadedPaper(dark: DarkPaper): Rgb {
+  const lightest = SHADED * contrast(dark.paper, BLACK);
+  return readableShade(dark.paper, 'lighter', (shade) => contrast(shade, BLACK) >= lightest);
+}
+
+/** Whether a kept color is light enough that text on it reads better in the light theme's ink. */
+export function wantsLightInk(color: Rgb, dark: DarkPaper): boolean {
+  return contrast(dark.lightInk, color) >= contrast(dark.ink, color);
 }
 
 /** A color as its sender saw it, over white paper where it lets some through. */
@@ -74,6 +132,20 @@ const LINES = [
   'column-rule-color',
 ];
 
+/** Every property a message colors with, painted or on a line. */
+const COLORED = new Set(['background-color', 'background-image', ...LINES]);
+
+/**
+ * What adapting a declaration block did: whether it changed the block, and whether it keeps a
+ * light color as sent and sets no text color of its own, so that in the dark theme its text needs
+ * the light theme's ink. Text inherits the color its parent shows, and charcoal's ink can't be
+ * read on a light color.
+ */
+export type Adapted = { changed: boolean; needsInk: boolean };
+
+/** Declarations a legacy color attribute adds to its element's style, as `adapt` would write them. */
+export type FromAttribute = { declarations: [name: string, value: string][]; needsInk: boolean };
+
 /**
  * What a walk through a message learns about its colors, and the rewrites that let them read on
  * the dark theme's paper. Declarations and attributes are handed to it as the walk meets them.
@@ -81,6 +153,8 @@ const LINES = [
 export function mailColors(dark: DarkPaper) {
   const read = colorReader(MOST_COLORS);
   const lifted = new Map<string, string | null>();
+  // Text is lifted to read on the lightest darkened background, so it reads on any of them.
+  const behindText = { ...dark, paper: shadedPaper(dark) };
   let scheme: 'dark' | 'light' | undefined;
   let keepsLight = false;
 
@@ -92,15 +166,38 @@ export function mailColors(dark: DarkPaper) {
     let shade = lifted.get(css);
     if (shade === undefined) {
       const seen = read(css);
-      shade = seen ? hexOf(liftedColor(onWhite(seen), dark)) : null;
+      shade = seen ? hexOf(liftedColor(onWhite(seen), behindText)) : null;
       lifted.set(css, shade);
     }
     return shade;
   };
 
-  /** The dark side for a background: none where it is white paper, or null where it paints. */
-  const backgroundOf = (seen: Seen | undefined): string | null =>
-    seen && (seen.alpha === 0 || isPaperWhite(onWhite(seen))) ? 'transparent' : null;
+  /** The declarations that keep a color as sent, with everything on it: its own color scheme. */
+  const kept = (color: Rgb, ownsInk: boolean): FromAttribute => ({
+    declarations: [['color-scheme', 'light']],
+    needsInk: !ownsInk && wantsLightInk(color, dark),
+  });
+
+  /**
+   * The declarations for a background a message paints, as a color and maybe an image: darkened,
+   * given way to the paper, or kept as sent. Null where the message stays on light paper instead.
+   */
+  const painted = (css: string, hasImage: boolean, ownsInk: boolean): FromAttribute | null => {
+    const seen = KEEPS.test(css) || ADAPTS.test(css) ? undefined : read(css);
+    if (seen === undefined && !KEEPS.test(css) && !ADAPTS.test(css)) return null;
+    const shown = seen && seen.alpha > 0 ? onWhite(seen) : undefined;
+    // An image or a gradient shows as sent, and so must the color it lies on. With none under it,
+    // nothing says what its text lies on.
+    if (hasImage) return shown ? kept(shown, ownsInk) : null;
+    if (!shown) return { declarations: [], needsInk: false };
+    const shading = shadingOf(shown, dark);
+    if (shading.as === 'kept') return kept(shown, ownsInk);
+    const darkened = hexOf(shading.as === 'paper' ? dark.paper : shading.color);
+    return {
+      declarations: [['background-color', `light-dark(${css}, ${darkened})`]],
+      needsInk: false,
+    };
+  };
 
   /** Notes a color scheme the message declares, in a meta or a `color-scheme`. */
   const declare = (value: string) => {
@@ -121,46 +218,60 @@ export function mailColors(dark: DarkPaper) {
     }
   };
 
-  /** Rewrites the colors a declaration block sets, in place. Returns whether it changed any. */
-  const adapt = (style: CSSStyleDeclaration): boolean => {
+  /** Rewrites the colors a declaration block sets, in place. */
+  const adapt = (style: CSSStyleDeclaration): Adapted => {
     declare(style.getPropertyValue('color-scheme'));
-    if (!adapting()) return false;
-    let changed = false;
-    const set = (name: string, value: string) => {
-      style.setProperty(name, value, style.getPropertyPriority(name));
-      changed = true;
-    };
-    if (!KEEPS.test(style.getPropertyValue('background-image').trim())) {
+    const unchanged = { changed: false, needsInk: false };
+    if (!adapting()) return unchanged;
+    // A shorthand that takes a variable leaves its colors unread until the page resolves them.
+    const hidesColor = Array.from({ length: style.length }, (_, i) => style.item(i)).some(
+      (name) => COLORED.has(name) && style.getPropertyValue(name) === '',
+    );
+    if (hidesColor) {
       keepsLight = true;
-      return changed;
+      return unchanged;
     }
-    const background = style.getPropertyValue('background-color').trim();
-    if (!KEEPS.test(background) && !ADAPTS.test(background)) {
-      const paper = backgroundOf(read(background));
-      if (paper === null) {
-        keepsLight = true;
-        return changed;
-      }
-      set('background-color', `light-dark(${background}, ${paper})`);
+    const set = (name: string, value: string) =>
+      style.setProperty(name, value, style.getPropertyPriority(name));
+    const ownsInk = !KEEPS.test(style.getPropertyValue('color').trim());
+    const background = painted(
+      style.getPropertyValue('background-color').trim(),
+      !KEEPS.test(style.getPropertyValue('background-image').trim()),
+      ownsInk,
+    );
+    if (background === null) {
+      keepsLight = true;
+      return unchanged;
     }
+    for (const [name, value] of background.declarations) set(name, value);
+    // On a color kept as sent, the lines are the sender's, as they wrote them for it.
+    if (style.getPropertyValue('color-scheme') === 'light') {
+      return { changed: true, needsInk: background.needsInk };
+    }
+    const lines: [string, string][] = [];
     for (const name of LINES) {
       const value = style.getPropertyValue(name).trim();
       if (KEEPS.test(value) || ADAPTS.test(value) || read(value)?.alpha === 0) continue;
       const shade = liftedOf(value);
       if (shade === null) {
         keepsLight = true;
-        return changed;
+        return unchanged;
       }
-      set(name, `light-dark(${value}, ${shade})`);
+      lines.push([name, `light-dark(${value}, ${shade})`]);
     }
-    return changed;
+    for (const [name, value] of lines) set(name, value);
+    return { changed: background.declarations.length + lines.length > 0, needsInk: false };
   };
 
   /**
-   * The color a legacy attribute sets, `<font color>` or `bgcolor`, as a value for the same
-   * property in the element's style, or undefined when it needs none.
+   * What a legacy attribute, `<font color>` or `bgcolor`, adds to its element's style, or nothing
+   * when it adds nothing. `ownsInk` says whether the element sets a text color of its own.
    */
-  const attribute = (name: 'color' | 'background-color', value: string): string | undefined => {
+  const attribute = (
+    name: 'color' | 'background-color',
+    value: string,
+    ownsInk: boolean,
+  ): FromAttribute | undefined => {
     if (!adapting()) return undefined;
     const css = legacyColor(value, read);
     const seen = css === undefined ? undefined : read(css);
@@ -169,12 +280,22 @@ export function mailColors(dark: DarkPaper) {
       return undefined;
     }
     if (seen.alpha === 0) return undefined;
-    const shade = name === 'color' ? liftedOf(css) : backgroundOf(seen);
+    if (name === 'background-color') {
+      const background = painted(css, false, ownsInk);
+      if (background === null) keepsLight = true;
+      return background ?? undefined;
+    }
+    const shade = liftedOf(css);
     if (shade === null) {
       keepsLight = true;
       return undefined;
     }
-    return `light-dark(${css}, ${shade})`;
+    return { declarations: [['color', `light-dark(${css}, ${shade})`]], needsInk: false };
+  };
+
+  /** An image a legacy `background` attribute paints, which says nothing of what lies on it. */
+  const image = () => {
+    if (adapting()) keepsLight = true;
   };
 
   /**
@@ -187,7 +308,7 @@ export function mailColors(dark: DarkPaper) {
   const paper = (): Paper =>
     scheme !== 'dark' && (keepsLight || scheme === 'light') ? 'light' : 'theme';
 
-  return { declare, scan, adapt, attribute, listening, paper };
+  return { declare, scan, adapt, attribute, image, listening, paper };
 }
 
 /**
@@ -263,6 +384,14 @@ export function colorReader(most = Infinity): ColorReader {
 }
 
 const WHITE: Rgb = { r: 1, g: 1, b: 1 };
+const BLACK: Rgb = { r: 0, g: 0, b: 0 };
+
+/** The OKLCH lightness from which a background is light, and darkens in the dark theme. */
+const LIGHT = 0.8;
+/** The most chroma a light background has and still darkens. More is a strong color, kept as sent. */
+const TINT = 0.1;
+/** How much of its chroma a darkened background keeps, so its hue shows without glaring. */
+const MUTED = 0.6;
 
 /**
  * The most distinct colors read in one message. Mail sets a few dozen. Mail that sets thousands

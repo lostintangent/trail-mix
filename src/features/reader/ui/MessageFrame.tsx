@@ -49,13 +49,16 @@ export type MessageFrameProps = {
   quotes: FrameLook['quotes'];
   /** Names the frame for assistive technology, as "Message from Ada Park". */
   title: string;
+  /** Shows it on light paper, as its sender designed it, whatever paper it would take. */
+  isLightPaper?: boolean;
 };
 
-export function MessageFrame({ mail, quotes, title }: MessageFrameProps) {
+export function MessageFrame({ mail, quotes, title, isLightPaper = false }: MessageFrameProps) {
   const box = useRef<HTMLDivElement>(null);
   const sizer = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLIFrameElement>(null);
-  const look = useLook(frame);
+  const paper = isLightPaper ? 'light' : mail.paper;
+  const look = useLook(frame, paper);
   const written = useMemo(
     () => (look ? frameDocument(mail, { ...look, quotes }) : undefined),
     [mail, look, quotes],
@@ -106,7 +109,7 @@ export function MessageFrame({ mail, quotes, title }: MessageFrameProps) {
           title={title}
           sandbox={FRAME_SANDBOX}
           referrerPolicy="no-referrer"
-          {...stylex.props(styles.frame, mail.paper === 'light' ? styles.fixedPaper : styles.paper)}
+          {...stylex.props(styles.frame, paper === 'light' ? styles.fixedPaper : styles.paper)}
         />
       </div>
     </div>
@@ -115,9 +118,9 @@ export function MessageFrame({ mail, quotes, title }: MessageFrameProps) {
 
 /**
  * The frame's colors and type, resolved from the theme on the frame's own element, and resolved
- * again when the theme mode or the system's changes.
+ * again when the theme mode or the system's changes, or the paper it lies on.
  */
-function useLook(frame: RefObject<HTMLIFrameElement | null>) {
+function useLook(frame: RefObject<HTMLIFrameElement | null>, paper: SafeMail['paper']) {
   const [look, setLook] = useState<Omit<FrameLook, 'quotes'>>();
   useLayoutEffect(() => {
     // The frame now, since a document after the first goes into a new one.
@@ -136,7 +139,7 @@ function useLook(frame: RefObject<HTMLIFrameElement | null>) {
       system.removeEventListener('change', read);
       mode.disconnect();
     };
-  }, [frame]);
+  }, [frame, paper]);
   return look;
 }
 
@@ -145,11 +148,20 @@ function readLook(element: HTMLIFrameElement): Omit<FrameLook, 'quotes'> {
   const schemes = style.colorScheme.split(/\s+/);
   const prefersDark = matchMedia('(prefers-color-scheme: dark)').matches;
   const dark = schemes.includes('dark') && (!schemes.includes('light') || prefersDark);
+  // The light theme's ink and links, from a probe beside the frame in the light scheme.
+  const probe = document.createElement('span');
+  probe.className = stylex.props(styles.lightProbe).className ?? '';
+  element.after(probe);
+  const light = getComputedStyle(probe);
+  const [lightInk, lightLink] = [light.color, light.accentColor];
+  probe.remove();
   return {
     colorScheme: dark ? 'dark' : 'light',
     paper: style.backgroundColor,
     ink: style.color,
     link: style.accentColor,
+    lightInk,
+    lightLink,
     // The leading stays a ratio, as the theme writes it, so a message's larger type keeps its
     // proportion. A computed line height would be one length for every size.
     font: `${style.fontSize}/${style.getPropertyValue('--text-body-leading') || 'normal'} ${style.fontFamily}`,
@@ -257,5 +269,12 @@ const styles = stylex.create({
   fixedPaper: {
     colorScheme: 'light',
     backgroundColor: tm.paperFixed,
+  },
+  lightProbe: {
+    position: 'absolute',
+    visibility: 'hidden',
+    colorScheme: 'light',
+    color: colorVars['--color-text-primary'],
+    accentColor: colorVars['--color-text-accent'],
   },
 });

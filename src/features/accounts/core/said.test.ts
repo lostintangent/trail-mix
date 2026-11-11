@@ -10,6 +10,7 @@ const account = (provider: Account['provider'], name = 'trl.mx'): Account => ({
   stamp: 'vermilion',
   status: 'ready',
   allowImagesFrom: [],
+  lightPaperFrom: [],
 });
 
 test('removing an account says what Trail Mix forgets, and that the mail stays on its server', () => {

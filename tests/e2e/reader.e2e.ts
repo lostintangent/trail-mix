@@ -149,6 +149,47 @@ test('each message answers and shows the source of its own, and the palette the 
   await expect(from.textContent()).resolves.toContain(address(newestTo));
 }, 30_000);
 
+test('light paper, chosen in the palette, holds for a sender on every device until turned off', async () => {
+  // Two devices of the same member, both in the dark theme, where painted mail is darkened.
+  const [first, second] = [
+    await open({ ...DESKTOP, colorScheme: 'dark' }),
+    await open({ ...DESKTOP, colorScheme: 'dark' }),
+  ];
+  const control = (page: Page) =>
+    reader(page).getByRole('article').last().getByRole('button', { name: 'Light paper' });
+  // The paper the newest message's frame lies on, which its document names.
+  const shows = (page: Page, paper: 'light' | 'dark') =>
+    page.waitForFunction(
+      (paper) =>
+        [...document.querySelectorAll('iframe')]
+          .at(-1)
+          ?.contentDocument?.documentElement.getAttribute('data-tm-scheme') === paper,
+      paper,
+      { timeout: 10_000 },
+    );
+  for (const page of [first, second]) {
+    await row(page, 'Kernel Weekly').click();
+    await control(page).waitFor();
+    await shows(page, 'dark');
+  }
+  expect(await control(first).getAttribute('aria-pressed')).toBe('false');
+
+  await first.keyboard.press('ControlOrMeta+k');
+  await first.keyboard.type('light paper');
+  await first.getByRole('option', { name: /Light paper for this sender/ }).waitFor();
+  await first.keyboard.press('Enter');
+  await shows(first, 'light');
+  expect(await control(first).getAttribute('aria-pressed')).toBe('true');
+  await readable(first, 'desktop-dark-light-paper');
+  await shows(second, 'light');
+
+  // Turned off on the other device, it darkens on both.
+  await control(second).click();
+  await shows(second, 'dark');
+  await shows(first, 'dark');
+  expect(await control(first).getAttribute('aria-pressed')).toBe('false');
+}, 60_000);
+
 for (const colorScheme of ['light', 'dark'] as const) {
   test(`on a phone, in ${colorScheme}, the top of the screen marks and the island files`, async () => {
     const page = await open({ ...PHONE, colorScheme });

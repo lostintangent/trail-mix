@@ -19,6 +19,7 @@ const account: Account = {
   stamp: 'vermilion',
   signature: 'Ada',
   allowImagesFrom: [],
+  lightPaperFrom: [],
   status: 'ready',
 };
 

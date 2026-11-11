@@ -1,5 +1,13 @@
 import DOMPurify from 'dompurify';
-import { mailColors, schemeRule, SCHEME_ATTRIBUTE, type DarkPaper, type Paper } from './colors.ts';
+import { hexOf } from '../../../shared/color.ts';
+import {
+  mailColors,
+  schemeRule,
+  SCHEME_ATTRIBUTE,
+  type Adapted,
+  type DarkPaper,
+  type Paper,
+} from './colors.ts';
 import { rewriteCssResources } from './css.ts';
 import { isAttribution, isForward, quoteMarker, type QuoteMarker } from './quotes.ts';
 
@@ -15,7 +23,8 @@ import { isAttribution, isForward, quoteMarker, type QuoteMarker } from './quote
  * - Links open in a new tab, with no opener and no referrer, and only to http, mail and phone.
  * - A quote that ends the message is marked so the frame can fold it.
  * - The colors the message sets are rewritten to read on the dark theme's paper as well, and its
- *   styles for a color scheme follow the theme's, as `colors.ts` describes.
+ *   styles for a color scheme follow the theme's, as `colors.ts` describes. Text on a light color
+ *   kept as sent is marked, or given a rule, to take the light theme's ink in the dark theme.
  *
  * The frame is a second, independent wall: a sandbox without scripts or forms, and a content
  * security policy that names exactly the images this sanitizer let through.
@@ -34,7 +43,10 @@ export type SafeMail = {
   html: string;
   /** Remote images were left out, because the sender is not allowed yet. */
   blockedImages: boolean;
-  /** The paper it sits on: the theme's, or light paper in both themes for mail that paints. */
+  /**
+   * The paper it sits on: the theme's, or light paper in both themes for mail whose colors can't be
+   * darkened. A member may choose light paper for a sender's mail besides.
+   */
   paper: Paper;
   /** A quote ends the message and is marked to fold. */
   quote: boolean;
@@ -78,13 +90,19 @@ export function sanitizeMail(html: string, images: Images, dark: DarkPaper): Saf
 
   const safeCss = (css: string) => rewriteCssResources(css, imageSource);
   // Inline styles as written, and as they are kept.
-  const styles = new Map<string, string>();
+  const styles = new Map<string, { rewritten: string; needsInk: boolean }>();
+  // Elements whose text takes the light theme's ink in the dark theme, marked once they're walked.
+  const inked = new WeakSet<Element>();
+  const lightInk = hexOf(dark.lightInk);
 
   const adaptAttribute = (element: Element, name: 'color' | 'background-color', value: string) => {
-    const css = colors.attribute(name, value);
-    if (css && element instanceof HTMLElement && !element.style.getPropertyValue(name)) {
-      element.style.setProperty(name, css);
+    if (!(element instanceof HTMLElement) || element.style.getPropertyValue(name)) return;
+    const ownsInk = element.style.getPropertyValue('color') !== '';
+    const added = colors.attribute(name, value, ownsInk);
+    for (const [property, css] of added?.declarations ?? []) {
+      if (!element.style.getPropertyValue(property)) element.style.setProperty(property, css);
     }
+    if (added?.needsInk) inked.add(element);
   };
 
   purify.addHook('beforeSanitizeElements', (node) => {
@@ -103,7 +121,7 @@ export function sanitizeMail(html: string, images: Images, dark: DarkPaper): Saf
     const sheet = new window.CSSStyleSheet();
     sheet.replaceSync(node.textContent ?? '');
     colors.scan(sheet.cssRules);
-    keepSafeRules(sheet.cssRules, colors.adapt);
+    keepSafeRules(sheet.cssRules, colors.adapt, lightInk);
     node.textContent = safeCss([...sheet.cssRules].map((rule) => rule.cssText).join('\n'));
   });
 
@@ -117,31 +135,39 @@ export function sanitizeMail(html: string, images: Images, dark: DarkPaper): Saf
     switch (data.attrName) {
       case 'style': {
         // Mail repeats the same style on line after line, and it comes out the same each time.
-        const again = styles.get(value);
-        if (again !== undefined) return keep(again);
-        // A declaration without a `(` holds no function, so it can load nothing, and one that
-        // names no color sets none. Most mail's inline styles are one or the other, and they are
-        // kept as written.
-        const loads = value.includes('(');
-        const colored = /color|background/i.test(value) && colors.listening(value);
-        if (!loads && !colored) return;
-        const scratch = element.ownerDocument.createElement('div');
-        scratch.setAttribute('style', value);
-        const adapted = colored && colors.adapt(scratch.style);
-        const rewritten = loads
-          ? safeCss(scratch.style.cssText)
-          : adapted
-            ? scratch.style.cssText
-            : value;
-        styles.set(value, rewritten);
-        return keep(rewritten);
+        let kept = styles.get(value);
+        if (kept === undefined) {
+          // A declaration without a `(` holds no function, so it can load nothing, and one that
+          // names no color sets none. Most mail's inline styles are one or the other, and they are
+          // kept as written.
+          const loads = value.includes('(');
+          const colored = /color|background/i.test(value) && colors.listening(value);
+          if (!loads && !colored) return;
+          const scratch = element.ownerDocument.createElement('div');
+          scratch.setAttribute('style', value);
+          const adapted: Adapted = colored
+            ? colors.adapt(scratch.style)
+            : { changed: false, needsInk: false };
+          const rewritten = loads
+            ? safeCss(scratch.style.cssText)
+            : adapted.changed
+              ? scratch.style.cssText
+              : value;
+          kept = { rewritten, needsInk: adapted.needsInk };
+          styles.set(value, kept);
+        }
+        if (kept.needsInk) inked.add(element);
+        return keep(kept.rewritten);
       }
       case 'src':
         return keep(tag === 'img' ? imageSource(value) : null);
       case 'srcset':
         return keep(tag === 'img' || tag === 'source' ? rewriteSrcset(value, imageSource) : null);
-      case 'background':
-        return keep(imageSource(value));
+      case 'background': {
+        const source = imageSource(value);
+        if (source) colors.image();
+        return keep(source);
+      }
       case 'href':
         return keep(tag === 'a' || tag === 'area' ? linkTarget(value) : null);
       default:
@@ -156,6 +182,7 @@ export function sanitizeMail(html: string, images: Images, dark: DarkPaper): Saf
     if (bgcolor !== null) adaptAttribute(element, 'background-color', bgcolor);
     const color = element.localName === 'font' ? element.getAttribute('color') : null;
     if (color !== null) adaptAttribute(element, 'color', color);
+    if (inked.has(element)) element.setAttribute(INK, '');
     if (element.hasAttribute('href')) {
       element.setAttribute('target', '_blank');
       element.setAttribute('rel', 'noopener noreferrer');
@@ -205,6 +232,9 @@ export type FrameLook = {
   paper: string;
   ink: string;
   link: string;
+  /** The light theme's ink and links, for what lies on mail's own light colors in the dark theme. */
+  lightInk: string;
+  lightLink: string;
   font: string;
   monospace: string;
   quotes: 'folded' | 'shown';
@@ -252,6 +282,8 @@ function cutOf(html: string): number | undefined {
 }
 
 const FOLD = 'data-tm-quote';
+/** Marks an element whose text takes the light theme's ink in the dark theme, as its frame says. */
+const INK = 'data-tm-ink';
 const FORMS = ['form', 'input', 'button', 'select', 'option', 'optgroup', 'textarea', 'datalist'];
 const POPOVERS = ['popover', 'popovertarget', 'popovertargetaction', 'command', 'commandfor'];
 
@@ -260,7 +292,11 @@ const POPOVERS = ['popover', 'popovertarget', 'popovertargetaction', 'command', 
  * and registered properties, whose images CSS reaches without `url()` in a value. Every rule kept
  * has its colors adapted, and a rule for one color scheme is rewritten to follow the frame's.
  */
-function keepSafeRules(rules: CSSRuleList, adapt: (style: CSSStyleDeclaration) => void) {
+function keepSafeRules(
+  rules: CSSRuleList,
+  adapt: (style: CSSStyleDeclaration) => Adapted,
+  lightInk: string,
+) {
   for (let i = rules.length - 1; i >= 0; i--) {
     const rule = rules[i];
     if (!rule) continue;
@@ -273,12 +309,34 @@ function keepSafeRules(rules: CSSRuleList, adapt: (style: CSSStyleDeclaration) =
       deleteRule(rule, i);
       continue;
     }
-    if ('style' in rule && rule.style instanceof CSSStyleDeclaration) adapt(rule.style);
+    if ('style' in rule && rule.style instanceof CSSStyleDeclaration) {
+      const { needsInk } = adapt(rule.style);
+      // Text in what the rule paints takes the light theme's ink in the dark theme, short of any
+      // color the message sets on it, which `:where` lets win.
+      if (needsInk && 'selectorText' in rule && typeof rule.selectorText === 'string') {
+        insertAfter(
+          rule,
+          i,
+          `@scope (:root[${SCHEME_ATTRIBUTE}="dark"]) { :where(${rule.selectorText}) { color: ${lightInk}; } }`,
+        );
+      }
+    }
     if ('cssRules' in rule && rule.cssRules instanceof CSSRuleList) {
-      keepSafeRules(rule.cssRules, adapt);
+      keepSafeRules(rule.cssRules, adapt, lightInk);
     }
     const themed = name === 'CSSMediaRule' ? schemeRule(rule as CSSMediaRule) : undefined;
     if (themed) replaceRule(rule, i, themed);
+  }
+}
+
+/** Puts `text` just after a rule, or nothing where a browser can't read it. */
+function insertAfter(rule: CSSRule, index: number, text: string) {
+  const parent = rule.parentRule ?? rule.parentStyleSheet;
+  if (!parent || !('insertRule' in parent)) return;
+  try {
+    parent.insertRule(text, index + 1);
+  } catch {
+    // A browser that reads no `@scope` leaves the text in the dark theme's ink.
   }
 }
 
@@ -524,10 +582,17 @@ function cspSource(url: string): string {
 
 function frameStyle(look: FrameLook): string {
   const value = (css: string) => css.replace(/[<>{};]/g, '');
+  // In the dark theme, what lies on a color the message keeps as sent is in the light scheme, so
+  // links there take the light theme's color, and marked text its ink.
+  const onKept =
+    look.colorScheme === 'dark'
+      ? `a{color:light-dark(${value(look.lightLink)},${value(look.link)})}
+:where([${INK}]){color:${value(look.lightInk)}}`
+      : `a{color:${value(look.link)}}`;
   return `:root{color-scheme:${look.colorScheme};background:${value(look.paper)};color:${value(look.ink)};font:${value(look.font)};overflow-wrap:break-word;-webkit-text-size-adjust:100%}
 :root:not(#tm),body:not(#tm){height:auto!important;min-height:0!important}
 body{margin:0}
-a{color:${value(look.link)}}
+${onKept}
 img{max-width:100%;height:auto}
 pre,code,kbd,samp,tt{font-family:${value(look.monospace)}}
 pre{white-space:pre-wrap}

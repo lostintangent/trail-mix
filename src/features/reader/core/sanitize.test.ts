@@ -6,6 +6,8 @@ const look: FrameLook = {
   paper: 'white',
   ink: 'black',
   link: 'blue',
+  lightInk: 'black',
+  lightLink: 'blue',
   font: '16px/1.5 serif',
   monospace: 'monospace',
   quotes: 'folded',

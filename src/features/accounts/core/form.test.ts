@@ -23,6 +23,7 @@ const account = (address: string): Account => ({
   stamp: 'teal',
   status: 'ready',
   allowImagesFrom: [],
+  lightPaperFrom: [],
 });
 
 const filled = (server: AccountForm['server'], change: Partial<AccountForm> = {}): AccountForm => ({

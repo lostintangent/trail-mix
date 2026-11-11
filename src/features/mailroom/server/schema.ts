@@ -205,6 +205,11 @@ export const versions: readonly (readonly string[])[] = [
       due_at INTEGER
     )`,
   ],
+  [
+    // Each account names the senders whose mail shows on light paper in the dark theme, none yet.
+    `UPDATE accounts SET account = json_set(account, '$.lightPaperFrom', json('[]'))
+     WHERE json_type(account, '$.lightPaperFrom') IS NULL`,
+  ],
 ];
 
 /**

@@ -69,6 +69,8 @@ export interface Commands {
   removeAccount(id: AccountId): Promise<void>;
   /** From now on, this sender's remote images load. */
   allowImages(account: AccountId, sender: string): Promise<void>;
+  /** This sender's HTML mail on light paper in the dark theme, as designed, or darkened again. */
+  setLightPaper(account: AccountId, sender: string, on: boolean): Promise<void>;
   /** This member's accounts, index, cache and credentials. */
   eraseEverything(): Promise<void>;
   setFlags(refs: MessageRef[], change: Partial<Flags>): Promise<void>;
@@ -275,6 +277,7 @@ export const COMMANDS = [
   'updateAccount',
   'removeAccount',
   'allowImages',
+  'setLightPaper',
   'eraseEverything',
   'setFlags',
   'move',

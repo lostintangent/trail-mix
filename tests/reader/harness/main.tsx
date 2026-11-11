@@ -33,6 +33,8 @@ export type Shown = {
    */
   walls?: 'both' | 'frame' | 'sanitizer';
   quotes?: 'folded' | 'shown';
+  /** Whether the member chose light paper for the sender. */
+  lightPaper?: boolean;
 };
 
 export type Result = Omit<SafeMail, 'html' | 'sources'>;
@@ -40,6 +42,8 @@ export type Result = Omit<SafeMail, 'html' | 'sources'>;
 declare global {
   interface Window {
     show: (mails: Shown[]) => Result[];
+    /** Shows one of the messages shown on light paper, or not, as the sheet's control does. */
+    showOnLightPaper: (index: number, on: boolean) => void;
     /** Shows a fixture conversation in the reader, as its pane would. */
     showConversation: (
       fixture: 'lunch' | 'newsletter',
@@ -72,15 +76,36 @@ window.setTheme = (mode) => {
 
 const root = createRoot(document.getElementById('root') as HTMLElement);
 
+let showing: { mails: Shown[]; safe: SafeMail[]; at: number } = { mails: [], safe: [], at: 0 };
+
 window.show = (mails) => {
   const safe = mails.map((mail) =>
     mail.walls === 'frame' ? unsanitized(mail.html) : sanitize(mail),
   );
+  showing = { mails, safe, at: Date.now() };
+  render();
+  return safe.map(({ blockedImages, paper, quote, inlineParts }) => ({
+    blockedImages,
+    paper,
+    quote,
+    inlineParts,
+  }));
+};
+
+window.showOnLightPaper = (index, on) => {
+  showing.mails = showing.mails.map((mail, i) =>
+    i === index ? { ...mail, lightPaper: on } : mail,
+  );
+  render();
+};
+
+function render() {
+  const { mails, safe, at } = showing;
   flushSync(() =>
     root.render(
       <StrictMode>
         {safe.map((mail, i) => (
-          <article key={`${Date.now()}-${i}`} data-mail={i}>
+          <article key={`${at}-${i}`} data-mail={i}>
             {mails[i]?.walls === 'sanitizer' ? (
               <iframe
                 title={`Message ${i}`}
@@ -92,6 +117,7 @@ window.show = (mails) => {
                 mail={mail}
                 quotes={mails[i]?.quotes ?? 'folded'}
                 title={`Message ${i}`}
+                isLightPaper={mails[i]?.lightPaper}
               />
             )}
           </article>
@@ -99,13 +125,7 @@ window.show = (mails) => {
       </StrictMode>,
     ),
   );
-  return safe.map(({ blockedImages, paper, quote, inlineParts }) => ({
-    blockedImages,
-    paper,
-    quote,
-    inlineParts,
-  }));
-};
+}
 
 /**
  * Shows a fixture as the reader pane would: its snapshots seeded as if the Mailroom had answered,

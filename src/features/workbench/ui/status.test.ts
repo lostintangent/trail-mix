@@ -9,6 +9,7 @@ const account = (name: string, status: Account['status']): Account => ({
   provider: 'demo',
   stamp: 'vermilion',
   allowImagesFrom: [],
+  lightPaperFrom: [],
   status,
 });
 

@@ -39,6 +39,8 @@ export type Account = {
   signature?: string;
   /** Senders whose remote images load, always through the Worker's proxy. */
   allowImagesFrom: string[];
+  /** Senders whose HTML mail shows on light paper in the dark theme, as they designed it. */
+  lightPaperFrom: string[];
   status: 'ready' | 'syncing' | 'needs-sign-in' | 'error';
 };
 

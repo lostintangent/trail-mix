@@ -19,6 +19,7 @@ export const ACCOUNT: Account = {
   stamp: 'vermilion',
   status: 'ready',
   allowImagesFrom: [],
+  lightPaperFrom: [],
 };
 
 const ada = { name: 'Ada Park', email: 'ada@example.com' };

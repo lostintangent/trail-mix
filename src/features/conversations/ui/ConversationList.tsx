@@ -39,6 +39,7 @@ import type {
   StampColor,
 } from '../../mail/core/index.ts';
 import { logoUrl } from '../../mailroom/client/index.ts';
+import { faceOf } from '../core/face.ts';
 import type { Listed } from '../core/pages.ts';
 import type { SelectBy, Selection } from '../core/selection.ts';
 import { formatListDate } from './dates.ts';
@@ -332,8 +333,7 @@ const Row = memo(function Row({
   onAhead: ((id: ConversationId, isPressed: boolean) => void) | undefined;
 }) {
   const { subject, senders, preview, date, unread, flagged, hasAttachments, logo } = conversation;
-  // The newest sender who isn't the member, or the member when only they wrote.
-  const who = senders.find(({ email }) => !selves.has(email.toLowerCase())) ?? senders[0];
+  const who = faceOf(senders, selves);
   // A finger that taps the avatar picks the row instead of opening it.
   const pointer = useRef('');
   const isUnread = unread > 0;

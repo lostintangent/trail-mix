@@ -5,5 +5,6 @@ export { preloadTriageActions, TriageActions } from './ui/lazy.ts';
 export { useTriage, type Triage } from './ui/useTriage.tsx';
 export { useConversations } from './ui/useConversations.ts';
 export { placesOf, type Listed } from './core/pages.ts';
+export { faceOf } from './core/face.ts';
 export { SearchContext, SearchField, SearchScope, type SearchState } from './ui/search.tsx';
 export { MOVE, triageCommands } from './ui/commands.ts';
