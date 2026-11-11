@@ -53,3 +53,31 @@ test('a comment can’t pass for a result, and a message with no header is unver
   expect(isVerified('', ZOHO, FROM)).toBe(false);
   expect(isVerified(block(passed), ZOHO, '')).toBe(false);
 });
+
+test('a pass reads the From domain however its server writes it: quoted, or as the address', () => {
+  for (const named of [
+    '"example.com"',
+    'news@example.com',
+    '<news@example.com>',
+    '"news@example.com"',
+    'Example.COM.',
+  ]) {
+    const header = passed.replace('header.from=example.com', `header.from=${named}`);
+    expect({ named, verified: isVerified(block(header), ZOHO, FROM) }).toEqual({
+      named,
+      verified: true,
+    });
+  }
+  // An address at another domain is that domain's pass, not this one's.
+  for (const named of [
+    '<news@example.org>',
+    'news@mail.example.com',
+    'example.com@forged.example',
+  ]) {
+    const header = passed.replace('header.from=example.com', `header.from=${named}`);
+    expect({ named, verified: isVerified(block(header), ZOHO, FROM) }).toEqual({
+      named,
+      verified: false,
+    });
+  }
+});

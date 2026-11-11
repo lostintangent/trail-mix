@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { envelopeOf, hasAttachments, previewPartOf, type Structure } from './envelope.ts';
+import { envelopeOf, hasAttachments, previewPartsOf, type Structure } from './envelope.ts';
 
 const text = (part: string, extra: Partial<Structure> = {}): Structure => ({
   part,
@@ -12,41 +12,40 @@ const multipart = (type: string, ...childNodes: Structure[]): Structure => ({
   childNodes,
 });
 
-describe('the preview part', () => {
-  test('is the plain text of an alternative, not its HTML', () => {
-    expect(previewPartOf(multipart('alternative', html('1'), text('2')))?.part).toBe('2');
-  });
-
-  test('is the HTML when there is no plain text', () => {
-    expect(
-      previewPartOf(
-        multipart('related', html('1'), { part: '2', type: 'image/png', id: '<logo>' }),
-      ),
-    ).toEqual({
-      part: '1',
-      html: true,
+describe('the preview parts', () => {
+  test('are the plain text and the HTML of an alternative', () => {
+    expect(previewPartsOf(multipart('alternative', html('1'), text('2')))).toEqual({
+      plain: { part: '2' },
+      html: { part: '1' },
     });
   });
 
-  test('is the text of a message that is a single part, which IMAP calls TEXT', () => {
+  test('are the HTML alone when there is no plain text', () => {
     expect(
-      previewPartOf({
+      previewPartsOf(
+        multipart('related', html('1'), { part: '2', type: 'image/png', id: '<logo>' }),
+      ),
+    ).toEqual({ html: { part: '1' } });
+  });
+
+  test('are the text of a message that is a single part, which IMAP calls TEXT', () => {
+    expect(
+      previewPartsOf({
         type: 'text/plain',
         parameters: { charset: 'iso-8859-1' },
         encoding: 'quoted-printable',
       }),
     ).toEqual({
-      part: 'TEXT',
-      html: false,
-      charset: 'iso-8859-1',
-      encoding: 'quoted-printable',
+      plain: { part: 'TEXT', charset: 'iso-8859-1', encoding: 'quoted-printable' },
     });
   });
 
-  test('is never a text file someone attached', () => {
+  test('are never a text file someone attached', () => {
     const attached = text('2', { disposition: 'attachment' });
-    expect(previewPartOf(multipart('mixed', html('1'), attached))?.part).toBe('1');
-    expect(previewPartOf(multipart('mixed', attached))).toBeUndefined();
+    expect(previewPartsOf(multipart('mixed', html('1'), attached))).toEqual({
+      html: { part: '1' },
+    });
+    expect(previewPartsOf(multipart('mixed', attached))).toEqual({});
   });
 });
 
@@ -88,7 +87,7 @@ describe('an envelope', () => {
       },
       headers:
         'References: <root@example.com>\r\n <a@example.com>\r\nList-Id: Plans <plans.example.com>\r\nList-Unsubscribe: <mailto:leave@example.com>\r\n',
-      previewText: 'Yes.',
+      previews: { plain: 'Yes.' },
     });
     expect(envelope).toEqual({
       ...ref,
@@ -114,7 +113,7 @@ describe('an envelope', () => {
       envelope: { from: [{ name: 'Kernel Weekly', address: 'hello@kernelweekly.example.com' }] },
       headers:
         'Authentication-Results: mx.zohomail.com; dmarc=pass header.from=kernelweekly.example.com\r\nReferences: <a@example.com>\r\n',
-      previewText: '',
+      previews: {},
     };
     expect(envelopeOf(vouched, ['mx.zohomail.com']).verified).toBe(true);
     // An account whose preset names no server vouches for nobody.
@@ -128,7 +127,7 @@ describe('an envelope', () => {
       envelope: {},
       headers: '',
       internalDate: '2026-11-08T08:00:00Z',
-      previewText: '',
+      previews: {},
     });
     expect(envelope.date).toBe('2026-11-08T08:00:00.000Z');
     expect(envelope.from).toEqual({ email: '' });

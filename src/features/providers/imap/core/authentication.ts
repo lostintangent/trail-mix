@@ -24,8 +24,20 @@ export function isVerified(
     const [method, ...properties] = result.trim().split(/\s+/);
     if (method?.toLowerCase() !== 'dmarc=pass') return false;
     const from = properties.find((property) => property.toLowerCase().startsWith('header.from='));
-    return from?.slice('header.from='.length).toLowerCase() === domain;
+    return from !== undefined && domainNamed(from.slice('header.from='.length)) === domain;
   });
+}
+
+/**
+ * The domain a `header.from` names. RFC 8601 writes a domain, perhaps quoted, but some servers
+ * write the From address, bare or in angle brackets, so it is read as the part after its `@`.
+ */
+function domainNamed(value: string): string {
+  const unwrapped = value.replace(/^["<]+|[">]+$/g, '');
+  return unwrapped
+    .slice(unwrapped.lastIndexOf('@') + 1)
+    .replace(/\.$/, '')
+    .toLowerCase();
 }
 
 /** Header lines in order, by lowercase name, with folding undone. */

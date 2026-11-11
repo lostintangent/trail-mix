@@ -7,7 +7,7 @@ import {
   type MessageRef,
 } from '../../../mail/core/index.ts';
 import { isVerified } from './authentication.ts';
-import { previewOf } from './preview.ts';
+import { previewFrom } from './preview.ts';
 
 /**
  * Envelopes from what an IMAP server reports. Fetching is the provider's work, and this turns the
@@ -48,9 +48,14 @@ export type ImapMessage = {
   structure?: Structure;
   /** When IMAP's envelope has no date. */
   internalDate?: Date | string;
-  /** The decoded start of the part `previewPartOf` chose, or empty when there is none. */
-  previewText: string;
+  /**
+   * The decoded start of the parts `previewPartsOf` names: the plain text, and the HTML when the
+   * plain text is missing or has no words to read.
+   */
+  previews: Previews;
 };
+
+export type Previews = { plain?: string; html?: string };
 
 /**
  * A message's envelope. `authServers` are the names the account's server signs its
@@ -72,7 +77,7 @@ export function envelopeOf(message: ImapMessage, authServers: readonly string[] 
     cc: addressesOf(envelope.cc),
     subject: envelope.subject ?? '',
     date: date ? new Date(date).toISOString() : new Date(0).toISOString(),
-    preview: previewOf(message.previewText, previewPartOf(structure)?.html ?? false),
+    preview: previewFrom(message.previews),
     flags,
     hasAttachments: structure ? hasAttachments(structure) : false,
     ...(listId ? { list: { id: listId, ...(unsubscribe ? { unsubscribe } : {}) } } : {}),
@@ -80,25 +85,34 @@ export function envelopeOf(message: ImapMessage, authServers: readonly string[] 
   };
 }
 
+/** A part a preview may be read from, as a fetch of its start names it. */
+export type PreviewPart = { part: string; charset?: string; encoding?: string };
+
 /**
- * The part a preview is read from: the first plain text part, or failing that the first HTML
- * part, never one that is an attachment.
+ * The parts a preview is read from: the first plain text part and the first HTML part, never one
+ * that is an attachment. The HTML is read only when the plain text gives no preview.
  */
-export function previewPartOf(
-  structure: Structure | undefined,
-): { part: string; html: boolean; charset?: string; encoding?: string } | undefined {
+export function previewPartsOf(structure: Structure | undefined): {
+  plain?: PreviewPart;
+  html?: PreviewPart;
+} {
   const leaves = structure
     ? leavesOf(structure).filter((leaf) => leaf.disposition !== 'attachment')
     : [];
   const plain = leaves.find((leaf) => leaf.type === 'text/plain');
-  const chosen = plain ?? leaves.find((leaf) => leaf.type === 'text/html');
-  if (!chosen) return undefined;
+  const html = leaves.find((leaf) => leaf.type === 'text/html');
+  return {
+    ...(plain ? { plain: partOf(plain) } : {}),
+    ...(html ? { html: partOf(html) } : {}),
+  };
+}
+
+function partOf(leaf: Structure): PreviewPart {
   return {
     // A message that is a single part has no part number. Its text is the part called TEXT.
-    part: chosen.part ?? 'TEXT',
-    html: chosen.type === 'text/html',
-    ...(chosen.parameters?.charset ? { charset: chosen.parameters.charset } : {}),
-    ...(chosen.encoding ? { encoding: chosen.encoding } : {}),
+    part: leaf.part ?? 'TEXT',
+    ...(leaf.parameters?.charset ? { charset: leaf.parameters.charset } : {}),
+    ...(leaf.encoding ? { encoding: leaf.encoding } : {}),
   };
 }
 

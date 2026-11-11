@@ -29,7 +29,14 @@ import {
   type SyncBatch,
   type SyncWindow,
 } from '../provider.ts';
-import { envelopeOf, previewPartOf, type ImapMessage } from './core/envelope.ts';
+import {
+  envelopeOf,
+  previewPartsOf,
+  type ImapMessage,
+  type PreviewPart,
+  type Previews,
+} from './core/envelope.ts';
+import { previewOf } from './core/preview.ts';
 import { flagsOf, planSync, type SyncPlan } from './core/sync.ts';
 import { subtree } from './core/folders.ts';
 import type { Endpoint } from './core/presets.ts';
@@ -232,33 +239,59 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
           headers: message.headers?.toString('utf8') ?? '',
           ...(message.bodyStructure ? { structure: message.bodyStructure } : {}),
           ...(message.internalDate ? { internalDate: message.internalDate } : {}),
-          previewText: previews.get(message.uid) ?? '',
+          previews: previews.get(message.uid) ?? {},
         } satisfies ImapMessage,
         account.authServers ?? [],
       ),
     );
   }
 
-  /** The decoded start of each message's preview part, fetched once per distinct part number. */
+  /**
+   * The decoded start of each message's preview parts: its plain text, and its HTML where there is
+   * no plain text or it has no words to read, as a newsletter's often hasn't.
+   */
   async function previewsOf(connection: ImapFlow, messages: FetchMessageObject[]) {
-    const wanted = new Map<string, { uids: number[]; html: boolean; header: string }>();
-    for (const message of messages) {
-      const preview = previewPartOf(message.bodyStructure);
-      if (!preview) continue;
+    const previews = new Map<number, Previews>();
+    const parts = new Map(
+      messages.map(({ uid, bodyStructure }) => [uid, previewPartsOf(bodyStructure)]),
+    );
+    const plain = await startsOf(
+      connection,
+      [...parts].flatMap(([uid, { plain }]) => (plain ? [{ uid, ...plain }] : [])),
+      false,
+    );
+    for (const [uid, text] of plain) previews.set(uid, { plain: text });
+    const html = await startsOf(
+      connection,
+      [...parts].flatMap(([uid, { html }]) => {
+        const read = plain.get(uid);
+        return html && (read === undefined || !previewOf(read, false)) ? [{ uid, ...html }] : [];
+      }),
+      true,
+    );
+    for (const [uid, text] of html) previews.set(uid, { ...previews.get(uid), html: text });
+    return previews;
+  }
+
+  /** The decoded start of each message's part, fetched once per distinct part number. */
+  async function startsOf(
+    connection: ImapFlow,
+    wanted: readonly (PreviewPart & { uid: number })[],
+    html: boolean,
+  ) {
+    const byPart = Map.groupBy(
+      wanted,
+      ({ part, charset, encoding }) => `${part}\n${charset ?? 'utf-8'}\n${encoding ?? '7bit'}`,
+    );
+    const starts = new Map<number, string>();
+    for (const [key, messages] of byPart) {
+      const [part = '', charset, encoding] = key.split('\n');
       const header =
-        `Content-Type: ${preview.html ? 'text/html' : 'text/plain'}; charset="${preview.charset ?? 'utf-8'}"\r\n` +
-        `Content-Transfer-Encoding: ${preview.encoding ?? '7bit'}\r\n\r\n`;
-      const key = `${preview.part}\n${header}`;
-      const entry = wanted.get(key) ?? { uids: [], html: preview.html, header };
-      entry.uids.push(message.uid);
-      wanted.set(key, entry);
-    }
-    const previews = new Map<number, string>();
-    for (const [key, { uids, html, header }] of wanted) {
-      const part = key.slice(0, key.indexOf('\n'));
+        `Content-Type: ${html ? 'text/html' : 'text/plain'}; charset="${charset}"\r\n` +
+        `Content-Transfer-Encoding: ${encoding}\r\n\r\n`;
       const maxLength = html ? PREVIEW_BYTES.html : PREVIEW_BYTES.text;
       for await (const message of connection.fetch(
-        rangeOf(uids),
+        rangeOf(messages.map(({ uid }) => uid)),
         { uid: true, bodyParts: [{ key: part, start: 0, maxLength }] },
         { uid: true },
       )) {
@@ -266,10 +299,10 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
         if (!bytes) continue;
         // The part's bytes under a header that names their type and encoding parse as a message.
         const parsed = await PostalMime.parse(concat(new TextEncoder().encode(header), bytes));
-        previews.set(message.uid, (html ? parsed.html : parsed.text) ?? '');
+        starts.set(message.uid, (html ? parsed.html : parsed.text) ?? '');
       }
     }
-    return previews;
+    return starts;
   }
 
   async function flagsFor(connection: ImapFlow, plan: SyncPlan, inWindow: readonly number[]) {

@@ -9,7 +9,7 @@ import {
   type Folder,
   type MessageRef,
 } from '../../mail/core/index.ts';
-import { previewOf } from '../imap/core/preview.ts';
+import { previewFrom } from '../imap/core/preview.ts';
 import { planSync } from '../imap/core/sync.ts';
 import {
   SEARCH_LIMIT,
@@ -396,8 +396,10 @@ async function written(bytes: Uint8Array): Promise<server.Written> {
       date: new Date(date ?? Date.now()).toISOString().replace(/\.\d{3}Z$/, '.000Z'),
       // What a member writes, as a draft or a copy in Sent, no server has vouched for.
       verified: false,
-      preview:
-        parsed.text === undefined ? previewOf(parsed.html ?? '', true) : previewOf(text, false),
+      preview: previewFrom({
+        ...(parsed.text === undefined ? {} : { plain: text }),
+        ...(parsed.html === undefined ? {} : { html: parsed.html }),
+      }),
       // As IMAP's providers judge it: a file marked as one, or anything but an inline image.
       hasAttachments: parsed.attachments.some(
         (file) =>

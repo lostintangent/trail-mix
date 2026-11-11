@@ -146,6 +146,29 @@ export function describeContract(
       });
     });
 
+    it('previews the HTML when the plain text has no words to read, and decodes what either escapes', async () => {
+      await world().deliver(
+        message({
+          id: 'padded',
+          subject: 'Padded',
+          // A newsletter's plain text can be nothing but its HTML's padding, written as entities.
+          text: '&zwnj;&nbsp;&zwnj;&nbsp;&zwnj;&nbsp;\r\n\r\n',
+          html: '<p>Upper Division Social Justice Day</p><p>Dear Families,</p>',
+        }),
+      );
+      await world().deliver(
+        message({
+          id: 'escaped',
+          subject: 'Escaped',
+          text: 'Jonathan, you&#39;re invited &amp; welcome',
+        }),
+      );
+      expect((await only('INBOX', 'Padded')).preview).toBe(
+        'Upper Division Social Justice Day Dear Families,',
+      );
+      expect((await only('INBOX', 'Escaped')).preview).toBe("Jonathan, you're invited & welcome");
+    });
+
     it('reports a large folder in bounded batches that together hold every message once', async () => {
       for (let i = 0; i < 520; i++) {
         await world().deliver(message({ id: `bulk-${i}`, subject: `Bulk ${i}` }));
@@ -546,7 +569,10 @@ async function until(done: () => boolean, ms = 5000) {
   }
 }
 
-/** A plain RFC 5322 message, with a file attached when asked. Its id is `<id@example.com>`. */
+/**
+ * A plain RFC 5322 message, with HTML beside its text or a file attached when asked. Its id is
+ * `<id@example.com>`.
+ */
 export function message(fields: {
   id: string;
   subject: string;
@@ -556,6 +582,7 @@ export function message(fields: {
   inReplyTo?: string;
   list?: string;
   text?: string;
+  html?: string;
   attachment?: boolean;
   minutesAgo?: number;
 }): string {
@@ -572,6 +599,23 @@ export function message(fields: {
     'MIME-Version: 1.0',
   ];
   const text = fields.text ?? `This is ${fields.subject}.`;
+  if (fields.html !== undefined) {
+    return [
+      ...headers,
+      'Content-Type: multipart/alternative; boundary="part"',
+      '',
+      '--part',
+      'Content-Type: text/plain; charset=utf-8',
+      '',
+      text,
+      '--part',
+      'Content-Type: text/html; charset=utf-8',
+      '',
+      fields.html,
+      '--part--',
+      '',
+    ].join('\r\n');
+  }
   if (!fields.attachment) {
     return [...headers, 'Content-Type: text/plain; charset=utf-8', '', text, ''].join('\r\n');
   }

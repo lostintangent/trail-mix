@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { previewOf } from './preview.ts';
+import { previewFrom, previewOf } from './preview.ts';
 
 const plain = (...lines: string[]) => previewOf(lines.join('\r\n'), false);
 
@@ -86,6 +86,15 @@ describe('a preview of plain text a sender made from its HTML', () => {
     expect(plain('Total ************ $45.00')).toBe('Total $45.00');
   });
 
+  test('decodes the entities a sender’s HTML wrote into its plain text', () => {
+    expect(
+      plain('Jonathan Carter, you&#39;re invited to: Fish &amp; chips&nbsp;&mdash; 6:30'),
+    ).toBe("Jonathan Carter, you're invited to: Fish & chips — 6:30");
+    // A link's address its entities hid is still left out.
+    expect(plain('Read it &lt;https://example.com/a?b=1&amp;c=2&gt; today')).toBe('Read it today');
+    expect(plain('AT&T &c. & co')).toBe('AT&T &c. & co');
+  });
+
   test('leaves out the invisible padding newsletters put after their first line', () => {
     expect(plain('Your order shipped\u200c\u00a0\u200c\u00a0\u034f\u200c\u00a0Track it')).toBe(
       'Your order shipped Track it',
@@ -143,5 +152,27 @@ describe('a preview of HTML', () => {
 
   test('keeps Markdown’s marks, since HTML shows them as written', () => {
     expect(previewOf('<p>Use **bold** for `code`</p>', true)).toBe('Use **bold** for `code`');
+  });
+});
+
+describe('a preview from a message’s parts', () => {
+  test('reads the plain text, and the HTML when the plain text has no words to read', () => {
+    const html = '<p>Upper Division Social Justice Day</p><p>Dear Families,</p>';
+    expect(previewFrom({ plain: 'Dear Families,', html })).toBe('Dear Families,');
+    for (const empty of [
+      '',
+      '  \r\n\r\n',
+      '\u200c\u00a0\u200c\u00a0',
+      '********',
+      '> quoted only',
+    ]) {
+      expect({ empty, preview: previewFrom({ plain: empty, html }) }).toEqual({
+        empty,
+        preview: 'Upper Division Social Justice Day Dear Families,',
+      });
+    }
+    expect(previewFrom({ html })).toBe('Upper Division Social Justice Day Dear Families,');
+    expect(previewFrom({ plain: '' })).toBe('');
+    expect(previewFrom({})).toBe('');
   });
 });

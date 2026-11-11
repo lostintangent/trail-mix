@@ -1,14 +1,21 @@
 /**
- * A message's preview: the first words a person would read in it, for the list's third line.
- *
- * It reads the plain text part, or the HTML when there is none, and leaves out what nobody reads as
- * words: quoted lines, invisible padding, and rules drawn with marks such as `*`, `=`, `-` or `_`.
- * A sender's plain text is often its HTML turned into Markdown, with table bars, heading marks,
- * links' and images' addresses written out, and mail written in Trail Mix is Markdown too, so plain text is
- * read as its message shows it, by the words alone.
+ * A message's preview: the first words a person would read in it, for the list's third line, from
+ * the start of its plain text part and of its HTML part. The plain text is read first, and the HTML
+ * when there is no plain text or it has no words to read, as a newsletter's often hasn't.
+ */
+export function previewFrom({ plain, html }: { plain?: string; html?: string }): string {
+  return (plain === undefined ? '' : previewOf(plain, false)) || previewOf(html ?? '', true);
+}
+
+/**
+ * The preview one part gives. It leaves out what nobody reads as words: quoted lines, invisible
+ * padding, and rules drawn with marks such as `*`, `=`, `-` or `_`. A sender's plain text is often
+ * its HTML turned into Markdown, with table bars, heading marks, links' and images' addresses
+ * written out, and entities its HTML wrote, and mail written in Trail Mix is Markdown too, so plain
+ * text is read as its message shows it, by the words alone.
  */
 export function previewOf(text: string, html: boolean): string {
-  return (html ? textOfHtml(text) : text)
+  return (html ? textOfHtml(text) : decoded(text))
     .split(/\r\n|\r|\n/)
     .filter((line) => !line.trimStart().startsWith('>') && !DRAWN.test(line))
     .map((line) => {
@@ -111,21 +118,25 @@ const ENTITIES: Record<string, string> = {
 
 /** Text a person would read in HTML, closely enough for a preview. Nothing here is rendered. */
 function textOfHtml(html: string): string {
-  return html
-    .replace(/<(head|style|script|title)\b[\s\S]*?(<\/\1\s*>|$)/gi, ' ')
-    .replace(/<blockquote\b[\s\S]*?(<\/blockquote\s*>|$)/gi, ' ')
-    .replace(/<(br|p|div|tr|li|h\d)\b[^>]*>/gi, '\n')
-    .replace(/<[^>]*>?/g, ' ')
-    .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entity: string, name: string) => {
-      if (name.startsWith('#')) {
-        const code =
-          name[1]?.toLowerCase() === 'x'
-            ? parseInt(name.slice(2), 16)
-            : parseInt(name.slice(1), 10);
-        return Number.isFinite(code) && code > 0 && code < 0x110000
-          ? String.fromCodePoint(code)
-          : ' ';
-      }
-      return ENTITIES[name.toLowerCase()] ?? entity;
-    });
+  return decoded(
+    html
+      .replace(/<(head|style|script|title)\b[\s\S]*?(<\/\1\s*>|$)/gi, ' ')
+      .replace(/<blockquote\b[\s\S]*?(<\/blockquote\s*>|$)/gi, ' ')
+      .replace(/<(br|p|div|tr|li|h\d)\b[^>]*>/gi, '\n')
+      .replace(/<[^>]*>?/g, ' '),
+  );
+}
+
+/** Text with HTML's character references written as the characters they stand for. */
+function decoded(text: string): string {
+  return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entity: string, name: string) => {
+    if (name.startsWith('#')) {
+      const code =
+        name[1]?.toLowerCase() === 'x' ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10);
+      return Number.isFinite(code) && code > 0 && code < 0x110000
+        ? String.fromCodePoint(code)
+        : ' ';
+    }
+    return ENTITIES[name.toLowerCase()] ?? entity;
+  });
 }
