@@ -12,6 +12,7 @@ import { astryxUseTheme } from './src/shared/build/astryxUseTheme.ts';
 import { serviceWorker } from './src/shared/build/serviceWorker.ts';
 import { stylexDefinitionsFirst } from './src/shared/build/stylexDefinitionsFirst.ts';
 import { stylexOptions } from './src/shared/build/stylexOptions.ts';
+import { workerModules } from './src/shared/build/workerModules.ts';
 
 /** Where a test's preview keeps its storage, as `tests/e2e/preview.ts` sets it. */
 const TEST_STATE = process.env.TRAIL_MIX_TEST_STATE;
@@ -40,6 +41,10 @@ export default defineConfig(({ isPreview }) => ({
         generatedRouteTree: 'app/routeTree.gen.ts',
         virtualRouteConfig: rootRoute('app/root.tsx', [index('app/workbench.tsx')]),
         addExtensions: true,
+        // Start hands these to the server build's code splitter alone. The Worker renders no route,
+        // only the shell, so it drops every route's component, and the app's UI with it, from what
+        // each of its isolates loads.
+        codeSplittingOptions: { deleteNodes: ['component'] },
       },
       client: { entry: 'app/main.tsx' },
     }),
@@ -53,6 +58,7 @@ export default defineConfig(({ isPreview }) => ({
     astryxBuiltTheme({ isTrapped: process.env.THEME_TRAPS === '1' }),
     // The installed app's service worker, `/sw.js`, which keeps this build for offline.
     serviceWorker({ entry: 'src/app/service-worker.ts' }),
+    workerModules(),
     stylexDefinitionsFirst(),
     stylex(stylexOptions),
     react(),
