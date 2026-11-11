@@ -1,9 +1,16 @@
+import {
+  clickNotification,
+  showPush,
+  type Clicked,
+  type Pushed,
+} from '../features/notifications/index.ts';
 import { answerFor, isShellOf } from '../features/offline/index.ts';
 
 /**
  * The service worker, built to `/sw.js` by `src/shared/build/serviceWorker.ts`, which hands it its
  * build: a version and every file the build serves. It keeps those files and the build's shell,
  * so an installed Trail Mix opens with no network, and leaves every other request to the network.
+ * It shows the notifications pushed to the device, and acts on a tap or a button.
  *
  * A new worker takes over at once. It keeps the previous build's files, so a page still running
  * that build can load what it hasn't yet, and drops anything older.
@@ -20,9 +27,21 @@ type Fetching = Extendable & {
 type Worker = {
   addEventListener(type: 'install' | 'activate', listener: (event: Extendable) => void): void;
   addEventListener(type: 'fetch', listener: (event: Fetching) => void): void;
+  addEventListener(type: 'push', listener: (event: Pushed) => void): void;
+  addEventListener(type: 'notificationclick', listener: (event: Clicked) => void): void;
   skipWaiting(): Promise<void>;
-  clients: { claim(): Promise<void> };
-  registration: { navigationPreload?: { enable(): Promise<void> } };
+  clients: {
+    claim(): Promise<void>;
+    matchAll(options: {
+      type: 'window';
+      includeUncontrolled: boolean;
+    }): Promise<{ focus(): Promise<unknown>; postMessage(message: unknown): void }[]>;
+    openWindow(url: string): Promise<unknown>;
+  };
+  registration: {
+    navigationPreload?: { enable(): Promise<void> };
+    showNotification(title: string, options: object): Promise<void>;
+  };
   location: Location;
 };
 
@@ -50,6 +69,9 @@ worker.addEventListener('activate', (event) => {
     })(),
   );
 });
+
+worker.addEventListener('push', (event) => showPush(worker, event));
+worker.addEventListener('notificationclick', (event) => clickNotification(worker, event));
 
 worker.addEventListener('fetch', (event) => {
   const answer = answerFor(event.request, worker.location.origin, KEPT);

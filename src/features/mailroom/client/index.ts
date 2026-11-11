@@ -21,6 +21,7 @@ export {
   conversationsQuery,
   foldersQuery,
   keys,
+  notifiedQuery,
   outboxQuery,
   signInPresetsQuery,
   signInsQuery,

@@ -1,5 +1,5 @@
 import type { AccountId, FolderRef } from '../../mail/core/index.ts';
-import type { Mark, Subscription } from '../../notifications/index.ts';
+import type { Mark, Subscription } from '../../notifications/core/index.ts';
 import type { Sql } from './schema.ts';
 
 export type Notifying = ReturnType<typeof notifying>;

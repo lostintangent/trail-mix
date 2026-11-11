@@ -15,7 +15,7 @@ import type {
   View,
 } from '../../mail/core/index.ts';
 import type { Members } from '../../members/core/index.ts';
-import type { Subscription } from '../../notifications/index.ts';
+import type { Subscription } from '../../notifications/core/index.ts';
 // Brings Start's `Register` in, so the declaration below can add to it in either program.
 import type {} from '@tanstack/react-start';
 

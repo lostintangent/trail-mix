@@ -4,7 +4,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { ImapFlow } from 'imapflow';
 import { addressOf, type Account, type MessageRef } from '../../mail/core/index.ts';
-import { pushOf, type Notice } from '../../notifications/index.ts';
+import { pushOf, type Notice } from '../../notifications/core/index.ts';
 import { standInPushService } from '../../../../tests/push-service.ts';
 import type { AccountSetup, ThisDevice } from '../client/contract.ts';
 import { caFile, empty, ports, start, stop, users } from '../../../../tests/mail-server/server.ts';

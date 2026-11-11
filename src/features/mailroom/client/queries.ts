@@ -12,6 +12,8 @@ export const keys = {
   thisDevice: ['this-device'],
   folders: ['folders'],
   outbox: ['outbox'],
+  /** Under this device, so an erase, which makes the Mailroom anew, asks again. */
+  notified: (endpoint: string | undefined) => ['this-device', endpoint ?? null] as const,
   // A view's list, under which each of its pages is kept by the place it starts at.
   conversations: (view: View) => ['conversations', view] as const,
   page: (view: View, at: number) => ['conversations', view, at] as const,
@@ -24,6 +26,7 @@ export type Key =
   | typeof keys.signIns
   | typeof keys.signInPresets
   | typeof keys.thisDevice
+  | ReturnType<typeof keys.notified>
   | typeof keys.folders
   | typeof keys.outbox
   | ReturnType<typeof keys.conversations>
@@ -89,6 +92,16 @@ export const thisDeviceQuery = queryOptions({
   queryKey: keys.thisDevice,
   queryFn: () => mailroom.thisDevice(),
 });
+
+/**
+ * Whether the device at `endpoint` is notified, and the key a device subscribes with, which is
+ * absent where notifications are off. Without an endpoint, a device isn't subscribed.
+ */
+export const notifiedQuery = (endpoint: string | undefined) =>
+  queryOptions({
+    queryKey: keys.notified(endpoint),
+    queryFn: () => mailroom.thisDevice(endpoint),
+  });
 
 export const foldersQuery = queryOptions({
   queryKey: keys.folders,

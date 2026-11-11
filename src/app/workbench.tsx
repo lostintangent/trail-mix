@@ -16,7 +16,7 @@ import {
   type ReactNode,
 } from 'react';
 import { FirstRun, preloadFirstRun } from '../features/accounts/index.ts';
-import type { Command } from '../features/commands/index.ts';
+import { RegisteredCommandButton, type Command } from '../features/commands/index.ts';
 import { useConversations } from '../features/conversations/index.ts';
 import { standing, useChangedFolders, viewCounts } from '../features/folders/index.ts';
 import {
@@ -37,6 +37,11 @@ import {
   useHints,
   whatFailed,
 } from '../features/mailroom/client/index.ts';
+import {
+  NOTIFICATIONS,
+  useNotificationCommands,
+  useNotificationOpenings,
+} from '../features/notifications/index.ts';
 import { REST_MS } from '../features/reader/index.ts';
 import { Workbench } from '../features/workbench/index.ts';
 import { AppTheme } from './theme/AppTheme.tsx';
@@ -75,6 +80,7 @@ export const Route = createFileRoute('/')({
 function App() {
   const [mode, setMode] = useThemeMode();
   const [accent, setAccent] = useAccent();
+  const notificationCommands = useNotificationCommands();
   // The hint socket is open on the first-run screen too, so an account added on another device
   // shows here.
   useHints();
@@ -90,11 +96,16 @@ function App() {
       <Desk
         sidebarFooter={
           <>
+            <RegisteredCommandButton id={NOTIFICATIONS} />
             <AccentChoice accent={accent} onChange={setAccent} />
             <ThemeChoice mode={mode} onChange={setMode} />
           </>
         }
-        extraCommands={[...themeCommands(mode, setMode), ...accentCommands(accent, setAccent)]}
+        extraCommands={[
+          ...notificationCommands,
+          ...themeCommands(mode, setMode),
+          ...accentCommands(accent, setAccent),
+        ]}
       />
     ) : welcome === 'failed' ? (
       <Unreachable />
@@ -198,6 +209,10 @@ function Desk({
 }) {
   const { place, changePlace, goBack } = usePlace();
   const { view } = place;
+  // A tapped notification brought this Trail Mix forward, to open its conversation.
+  useNotificationOpenings(
+    useCallback((address: string) => changePlace(placeAt(address), 'push'), [changePlace]),
+  );
   const accounts = useQuery(accountsQuery).data ?? NONE;
   // Folder changes on their way show at once, laid over the Mailroom's snapshot.
   const held = useQuery(foldersQuery).data;

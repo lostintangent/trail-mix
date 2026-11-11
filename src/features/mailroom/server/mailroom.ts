@@ -33,7 +33,7 @@ import {
   pushOf,
   subscriptionOf,
   type Subscription,
-} from '../../notifications/index.ts';
+} from '../../notifications/core/index.ts';
 import { deliver, pushKeyOf, type PushKey } from '../../notifications/server/index.ts';
 import {
   DEMO_ACCOUNTS,
