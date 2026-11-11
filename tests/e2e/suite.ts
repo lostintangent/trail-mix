@@ -15,6 +15,8 @@ import { BUILDS, startPreview, type Build, type Preview } from './preview.ts';
 export type Suite = {
   /** Where the app answers. Starting it again moves it, so a test reads this as it goes. */
   readonly url: string;
+  /** Where the app keeps its storage, which starts empty, and again whenever the app does. */
+  readonly state: string;
   /** A new context, as a fresh browser profile is, which closes after the test. */
   context: (options?: BrowserContextOptions) => Promise<BrowserContext>;
   /**
@@ -131,6 +133,10 @@ export function suite({
     get url() {
       if (!preview) throw new Error('The app starts before the suite’s first test.');
       return preview.url;
+    },
+    get state() {
+      if (!preview) throw new Error('The app starts before the suite’s first test.');
+      return preview.state;
     },
     async context(options) {
       // A browser ended with a timed-out test can still look connected for a moment.

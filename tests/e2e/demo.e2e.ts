@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, expect } from 'bun:test';
-import { mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { toJSON } from 'seroval';
 import type { Page } from 'playwright';
@@ -21,18 +21,11 @@ const A_DAY = 6;
 /** How many changes the demo takes a minute from one network, as `wrangler.jsonc` sets it. */
 const CHANGES_A_MINUTE = 300;
 const ROOT = join(import.meta.dir, '../..');
-/** Where the preview keeps each Durable Object, by Worker and class. */
-const OBJECTS = join(ROOT, '.wrangler/preview/v3/do');
 const SHOTS = join(ROOT, 'test-results');
 const SIZES = {
   desktop: { viewport: { width: 1440, height: 900 } },
   phone: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
 };
-
-// Today's visitors and their Mailrooms from an earlier run would take this run's places.
-for (const kept of ['trail-mix-demo-Mailroom', 'trail-mix-demo-VisitorGate']) {
-  rmSync(join(OBJECTS, kept), { recursive: true, force: true });
-}
 
 const app = suite({
   build: BUILDS.demo,
@@ -50,9 +43,12 @@ afterEach(() => {
   expect(errors.splice(0)).toEqual([]);
 });
 
-/** How many Mailrooms the demo has made: one database each, beside the namespace's own. */
+/**
+ * How many Mailrooms the demo has made: one database each, beside the namespace's own, where the
+ * preview keeps each Durable Object, by Worker and class.
+ */
 const mailrooms = () =>
-  readdirSync(join(OBJECTS, 'trail-mix-demo-Mailroom')).filter(
+  readdirSync(join(app.state, 'v3/do/trail-mix-demo-Mailroom')).filter(
     (file) => file.endsWith('.sqlite') && file !== 'metadata.sqlite',
   ).length;
 

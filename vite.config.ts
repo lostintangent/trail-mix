@@ -20,8 +20,11 @@ export default defineConfig(({ isPreview }) => ({
     cloudflare({
       // The Worker, `src/server/entry.ts`, runs on workerd in development, preview and production.
       viteEnvironment: { name: 'ssr' },
-      // Development and preview keep separate local storage, so both can run at once.
-      persistState: { path: isPreview ? '.wrangler/preview' : '.wrangler/state' },
+      // Development and preview keep separate local storage, so both can run at once. A test's
+      // preview names a fresh place of its own, so it starts empty, as it does in CI.
+      persistState: {
+        path: process.env.TRAIL_MIX_STATE ?? (isPreview ? '.wrangler/preview' : '.wrangler/state'),
+      },
     }),
     tanstackStart({
       router: {

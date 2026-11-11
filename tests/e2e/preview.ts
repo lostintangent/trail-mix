@@ -1,10 +1,21 @@
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
 const ROOT = join(import.meta.dir, '../..');
 
 export type Preview = {
   url: string;
+  /** Where it keeps its storage, each Durable Object's database among it, until it stops. */
+  state: string;
   stop: () => Promise<void>;
   /** The last lines the app printed, the Worker's own logs and errors among them. */
   log: () => string;
@@ -18,7 +29,9 @@ const KEPT_LINES = 300;
  * build must already exist, so a test drives what CI built rather than building its own. The Worker
  * gets the variables a fresh clone starts with, from `dev.vars.example`, so it signs in as the
  * development member on localhost. `vars` override them, such as `DEMO_MAILBOX`, and `env` adds to
- * the preview's environment, such as a certificate authority for workerd to trust.
+ * the preview's environment, such as a certificate authority for workerd to trust. Each preview
+ * keeps its storage in a fresh place, removed when it stops, so Mailrooms an earlier run left, with
+ * accounts that still check the test mail server, never wake into this one.
  *
  * `build` names another build to serve, such as the public demo's, which runs as it is deployed:
  * with its own configuration's variables and `vars`, and none from `.dev.vars.example`.
@@ -33,6 +46,7 @@ export async function startPreview(
   }
   const restoreVars = writeVars(build, build === BUILDS.app ? { ...exampleVars(), ...vars } : vars);
   const restoreBuild = pointAt(build);
+  const state = mkdtempSync(join(tmpdir(), 'trail-mix-preview-'));
   const server = Bun.spawn(
     ['node', 'node_modules/vite/bin/vite.js', 'preview', '--port', '0', '--strictPort'],
     {
@@ -47,6 +61,7 @@ export async function startPreview(
         // own thread. A deployed Worker has none of it, so it stays out of what the bench measures.
         X_LOCAL_EXPLORER: 'false',
         X_LOCAL_OBSERVABILITY: 'false',
+        TRAIL_MIX_STATE: state,
         ...env,
       },
     },
@@ -57,11 +72,13 @@ export async function startPreview(
   const url = await listeningUrl(server.stdout, kept);
   return {
     url,
+    state,
     stop: async () => {
       server.kill();
       await server.exited;
       restoreVars();
       restoreBuild();
+      rmSync(state, { recursive: true, force: true });
     },
     log: () => kept.join('\n'),
   };
