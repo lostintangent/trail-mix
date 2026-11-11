@@ -240,13 +240,13 @@ function Desk({
     const kept = standing(view, foldersNow.current);
     if (kept !== view) changePlace({ view: kept }, 'replace');
   }, [view, isHeld, changePlace]);
-  const { data: outbox = NONE, isFetching: isOutboxComing } = useQuery(outboxQuery);
+  const { data: outbox = NONE, isRefetching: isOutboxComing } = useQuery(outboxQuery);
   // Mail on its way is in the Outbox, and out of Drafts and its count, from the press of Send
   // until its draft has gone from the server's Drafts.
   const leaving = useLeaving();
   const { onTheirWay, withoutAway } = useDraftsAway(leaving.all, folders);
   // While the Outbox's next snapshot is on its way, the counts wait for it, since the folders may
-  // already have counted without a send the Outbox still holds.
+  // already have counted without a send the Outbox still holds. Its first snapshot holds nothing up.
   const counts = useHeldWhile(
     isOutboxComing,
     useMemo(() => viewCounts(folders, outbox, onTheirWay), [folders, outbox, onTheirWay]),

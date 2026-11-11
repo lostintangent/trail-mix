@@ -45,6 +45,10 @@ async function open(options: BrowserContextOptions): Promise<Page> {
   await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
   await goTo(page, 'Drafts');
   await page.getByRole('option').first().waitFor();
+  await page
+    .getByRole('button', { name: /^Drafts\s?\d+$/ })
+    .first()
+    .waitFor();
   await page.evaluate(() => {
     const drawn: Drawn[] = [];
     Object.assign(window, { drawn });
