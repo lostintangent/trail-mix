@@ -126,7 +126,14 @@ const styles = stylex.create({
     placeItems: 'center',
     width: tm.accentFill,
     height: tm.accentFill,
-    borderRadius: radiusVars['--radius-element'],
+    // A squircle: the whole side bends, so it reads squarer than a rounded square of its size. A
+    // browser without corner shapes draws a rounded square, rather than the circle its radius
+    // would make.
+    borderRadius: {
+      default: radiusVars['--radius-inner'],
+      '@supports (corner-shape: squircle)': radiusVars['--radius-full'],
+    },
+    cornerShape: 'squircle',
     color: { default: colorVars['--color-on-accent'], [media.forcedColors]: 'ButtonFace' },
     backgroundColor: {
       default: colorVars['--color-accent'],
