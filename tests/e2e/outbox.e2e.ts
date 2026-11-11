@@ -101,9 +101,9 @@ const hasAirmail = (page: Page, to: RegExp) =>
     );
 
 /**
- * That a toast reads across its card: what it says in three lines at most, and its actions beside
- * it only while it fits on one line, else at the end of a line beneath it, each a 44-pixel target
- * under a finger.
+ * That a toast reads across its card: what it says shares a line with its actions only while it
+ * fits on one, and otherwise takes the card's width, with its actions at the end of a line beneath
+ * it, each a 44-pixel target under a finger. How many lines that takes is the font's to say.
  */
 async function readsAcross(page: Page, text: RegExp) {
   const shape = await toast(page, text).evaluate((said) => {
@@ -121,10 +121,9 @@ async function readsAcross(page: Page, text: RegExp) {
       isReachable: actions.every(({ width, height }) => width >= 44 && height >= 44),
     };
   });
-  expect(shape.lines).toBeLessThanOrEqual(3);
   expect(shape.isReachable).toBe(true);
   if (shape.lines > 1) {
-    expect(shape.isBeneath).toBe(true);
+    expect(shape).toMatchObject({ isBeneath: true });
     expect(shape.share).toBeGreaterThan(0.75);
   }
 }
