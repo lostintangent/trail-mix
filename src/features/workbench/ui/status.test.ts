@@ -55,3 +55,12 @@ test('offline, the line says so above all else, and whether it shows what the de
   });
   expect(mailStatus([], 'offline')).toBeUndefined();
 });
+
+test('a page that hasn’t caught up with its Mailroom is still checking, whatever its first snapshots said', () => {
+  const ready = [account('Personal', 'ready')];
+  expect(mailStatus(ready, 'online', false)).toEqual({ tone: 'busy', label: 'Checking for mail' });
+  expect(mailStatus(ready, 'online', true)).toEqual({ tone: 'ready', label: 'Up to date' });
+  // Trouble, and the network, still come first.
+  expect(mailStatus([account('Personal', 'error')], 'online', false)?.tone).toBe('trouble');
+  expect(mailStatus(ready, 'offline', false)?.label).toBe('Offline');
+});

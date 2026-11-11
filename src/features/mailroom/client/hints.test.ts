@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { QueryClient, QueryObserver } from '@tanstack/react-query';
-import { listen, SETTLE_MS } from './hints.ts';
+import { isCaughtUp, listen, SETTLE_MS } from './hints.ts';
 import { keys } from './queries.ts';
 
 /** A stand-in for the browser's WebSocket, which a test opens and drops by hand. */
@@ -95,5 +95,34 @@ test('a burst of hints, as a first sync sends, can’t keep the list from refres
   expect(queryClient.getQueryState(keys.conversations({ in: 'inbox' }))?.isInvalidated).toBe(false);
   expect(shown.at(-1)).toBe(found);
   unsubscribe();
+  stop();
+});
+
+test('a page catches up once its socket has opened and what it held is asked again', async () => {
+  const queryClient = new QueryClient();
+  const { promise: answered, resolve: answer } = Promise.withResolvers<number>();
+  const list = new QueryObserver(queryClient, {
+    queryKey: keys.conversations({ in: 'inbox' }),
+    queryFn: () => answered,
+  });
+  const unsubscribe = list.subscribe(() => {});
+  const stop = listen(queryClient);
+  expect(isCaughtUp(queryClient)).toBe(false);
+  Socket.made.at(-1)!.open();
+  // The list on screen is asked again, and until it answers the page hasn't caught up.
+  await Bun.sleep(10);
+  expect(isCaughtUp(queryClient)).toBe(false);
+  answer(1);
+  await Bun.sleep(10);
+  expect(isCaughtUp(queryClient)).toBe(true);
+  unsubscribe();
+  stop();
+});
+
+test('a socket that can’t open, as with no network, leaves the page caught up at its first try', () => {
+  const queryClient = new QueryClient();
+  const stop = listen(queryClient);
+  Socket.made.at(-1)!.onclose?.();
+  expect(isCaughtUp(queryClient)).toBe(true);
   stop();
 });

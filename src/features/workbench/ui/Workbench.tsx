@@ -34,6 +34,7 @@ import {
   MATCHES_LISTED,
   outboxQuery,
   thisDeviceQuery,
+  useIsCaughtUp,
 } from '../../mailroom/client/index.ts';
 import {
   isDraftsView,
@@ -243,12 +244,14 @@ export function Workbench({
   const sidebarId = useId();
   const listId = useId();
   const { title, unread, scope } = describeView(view, accounts, folders, counts);
-  // An empty list while an account the view holds is on its first sync is mail on its way, which
-  // stands as skeleton rows. Search and the Outbox say what they found at once.
+  // An empty list while an account the view holds is on its first sync, or before the page has
+  // caught up with its Mailroom, may be mail on its way, which stands as skeleton rows. Search and
+  // the Outbox say what they found at once.
+  const isCaughtUp = useIsCaughtUp();
   const isFilling =
     view.in !== 'search' &&
     view.in !== 'outbox' &&
-    (scope ? [scope] : accounts).some(({ status }) => status === 'syncing');
+    (!isCaughtUp || (scope ? [scope] : accounts).some(({ status }) => status === 'syncing'));
   const { move, onViewChange, chooseView, written, pushed } = useAddress({
     place,
     onPlaceChange,
