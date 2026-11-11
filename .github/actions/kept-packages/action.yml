@@ -1,0 +1,74 @@
+name: Kept packages
+description: >
+  Installs system packages from apt once for each runner image, and from the packages kept from
+  that install every time after, so a job reaches an Ubuntu mirror only when its image or what it
+  installs changes. A job whose packages are kept installs them with dpkg alone, with no network.
+
+inputs:
+  name:
+    description: What the packages are for, which names the cache.
+    required: true
+  version:
+    description: What else changes which packages are installed, such as the lockfile's hash.
+    default: ''
+  install:
+    description: >
+      The command that installs them from apt onto the image as it comes. It runs only when no
+      packages are kept, and every package it downloads is kept.
+    required: true
+  check:
+    description: >
+      A command that fails unless every package is installed, without the network. It runs after
+      either install, for packages nothing depends on, such as fonts, which dpkg would not miss.
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - name: Name the kept packages
+      id: kept
+      shell: bash
+      env:
+        NAME: ${{ inputs.name }}
+        VERSION: ${{ inputs.version }}
+      run: echo "key=$NAME-packages-$ImageOS-$ImageVersion${VERSION:+-$VERSION}" >> "$GITHUB_OUTPUT"
+
+    - uses: actions/cache/restore@v6
+      id: restore
+      with:
+        path: ~/${{ inputs.name }}-packages
+        key: ${{ steps.kept.outputs.key }}
+
+    - name: Install the packages
+      shell: bash
+      env:
+        KEPT: ${{ inputs.name }}-packages
+        IS_KEPT: ${{ steps.restore.outputs.cache-hit }}
+        INSTALL: ${{ inputs.install }}
+      run: |
+        shopt -s nullglob
+        if [ "$IS_KEPT" = true ]; then
+          packages=(~/"$KEPT"/*.deb)
+          if [ ${#packages[@]} -gt 0 ]; then sudo dpkg --install "${packages[@]}"; fi
+        else
+          # Only what this install downloads is kept, and none from an earlier one.
+          sudo apt-get clean
+          eval "$INSTALL"
+          mkdir -p ~/"$KEPT"
+          downloaded=(/var/cache/apt/archives/*.deb)
+          if [ ${#downloaded[@]} -gt 0 ]; then cp "${downloaded[@]}" ~/"$KEPT"/; fi
+        fi
+
+    - name: Check every package is installed
+      if: inputs.check != ''
+      shell: bash
+      env:
+        CHECK: ${{ inputs.check }}
+      run: eval "$CHECK"
+
+    # Kept as soon as they install, so a job that fails later still keeps them for the next.
+    - if: steps.restore.outputs.cache-hit != 'true'
+      uses: actions/cache/save@v6
+      with:
+        path: ~/${{ inputs.name }}-packages
+        key: ${{ steps.kept.outputs.key }}

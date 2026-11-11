@@ -56,8 +56,22 @@ jobs:
 
       # The reader's tests render hostile mail in Chromium here, and in WebKit in their own job. The
       # bench below drives the built app in it too.
+      # Chromium's system packages, its fonts among them, are kept for each runner image and
+      # Playwright version, so the job reaches an Ubuntu mirror only when one of them changes.
+      - name: Name Playwright's version
+        id: playwright
+        run: echo "version=$(jq -r .version node_modules/playwright-core/package.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Install Chromium's system packages
+        uses: ./.github/actions/kept-packages
+        with:
+          name: chromium
+          version: playwright-${{ steps.playwright.outputs.version }}
+          install: bunx playwright install-deps chromium
+          check: bunx playwright install-deps --dry-run chromium
+
       - name: Install Chromium
-        run: bunx playwright install --with-deps chromium
+        run: bunx playwright install chromium
 
       - name: Test
         run: bun test
@@ -128,8 +142,22 @@ jobs:
           path: ~/.cache/ms-playwright
           key: playwright-${{ runner.os }}-chromium-${{ hashFiles('bun.lock') }}
 
+      # Chromium's system packages, its fonts among them, are kept for each runner image and
+      # Playwright version, so the job reaches an Ubuntu mirror only when one of them changes.
+      - name: Name Playwright's version
+        id: playwright
+        run: echo "version=$(jq -r .version node_modules/playwright-core/package.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Install Chromium's system packages
+        uses: ./.github/actions/kept-packages
+        with:
+          name: chromium
+          version: playwright-${{ steps.playwright.outputs.version }}
+          install: bunx playwright install-deps chromium
+          check: bunx playwright install-deps --dry-run chromium
+
       - name: Install Chromium
-        run: bunx playwright install --with-deps chromium
+        run: bunx playwright install chromium
 
       - name: Build
         run: bun run build
@@ -180,27 +208,17 @@ jobs:
           key: playwright-${{ runner.os }}-webkit-${{ hashFiles('bun.lock') }}
 
       # WebKit needs about 180 system packages from apt, and the runner's mirror has stalled on
-      # them for more than 20 minutes. They are kept for each runner image and Playwright version.
-      - name: Name the runner image
-        id: image
-        run: echo "name=$ImageOS-$ImageVersion" >> "$GITHUB_OUTPUT"
-
-      - uses: actions/cache@v6
-        id: webkit-packages
+      # them for more than 20 minutes. They are kept for each runner image and lockfile.
+      - name: Install WebKit's system packages
+        uses: ./.github/actions/kept-packages
         with:
-          path: ~/webkit-packages
-          key: webkit-packages-${{ steps.image.outputs.name }}-${{ hashFiles('bun.lock') }}
+          name: webkit
+          version: ${{ hashFiles('bun.lock') }}
+          install: bunx playwright install-deps webkit
+          check: bunx playwright install-deps --dry-run webkit
 
       - name: Install WebKit
-        run: |
-          if [ "${{ steps.webkit-packages.outputs.cache-hit }}" = true ]; then
-            sudo dpkg --install ~/webkit-packages/*.deb
-            bunx playwright install webkit
-          else
-            bunx playwright install --with-deps webkit
-            mkdir -p ~/webkit-packages
-            cp /var/cache/apt/archives/*.deb ~/webkit-packages/
-          fi
+        run: bunx playwright install webkit
 
       - name: Reader tests in WebKit
         run: bun test tests/reader
@@ -227,54 +245,11 @@ jobs:
   mail:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      # The Dovecot release the test mail server runs, as repo.dovecot.org numbers its packages.
+      DOVECOT: 2.4.5-2
     steps:
       - uses: actions/checkout@v7
-
-      - name: Install Dovecot 2.4.5 from repo.dovecot.org
-        run: |
-          curl -fsSL https://repo.dovecot.org/DOVECOT-REPO-GPG-2.4 -o dovecot.asc
-          # Trust the key only if it is the one dovecot.org publishes.
-          gpg --show-keys --with-colons dovecot.asc | grep -q '^fpr:::::::::EF0882079FD4ED32BF8B23B2A1B09EF84EDC5219:'
-          gpg --dearmor < dovecot.asc | sudo tee /usr/share/keyrings/dovecot.gpg > /dev/null
-          # ubuntu-latest moves between releases, so the suite and the package build follow the runner.
-          . /etc/os-release
-          printf 'Types: deb\nURIs: https://repo.dovecot.org/ce-2.4.5/ubuntu/%s\nSuites: %s\nComponents: main\nSigned-By: /usr/share/keyrings/dovecot.gpg\n' \
-            "$VERSION_CODENAME" "$VERSION_CODENAME" | sudo tee /etc/apt/sources.list.d/dovecot.sources > /dev/null
-          # Only the test mail server's own unprivileged instance runs. The packaged service never starts.
-          printf '#!/bin/sh\nexit 101\n' | sudo tee /usr/sbin/policy-rc.d > /dev/null
-          sudo chmod +x /usr/sbin/policy-rc.d
-          sudo apt-get update -qq
-          v=2:2.4.5-2+ubuntu$VERSION_ID
-          sudo apt-get install -y -qq --no-install-recommends dovecot-core="$v" dovecot-imapd="$v" dovecot-lmtpd="$v"
-
-      - name: Name the runner image
-        id: image
-        run: echo "name=$ImageOS-$ImageVersion" >> "$GITHUB_OUTPUT"
-
-      # mutt reads Trail Mix's mail in the tests. Its packages are kept for each runner image, so the
-      # job doesn't wait on the apt mirror for them. PHP, which serves Roundcube, comes with the image.
-      - uses: actions/cache@v6
-        id: mutt-packages
-        with:
-          path: ~/mutt-packages
-          key: mutt-packages-${{ steps.image.outputs.name }}
-
-      - name: Install mutt
-        run: |
-          if [ "${{ steps.mutt-packages.outputs.cache-hit }}" = true ]; then
-            sudo dpkg --install ~/mutt-packages/*.deb
-          else
-            sudo apt-get clean
-            sudo apt-get install -y -qq --no-install-recommends mutt
-            mkdir -p ~/mutt-packages
-            cp /var/cache/apt/archives/*.deb ~/mutt-packages/
-          fi
-
-      # Roundcube, the other client, is downloaded by the tests and kept until its pinned release changes.
-      - uses: actions/cache@v6
-        with:
-          path: .mail-server/clients/roundcubemail-*
-          key: roundcube-${{ hashFiles('tests/mail-clients/roundcube.ts') }}
 
       - uses: oven-sh/setup-bun@v2
         with:
@@ -294,8 +269,64 @@ jobs:
           key: playwright-${{ runner.os }}-chromium-${{ hashFiles('bun.lock') }}
 
       # The reader renders the demo mailbox, read through the Mailroom on workerd, in Chromium.
+      # Chromium's system packages, its fonts among them, are kept for each runner image and
+      # Playwright version. They go on first, onto the image as it comes, so what this job keeps of
+      # them is what the other jobs keep.
+      - name: Name Playwright's version
+        id: playwright
+        run: echo "version=$(jq -r .version node_modules/playwright-core/package.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Install Chromium's system packages
+        uses: ./.github/actions/kept-packages
+        with:
+          name: chromium
+          version: playwright-${{ steps.playwright.outputs.version }}
+          install: bunx playwright install-deps chromium
+          check: bunx playwright install-deps --dry-run chromium
+
       - name: Install Chromium
-        run: bunx playwright install --with-deps chromium
+        run: bunx playwright install chromium
+
+      # Only the test mail server's own unprivileged instance runs. A packaged service never starts.
+      - name: Keep packaged services from starting
+        run: |
+          printf '#!/bin/sh\nexit 101\n' | sudo tee /usr/sbin/policy-rc.d > /dev/null
+          sudo chmod +x /usr/sbin/policy-rc.d
+
+      # Dovecot and what it needs are kept for each runner image and Dovecot release.
+      - name: Install Dovecot from repo.dovecot.org
+        uses: ./.github/actions/kept-packages
+        with:
+          name: dovecot
+          version: ${{ env.DOVECOT }}
+          install: |
+            curl -fsSL https://repo.dovecot.org/DOVECOT-REPO-GPG-2.4 -o dovecot.asc
+            # Trust the key only if it is the one dovecot.org publishes.
+            gpg --show-keys --with-colons dovecot.asc | grep -q '^fpr:::::::::EF0882079FD4ED32BF8B23B2A1B09EF84EDC5219:'
+            gpg --dearmor < dovecot.asc | sudo tee /usr/share/keyrings/dovecot.gpg > /dev/null
+            # ubuntu-latest moves between releases, so the suite and the package build follow the runner.
+            . /etc/os-release
+            release=${DOVECOT%-*}
+            printf 'Types: deb\nURIs: https://repo.dovecot.org/ce-%s/ubuntu/%s\nSuites: %s\nComponents: main\nSigned-By: /usr/share/keyrings/dovecot.gpg\n' \
+              "$release" "$VERSION_CODENAME" "$VERSION_CODENAME" | sudo tee /etc/apt/sources.list.d/dovecot.sources > /dev/null
+            sudo apt-get update -qq
+            v=2:$DOVECOT+ubuntu$VERSION_ID
+            sudo apt-get install -y -qq --no-install-recommends dovecot-core="$v" dovecot-imapd="$v" dovecot-lmtpd="$v"
+
+      # mutt reads Trail Mix's mail in the tests. PHP, which serves Roundcube, comes with the image.
+      - name: Install mutt
+        uses: ./.github/actions/kept-packages
+        with:
+          name: mutt
+          install: |
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq --no-install-recommends mutt
+
+      # Roundcube, the other client, is downloaded by the tests and kept until its pinned release changes.
+      - uses: actions/cache@v6
+        with:
+          path: .mail-server/clients/roundcubemail-*
+          key: roundcube-${{ hashFiles('tests/mail-clients/roundcube.ts') }}
 
       # The other mail clients read what the built app's composer writes.
       - name: Build
