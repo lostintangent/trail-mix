@@ -112,10 +112,20 @@ test('the installed app opens offline to the lists and conversations it showed',
 
   await context.setOffline(true);
   await page.reload();
-  const status = page.getByText('Offline: kept mail');
-  await status.waitFor();
-  // The list says all of it beside its title.
-  expect(await status.evaluate((line) => line.scrollWidth <= line.clientWidth)).toBe(true);
+  await page.getByText('Offline: kept mail').waitFor();
+  // Beside the open conversation's buttons, with the list at its first width, the title shows
+  // whole, and the status gives way before it, a whole word at a time, at a desktop's width and a
+  // laptop's.
+  for (const width of [1024, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect({ width, ...(await listHeader(page)) }).toEqual({
+      width,
+      title: 'Inbox',
+      isWhole: true,
+      shows: 'Offline',
+      says: 'Offline: kept mail',
+    });
+  }
   await page.screenshot({ path: join(SHOTS, 'desktop-light-offline.png') });
   for (const [row, subject] of subjects.entries()) {
     expect({ row, opened: await openConversation(page, row) }).toEqual({ row, opened: subject });
@@ -158,6 +168,14 @@ test('the installed app reads offline at both sizes in both themes: the Inbox an
           .filter({ hasText: 'Offline: kept mail' })
           .waitFor();
         await page.waitForTimeout(400);
+        // With no buttons beside it, there's room for all of it.
+        expect({ colorScheme, ...(await listHeader(page)) }).toEqual({
+          colorScheme,
+          title: 'Inbox',
+          isWhole: true,
+          shows: 'Offline: kept mail',
+          says: 'Offline: kept mail',
+        });
         await page.screenshot({ path: join(SHOTS, `offline-phone-${colorScheme}-inbox.png`) });
       }
       expect({ size, colorScheme, rows: (await page.getByRole('option').count()) > 5 }).toEqual({
@@ -451,6 +469,30 @@ async function openConversation(page: Page, row: number | RegExp): Promise<strin
     );
   }, listed);
   return (await subject.textContent()) ?? '';
+}
+
+/**
+ * The Inbox list's header: its title, whether it shows whole, the words its status shows, which
+ * give way whole onto a line the status hides, and all the status says.
+ */
+function listHeader(page: Page) {
+  return page
+    .getByRole('region', { name: 'Inbox', exact: true })
+    .locator('header')
+    .evaluate((header) => {
+      const title = header.querySelector('h2');
+      const status = header.querySelector('[role="status"]');
+      const end = status?.getBoundingClientRect().bottom ?? 0;
+      const shown = [...(status?.children ?? [])].filter(
+        (part) => part.getBoundingClientRect().top < end,
+      );
+      return {
+        title: title?.textContent,
+        isWhole: title !== null && title.scrollWidth <= title.clientWidth,
+        shows: shown.map(({ textContent }) => textContent).join(''),
+        says: status?.textContent,
+      };
+    });
 }
 
 /** Helpers on the page for what the app keeps in IndexedDB. */

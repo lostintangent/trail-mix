@@ -165,9 +165,9 @@ const NEW_MESSAGE = <PrimaryCommandButton id="message.new" />;
 const SETTINGS_GEAR = <RegisteredCommandButton id={OPEN_SETTINGS} />;
 
 /** What a list says beside its title while the device can't reach its Mailroom. */
-const OFFLINE: Record<Exclude<Reach, 'online'>, string> = {
-  offline: 'Offline',
-  'offline-kept': 'Offline: kept mail',
+const OFFLINE: Record<Exclude<Reach, 'online'>, { said: string; more?: string }> = {
+  offline: { said: 'Offline' },
+  'offline-kept': { said: 'Offline', more: 'kept mail' },
 };
 
 /** How a desktop's sidebar folds: to its rail, led by New message, with a button that holds still. */

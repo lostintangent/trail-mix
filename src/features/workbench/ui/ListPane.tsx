@@ -77,10 +77,11 @@ export function ListPane({
   title: string;
   unread: number | undefined;
   /**
-   * On a phone, what the sidebar's status says while the device has no network. Its sidebar is off
-   * the screen, so the list says it in place of the unread count, as mail read then may be old.
+   * What the list says in place of the unread count while the device has no network, as mail read
+   * then may be old: a word, and more where there's room. The title matters more, so they give way
+   * before it does, the more first, though the status still says all of them.
    */
-  offline?: string;
+  offline?: { said: string; more?: string };
   /** The one account the view holds, or nothing when it gathers every account. */
   scope: Account | undefined;
   /** What sits under the title, such as the search field on a phone and what a search covers. */
@@ -149,9 +150,14 @@ export function ListPane({
           {title}
         </Heading>
         {offline && (
+          // Each part wraps whole to a second line its box hides, the last first, where they can't
+          // all fit beside the title.
           <span role="status" {...stylex.props(styles.offline)}>
             <span {...stylex.props(styles.offlineDot)} />
-            {offline}
+            <span {...stylex.props(styles.offlinePart)}>{offline.said}</span>
+            {offline.more && (
+              <span {...stylex.props(styles.offlinePart)}>{`: ${offline.more}`}</span>
+            )}
           </span>
         )}
         {unread ? (
@@ -404,23 +410,29 @@ const styles = stylex.create({
   besideOffline: {
     display: 'none',
   },
-  // It stays whole while the title gives up letters, since it matters more.
+  // As the unread count, it gives way before the title gives up a letter, one line tall.
   offline: {
-    display: 'inline-flex',
-    flexShrink: 0,
-    alignItems: 'center',
-    alignSelf: 'center',
-    gap: spacingVars['--spacing-1-5'],
+    flexShrink: 1_000_000,
+    minWidth: 0,
+    height: `calc(${typeScaleVars['--text-supporting-size']} * ${typeScaleVars['--text-supporting-leading']})`,
+    overflow: 'hidden',
     color: tm.textQuiet,
     fontSize: typeScaleVars['--text-supporting-size'],
-    whiteSpace: 'nowrap',
+    lineHeight: typeScaleVars['--text-supporting-leading'],
   },
   offlineDot: {
+    display: 'inline-block',
+    verticalAlign: 'middle',
     width: tm.statusDot,
     height: tm.statusDot,
+    marginInlineEnd: spacingVars['--spacing-1-5'],
     borderRadius: '50%',
     backgroundColor: tm.textQuiet,
     forcedColorAdjust: 'none',
+  },
+  offlinePart: {
+    display: 'inline-block',
+    whiteSpace: 'nowrap',
   },
   sheet: {
     flexGrow: 1,
