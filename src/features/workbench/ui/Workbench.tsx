@@ -638,11 +638,9 @@ export function Workbench({
       : {
           label: isMany ? 'Selected conversations' : 'Conversation',
           actions: (
-            <Suspense>
-              <TriageActions
-                commands={selectedCommands.length > 0 ? selectedCommands : NOTHING_TO_TRIAGE}
-              />
-            </Suspense>
+            <TriageActions
+              commands={selectedCommands.length > 0 ? selectedCommands : NOTHING_TO_TRIAGE}
+            />
           ),
         };
 
@@ -940,7 +938,7 @@ export function Workbench({
                 onAhead={ahead}
                 picked={
                   <PickedActions count={selection.ids.length} onCancel={stopPicking}>
-                    <Suspense>{selectionActions('island')}</Suspense>
+                    {selectionActions('island')}
                   </PickedActions>
                 }
                 onShown={onListShown}

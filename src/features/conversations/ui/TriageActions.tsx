@@ -1,9 +1,11 @@
-import { DropdownMenu, type DropdownMenuOption } from '@astryxdesign/core/DropdownMenu';
+import { Button } from '@astryxdesign/core/Button';
+import type { DropdownMenuOption } from '@astryxdesign/core/DropdownMenu';
 import { Icon } from '@astryxdesign/core/Icon';
 import * as stylex from '@stylexjs/stylex';
 import { Ellipsis, FolderInput } from 'lucide-react';
-import { memo, useMemo, useState, type ReactNode } from 'react';
+import { memo, Suspense, useMemo, useRef, useState, type ReactNode } from 'react';
 import { tm } from '../../../app/theme/tokens.stylex.ts';
+import { preloadable } from '../../../shared/preloadable.ts';
 import { CommandButton, useSteadyCommands, type Command } from '../../commands/index.ts';
 import { MOVE } from './commands.ts';
 
@@ -16,6 +18,9 @@ import { MOVE } from './commands.ts';
  *
  * The reader makes its commands anew for each conversation it opens, though they mostly look the
  * same, so the controls draw from steady commands and render again only where something changed.
+ *
+ * The controls draw with the first screen, in the list's header. Only what their menus open loads
+ * apart from it.
  */
 export function TriageActions({
   commands,
@@ -68,9 +73,22 @@ const MOVE_ICON = <Icon icon={FolderInput} />;
 const MORE_ICON = <Icon icon={Ellipsis} />;
 
 /**
+ * The design system's menus, which load apart from the first screen, with a way to load them ahead
+ * of need, as once the reader is wanted.
+ */
+const { Component: DropdownMenu, preload: preloadTriageMenus } = preloadable(
+  async () => (await import('@astryxdesign/core/DropdownMenu')).DropdownMenu,
+);
+export { preloadTriageMenus };
+
+/**
  * A menu behind an icon button, which renders again only when its items change. Its items are drawn
  * only while it is open, so a conversation opened while the menu is closed costs it nothing. With no
  * items, as while nothing is open, its button is disabled.
+ *
+ * Until the menu's code has come, the same button stands in its place: a pointer or focus reaching
+ * it asks for the code, a press opens the menu once the code is here, and focus passes to the
+ * menu's own button.
  */
 const Menu = memo(function Menu({
   label,
@@ -82,27 +100,61 @@ const Menu = memo(function Menu({
   items: DropdownMenuOption[];
 }) {
   const [isOpen, setOpen] = useState(false);
-  return (
-    <DropdownMenu
-      button={{
-        label,
-        tooltip: label,
-        icon,
-        isIconOnly: true,
-        variant: 'ghost',
-        isDisabled: items.length === 0,
+  const isFocused = useRef(false);
+  const button = {
+    label,
+    tooltip: label,
+    icon,
+    isIconOnly: true,
+    variant: 'ghost',
+    isDisabled: items.length === 0,
+  } as const;
+  const standIn = (
+    <Button
+      {...button}
+      aria-haspopup="menu"
+      aria-expanded={false}
+      xstyle={styles.trigger}
+      onPointerEnter={() => void preloadTriageMenus()}
+      onFocus={() => {
+        isFocused.current = true;
+        void preloadTriageMenus();
       }}
-      hasChevron={false}
-      items={isOpen ? items : CLOSED}
-      isMenuOpen={isOpen}
-      onOpenChange={setOpen}
+      onBlur={() => (isFocused.current = false)}
+      onClick={() => {
+        setOpen(true);
+        void preloadTriageMenus();
+      }}
     />
+  );
+  return (
+    <Suspense fallback={standIn}>
+      <DropdownMenu
+        button={{
+          ...button,
+          ref: (trigger: HTMLButtonElement | null) => {
+            if (!trigger || !isFocused.current) return;
+            isFocused.current = false;
+            trigger.focus();
+          },
+        }}
+        hasChevron={false}
+        items={isOpen ? items : CLOSED}
+        isMenuOpen={isOpen}
+        onOpenChange={setOpen}
+      />
+    </Suspense>
   );
 });
 
 const CLOSED: DropdownMenuOption[] = [];
 
 const styles = stylex.create({
+  // As the menu's own button, which a long press doesn't select or call out.
+  trigger: {
+    userSelect: 'none',
+    WebkitTouchCallout: 'none',
+  },
   flagged: {
     color: tm.highlight,
     fill: tm.highlight,

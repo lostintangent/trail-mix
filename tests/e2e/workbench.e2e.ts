@@ -1,7 +1,7 @@
 import { beforeAll, expect } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { BrowserContext, BrowserContextOptions, Locator, Page } from 'playwright';
+import type { BrowserContext, BrowserContextOptions, Locator, Page, Route } from 'playwright';
 import { ACCENT_STORAGE_KEY } from '../../src/app/theme/accent.ts';
 import { parseHex } from '../../src/shared/color.ts';
 import { DESK_HEX } from '../../src/app/theme/palette.ts';
@@ -330,6 +330,134 @@ async function holdAccounts(page: Page) {
   );
   return release;
 }
+
+test('the first screen draws every control it settles with, from the first load alone, at both sizes', async () => {
+  // The Mailroom is filled first, so both screens compared hold the same mail.
+  const filling = await app.context(SIZES.desktop);
+  const page = await filling.newPage();
+  await page.goto(app.url);
+  await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
+  await filling.close();
+  // The first load is what the page's HTML names. Every other chunk waits until the first rows.
+  const html = await (await fetch(app.url)).text();
+  const firstLoad = new Set([...html.matchAll(/"(\/assets\/[^"]+\.js)"/g)].map(([, path]) => path));
+  expect(firstLoad.size).toBeGreaterThan(1);
+
+  // A phone's first rows ask for nothing past the first load. A desktop's open conversation does.
+  let heldBack = 0;
+  for (const [size, options] of Object.entries(SIZES)) {
+    const context = await app.context({ ...options, serviceWorkers: 'block' });
+    const page = await context.newPage();
+    const held: Route[] = [];
+    let isHolding = true;
+    await page.route(/\/assets\/[^/]+\.js$/, async (route) => {
+      const { pathname } = new URL(route.request().url());
+      if (isHolding && !firstLoad.has(pathname)) held.push(route);
+      else await route.continue();
+    });
+    await page.goto(app.url);
+    await page.getByRole('option').first().waitFor();
+    await page.evaluate(() => new Promise(requestAnimationFrame));
+    const first = await controls(page);
+    const isOpening = await page
+      .getByRole('status')
+      .filter({ hasText: 'Opening the conversation' })
+      .count();
+    heldBack += held.length;
+
+    isHolding = false;
+    await Promise.all(held.map((route) => route.continue()));
+    // Past what loads once the first screen has settled, and the browser is idle again.
+    await page.waitForTimeout(2_000);
+    await page.waitForLoadState('networkidle');
+    const settled = await controls(page);
+    expect(first.screen, `${size}: the controls at the first rows`).toEqual(settled.screen);
+    // An open conversation's own controls come with it, while its skeleton holds its place.
+    if (settled.conversation.length > 0 && isOpening === 0) {
+      expect(first.conversation, `${size}: the open conversation`).toEqual(settled.conversation);
+    }
+    await context.close();
+  }
+  expect(heldBack).toBeGreaterThan(0);
+}, 90_000);
+
+/**
+ * Every control a member can see or reach on the page, as its role, its name and where it is
+ * drawn: those of the open conversation apart, and those of the screen around it, the reader's
+ * toolbars included.
+ */
+async function controls(page: Page) {
+  const all = await page.evaluate(() =>
+    [
+      ...document.querySelectorAll<HTMLElement>(
+        'button, a[href], input, select, textarea, [role="button"], [role="separator"], [role="tab"], [role="switch"], [role="checkbox"], [role="searchbox"], [role="combobox"]',
+      ),
+    ]
+      .filter(
+        (element) =>
+          !element.closest('[inert], [aria-hidden="true"]') &&
+          element.checkVisibility({ visibilityProperty: true }),
+      )
+      .map((element) => {
+        const { x, y, width, height } = element.getBoundingClientRect();
+        const role = element.getAttribute('role') ?? element.tagName.toLowerCase();
+        // A count in a name is mail, which can still be arriving, not a control of its own.
+        const name = (
+          element.getAttribute('aria-label') ??
+          element.textContent?.trim().slice(0, 40) ??
+          ''
+        ).replace(/\d+/g, '#');
+        const box = [x, y, width, height].map(Math.round).join(' ');
+        const isConversation =
+          element.closest('section[aria-label="Reader"]') !== null &&
+          element.closest('[role="toolbar"]') === null;
+        return { control: `${role} "${name}" at ${box}`, isConversation };
+      }),
+  );
+  return {
+    screen: all.filter(({ isConversation }) => !isConversation).map(({ control }) => control),
+    conversation: all.filter(({ isConversation }) => isConversation).map(({ control }) => control),
+  };
+}
+
+test('a list header menu reached before its code has come opens once the code is here, and keeps the focus', async () => {
+  const context = await app.context({ ...SIZES.desktop, serviceWorkers: 'block' });
+  /** A page whose menus' code waits until the returned release. */
+  const opened = async () => {
+    const page = await context.newPage();
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route(/\/assets\/DropdownMenu-[^/]+\.js$/, async (route) => {
+      await held;
+      await route.continue();
+    });
+    await page.goto(app.url);
+    await page.getByRole('option').first().waitFor();
+    const header = page.getByRole('toolbar', { name: 'Conversation' }).first();
+    const menu = (name: string) => header.getByRole('button', { name, exact: true });
+    // The menu's own button is the one that names the menu it controls.
+    const isReal = (name: string) =>
+      menu(name).evaluate((button) => button.hasAttribute('aria-controls'));
+    expect(await isReal('More')).toBe(false);
+    return { page, menu, isReal, release };
+  };
+
+  const pressing = await opened();
+  await pressing.menu('More').click();
+  expect(await pressing.page.getByRole('menu').count()).toBe(0);
+  pressing.release();
+  await pressing.page.getByRole('menuitem', { name: /^Mark (read|unread)$/ }).waitFor();
+  await pressing.page.close();
+
+  const focusing = await opened();
+  await focusing.menu('Move to').focus();
+  focusing.release();
+  await focusing.menu('Move to').and(focusing.page.locator('[aria-controls]')).waitFor();
+  expect(
+    await focusing.menu('Move to').evaluate((button) => button === document.activeElement),
+  ).toBe(true);
+  await context.close();
+}, 60_000);
 
 test('a device that last saw mail draws the workbench and its skeletons before the Mailroom answers', async () => {
   const context = await app.context(SIZES.desktop);

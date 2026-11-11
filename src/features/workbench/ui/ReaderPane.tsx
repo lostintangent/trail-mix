@@ -28,7 +28,7 @@ import type {
   MessageRef,
 } from '../../mail/core/index.ts';
 import { conversationQuery } from '../../mailroom/client/index.ts';
-import { preloadTriageActions } from '../../conversations/index.ts';
+import { preloadTriageMenus } from '../../conversations/index.ts';
 import { preloadComposer } from '../../composer/ui/index.ts';
 import { isAwaitingCopy, leavingIn, preloadSendActions, type Leaving } from '../../outbox/index.ts';
 import { preloadReader, Reader, ReaderSkeleton, REST_MS } from '../../reader/index.ts';
@@ -330,7 +330,7 @@ function usePreloadedReader(isWanted: boolean) {
       // Safari has no idle callback.
       const load = () => {
         void preloadReader();
-        preloadTriageActions();
+        void preloadTriageMenus();
       };
       if ('requestIdleCallback' in window) requestIdleCallback(load);
       else load();
