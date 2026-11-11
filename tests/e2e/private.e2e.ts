@@ -86,7 +86,11 @@ async function ask<T>(email: string, name: string, ...args: unknown[]): Promise<
   const response = await fetch(url, {
     headers: { ...(await as(email)), 'x-tsr-serverFn': 'true' },
   });
-  if (!response.ok) throw new Error(`${name} was refused with ${response.status}.`);
+  // A refusal says what the Worker answered, so one that happens once can be told apart.
+  if (!response.ok) {
+    const said = (await response.text()).slice(0, 500);
+    throw new Error(`${name} was refused with ${response.status}: ${said}`);
+  }
   // Start sends the handler's result under `result`, or what it threw under `error`, in a form of
   // its own, whose message is plain.
   const text = await response.text();
