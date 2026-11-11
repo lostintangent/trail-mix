@@ -59,6 +59,7 @@ import {
   triageCommands,
   useTriage,
   type Action,
+  placesOf,
   type Listed,
   type SelectBy,
   type Selection,
@@ -260,13 +261,22 @@ export function Workbench({
   // Meanwhile it stays picked, and the moves either side of it and the reader's place count from
   // where it was, so the commands and what shows them don't change in the frame that shows it gone.
   const [vacating, setVacating] = useState<{ row: ConversationSummary; at: number }>();
+  // Where each fetched conversation lies, so finding one never reads the whole list.
+  const places = useMemo(
+    () => (conversations ? placesOf(conversations) : NO_PLACES),
+    [conversations],
+  );
+  const rowOf = useCallback(
+    (id: ConversationId) => conversations?.[places.get(id) ?? -1],
+    [conversations, places],
+  );
   // A conversation that leaves the list gives way to the one below it, or above it at the end. On a
   // phone, where the reader fills the screen, the list comes back instead. The list shows the
   // conversation gone at once, and the reader turns to the next one just after, so the frame that
   // shows the archive doesn't wait for the next conversation to render.
   const triageShown = (action: Action, id: ConversationId) => {
     if (rowChange(action, view) === 'gone') {
-      const at = conversations?.findIndex((row) => row?.id === id) ?? -1;
+      const at = places.get(id) ?? -1;
       const leaving = conversations?.[at];
       const next = conversations?.[at + 1] ?? conversations?.[at - 1];
       if (isPhone) {
@@ -288,12 +298,12 @@ export function Workbench({
    */
   const placeOf = useCallback(
     (id: ConversationId | undefined) => {
-      const at = id === undefined ? -1 : (conversations?.findIndex((row) => row?.id === id) ?? -1);
+      const at = id === undefined ? -1 : (places.get(id) ?? -1);
       return at < 0 && vacating !== undefined && vacating.row.id === id
         ? { at: vacating.at, after: vacating.at }
         : { at, after: at + 1 };
     },
-    [conversations, vacating],
+    [places, vacating],
   );
   // A selection that leaves the list is done with, and so is picking.
   const triageSelection = (action: Action) => {
@@ -304,7 +314,7 @@ export function Workbench({
     triage(action, selection.ids);
   };
   const markRead = (id: ConversationId) => {
-    if (conversations?.find((row) => row?.id === id)?.unread) {
+    if (rowOf(id)?.unread) {
       triage({ do: 'read' }, [id], { quietly: true });
     }
   };
@@ -463,9 +473,10 @@ export function Workbench({
     if (page?.as === 'edit' && page.account === account.id) closePage();
     if (view.in === 'folder' && view.folder.account === account.id) onViewChange({ in: 'inbox' });
   };
-  const order = useRef<ConversationId[]>([]);
+  // The list's order, read only by a pick that adds to the selection or extends it.
+  const order = useRef<Listed<ConversationSummary>>([]);
   useLayoutEffect(() => {
-    order.current = conversations?.flatMap((row) => (row ? [row.id] : [])) ?? [];
+    order.current = conversations ?? [];
   }, [conversations]);
   // On a phone, opening a conversation pushes the address, so Back slides from it to its list.
   const isPhoneNow = useRef(isPhone);
@@ -475,7 +486,7 @@ export function Workbench({
   const pick = useCallback(
     (id: ConversationId, by: SelectBy) => {
       setPage(undefined);
-      setSelection((current) => select(current, id, by, order.current));
+      setSelection((current) => select(current, id, by, by === 'only' ? [] : idsIn(order.current)));
       if (by !== 'only') return;
       setPhonePane('reader');
       const { view, open } = latestPlace.current;
@@ -505,23 +516,19 @@ export function Workbench({
     [queryClient],
   );
   // The list's subject shows at once while the rest of the conversation is on its way.
-  const subjectOf = useCallback(
-    (id: ConversationId) => conversations?.find((row) => row?.id === id)?.subject,
-    [conversations],
-  );
+  const subjectOf = useCallback((id: ConversationId) => rowOf(id)?.subject, [rowOf]);
   const stopPicking = () => {
     setPicking(false);
     setSelection(NOTHING_SELECTED);
   };
   const pickedRows = useMemo(() => {
-    const rows =
-      conversations?.filter(
-        (row): row is ConversationSummary => row !== undefined && selection.ids.includes(row.id),
-      ) ?? [];
+    const rows = selection.ids
+      .flatMap((id) => rowOf(id) ?? [])
+      .toSorted((a, b) => (places.get(a.id) ?? 0) - (places.get(b.id) ?? 0));
     return vacating && selection.ids.includes(vacating.row.id) && !rows.includes(vacating.row)
       ? [...rows, vacating.row]
       : rows;
-  }, [conversations, selection.ids, vacating]);
+  }, [rowOf, places, selection.ids, vacating]);
   // What's selected, as commands: the selection's own while several are picked, else the open one's.
   const selectedCommands =
     pickedRows.length === 0
@@ -855,7 +862,7 @@ export function Workbench({
                   selected={selected}
                   accounts={accounts}
                   folders={folders}
-                  upcoming={neighbors(conversations, selected)}
+                  upcoming={neighbors(conversations, places, selected)}
                   onShown={markRead}
                   actions={readerActions}
                   place={readerPlace}
@@ -1051,15 +1058,22 @@ function useSearch(view: View, onViewChange: (view: View) => void) {
  */
 function neighbors(
   conversations: Listed<ConversationSummary> | undefined,
+  places: ReadonlyMap<ConversationId, number>,
   selected: ConversationId | undefined,
 ): ConversationId[] {
   if (!conversations) return [];
-  const idsOf = (rows: Listed<ConversationSummary>) => rows.flatMap((row) => (row ? [row.id] : []));
-  if (selected === undefined) return idsOf(conversations.slice(0, 2));
-  const at = conversations.findIndex((row) => row?.id === selected);
-  if (at < 0) return [];
-  return idsOf([conversations[at + 1], conversations[at - 1]]);
+  if (selected === undefined) return idsIn(conversations.slice(0, 2));
+  const at = places.get(selected);
+  if (at === undefined) return [];
+  return idsIn([conversations[at + 1], conversations[at - 1]]);
 }
+
+/** The ids of a list's fetched conversations, in its order. */
+function idsIn(rows: Listed<ConversationSummary>): ConversationId[] {
+  return rows.flatMap((row) => (row ? [row.id] : []));
+}
+
+const NO_PLACES: ReadonlyMap<ConversationId, number> = new Map();
 
 /**
  * A view's title, the unread count its header shows (Inbox's across accounts, or a folder's), and

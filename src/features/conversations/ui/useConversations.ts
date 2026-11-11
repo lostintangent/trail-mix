@@ -6,7 +6,7 @@ import {
   type QueryClient,
 } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import type { ConversationSummary, View } from '../../mail/core/index.ts';
+import type { ConversationId, ConversationSummary, View } from '../../mail/core/index.ts';
 import { conversationsQuery, keys, PAGE_SIZE, type Page } from '../../mailroom/client/index.ts';
 import { listOf, pagesCovering, type Listed } from '../core/pages.ts';
 import { useTriagedList } from './overlays.ts';
@@ -120,6 +120,32 @@ export function fetchedList(
           : [],
       ),
   );
+}
+
+/**
+ * Some conversations' rows among the pages of a view the browser holds, each as the freshest page
+ * holding it shows it, found without laying out the whole list.
+ */
+export function fetchedRows(
+  queryClient: QueryClient,
+  view: View,
+  ids: readonly ConversationId[],
+): ConversationSummary[] {
+  const list = hashKey(keys.conversations(view));
+  const wanted = new Set(ids);
+  const found = new Map<ConversationId, { row: ConversationSummary; fetchedAt: number }>();
+  for (const { queryKey, state } of queryClient
+    .getQueryCache()
+    .findAll({ queryKey: keys.conversations(view) })) {
+    if (!state.data || listOfKey(queryKey) !== list) continue;
+    for (const row of (state.data as Page).items) {
+      const seen = found.get(row.id);
+      if (wanted.has(row.id) && (!seen || seen.fetchedAt < state.dataUpdatedAt)) {
+        found.set(row.id, { row, fetchedAt: state.dataUpdatedAt });
+      }
+    }
+  }
+  return [...found.values()].map(({ row }) => row);
 }
 
 /** A view's list as `fetchedList` makes it, made anew as a page of it arrives or leaves the cache. */

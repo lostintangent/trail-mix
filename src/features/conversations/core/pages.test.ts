@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { listOf, pagesCovering, type Fetched } from './pages.ts';
+import { listOf, pagesCovering, placesOf, type Fetched } from './pages.ts';
 
 const rows = (...ids: string[]) => ids.map((id) => ({ id }));
 const page = (
@@ -87,4 +87,10 @@ test('each stretch brings its own pages, as a selected row far from the rows in 
 
 test('an empty list still has its first page asked about, to hear when mail arrives', () => {
   expect(pagesCovering([[0, 12]], 0, 50)).toEqual([0]);
+});
+
+test('a fetched conversation is found at its place, and one not fetched is nowhere', () => {
+  const places = placesOf(listOf([page(0, 6, ['a', 'b']), page(4, 6, ['e', 'f'])])!);
+
+  expect([places.get('b'), places.get('e'), places.get('c')]).toEqual([1, 4, undefined]);
 });

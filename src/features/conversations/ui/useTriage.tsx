@@ -24,7 +24,7 @@ import { afterPaint } from '../../../shared/afterPaint.ts';
 import { reasonOf } from '../../../shared/reasons.ts';
 import { toast } from '../../../shared/toasts.tsx';
 import { overlaysOf } from './overlays.ts';
-import { fetchedList } from './useConversations.ts';
+import { fetchedRows } from './useConversations.ts';
 
 /** Triages some of a view's conversations, by default saying so with a way to undo it. */
 export type Triage = (
@@ -58,7 +58,7 @@ export function useTriage(
   const triage = useCallback<Triage>(
     (action, ids, { quietly = false } = {}) => {
       const overlays = overlaysOf(queryClient);
-      const listed = overlaid(fetchedList(queryClient, view) ?? [], overlays.on(view));
+      const listed = overlaid(fetchedRows(queryClient, view, ids), overlays.on(view));
       const earlierRows = listed.filter(
         (row): row is ConversationSummary => row !== undefined && ids.includes(row.id),
       );

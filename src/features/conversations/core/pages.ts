@@ -58,3 +58,18 @@ export function pagesCovering(
   if (pages.size === 0) pages.add(0);
   return [...pages].sort((a, b) => a - b);
 }
+
+/**
+ * Where each conversation a list has fetched lies in it, so a row is found by its id without
+ * reading the whole list, which may be tens of thousands of places long.
+ */
+export function placesOf<Row extends { id: ConversationId }>(
+  rows: Listed<Row>,
+): ReadonlyMap<ConversationId, number> {
+  const places = new Map<ConversationId, number>();
+  for (let place = 0; place < rows.length; place++) {
+    const row = rows[place];
+    if (row) places.set(row.id, place);
+  }
+  return places;
+}
