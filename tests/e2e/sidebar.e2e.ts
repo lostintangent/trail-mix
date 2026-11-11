@@ -112,6 +112,8 @@ test('the sidebar folds to its rail and back by button and key, keeping every vi
 test('every folder and account has its menu without a hover, for itself rather than the view', async () => {
   const page = await open({ ...DESKTOP, colorScheme: 'light' });
   const work = page.getByRole('region', { name: 'Work' });
+  // The account's folders have arrived, so the rows and their menus are counted from the same tree.
+  await work.getByRole('button', { name: /^Receipts/ }).waitFor();
   const rows = await work
     .getByRole('button', { name: /^(Inbox|Archive|Sent|Drafts|Receipts|Junk|Trash)( \d+)?$/ })
     .count();
