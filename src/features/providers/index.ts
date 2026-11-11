@@ -9,13 +9,14 @@ export {
   type DemoMailbox,
   type DemoServer,
 } from './demo/provider.ts';
-export {
-  checkSignIn,
-  imapProvider,
-  SIGN_IN_PATIENCE_MS,
-  type ImapAccount,
-  type Network,
-} from './imap/provider.ts';
+export type { ImapAccount, Network } from './imap/provider.ts';
+
+/**
+ * The IMAP and SMTP provider, loaded when a Mailroom first reaches a mail server. Its mail
+ * libraries are most of the Worker's code, and an isolate that serves only pages and calls never
+ * runs them.
+ */
+export const imap = () => import('./imap/provider.ts');
 export {
   PRESETS,
   authServersFor,

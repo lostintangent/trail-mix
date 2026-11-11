@@ -15,7 +15,7 @@ import type {
   Outgoing,
 } from '../../mail/core/index.ts';
 import { RESTARTED, UNDO_SECONDS } from '../../outbox/core/index.ts';
-import { SIGN_IN_PATIENCE_MS } from '../../providers/index.ts';
+import { imap } from '../../providers/index.ts';
 import PostalMime from 'postal-mime';
 import {
   PAGE_SIZE,
@@ -44,6 +44,7 @@ import type { Synced, Wake } from './test-worker.ts';
 
 const { alice, bob } = users;
 const AT = '2026-11-09T12:00:00.000Z';
+const { SIGN_IN_PATIENCE_MS } = await imap();
 const DAY = 24 * 60 * 60_000;
 const setup: AccountSetup = {
   provider: 'imap',
@@ -158,6 +159,7 @@ describe('The Mailroom', () => {
 
   test('connects an account once both its hosts take the password, and keeps it only sealed', async () => {
     account = await ada.call<Account>('addAccount', setup);
+    expect(await ada.call<number>('imapLoadCount')).toBeGreaterThan(0);
     expect(account).toMatchObject({ name: 'Alice', address: alice.email, stamp: 'vermilion' });
     await ada.until(async () => (await ada.call<Account[]>('accounts'))[0]?.status === 'ready');
 
@@ -1035,6 +1037,30 @@ describe('The Mailroom with the demo mailbox', () => {
       'Sam Rivera <sam@work.trailmix.test>',
     );
   }, 30_000);
+
+  test('never loads the IMAP provider’s code, however a member uses it', async () => {
+    const ivy = member('ivy', () => worker);
+    const device = ivy.device();
+    await device.opened;
+    await ivy.until(async () =>
+      (await ivy.call<Account[]>('accounts')).every(({ status }) => status === 'ready'),
+    );
+    const [row] = await ivy.page({ in: 'inbox' });
+    await ivy.call('body', (await ivy.call<Message[]>('conversation', row!.id))[0]);
+    const [personal] = await ivy.call<Account[]>('accounts');
+    await ivy.call('saveDraft', {
+      account: personal!.id,
+      to: [{ email: 'sam@example.com' }],
+      cc: [],
+      bcc: [],
+      subject: 'Lunch',
+      markdown: 'Thursday?\n',
+      attachments: [],
+    });
+    await expect(ivy.call('addAccount', setup)).rejects.toThrow('only the demo mailbox');
+    expect(await ivy.call<number>('imapLoadCount')).toBe(0);
+    device.close();
+  }, 60_000);
 });
 
 describe('A visitor’s Mailroom on the public demo', () => {

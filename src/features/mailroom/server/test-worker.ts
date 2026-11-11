@@ -143,6 +143,18 @@ export class TestMailroom extends Mailroom {
     await this.ctx.storage.setAlarm(now);
   }
 
+  private imapLoads = 0;
+
+  protected override imapCode() {
+    this.imapLoads++;
+    return super.imapCode();
+  }
+
+  /** How many times this instance has asked for the IMAP provider's code. */
+  imapLoadCount(): Promise<number> {
+    return Promise.resolve(this.imapLoads);
+  }
+
   private readonly synced: Synced[] = [];
 
   /** Records what each folder's sync downloads: the messages it reports, by path. */

@@ -1,6 +1,5 @@
 import { DurableObject } from 'cloudflare:workers';
 import { connect } from 'cloudflare:sockets';
-import { createSocketsTransport } from 'imapflow';
 import PostalMime, { type Address as PostalAddress } from 'postal-mime';
 import * as signing from '../../accounts/core/index.ts';
 import { messageOf } from '../../composer/index.ts';
@@ -43,8 +42,7 @@ import {
   codeRequest,
   demoMailbox,
   demoServer,
-  checkSignIn,
-  imapProvider,
+  imap,
   isFresh,
   namesThisMachine,
   pollRequest,
@@ -439,7 +437,8 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 
     // Nothing is kept until both hosts accept the password.
     const id = crypto.randomUUID();
-    await checkSignIn(imapAccount(id, connection, { pass: checked.password }), network);
+    const { code, network } = await this.imapCode();
+    await code.checkSignIn(imapAccount(id, connection, { pass: checked.password }), network);
 
     const account = this.book.add(
       {
@@ -1033,6 +1032,14 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   /** Runs once the host has accepted a message and before the Outbox records it. */
   protected accepted(): void {}
 
+  /**
+   * The IMAP provider's code, which this isolate loads the first time it signs in to or reaches a
+   * mail server. A test's Mailroom counts the loads here.
+   */
+  protected imapCode(): Promise<ImapCode> {
+    return loadImapCode();
+  }
+
   /** The provider an account is reached through, as it's made. A test's Mailroom watches it here. */
   protected reached(provider: MailProvider): MailProvider {
     return provider;
@@ -1193,12 +1200,12 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
         const signers = authServersFor(connection.imap.host, this.env.AUTH_SERVERS_STAND_IN);
         if (deviceOf(this.book.get(account)?.account.preset)) {
           const accessToken = () => this.accessToken(account);
-          return imapOver(account, connection, { accessToken }, signers);
+          return imapOver(await this.imapCode(), account, connection, { accessToken }, signers);
         }
         const sealed = this.book.sealed(account);
         if (!sealed) throw new Error('There is no such account.');
         const pass = await open(await this.memberKey(), sealed, account);
-        return imapOver(account, connection, { pass }, signers);
+        return imapOver(await this.imapCode(), account, connection, { pass }, signers);
       })().then((made) => this.reached(made));
       this.providers.set(account, provider);
       provider.catch(() => this.providers.delete(account));
@@ -1302,7 +1309,8 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       held?.connection.provider === 'imap' ? held.connection : this.connectionOf(pending);
     const accessToken = () => Promise.resolve(tokens.access);
     try {
-      await checkSignIn(imapAccount(id, connection, { accessToken }), network);
+      const { code, network } = await this.imapCode();
+      await code.checkSignIn(imapAccount(id, connection, { accessToken }), network);
     } catch (error) {
       const said = error instanceof Error ? error.message : String(error);
       return stop(signIn.whenRefused ? `${said} ${signIn.whenRefused}` : said);
@@ -1574,12 +1582,13 @@ const CALLABLE: ReadonlySet<string> = new Set([...QUERIES, ...COMMANDS]);
 
 /** The IMAP provider for an account, over workerd's sockets. */
 function imapOver(
+  { code, network }: ImapCode,
   account: AccountId,
   connection: Extract<Connection, { provider: 'imap' }>,
   secret: Secret,
   authServers: readonly string[],
 ): MailProvider {
-  return imapProvider({ ...imapAccount(account, connection, secret), authServers }, network);
+  return code.imapProvider({ ...imapAccount(account, connection, secret), authServers }, network);
 }
 
 /** A password, or what gives each connection an access token from the account's vendor. */
@@ -1638,13 +1647,37 @@ const sameAddress = (one: string, other: string) => one.toLowerCase() === other.
 /** What a member reads when an account's sign-in has lapsed. */
 const lapsed = (account: Account) => `Sign in to ${account.name} again.`;
 
-/** How the Mailroom reaches hosts: workerd's STARTTLS works only on its own sockets. */
-const network: Network = {
-  // Its types want `allowHalfOpen` given.
-  imapTransport: createSocketsTransport((address, options) =>
-    connect(address, options && { ...options, allowHalfOpen: options.allowHalfOpen ?? false }),
-  ),
-};
+/**
+ * The IMAP provider's code, and how the Mailroom reaches hosts with it: workerd's STARTTLS works
+ * only on its own sockets. Both load when this isolate first needs them, so one that never reaches
+ * a mail server, as every demo Mailroom and the Worker's own isolates don't, never runs the mail
+ * libraries. A load that fails is tried again the next time.
+ */
+type ImapCode = { code: Awaited<ReturnType<typeof imap>>; network: Network };
+
+let imapLoaded: Promise<ImapCode> | undefined;
+
+function loadImapCode(): Promise<ImapCode> {
+  imapLoaded ??= Promise.all([imap(), import('imapflow')]).then(
+    ([code, { createSocketsTransport }]) => ({
+      code,
+      network: {
+        // Its types want `allowHalfOpen` given.
+        imapTransport: createSocketsTransport((address, options) =>
+          connect(
+            address,
+            options && { ...options, allowHalfOpen: options.allowHalfOpen ?? false },
+          ),
+        ),
+      },
+    }),
+    (error: unknown) => {
+      imapLoaded = undefined;
+      throw error;
+    },
+  );
+  return imapLoaded;
+}
 
 /** The Mailroom's storage, as `schema.ts` speaks to it, on a Durable Object's SQLite. */
 function durableSql(storage: DurableObjectStorage): Sql {
