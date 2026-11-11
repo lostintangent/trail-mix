@@ -366,7 +366,8 @@ async function click(context: BrowserContext, action: string) {
 
 /**
  * Every row of Settings has one shape: its label, in one ink and size, and what it does on the
- * left, and its control on the right.
+ * left, and its control on the right, where what each draws ends at the same edge. The page never
+ * scrolls sideways for a target that reaches past it.
  */
 async function rowsAgree(page: Page) {
   const rows = await page.getByRole('region', { name: 'Settings' }).evaluate((settings) =>
@@ -376,11 +377,16 @@ async function rowsAgree(page: Page) {
       )!;
       const { color, fontSize, fontWeight } = getComputedStyle(label);
       const words = label.parentElement!.getBoundingClientRect();
-      const control = document.getElementById(label.htmlFor)!.getBoundingClientRect();
+      const control = document.getElementById(label.htmlFor) as HTMLInputElement;
+      // What each control draws: the switch's track, around its input, or the swatch beside the
+      // picker.
+      const drawn =
+        control.type === 'color' ? control.previousElementSibling! : control.parentElement!;
       return {
         name,
         looks: `${color} ${fontSize} ${fontWeight}`,
-        isControlRight: control.left >= words.right,
+        isControlRight: control.getBoundingClientRect().left >= words.right,
+        drawnTo: drawn.getBoundingClientRect().right,
       };
     }),
   );
@@ -389,6 +395,22 @@ async function rowsAgree(page: Page) {
     { name: 'Accent color', isControlRight: true },
   ]);
   expect(rows[0]!.looks).toBe(rows[1]!.looks);
+  expect(Math.abs(rows[0]!.drawnTo - rows[1]!.drawnTo)).toBeLessThan(1);
+  expect(
+    await page.evaluate(() =>
+      [...document.querySelectorAll('*')]
+        .filter((element) => {
+          const { overflowX } = getComputedStyle(element);
+          return (
+            (overflowX === 'auto' ||
+              overflowX === 'scroll' ||
+              element === document.documentElement) &&
+            element.scrollWidth > element.clientWidth
+          );
+        })
+        .map(({ tagName, className }) => `${tagName}.${String(className)}`),
+    ),
+  ).toEqual([]);
 }
 
 async function shot(page: Page, screen: string) {

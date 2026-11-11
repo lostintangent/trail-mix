@@ -3,6 +3,7 @@ import { Switch } from '@astryxdesign/core/Switch';
 import {
   borderVars,
   colorVars,
+  sizeVars,
   spacingVars,
   typeScaleVars,
 } from '@astryxdesign/core/theme/tokens.stylex';
@@ -142,6 +143,10 @@ const styles = stylex.create({
       [media.phone]: spacingVars['--spacing-3'],
     },
     paddingBottom: spacingVars['--spacing-6'],
+    // A phone's gutter is narrower than a finger's target reaches past the swatch, so the target's
+    // last few pixels lie past the screen's edge, where no finger can reach, and are cut off there
+    // rather than letting the page slide sideways.
+    overflowX: { default: null, [media.phone]: 'clip' },
   },
   title: {
     margin: 0,
@@ -174,11 +179,15 @@ const styles = stylex.create({
     justifyContent: 'space-between',
     gap: spacingVars['--spacing-2'],
   },
+  // A control draws less than its target: the swatch sits centered in a target the size of a
+  // button. Its target reaches past it into the page's padding, so what it draws ends where a
+  // switch's track does.
   controls: {
     display: 'flex',
     alignItems: 'center',
     flexShrink: 0,
     gap: spacingVars['--spacing-1'],
+    marginInlineEnd: `calc((${tm.swatch} - ${sizeVars['--size-element-sm']}) / 2)`,
   },
   pending: {
     display: 'flex',
