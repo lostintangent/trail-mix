@@ -175,6 +175,16 @@ export class TestMailroom extends Mailroom {
     return Promise.resolve(this.pushed);
   }
 
+  /** Notifies a device unchecked, as no browser could have it, such as one whose keys can't seal. */
+  notifyUnchecked(subscription: unknown): Promise<void> {
+    this.sql.run(
+      `INSERT INTO devices (endpoint, subscription, added) VALUES (?, ?, 0)`,
+      (subscription as { endpoint: string }).endpoint,
+      JSON.stringify(subscription),
+    );
+    return Promise.resolve();
+  }
+
   /** Has every push service answer each push from now on with this status. */
   answerPushesWith(status: number): Promise<void> {
     this.pushAnswer = status;

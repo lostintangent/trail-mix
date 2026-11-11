@@ -31,7 +31,7 @@ export type SyncQueue = ReturnType<typeof syncQueue>;
 
 /**
  * What sync works with. `settled` hears when an account's check finishes, or fails, and `landed`
- * hears each batch of a folder once the index holds it.
+ * hears each batch of a folder as the index takes it, in the same transaction.
  */
 export type Syncing = {
   sql: Sql;
@@ -178,10 +178,11 @@ export function syncQueue(syncing: Syncing) {
     const changed = sql.transaction(() => {
       const folders = store.fold(batch.events);
       store.saveCursor(account, path, batch.cursor);
+      // In the same transaction, so what it notes of the batch lands with the cursor or not at all.
+      syncing.landed?.({ account, path }, batch.events);
       return folders;
     });
     for (const folder of changed) hint({ changed: 'conversations', folder });
-    syncing.landed?.({ account, path }, batch.events);
     job.changed ||= batch.events.length > 0;
     if (batch.more) return;
     if (job.again) {

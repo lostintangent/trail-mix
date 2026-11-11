@@ -137,6 +137,22 @@ describe('The Mailroom, notifying devices', () => {
     await nia.call('answerPushesWith', 201);
   });
 
+  test('a device its push can’t be sealed for costs the other devices nothing', async () => {
+    const broken = 'https://push.example/devices/broken';
+    // A point that isn't on the curve, which no browser makes, so sealing a push for it throws.
+    const p256dh = btoa(String.fromCharCode(4, ...Array<number>(64).fill(0))).replace(/=+$/, '');
+    await nia.call('notifyUnchecked', {
+      endpoint: broken,
+      keys: { p256dh, auth: 'AAAAAAAAAAAAAAAAAAAAAA' },
+    });
+    await nia.call('notifyDevice', service.subscription);
+    await arrive({ id: 'sealed', subject: 'Sealed' });
+    expect(subjectsOf(await pushed(1))).toEqual(['Sealed']);
+    for (const endpoint of [broken, service.subscription.endpoint]) {
+      await nia.call('forgetDevice', endpoint);
+    }
+  });
+
   test('checks mail every four minutes while a device is notified, and every five otherwise', async () => {
     const minutesToNextCheck = async () => {
       await nia.call('wakeNow');
@@ -190,25 +206,36 @@ describe('The Mailroom, notifying devices', () => {
   }
 });
 
-describe('A Trail Mix without a push key', () => {
-  let worker: LocalWorker;
-  const ola = member('ola', () => worker);
+describe('A Trail Mix without a push key it can use', () => {
+  let none: LocalWorker;
+  let malformed: LocalWorker;
 
   beforeAll(async () => {
-    worker = await mailrooms({ OPERATOR_EMAIL: OPERATOR });
+    [none, malformed] = await Promise.all([
+      mailrooms({ OPERATOR_EMAIL: OPERATOR }),
+      mailrooms({ OPERATOR_EMAIL: OPERATOR, PUSH_KEY: 'not a key' }),
+    ]);
   }, 60_000);
 
-  afterAll(() => worker?.stop());
+  afterAll(() => {
+    none?.stop();
+    malformed?.stop();
+  });
 
-  test('gives no key to subscribe with, and turns no device on', async () => {
+  test('gives no key to subscribe with and turns no device on, and answers everything else', async () => {
     const service = await standInPushService();
-    expect(await ola.call<ThisDevice>('thisDevice', service.subscription.endpoint)).toEqual({
-      cache: expect.any(String) as string,
-      notified: false,
-    });
-    await expect(ola.call('notifyDevice', service.subscription)).rejects.toThrow(
-      'Notifications aren’t set up on this Trail Mix.',
-    );
+    for (const worker of [none, malformed]) {
+      const ola = member('ola', () => worker);
+      for (let ask = 0; ask < 2; ask++) {
+        expect(await ola.call<ThisDevice>('thisDevice', service.subscription.endpoint)).toEqual({
+          cache: expect.any(String) as string,
+          notified: false,
+        });
+      }
+      await expect(ola.call('notifyDevice', service.subscription)).rejects.toThrow(
+        'Notifications aren’t set up on this Trail Mix.',
+      );
+    }
   });
 });
 

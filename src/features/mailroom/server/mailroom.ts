@@ -149,6 +149,11 @@ const CHECKING_MS = 5 * 60_000;
  * within five minutes, with the sync and the push service's share of the time.
  */
 const NOTIFYING_CHECKING_MS = 4 * 60_000;
+/**
+ * How early an alarm may come by this instance's clock, since a Durable Object may wake on another
+ * machine, so a check it is due doesn't slip a whole interval.
+ */
+const ALARM_SLACK_MS = 1_000;
 /** How many refs of messages the member moved into an Inbox are held, oldest dropped first. */
 const MOVED_IN_HELD = 1_000;
 /** Where the id that names what an installed app keeps is stored. */
@@ -813,7 +818,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     // A send that is due goes before sync, which can wait.
     await this.sending.run(() => new Date().toISOString());
     // Timed from the wake's start, as the next alarm is, so the wake it sets always checks.
-    if (now - this.checkedAt >= checking) this.checkAll(now);
+    if (now - this.checkedAt >= checking - ALARM_SLACK_MS) this.checkAll(now);
     await this.watchAll(open);
     const landed = await this.queue.run();
     await this.tellNews();
@@ -933,7 +938,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 
   /**
    * Tells every notified device the news this wake's sync folded. A device whose subscription has
-   * ended is forgotten. A push that fails costs that notice and nothing more.
+   * ended is forgotten. A push that fails costs that notice and nothing more, and never the wake.
    */
   private async tellNews() {
     const news = this.news;
@@ -942,15 +947,21 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     if (!key) return;
     const notices = noticesOf(news, (id) => this.book.get(id)?.account.name);
     for (const device of this.notifying.devices()) {
-      for (const notice of notices) {
-        const fared = await deliver(device, pushOf(notice), key, (request) =>
-          this.postPush(request),
-        );
-        if (fared === 'gone') {
-          this.notifying.forget(device.endpoint);
-          break;
+      try {
+        for (const notice of notices) {
+          const fared = await deliver(device, pushOf(notice), key, (request) =>
+            this.postPush(request),
+          );
+          if (fared === 'gone') {
+            this.notifying.forget(device.endpoint);
+            break;
+          }
+          if (fared === 'refused') {
+            report(new Error('A push service refused this deployment’s key.'));
+          }
         }
-        if (fared === 'refused') report(new Error('A push service refused this deployment’s key.'));
+      } catch (error) {
+        report(error);
       }
     }
   }
@@ -964,10 +975,19 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     }
   }
 
-  /** The deployment's push key, or nothing where notifications are off. */
+  /**
+   * The deployment's push key, or nothing where notifications are off. A key that can't be read is
+   * reported, and leaves notifications off and everything else working.
+   */
   private pushKeyNow(): Promise<PushKey | undefined> {
     const { PUSH_KEY: pem, OPERATOR_EMAIL: operator } = this.env;
-    this.pushKey ??= pem && operator ? pushKeyOf(pem, operator) : Promise.resolve(undefined);
+    this.pushKey ??=
+      pem && operator
+        ? pushKeyOf(pem, operator).catch((error: unknown) => {
+            report(error);
+            return undefined;
+          })
+        : Promise.resolve(undefined);
     return this.pushKey;
   }
 
