@@ -5,7 +5,8 @@ import { suite } from './suite.ts';
 /**
  * The address, end to end: the built app on workerd, on a member of its own. The address names the
  * view, the search and the open conversation, so a reload or another browser opens the same place,
- * Back and Forward step between views, and moving by key adds no history.
+ * Back and Forward step between views, and moving by key adds no history. Choosing a view opens its
+ * newest conversation on a desktop, which is read only once it has stayed open.
  */
 
 const DESKTOP = { viewport: { width: 1440, height: 900 } };
@@ -36,6 +37,19 @@ const historyLength = (page: Page) => page.evaluate(() => history.length);
 /** The address once the selection has rested and written it. */
 const addressNaming = (page: Page, key: string) =>
   page.waitForFunction((key) => new URL(location.href).searchParams.has(key), key);
+/** The conversation the address opens. */
+const opened = (page: Page) => new URL(page.url()).searchParams.get('open');
+/** Opens a row's conversation and waits for the reader to show it. Returns its subject. */
+async function openRow(page: Page, row: number) {
+  const option = page.getByRole('option').nth(row);
+  const listed = (await option.textContent()) ?? '';
+  await option.click();
+  await page.waitForFunction((listed) => {
+    const shown = document.querySelector('section[aria-label="Reader"] h1')?.textContent;
+    return Boolean(shown && listed.includes(shown));
+  }, listed);
+  return subject(page).textContent();
+}
 
 test('a folder and its open conversation come back on a reload and in another browser', async () => {
   const page = await open(DESKTOP);
@@ -44,9 +58,14 @@ test('a folder and its open conversation come back on a reload and in another br
     .getByRole('button', { name: /^Archive/ })
     .click();
   await heading(page).filter({ hasText: 'Archive' }).waitFor();
-  await page.getByRole('option').nth(1).click();
-  const shown = await subject(page).textContent();
+  // Choosing the folder opened its newest, and the member opens the next.
   await addressNaming(page, 'open');
+  const newest = opened(page);
+  const shown = await openRow(page, 1);
+  await page.waitForFunction((newest) => {
+    const open = new URL(location.href).searchParams.get('open');
+    return open !== null && open !== newest;
+  }, newest);
   const address = page.url();
   expect(new URL(address).searchParams.get('folder')).toBe('Archive');
 
@@ -140,9 +159,13 @@ test('an address whose conversation or folder has gone opens what remains, and s
   await page.waitForFunction(() => location.search === '?in=flagged');
   await expect(selectedRow(page).count()).resolves.toBe(0);
 
+  // A folder gone opens the Inbox, which, naming no conversation, opens at its newest.
   await page.goto(new URL('/?account=gone&folder=Nowhere', app.url).href);
   await heading(page).filter({ hasText: 'Inbox' }).waitFor();
-  await page.waitForFunction(() => location.search === '');
+  await page.waitForFunction(() => {
+    const address = new URL(location.href).searchParams;
+    return !address.has('folder') && !address.has('account');
+  });
 }, 60_000);
 
 test('on a phone, a conversation opens on its own address, Back slides to the list, and a reload opens it again with no slide', async () => {
@@ -176,4 +199,140 @@ test('on a phone, a conversation opens on its own address, Back slides to the li
   await page.getByRole('button', { name: 'Back', exact: true }).locator('visible=true').click();
   await page.waitForFunction(() => location.search === '');
   await expect(isShown()).resolves.toBe(false);
+}, 60_000);
+
+test('choosing a view opens its newest, read only once it has stayed open two seconds', async () => {
+  const page = await open(DESKTOP);
+  const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
+  const choose = (name: RegExp) => sidebar.getByRole('button', { name }).first().click();
+  const inbox = sidebar.getByRole('button', { name: /^Inbox/ }).first();
+  const unread = async () => Number((await inbox.textContent())?.match(/\d+/)?.[0]);
+  const unreadIs = (count: number, timeout: number) =>
+    page.waitForFunction(
+      (count) => {
+        const inbox = [...document.querySelectorAll('nav[aria-label="Mailboxes"] button')].find(
+          (button) => button.textContent?.startsWith('Inbox'),
+        );
+        return Number(inbox?.textContent?.match(/\d+/)?.[0]) === count;
+      },
+      count,
+      { timeout },
+    );
+  const newestOpen = async (title: string) => {
+    await heading(page).filter({ hasText: title }).waitFor();
+    await expect(selectedRow(page).getAttribute('aria-posinset')).resolves.toBe('1');
+    // The reader shows the row's conversation.
+    await page.waitForFunction(() => {
+      const row = document.querySelector('[role="option"][aria-selected="true"]')?.textContent;
+      const shown = document.querySelector('section[aria-label="Reader"] h1')?.textContent;
+      return Boolean(row && shown && row.includes(shown));
+    });
+    return (await selectedRow(page).textContent()) ?? '';
+  };
+  // The Inbox's newest starts unread, whatever came before, and is left before it's read again.
+  await choose(/^Inbox/);
+  await newestOpen('Inbox');
+  await page.keyboard.press('Shift+U');
+  await selectedRow(page).filter({ hasText: 'Unread' }).waitFor();
+  await choose(/^Flagged/);
+  await newestOpen('Flagged');
+  await page.waitForTimeout(500);
+  const before = await unread();
+  const steps = await historyLength(page);
+
+  // Passing through the Inbox on the way to Drafts, by the palette, reads nothing.
+  await choose(/^Inbox/);
+  expect(await newestOpen('Inbox')).toContain('Unread');
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.keyboard.type('go to drafts');
+  await page.keyboard.press('Enter');
+  await newestOpen('Drafts');
+  await page.waitForTimeout(2_500);
+  expect(await unread()).toBe(before);
+
+  // Staying reads it, and only after two seconds.
+  await choose(/^Inbox/);
+  await newestOpen('Inbox');
+  await page.waitForTimeout(1_000);
+  expect(await unread()).toBe(before);
+  await unreadIs(before - 1, 5_000);
+
+  // Opening it yourself reads it at once, well inside the two seconds.
+  await page.keyboard.press('Shift+U');
+  await unreadIs(before, 5_000);
+  await choose(/^Flagged/);
+  await newestOpen('Flagged');
+  await choose(/^Inbox/);
+  await newestOpen('Inbox');
+  await page.getByRole('option').first().click();
+  await unreadIs(before - 1, 1_000);
+
+  // Typing a search leaves the reader as it was.
+  const shown = await subject(page).textContent();
+  await page.getByRole('searchbox', { name: 'Search mail' }).fill('lunch');
+  await heading(page).filter({ hasText: 'Search' }).waitFor();
+  await expect(subject(page).textContent()).resolves.toBe(shown);
+
+  // A view whose list is known draws its newest in the reader in the same frame as its row.
+  await page.evaluate(() => {
+    const frames: boolean[] = [];
+    Object.assign(window, { readerFrames: frames });
+    const check = () => {
+      const row = document.querySelector('[role="option"][aria-selected="true"]')?.textContent;
+      const shown = document.querySelector('section[aria-label="Reader"] h1')?.textContent;
+      frames.push(!row || Boolean(shown && row.includes(shown)));
+      if (frames.length < 30) requestAnimationFrame(check);
+    };
+    requestAnimationFrame(check);
+  });
+  // Each choice is one step, whose newest is written in place, and the search gives way to the
+  // view chosen from it. Back returns to each view with what it had open.
+  await choose(/^Flagged/);
+  await newestOpen('Flagged');
+  await page.waitForFunction(
+    () => (window as unknown as { readerFrames: boolean[] }).readerFrames.length >= 30,
+  );
+  expect(
+    await page.evaluate(() => (window as unknown as { readerFrames: boolean[] }).readerFrames),
+  ).not.toContain(false);
+  await expect(historyLength(page)).resolves.toBe(steps + 6);
+  await page.goBack();
+  await newestOpen('Inbox');
+  await page.goBack();
+  await newestOpen('Flagged');
+}, 60_000);
+
+test('an empty view opens on the empty reader, and on a phone a view opens on its list', async () => {
+  const page = await open(DESKTOP);
+  await page.getByRole('button', { name: 'More for Work' }).click();
+  await page.getByRole('menuitem', { name: 'New folder in Work' }).click();
+  const field = page.getByRole('textbox', { name: 'Name of the new folder in Work' });
+  await field.fill('Empty');
+  await field.press('Enter');
+  await page
+    .getByRole('region', { name: 'Work' })
+    .getByRole('button', { name: /^Empty/ })
+    .click();
+  await heading(page).filter({ hasText: 'Empty' }).waitFor();
+  await page
+    .locator('section[aria-label="Reader"]')
+    .getByText('No conversation open')
+    .first()
+    .waitFor();
+  await expect(selectedRow(page).count()).resolves.toBe(0);
+
+  const phone = await open(PHONE);
+  await page.close();
+  await phone.getByRole('button', { name: 'Folders', exact: true }).click();
+  await phone
+    .getByRole('navigation', { name: 'Mailboxes' })
+    .getByRole('button', { name: /^Drafts/ })
+    .first()
+    .click();
+  await heading(phone).filter({ hasText: 'Drafts' }).waitFor();
+  await phone.getByRole('option').first().waitFor();
+  await expect(selectedRow(phone).count()).resolves.toBe(0);
+  await expect(
+    phone.locator('section[aria-label="Reader"]').evaluate((reader) => !reader.closest('[inert]')),
+  ).resolves.toBe(false);
 }, 60_000);

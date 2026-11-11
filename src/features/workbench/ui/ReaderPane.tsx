@@ -242,12 +242,22 @@ function useRestingSelection(selected: ConversationId | undefined) {
   const [shown, setShown] = useState(selected);
   const [isPassing, setPassing] = useState(false);
   const pressedAt = useLastPress();
+  // When the selection last moved between conversations, the press the last move used, and what
+  // it moved from.
   const movedAt = useRef(-Infinity);
+  const usedPress = useRef(-Infinity);
+  const movedFrom = useRef(selected);
   useLayoutEffect(() => {
-    const now = performance.now();
-    const at = pressedAt.current > movedAt.current ? pressedAt.current : now;
-    const hasRested = at - movedAt.current >= REST_MS;
-    movedAt.current = at;
+    const isPressed = pressedAt.current > usedPress.current;
+    const at = isPressed ? pressedAt.current : performance.now();
+    usedPress.current = pressedAt.current;
+    // Resting matters between conversations, which keys pass by. A move to none or from none, as
+    // choosing a view and opening its newest make, shows at once, and only a move to a conversation
+    // that a press or a step between conversations made starts a rest.
+    const isBetween = movedFrom.current !== undefined && selected !== undefined;
+    const hasRested = !isBetween || at - movedAt.current >= REST_MS;
+    if (selected !== undefined && (isPressed || isBetween)) movedAt.current = at;
+    movedFrom.current = selected;
     const show = () => {
       setShown(selected);
       setPassing(false);

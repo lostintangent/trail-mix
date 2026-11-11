@@ -190,13 +190,19 @@ export function ConversationList({
     listShown.current = listKey;
     scrollTo(0);
   });
-  // A selection moved from elsewhere, as by J and K, scrolls into view. The list's own keys scroll as
-  // they move, in the same commit, so they're left alone here.
+  // A selection moved from elsewhere, as by J and K, scrolls into view, and so does one whose row
+  // arrives after it. Rows coming and going above it move it in the list but not in sight, so they
+  // don't scroll. The list's own keys scroll as they move, in the same commit, so they're left alone.
   const isMovedHere = useRef(false);
+  const selectedAt = useRef(selectedIndex);
+  useLayoutEffect(() => {
+    selectedAt.current = selectedIndex;
+  });
+  const isSelectedListed = selectedIndex >= 0;
   useLayoutEffect(() => {
     if (isMovedHere.current) isMovedHere.current = false;
-    else if (selectedIndex >= 0) virtualizer.scrollToIndex(selectedIndex, { align: 'auto' });
-  }, [virtualizer, selectedIndex]);
+    else if (isSelectedListed) virtualizer.scrollToIndex(selectedAt.current, { align: 'auto' });
+  }, [virtualizer, selection.anchor, isSelectedListed]);
   const first = Math.max(0, (inSight?.startIndex ?? 0) - AHEAD);
   const last = (inSight?.endIndex ?? 0) + AHEAD;
   useEffect(() => {

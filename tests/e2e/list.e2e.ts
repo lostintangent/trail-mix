@@ -16,6 +16,12 @@ const { test } = app;
 const DESKTOP = { viewport: { width: 1440, height: 900 } };
 const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
 
+/**
+ * The rows drawn where the list is scrolled. The conversation open, the Inbox's newest, stays drawn
+ * at the top wherever the list is scrolled, so it's left out.
+ */
+const SCROLLED = '[role="option"]:not([aria-selected="true"])';
+
 /** The Inbox, at a desktop's size unless told, recording every error and failed response. */
 async function open(options: BrowserContextOptions = DESKTOP) {
   const context = await app.context(options);
@@ -41,11 +47,14 @@ test('mail that arrives while the list is scrolled down moves nothing in sight, 
   const before = await length();
   // Halfway down the Inbox, far past its first page, once the rows there have arrived.
   await list.evaluate((list) => (list.scrollTop = list.scrollHeight / 2));
-  await page.waitForFunction((page) => {
-    const list = document.querySelector('[role="listbox"][aria-multiselectable]');
-    const first = Number(list?.querySelector('[role="option"]')?.getAttribute('aria-posinset'));
-    return list?.getAttribute('aria-busy') === 'false' && first > page;
-  }, PAGE_SIZE);
+  await page.waitForFunction(
+    ({ page, drawn }) => {
+      const list = document.querySelector('[role="listbox"][aria-multiselectable]');
+      const first = Number(list?.querySelector(drawn)?.getAttribute('aria-posinset'));
+      return list?.getAttribute('aria-busy') === 'false' && first > page;
+    },
+    { page: PAGE_SIZE, drawn: SCROLLED },
+  );
   const inSight = () =>
     list.evaluate((list) => {
       const top = list.getBoundingClientRect().top;
@@ -106,11 +115,11 @@ test('a list dragged far down asks for no page on the way, only for where it sto
       }),
   );
   const onTheWay = asked.length;
-  await page.waitForFunction(() => {
+  await page.waitForFunction((drawn) => {
     const list = document.querySelector('[role="listbox"][aria-multiselectable]');
-    return list?.getAttribute('aria-busy') === 'false' && list.querySelector('[role="option"]');
-  });
-  const first = Number(await list.getByRole('option').first().getAttribute('aria-posinset'));
+    return list?.getAttribute('aria-busy') === 'false' && list.querySelector(drawn);
+  }, SCROLLED);
+  const first = Number(await list.locator(SCROLLED).first().getAttribute('aria-posinset'));
 
   expect(onTheWay).toBe(0);
   // The pages in sight where it stopped, with the rows either side that arrive ahead.

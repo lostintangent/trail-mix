@@ -364,7 +364,15 @@ test('a selection made with Cmd and Shift is archived together, and Undo brings 
       .getByRole('option')
       .filter({ hasText: subject ?? '' })
       .filter({ hasText: preview ?? '' });
-  expect(await Promise.all(picked.map((text) => listed(here, text).count()))).toEqual([1, 1, 1]);
+  // Each is the only one of its kind among the rows drawn, but for the newest the Inbox opened at,
+  // which stays drawn wherever mail arriving above it has moved it.
+  const unselected = here.locator('[role="option"]:not([aria-selected="true"])');
+  const alike = ([subject, preview]: (string | null)[]) =>
+    unselected
+      .filter({ hasText: subject ?? '' })
+      .filter({ hasText: preview ?? '' })
+      .count();
+  expect(await Promise.all(picked.map(alike))).toEqual([1, 1, 1]);
   await options.nth(4).click();
   await options.nth(6).click({ modifiers: ['Shift'] });
   await options.nth(5).click({ modifiers: ['ControlOrMeta'] });

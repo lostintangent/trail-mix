@@ -67,9 +67,18 @@ for (const [size, options] of Object.entries(SIZES)) {
     const app = suite({ vars: { DEV_MEMBER: `reply-${size}-${Date.now()}@trailmix.test` } });
     const { test } = app;
 
-    async function inbox(colorScheme: 'light' | 'dark', more: BrowserContextOptions = {}) {
+    /**
+     * The Inbox, which opens at its newest and prepares the conversations beside it. What `before`
+     * sets up, such as a slow server, is in place before the page asks for anything.
+     */
+    async function inbox(
+      colorScheme: 'light' | 'dark',
+      more: BrowserContextOptions = {},
+      before: (page: Page) => Promise<void> = async () => {},
+    ) {
       const page = await (await app.context({ ...options, colorScheme, ...more })).newPage();
       page.on('pageerror', (error) => errors.push(error.message));
+      await before(page);
       await page.goto(app.url);
       await page.getByText('Up to date').waitFor({ state: 'attached', timeout: 30_000 });
       return page;
@@ -85,19 +94,21 @@ for (const [size, options] of Object.entries(SIZES)) {
     }
 
     test('Reply opens at once while the server is slow, and goes to the list once the parent says', async () => {
-      const page = await inbox('light');
       // The parent's body comes only once the reply has been saved, addressed as it was before.
-      const saves = (to: 'sender' | 'list') =>
+      const saves = (page: Page, to: 'sender' | 'list') =>
         page.waitForResponse((response) => {
           const sent = response.request().postData() ?? '';
           return sent.includes('saveDraft') && sent.includes(LIST) === (to === 'list');
         });
-      const savedToSender = saves('sender');
-      await slowBodies(page, () => savedToSender);
+      let savedToSender: Promise<unknown> = Promise.resolve();
+      const page = await inbox('light', {}, async (page) => {
+        savedToSender = saves(page, 'sender');
+        await slowBodies(page, () => savedToSender);
+      });
       await open(page);
       await composerLoaded(page);
       // Before the newest message's body has come, and typed straight after, as a typist does.
-      const savedToList = saves('list');
+      const savedToList = saves(page, 'list');
       await page.keyboard.press('r');
       await page.keyboard.type('Count me in.');
       const reply = composer(page);

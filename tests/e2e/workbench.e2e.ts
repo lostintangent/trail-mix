@@ -672,11 +672,21 @@ test('the list’s header shows its view’s icon, and the buttons for what is o
     .first()
     .click();
   await page.getByRole('heading', { name: 'Inbox', level: 2 }).waitFor();
+  // The Inbox opens at its newest. An address whose conversation has gone opens it with none.
+  await page.waitForFunction(() => new URL(location.href).searchParams.has('open'));
+  const gone = new URL(page.url());
+  gone.searchParams.set(
+    'open',
+    gone.searchParams.get('open')!.replace(/:[^:]*$/, ':%3Cgone%40example.com%3E'),
+  );
+  await page.goto(gone.href);
+  await page.waitForFunction(() => !new URL(location.href).searchParams.has('open'));
 
   // With nothing open, the buttons are there but can't be pressed, and opening one moves nothing.
   const header = list.getByRole('toolbar', { name: 'Conversation' });
   const buttons = header.getByRole('button');
   const names = ['Archive', 'Delete', 'Move to', 'Flag', 'More'];
+  await buttons.last().waitFor();
   expect(
     await buttons.evaluateAll((all) => all.map((button) => button.getAttribute('aria-label'))),
   ).toEqual(names);
