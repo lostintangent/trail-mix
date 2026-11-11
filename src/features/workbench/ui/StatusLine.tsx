@@ -1,7 +1,8 @@
 import { colorVars, spacingVars, typeScaleVars } from '@astryxdesign/core/theme/tokens.stylex';
-import { Tooltip } from '@astryxdesign/core/Tooltip';
 import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
 import * as stylex from '@stylexjs/stylex';
+import { useRef } from 'react';
+import { LaterTooltip } from '../../../shared/LaterTooltip.tsx';
 import { tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account } from '../../mail/core/index.ts';
 import { useIsCaughtUp } from '../../mailroom/client/index.ts';
@@ -24,24 +25,28 @@ export function StatusLine({
   note?: string;
 }) {
   const status = mailStatus(accounts, useReach(), useIsCaughtUp());
+  const line = useRef<HTMLParagraphElement>(null);
   if (!status) return null;
-  const line = (
-    <p role="status" {...stylex.props(styles.line)}>
+  const said = note ? `${status.label}. ${note}` : status.label;
+  const shown = (
+    <p ref={line} role="status" {...stylex.props(styles.line)}>
       <span {...stylex.props(styles.dot, tones[status.tone])} />
       {isCollapsed ? (
-        <VisuallyHidden>{status.label}</VisuallyHidden>
+        // On the rail the words wait in the tooltip, and are read from here from the first frame.
+        <VisuallyHidden>{said}</VisuallyHidden>
       ) : (
         <span {...stylex.props(styles.words)}>{status.label}</span>
       )}
     </p>
   );
   return isCollapsed ? (
-    <Tooltip content={note ? `${status.label}. ${note}` : status.label} placement="end">
-      {line}
-    </Tooltip>
+    <>
+      {shown}
+      <LaterTooltip anchor={line} content={said} placement="end" />
+    </>
   ) : (
     <div {...stylex.props(styles.status)}>
-      {line}
+      {shown}
       {note && <p {...stylex.props(styles.note)}>{note}</p>}
     </div>
   );

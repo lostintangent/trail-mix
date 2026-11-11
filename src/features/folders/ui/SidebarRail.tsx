@@ -5,10 +5,10 @@ import {
   radiusVars,
   spacingVars,
 } from '@astryxdesign/core/theme/tokens.stylex';
-import { Tooltip } from '@astryxdesign/core/Tooltip';
 import * as stylex from '@stylexjs/stylex';
 import { MailPlus, Users } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
+import { LaterTooltip } from '../../../shared/LaterTooltip.tsx';
 import { StampDot } from '../../../app/theme/StampDot.tsx';
 import { tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, Folder, View } from '../../mail/core/index.ts';
@@ -113,9 +113,11 @@ function RailButton({
   onSelect: () => void;
   children: ReactNode;
 }) {
+  const button = useRef<HTMLButtonElement>(null);
   return (
-    <Tooltip content={label} placement="end">
+    <>
       <button
+        ref={button}
         type="button"
         aria-label={label}
         aria-current={isSelected ? 'page' : undefined}
@@ -125,7 +127,8 @@ function RailButton({
         {children}
         {hasDot && <span {...stylex.props(styles.dot)} />}
       </button>
-    </Tooltip>
+      <LaterTooltip anchor={button} content={label} placement="end" />
+    </>
   );
 }
 

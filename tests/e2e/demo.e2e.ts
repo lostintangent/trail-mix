@@ -5,6 +5,7 @@ import { toJSON } from 'seroval';
 import type { Page } from 'playwright';
 import { unreadableText } from './contrast.ts';
 import { checkDemo } from './demo-check.ts';
+import { PANELS } from '../../src/features/workbench/ui/panels.ts';
 import { VISITOR_SECONDS } from '../../src/server/access.ts';
 import { BUILDS, serverFunctionIds } from './preview.ts';
 import { suite } from './suite.ts';
@@ -168,6 +169,47 @@ test('a visitor can’t add an account of their own, or remove or erase the demo
     const about = await shown.getAttribute('aria-describedby');
     expect(await cy.locator(`[id="${about}"]`).textContent()).toContain(why);
   }
+
+  // The rail's controls and the accent's swatch gain their tooltips a moment after the first
+  // screen. Hovered right after a load on a slowed CPU, each shows its tooltip, and the status's
+  // carries the demo's line, which its words already read. The tooltip's code is held until the
+  // first hover rests, so that hover proves a tooltip arriving under the pointer opens at once.
+  await cy.evaluate(
+    ([key, width]) => localStorage.setItem(key, JSON.stringify({ width, isCollapsed: true })),
+    [PANELS.sidebar.key, PANELS.sidebar.min] as const,
+  );
+  const tooltipCode = /\/assets\/Tooltip-[^/]+\.js$/;
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await cy.route(tooltipCode, async (route) => {
+    await held;
+    await route.continue();
+  });
+  const asked = cy.waitForRequest(tooltipCode);
+  const cdp = await cy.context().newCDPSession(cy);
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 6 });
+  await cy.reload();
+  await cy.getByRole('option').first().waitFor();
+  const demoLine = 'A sample mailbox, yours for a day.';
+  const tooltip = (says: string | RegExp) => cy.getByRole('tooltip').filter({ hasText: says });
+  await cy
+    .getByRole('button', { name: /^Inbox/ })
+    .first()
+    .hover();
+  await asked;
+  expect(await cy.getByRole('tooltip').count()).toBe(0);
+  release();
+  await tooltip(/^Inbox/).waitFor({ timeout: 2_000 });
+  await cy.unroute(tooltipCode);
+  for (const [control, says] of [
+    [cy.locator('p[role="status"]', { hasText: demoLine }), demoLine],
+    [cy.locator('input[aria-label="Accent color"]:not([inert] *)'), 'Accent color'],
+  ] as const) {
+    await cy.mouse.move(0, 0);
+    await control.hover();
+    await tooltip(says).waitFor({ timeout: 2_000 });
+  }
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
 }, 60_000);
 
 test('holding E down archives the whole Inbox within the change limit, which stops a script', async () => {

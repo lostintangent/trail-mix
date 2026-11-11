@@ -1,8 +1,9 @@
 import { Icon } from '@astryxdesign/core/Icon';
 import { IconButton } from '@astryxdesign/core/IconButton';
 import { colorVars, focusVars, radiusVars, sizeVars } from '@astryxdesign/core/theme/tokens.stylex';
-import { Tooltip } from '@astryxdesign/core/Tooltip';
 import * as stylex from '@stylexjs/stylex';
+import { useRef } from 'react';
+import { LaterTooltip } from '../../shared/LaterTooltip.tsx';
 import { RotateCcw } from 'lucide-react';
 import { preloadAccentMath } from './accent.ts';
 import { DEFAULT_ACCENT_HEX } from './palette.ts';
@@ -20,24 +21,24 @@ export function AccentChoice({
   accent: string | undefined;
   onChange: (color: string | undefined) => void;
 }) {
+  const target = useRef<HTMLSpanElement>(null);
   return (
     <>
-      <Tooltip content="Accent color">
-        <span {...stylex.props(styles.target)}>
-          <span {...stylex.props(styles.swatch)} />
-          <input
-            ref={registerPicker}
-            type="color"
-            aria-label="Accent color"
-            value={accent ?? DEFAULT_ACCENT_HEX}
-            // The math a pick needs loads as the member reaches for the picker, before any pick.
-            onPointerDown={preloadAccentMath}
-            onFocus={preloadAccentMath}
-            onChange={(event) => onChange(event.currentTarget.value)}
-            {...stylex.props(styles.input)}
-          />
-        </span>
-      </Tooltip>
+      <span ref={target} {...stylex.props(styles.target)}>
+        <span {...stylex.props(styles.swatch)} />
+        <input
+          ref={registerPicker}
+          type="color"
+          aria-label="Accent color"
+          value={accent ?? DEFAULT_ACCENT_HEX}
+          // The math a pick needs loads as the member reaches for the picker, before any pick.
+          onPointerDown={preloadAccentMath}
+          onFocus={preloadAccentMath}
+          onChange={(event) => onChange(event.currentTarget.value)}
+          {...stylex.props(styles.input)}
+        />
+      </span>
+      <LaterTooltip anchor={target} content="Accent color" />
       {accent && (
         <IconButton
           label="Use the default accent"
