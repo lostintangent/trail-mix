@@ -382,12 +382,15 @@ const styles = stylex.create({
     paddingTop: { default: spacingVars['--spacing-6'], [media.phone]: spacingVars['--spacing-1'] },
   },
   // Below a desktop's bar the subject needs less room above it, and on a phone the conversation
-  // ends above the island: its height, its padding, and the gap below it.
+  // ends above the island: its height, its padding, and the gap below it. It also ends above a
+  // toast, which rises over the island: a row of controls, its padding and airmail, and a gap. So a
+  // reply just sent comes into view clear of the toast that follows it, and the conversation's
+  // height never changes as a toast comes and goes.
   underBar: {
     paddingTop: { default: spacingVars['--spacing-2'], [media.phone]: spacingVars['--spacing-1'] },
     paddingBottom: {
       default: null,
-      [media.phone]: `calc(${tm.target} + ${spacingVars['--spacing-1']} * 2 + ${spacingVars['--spacing-3']} + ${tm.safeBottom})`,
+      [media.phone]: `calc(${tm.target} * 2 + ${spacingVars['--spacing-1']} * 2 + ${spacingVars['--spacing-2']} * 3 + ${tm.airmailHeight} + ${spacingVars['--spacing-3']} + ${tm.safeBottom})`,
     },
   },
   // A new message's sheet fills the reader, however little is written on it.

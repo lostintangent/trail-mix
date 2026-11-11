@@ -7,8 +7,9 @@ import {
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { memo, useDeferredValue, useEffect, useRef, useState } from 'react';
+import { memo, useDeferredValue, useEffect, useEffectEvent, useRef, useState } from 'react';
 import { stampStyles } from '../../../app/theme/stamps.ts';
+import { useMediaQuery } from '../../../shared/useMediaQuery.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Command } from '../../commands/index.ts';
 import { folderName } from '../../folders/index.ts';
@@ -216,11 +217,29 @@ const Conversation = memo(function Conversation({
   );
 });
 
-/** A reply on its way, folded where its copy will lie, under airmail while it leaves. */
+/**
+ * A reply on its way, folded where its copy will lie, under airmail while it leaves. One this device
+ * has just sent comes into view, so the member sees it leave: on a phone, clear of the island and
+ * the toast below it.
+ */
 function OnItsWay({ shown: { leaving, preview } }: { shown: Shown }) {
   const standing = useLeavingStanding(leaving);
+  const row = useRef<HTMLDivElement>(null);
+  const isPhone = useMediaQuery(media.phone);
+  const isStill = useMediaQuery(media.reducedMotion);
+  // Sent here, and still in its undo window as it first shows, rather than met later on.
+  const [isJustSent] = useState(leaving.pressedIn !== undefined && standing.is === 'counting');
+  const bringIntoView = useEffectEvent(() =>
+    row.current?.scrollIntoView({
+      block: isPhone ? 'center' : 'nearest',
+      behavior: isStill ? 'instant' : 'smooth',
+    }),
+  );
+  useEffect(() => {
+    if (isJustSent) bringIntoView();
+  }, [isJustSent]);
   return (
-    <div {...stylex.props(threadStyles.folded, styles.onItsWay)}>
+    <div ref={row} {...stylex.props(threadStyles.folded, styles.onItsWay)}>
       <Airmail isRunning={isOnItsWay(standing)} xstyle={styles.airmail} />
       <strong {...stylex.props(styles.foldedFrom)}>You</strong>
       <span {...stylex.props(styles.foldedPreview)}>{preview}</span>

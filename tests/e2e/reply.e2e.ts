@@ -170,6 +170,24 @@ for (const [size, options] of Object.entries(SIZES)) {
       );
     }, 60_000);
 
+    test('a reply closed untouched leaves nothing on the server', async () => {
+      const page = await inbox('light');
+      await open(page);
+      await composerLoaded(page);
+      const drafts = reader(page).getByRole('button', { name: /^Draft/ });
+      const before = await drafts.count();
+      let saves = 0;
+      page.on('request', (request) => {
+        if (request.method() === 'POST' && request.postData()?.includes('saveDraft')) saves++;
+      });
+      await page.keyboard.press('r');
+      await composer(page).getByRole('textbox', { name: 'Reply' }).waitFor();
+      await page.keyboard.press('Escape');
+      await composer(page).waitFor({ state: 'detached' });
+      await painted(page);
+      expect({ saves, drafts: await drafts.count() }).toEqual({ saves: 0, drafts: before });
+    }, 60_000);
+
     /** Writes a reply to the conversation open in `page`, and sends it. */
     async function sendReply(page: Page, text: string) {
       await page.keyboard.press('r');
@@ -202,7 +220,8 @@ for (const [size, options] of Object.entries(SIZES)) {
     }, 90_000);
 
     test('Undo brings the composer back as it was, and takes the reply from its conversation', async () => {
-      const page = await inbox('dark');
+      // A short window, where the end of the conversation starts out of view.
+      const page = await inbox('dark', { viewport: { ...options.viewport, height: 600 } });
       await open(page);
       const text = 'On second thought, Friday.';
       await watch(page, text);
@@ -264,6 +283,11 @@ async function sentShows(page: Page, text: string, screen: string) {
   expect(await onItsWay.locator('[data-airmail]').getAttribute('data-airmail')).toBe('running');
   const toastCard = page.locator('.astryx-toast').first();
   await toastCard.waitFor();
+  // The member sees it leave: on screen, and clear of the toast.
+  await until(async () => {
+    const [line, toast] = await Promise.all([onItsWay.boundingBox(), toastCard.boundingBox()]);
+    return !!line && !!toast && line.y >= 0 && line.y + line.height <= toast.y;
+  }, 2000);
   expect(await toastCard.evaluate(onPaper)).toBe(true);
   await readable(page, sizeOf(page), screen);
 }
