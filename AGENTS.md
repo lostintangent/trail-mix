@@ -156,6 +156,7 @@ src/
     outbox/            core/ is the state machine the Mailroom's alarm drives, ui/ lists what waits
     commands/          registry.ts and the palette
     offline/           core/ decides what the worker answers and what is kept, ui/ keeps snapshots in IndexedDB
+    notifications/     core/ chooses which arrivals notify and what each says, server/ seals and sends them by Web Push
     accounts/          core/ reads the add-account form, ui/ is the first-run screen and each account's page
     members/           core/ reads and changes the Access policy, server/ edits it through Cloudflare's API, ui/ is the Members page
   server/
