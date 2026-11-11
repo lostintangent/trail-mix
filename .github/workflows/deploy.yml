@@ -146,15 +146,6 @@ jobs:
           fi
           address="https://$worker.$(jq -er .result.subdomain "$RUNNER_TEMP/api.json").workers.dev"
 
-          # wrangler deploy won't create a bucket the Worker binds.
-          for bucket in $(jq -r '.r2_buckets[].bucket_name' "$config"); do
-            case "$(api "r2/buckets/$bucket")" in
-              200) ;;
-              404) $WRANGLER r2 bucket create "$bucket" ;;
-              *) failed "Couldn't look for the bucket $bucket" ;;
-            esac
-          done
-
           # The version serving now, which a failed deploy rolls back to. None before the first.
           case "$(api "workers/scripts/$worker/deployments")" in
             200)
@@ -166,18 +157,6 @@ jobs:
             *) failed "Couldn't read what $worker serves now" ;;
           esac
 
-          # Whether production has the key every member's passwords are sealed with, and the key that
-          # signs its notifications.
-          case "$(api "workers/scripts/$worker/secrets")" in
-            200)
-              has() { jq -e --arg name "$1" '.result | any(.name == $name)' "$RUNNER_TEMP/api.json" > /dev/null; }
-              if has CREDENTIALS_KEY; then key=kept; else key=missing; fi
-              if has PUSH_KEY; then push=kept; else push=missing; fi
-              ;;
-            404) key=missing push=missing ;;
-            *) failed "Couldn't read $worker's secrets" ;;
-          esac
-
           # The commit serving now, to see the rollback bring it back.
           before=$(curl -sS --max-time 10 -A "$USER_AGENT" "$address/health" 2> /dev/null | jq -r '.version // empty' 2> /dev/null || true)
           [[ "$before" =~ ^[0-9a-f]{40}$ ]] || before=
@@ -187,11 +166,15 @@ jobs:
             echo "address=$address"
             echo "previous=$previous"
             echo "before=$before"
-            echo "key=$key"
-            echo "push=$push"
           } >> "$GITHUB_OUTPUT"
           echo "Production is $address, now serving version ${previous:-none} (commit ${before:-unknown})."
 
+      # `bun run deploy`, as every copy's Deploy to Cloudflare builds run it: it makes any bucket the
+      # Worker binds, gives a Worker never deployed its CREDENTIALS_KEY and any Worker without one its
+      # PUSH_KEY, and stops rather than give a deployed Worker a new CREDENTIALS_KEY. It names the
+      # commit and the account, and passes ACCESS_API_TOKEN on with every deploy while the repository
+      # has it, so a token replaced in GitHub reaches the Worker next time. It logs the names of the
+      # secrets production keeps, never a value. Variables a deploy doesn't name stay as they were.
       - name: Deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -201,11 +184,8 @@ jobs:
           OPERATOR_EMAIL: ${{ vars.OPERATOR_EMAIL }}
           MICROSOFT_CLIENT_ID: ${{ vars.MICROSOFT_CLIENT_ID }}
           ACCESS_API_TOKEN: ${{ secrets.ACCESS_API_TOKEN }}
-          KEY: ${{ steps.account.outputs.key }}
-          PUSH: ${{ steps.account.outputs.push }}
         run: |
-          args=(--var "VERSION:$COMMIT" --var "CLOUDFLARE_ACCOUNT_ID:$CLOUDFLARE_ACCOUNT_ID")
-          args+=(--message "Commit $COMMIT")
+          args=(--message "Commit $COMMIT")
           if [ -n "$ACCESS_TEAM_DOMAIN" ]; then
             args+=(--var "ACCESS_TEAM_DOMAIN:$ACCESS_TEAM_DOMAIN" --var "ACCESS_AUD:$ACCESS_AUD")
           fi
@@ -216,36 +196,7 @@ jobs:
             args+=(--var "MICROSOFT_CLIENT_ID:$MICROSOFT_CLIENT_ID")
           fi
 
-          # Secrets reach the Worker in a file only the runner's user can read, which jq writes from
-          # the environment, so no secret is ever an argument or printed. A deploy adds to the
-          # secrets production has and removes none.
-          # - CREDENTIALS_KEY is made here once, when production has none, and never replaced.
-          # - PUSH_KEY, the P-256 key that signs notifications, is made once the same way. Replacing
-          #   it would silently end every device's subscription.
-          # - ACCESS_API_TOKEN goes with every deploy while the repository has it, so a token
-          #   replaced in GitHub reaches the Worker on the next deploy.
-          umask 077
-          secrets="$RUNNER_TEMP/secrets.json"
-          trap 'rm -f "$secrets"' EXIT
-          if [ "$KEY" = missing ]; then
-            NEW_KEY=$(openssl rand -base64 48 | tr -d '\n')
-            export NEW_KEY
-            echo "Production has no CREDENTIALS_KEY yet, so this deploy gives it one."
-          fi
-          if [ "$PUSH" = missing ]; then
-            NEW_PUSH_KEY=$(openssl genpkey -algorithm EC -pkeyopt ec_paramgen_curve:P-256)
-            export NEW_PUSH_KEY
-            echo "Production has no PUSH_KEY yet, so this deploy gives it one."
-          fi
-          jq -n '{}
-            + if env.NEW_KEY then {CREDENTIALS_KEY: env.NEW_KEY} else {} end
-            + if env.NEW_PUSH_KEY then {PUSH_KEY: env.NEW_PUSH_KEY} else {} end
-            + if (env.ACCESS_API_TOKEN // "") != "" then {ACCESS_API_TOKEN: env.ACCESS_API_TOKEN} else {} end' > "$secrets"
-          unset NEW_KEY NEW_PUSH_KEY
-          if [ "$(jq length "$secrets")" -gt 0 ]; then
-            args+=(--secrets-file "$secrets")
-          fi
-          $WRANGLER deploy "${args[@]}"
+          node src/shared/build/deploy.ts "${args[@]}"
 
       - name: Check /health reports the commit
         id: health
@@ -351,14 +302,6 @@ jobs:
           fi
           address="https://$worker.$(jq -er .result.subdomain "$RUNNER_TEMP/api.json").workers.dev"
 
-          for bucket in $(jq -r '.r2_buckets[].bucket_name' "$CONFIG"); do
-            case "$(api "r2/buckets/$bucket")" in
-              200) ;;
-              404) $WRANGLER r2 bucket create "$bucket" ;;
-              *) failed "Couldn't look for the bucket $bucket" ;;
-            esac
-          done
-
           case "$(api "workers/scripts/$worker/deployments")" in
             200)
               previous=$(jq -r '.result.deployments[0] | (.versions // []) | max_by(.percentage)
@@ -366,19 +309,6 @@ jobs:
               ;;
             404) previous= ;;
             *) failed "Couldn't read what $worker serves now" ;;
-          esac
-
-          # Whether the demo has the key that signs its visitors' cookies.
-          case "$(api "workers/scripts/$worker/secrets")" in
-            200)
-              if jq -e '.result | any(.name == "VISITOR_KEY")' "$RUNNER_TEMP/api.json" > /dev/null; then
-                visitor=kept
-              else
-                visitor=missing
-              fi
-              ;;
-            404) visitor=missing ;;
-            *) failed "Couldn't read $worker's secrets" ;;
           esac
 
           before=$(curl -sS --max-time 10 -A "$USER_AGENT" "$address/health" 2> /dev/null | jq -r '.version // empty' 2> /dev/null || true)
@@ -389,31 +319,16 @@ jobs:
             echo "address=$address"
             echo "previous=$previous"
             echo "before=$before"
-            echo "visitor=$visitor"
           } >> "$GITHUB_OUTPUT"
           echo "The demo is $address, now serving version ${previous:-none} (commit ${before:-unknown})."
 
+      # `bun run deploy` makes the demo's bucket, and its VISITOR_KEY once, when it has none.
+      # Replacing that key would only make every visitor new.
       - name: Deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          VISITOR: ${{ steps.account.outputs.visitor }}
-        run: |
-          args=(--config "$CONFIG" --var "VERSION:$COMMIT" --message "Commit $COMMIT")
-          # VISITOR_KEY signs each visitor's cookie. It is made here once, when the demo has none, in
-          # a file only the runner's user can read. Replacing it would make every visitor new.
-          umask 077
-          secrets="$RUNNER_TEMP/secrets.json"
-          trap 'rm -f "$secrets"' EXIT
-          if [ "$VISITOR" = missing ]; then
-            NEW_VISITOR_KEY=$(openssl rand -base64 48 | tr -d '\n')
-            export NEW_VISITOR_KEY
-            jq -n '{VISITOR_KEY: env.NEW_VISITOR_KEY}' > "$secrets"
-            unset NEW_VISITOR_KEY
-            args+=(--secrets-file "$secrets")
-            echo "The demo has no VISITOR_KEY yet, so this deploy gives it one."
-          fi
-          $WRANGLER deploy "${args[@]}"
+        run: node src/shared/build/deploy.ts --config "$CONFIG" --message "Commit $COMMIT"
 
       - name: Check /health reports the commit
         id: health

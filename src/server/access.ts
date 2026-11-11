@@ -51,10 +51,11 @@ export type SignIn = (
  * the team domain.
  */
 export function signInFor(config: SignInConfig, keys?: JWTVerifyGetKey): SignIn | undefined {
-  const { ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: audience, DEV_MEMBER: developer } = config;
-  if (team && audience) return accessSignIn(team, audience, keys ?? certificatesOf(team));
+  const access = accessOf(config);
+  if (access)
+    return accessSignIn(access.team, access.audience, keys ?? certificatesOf(access.team));
   if (signsInVisitors(config)) return visitorSignIn(config.VISITOR_KEY!, config.VISITOR_GATE!);
-  if (signsInDevelopers(config) && developer) return developmentSignIn(developer);
+  if (signsInDevelopers(config)) return developmentSignIn(config.DEV_MEMBER!);
   return undefined;
 }
 
@@ -64,8 +65,21 @@ export function signInFor(config: SignInConfig, keys?: JWTVerifyGetKey): SignIn 
  * on this.
  */
 export function signsInDevelopers(config: SignInConfig): boolean {
-  const { ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: audience, DEV_MEMBER: developer } = config;
-  return !(team && audience) && !signsInVisitors(config) && Boolean(developer);
+  return !accessOf(config) && !signsInVisitors(config) && Boolean(config.DEV_MEMBER);
+}
+
+/**
+ * The Access application a deployment names, once it names one in full. The team domain is taken
+ * however it was pasted: Cloudflare's own dialogs show it as an address,
+ * `https://example.cloudflareaccess.com/`, and the setup steps name only the domain.
+ */
+function accessOf(config: SignInConfig): { team: string; audience: string } | undefined {
+  const team = config.ACCESS_TEAM_DOMAIN?.trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/+$/, '')
+    .toLowerCase();
+  const audience = config.ACCESS_AUD?.trim();
+  return team && audience ? { team, audience } : undefined;
 }
 
 /**
@@ -74,9 +88,8 @@ export function signsInDevelopers(config: SignInConfig): boolean {
  * account.
  */
 export function signsInVisitors(config: SignInConfig): boolean {
-  const { ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: audience } = config;
   return (
-    !(team && audience) &&
+    !accessOf(config) &&
     Boolean(config.VISITOR_KEY) &&
     Boolean(config.DEMO_MAILBOX) &&
     config.VISITOR_GATE !== undefined

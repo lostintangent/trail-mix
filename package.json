@@ -4,6 +4,7 @@
   "private": true,
   "license": "MIT",
   "type": "module",
+  "packageManager": "bun@1.4.4",
   "sideEffects": [
     "*.css",
     "*.stylex.ts"
@@ -12,6 +13,7 @@
     "dev": "node node_modules/vite/bin/vite.js dev",
     "build": "bun --bun vite build",
     "build:demo": "CLOUDFLARE_ENV=demo bun --bun vite build --outDir dist-demo",
+    "deploy": "node src/shared/build/deploy.ts",
     "check": "bun check --no-script -b",
     "preview": "node node_modules/vite/bin/vite.js preview",
     "test:mail": "bun tests/mail-server/server.ts prepare && bun test --path-ignore-patterns=node_modules/** tests/mail-server tests/workerd.mail.test.ts tests/mail-check tests/contract tests/reader/demo.mail.test.ts tests/mail-clients tests/accounts src/features/mailroom",

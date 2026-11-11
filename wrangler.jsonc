@@ -5,6 +5,10 @@
   "compatibility_date": "2026-11-03",
   "compatibility_flags": ["nodejs_compat"],
   "observability": { "enabled": true },
+  // A deploy keeps the variables the operator set in the dashboard, such as ACCESS_TEAM_DOMAIN and
+  // ACCESS_AUD, so a copy deployed with the Deploy to Cloudflare button keeps its sign-in through
+  // every build. A deploy's own `--var`s still replace any of the same name.
+  "keep_vars": true,
   // Production answers at trail-mix.<subdomain>.workers.dev, where the deploy checks /health. To
   // serve it from a domain of your own on Cloudflare as well, add one line:
   // "routes": [{ "pattern": "mail.example.com", "custom_domain": true }],

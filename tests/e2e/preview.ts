@@ -16,7 +16,7 @@ const KEPT_LINES = 300;
 /**
  * Serves the built app the way production does, on workerd, through `vite preview` under Node. The
  * build must already exist, so a test drives what CI built rather than building its own. The Worker
- * gets the variables a fresh clone starts with, from `.dev.vars.example`, so it signs in as the
+ * gets the variables a fresh clone starts with, from `dev.vars.example`, so it signs in as the
  * development member on localhost. `vars` override them, such as `DEMO_MAILBOX`, and `env` adds to
  * the preview's environment, such as a certificate authority for workerd to trust.
  *
@@ -93,9 +93,9 @@ export function serverFunctionIds(build: Build = BUILDS.app): Record<string, str
 /** An entry of Start's manifest: `"<id>": { functionName: "<name>_createServerFn_handler"`. */
 const MANIFEST_ENTRY = /"(\w+)":\s*\{\s*functionName:\s*"(\w+)_createServerFn_handler"/g;
 
-/** The variables `.dev.vars.example` sets, as a fresh clone copies them. */
+/** The variables `dev.vars.example` sets, as a fresh clone copies them. */
 function exampleVars(): Record<string, string> {
-  const lines = readFileSync(join(ROOT, '.dev.vars.example'), 'utf8').split('\n');
+  const lines = readFileSync(join(ROOT, 'dev.vars.example'), 'utf8').split('\n');
   return Object.fromEntries(
     lines
       .filter((line) => /^\w+=/.test(line))

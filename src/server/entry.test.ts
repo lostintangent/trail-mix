@@ -139,6 +139,18 @@ test('a deployment with no sign-in configured serves the setup page and nothing 
   expect(reachedApp).toEqual([]);
 });
 
+test('the setup page names the address to put behind Access, and the README’s steps', async () => {
+  const page = await (
+    await worker.fetch(new Request('https://trail-mix.ada.workers.dev/'), mailrooms())
+  ).text();
+  expect(page).toContain('<code>trail-mix.ada.workers.dev</code>');
+  expect(page).toContain('ACCESS_TEAM_DOMAIN');
+  expect(page).toContain('github.com/lostintangent/trail-mix#2-sign-in-with-cloudflare-access');
+
+  const local = await (await worker.fetch(new Request(`${LOCAL}/`), mailrooms())).text();
+  expect(local).toContain('copy <code>dev.vars.example</code> to <code>.dev.vars</code>');
+});
+
 test('a request nobody signed in to reaches no Mailroom and not the app', async () => {
   const { env, opened } = developer();
   reachedApp.length = 0;

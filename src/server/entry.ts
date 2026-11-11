@@ -147,7 +147,7 @@ function membersOf(env: Env, member: string) {
   return membersFor({
     caller: member,
     operator: env.OPERATOR_EMAIL,
-    audience: env.ACCESS_AUD,
+    audience: env.ACCESS_AUD?.trim(),
     api: account && token ? cloudflareApi({ base, account, token }) : undefined,
     mailroomOf: (removed) => env.MAILROOM.get(env.MAILROOM.idFromName(removed)),
   });
@@ -169,8 +169,12 @@ function isFromTrailMix(request: Request): boolean {
 function setupPage(url: URL): Response {
   const isLocal = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
   const next = isLocal
-    ? 'To sign in while developing, copy <code>.dev.vars.example</code> to <code>.dev.vars</code> and restart.'
-    : 'Put Cloudflare Access in front of this Worker, then set <code>ACCESS_TEAM_DOMAIN</code> and <code>ACCESS_AUD</code>. The README walks through it.';
+    ? '<p>To sign in while developing, copy <code>dev.vars.example</code> to <code>.dev.vars</code> and restart.</p>'
+    : `<ol>
+<li>In Cloudflare Zero Trust, add a self-hosted Access application for <code>${escapeHtml(url.hostname)}</code> that lets your email address in with a one-time PIN.</li>
+<li>In this Worker's settings, under Variables and Secrets, add <code>ACCESS_TEAM_DOMAIN</code>, your team domain, and <code>ACCESS_AUD</code>, the application's Audience (AUD) tag. Then reload this page.</li>
+</ol>
+<p><a href="${SETUP_STEPS}">Trail Mix's README</a> walks through both, step by step.</p>`;
   const page = `<!doctype html>
 <html lang="en">
 <meta charset="utf-8">
@@ -179,11 +183,18 @@ function setupPage(url: URL): Response {
 <body style="font-family: system-ui; max-width: 36rem; margin: 4rem auto; padding: 0 1rem">
 <h1>Trail Mix isn’t set up yet</h1>
 <p>It stays closed until it can check who is signing in.</p>
-<p>${next}</p>
+${next}
 </body>
 </html>`;
   return new Response(page, {
     status: 503,
     headers: { 'Content-Type': 'text/html; charset=utf-8' },
   });
+}
+
+/** Where the setup page sends an operator: the README's steps for signing in with Access. */
+const SETUP_STEPS = 'https://github.com/lostintangent/trail-mix#2-sign-in-with-cloudflare-access';
+
+function escapeHtml(text: string): string {
+  return text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
 }

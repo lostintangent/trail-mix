@@ -1,12 +1,14 @@
 # The Worker's variables for `bun run dev` and `bun run preview`. Copy this file to `.dev.vars`,
-# which stays on your machine.
+# which stays on your machine. It's for development only. A deployment makes its own keys, so the
+# Deploy to Cloudflare button, which offers every line of a `.dev.vars.example` as a secret to
+# set, finds no such file here.
 
 # The one development member. It signs in only for requests addressed to localhost, and only while
 # Cloudflare Access isn't configured.
 DEV_MEMBER=dev@trailmix.test
 
 # The key each member's account passwords are sealed with. Any value of 32 characters or more works
-# on your machine. A deployment gets its own, set with `wrangler secret put CREDENTIALS_KEY`.
+# on your machine. A deployment's first `bun run deploy` makes its own.
 CREDENTIALS_KEY=development-only-not-a-secret-0123456789
 
 # Every new Mailroom gets the demo mailbox: Personal with this many messages in its Inbox, and Work

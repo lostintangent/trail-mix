@@ -76,6 +76,16 @@ test('a token Access signed for this application names its member', async () => 
   );
 });
 
+test('the team domain may be pasted as Cloudflare shows it, as an address', async () => {
+  const signed = await token();
+  for (const pasted of [`https://${TEAM}`, `https://${TEAM}/`, ` HTTPS://${TEAM.toUpperCase()} `]) {
+    const config = { ACCESS_TEAM_DOMAIN: pasted, ACCESS_AUD: ` ${AUD}\n` };
+    expect(await member(config, request({ 'Cf-Access-Jwt-Assertion': signed }))).toBe(
+      'ada@example.com',
+    );
+  }
+});
+
 test('only A to Z fold, so an address in another script keeps its own Mailroom', async () => {
   const kelvin = await token({ email: 'Mar\u212Aus@example.com' });
 
@@ -146,6 +156,8 @@ test('a deployment with no sign-in configured has no way to sign in', () => {
   expect(signInFor({})).toBeUndefined();
   expect(signInFor({ ACCESS_TEAM_DOMAIN: TEAM })).toBeUndefined();
   expect(signInFor({ ACCESS_AUD: AUD })).toBeUndefined();
+  expect(signInFor({ ACCESS_TEAM_DOMAIN: 'https://', ACCESS_AUD: AUD })).toBeUndefined();
+  expect(signInFor({ ACCESS_TEAM_DOMAIN: TEAM, ACCESS_AUD: '  ' })).toBeUndefined();
 });
 
 describe('a visitor to the public demo', () => {

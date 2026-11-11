@@ -7,7 +7,6 @@ dist
 .env.*
 .dev.vars
 .dev.vars.*
-!.dev.vars.example
 
 # Local Workers state. It can hold mail from a test mailbox.
 .wrangler
