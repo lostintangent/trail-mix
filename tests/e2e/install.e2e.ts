@@ -77,14 +77,18 @@ test('the installed app opens offline to the lists and conversations it showed',
 
 test('losing the network while open, the installed app still opens the conversations it kept', async () => {
   const { context, page } = await installed();
-  // Far enough down that a new start doesn't prepare it ahead.
-  const subject = await openConversation(page, 4);
+  // HTML mail, far enough down that a new start doesn't prepare it ahead. Rows move with the
+  // clock, so it is found by its subject.
+  const designReview = /Design review notes/;
+  const subject = await openConversation(page, designReview);
   await page.waitForFunction(async () => (await keptCount()) >= 5, undefined, { polling: 200 });
-  // A new start, so the conversation is kept on the device but not in the page.
+  // A new start, so the conversation is kept on the device but not in the page, and the pointer
+  // off the list, so resting on its row doesn't fetch it ahead.
+  await page.mouse.move(0, 0);
   await page.reload({ waitUntil: 'networkidle' });
   await context.setOffline(true);
   await page.getByText('Offline. Showing what this device kept').waitFor();
-  expect(await openConversation(page, 4)).toBe(subject);
+  expect(await openConversation(page, designReview)).toBe(subject);
   await context.close();
 }, 60_000);
 
@@ -136,8 +140,9 @@ async function installed() {
 }
 
 /** Opens a row's conversation and waits for its open message to show. Returns its subject. */
-async function openConversation(page: Page, row: number): Promise<string> {
-  await page.getByRole('option').nth(row).click();
+async function openConversation(page: Page, row: number | RegExp): Promise<string> {
+  const rows = page.getByRole('option');
+  await (typeof row === 'number' ? rows.nth(row) : rows.filter({ hasText: row }).first()).click();
   const subject = page.locator('section[aria-label="Reader"] h1');
   await page.waitForFunction(() => {
     const frames = [
