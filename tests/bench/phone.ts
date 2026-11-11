@@ -17,6 +17,13 @@ const PHONE_SLOWDOWN = 4;
  */
 const REFERENCE_INDEX = 4_270;
 
+/**
+ * The reference desktop's `workloadIndex`, as the highest of three runs, ten times over (962 to
+ * 976). It is printed beside the benchmark index, which sets the slowdown, so each runner's two can
+ * be compared before either replaces the other.
+ */
+const REFERENCE_WORKLOAD = 970;
+
 export type CpuProfile = { index: number; rate: number };
 
 let measured: Promise<CpuProfile> | undefined;
@@ -33,12 +40,19 @@ export function cpuProfile(browser: Browser): Promise<CpuProfile> {
     const page = await context.newPage();
     const runs: number[] = [];
     for (let run = 0; run < 3; run++) runs.push(await page.evaluate(benchmarkIndex));
+    const workloads: number[] = [];
+    for (let run = 0; run < 3; run++) workloads.push(await page.evaluate(workloadIndex));
     await context.close();
     const index = Math.max(...runs);
     const rate = Math.max(1, (PHONE_SLOWDOWN * index) / REFERENCE_INDEX);
+    const workload = Math.max(...workloads);
+    const workloadRate = Math.max(1, (PHONE_SLOWDOWN * workload) / REFERENCE_WORKLOAD);
     const [cpu] = cpus();
     console.log(
       `CPU: ${cpu?.model.trim() ?? 'unknown'}, ${availableParallelism()} cores. Benchmark index ${Math.round(index)} (${runs.map(Math.round).join(', ')}), so the phone runs at ${rate.toFixed(2)}x slowdown.`,
+    );
+    console.log(
+      `Workload index ${workload} (${workloads.join(', ')}), which would run the phone at ${workloadRate.toFixed(2)}x.`,
     );
     return { index, rate };
   })();
@@ -113,4 +127,62 @@ function benchmarkIndex(): number {
   }
 
   return (benchmarkIndexGC() + benchmarkIndexNoGC()) / 2;
+}
+
+/**
+ * A workload shaped like what the budgets time, to calibrate by in place of the benchmark index if
+ * it tracks machines better: a list's rows built from their data, styled and laid out, changed and
+ * laid out again, then taken down, as passes a second over half a second. It runs in the page, so
+ * it must stay self-contained.
+ */
+function workloadIndex(): number {
+  const style = document.createElement('style');
+  style.textContent = [
+    '.rows { display: flex; flex-direction: column; width: 390px; font: 15px system-ui }',
+    '.row { display: grid; grid-template-columns: 32px 1fr auto; gap: 2px 8px; padding: 8px 12px; border-radius: 8px }',
+    '.row.unread .who { font-weight: 600 }',
+    '.who, .what { overflow: hidden; white-space: nowrap; text-overflow: ellipsis }',
+    '.what { grid-column: 2 / 4 }',
+    '.when { color: gray; font-size: 13px }',
+  ].join('\n');
+  document.head.append(style);
+  const messages = Array.from({ length: 50 }, (_, i) => ({
+    from: `Sender number ${i}`,
+    subject: `The subject of message ${i}, about the plan for the week`,
+    date: (i * 7919) % 1000,
+    isUnread: i % 3 === 0,
+  }));
+  const start = performance.now();
+  let passes = 0;
+  while (performance.now() - start < 500) {
+    const sorted = (JSON.parse(JSON.stringify(messages)) as typeof messages).sort(
+      (a, b) => b.date - a.date,
+    );
+    const rows = document.createElement('div');
+    rows.className = 'rows';
+    for (const { from, subject, date, isUnread } of sorted) {
+      const row = document.createElement('div');
+      row.className = isUnread ? 'row unread' : 'row';
+      for (const [name, text] of [
+        ['face', from.slice(0, 2)],
+        ['who', from],
+        ['when', String(date)],
+        ['what', subject],
+      ] as const) {
+        const span = document.createElement('span');
+        span.className = name;
+        span.textContent = text;
+        row.append(span);
+      }
+      rows.append(row);
+    }
+    document.body.append(rows);
+    void rows.offsetHeight;
+    for (const row of rows.children) row.classList.toggle('unread');
+    void rows.offsetHeight;
+    rows.remove();
+    passes++;
+  }
+  style.remove();
+  return Math.round(passes / ((performance.now() - start) / 1000));
 }
