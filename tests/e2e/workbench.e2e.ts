@@ -809,8 +809,9 @@ test('the search field is the palette: ⌘K, a click or the phone’s island ope
   const commands = page.getByRole('listbox', { name: 'Commands' });
   const heading = (name: string) => page.getByRole('heading', { name, level: 2 });
 
-  // ⌘K lists every command but its own, and typing part of a title highlights the best match.
-  await expect(field.getAttribute('placeholder')).resolves.toBe('Search and commands');
+  // Beside the sidebar's fold button it says only "Search". ⌘K lists every command but its own,
+  // and typing part of a title highlights the best match.
+  await expect(field.getAttribute('placeholder')).resolves.toBe('Search');
   await page.keyboard.press('ControlOrMeta+k');
   await expect(field.evaluate((node) => node === document.activeElement)).resolves.toBe(true);
   await commands.getByRole('option').first().waitFor();
@@ -1105,7 +1106,7 @@ test('the reader says where its conversation sits, and steps to the ones either 
   await rows.first().click();
   await shows(`1 of ${await listed()}`);
 
-  // New message tops the sidebar, and opens a message of its own.
+  // New message ends the sidebar's foot, and opens a message of its own.
   await page
     .getByRole('navigation', { name: 'Mailboxes' })
     .getByRole('button', { name: 'New message' })

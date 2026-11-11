@@ -41,8 +41,11 @@ export const SearchContext = createContext<SearchState>({ text: '', onSearch: ()
  * The field that searches every account as the member types. It is on screen from the first paint,
  * so it is a native search input drawn with Astryx's input tokens, not Astryx's TextInput, whose
  * field machinery would weigh on the first load.
+ *
+ * On a desktop it names itself "Search and commands", with its key, except beside the sidebar's
+ * fold button, where there's room only for "Search". A phone's says "Search mail".
  */
-export function SearchField() {
+export function SearchField({ isCompact = false }: { isCompact?: boolean }) {
   const { text, onSearch } = use(SearchContext);
   const input = useRef<HTMLInputElement>(null);
   // On a desktop the field is the way to the commands too, and says so, with its key.
@@ -106,7 +109,7 @@ export function SearchField() {
           ref={input}
           type="search"
           aria-label="Search mail"
-          placeholder={isPhone ? 'Search mail' : 'Search and commands'}
+          placeholder={isPhone ? 'Search mail' : isCompact ? 'Search' : 'Search and commands'}
           value={text}
           aria-controls={isOpen ? listId : undefined}
           aria-activedescendant={isOpen ? active : undefined}

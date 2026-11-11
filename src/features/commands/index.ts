@@ -15,10 +15,6 @@ export {
   type Command,
   type MenuIconName,
 } from './registry.ts';
-export {
-  CommandButton,
-  PrimaryCommandButton,
-  RegisteredCommandButton,
-} from './ui/CommandButton.tsx';
+export { CommandButton, RegisteredCommandButton } from './ui/CommandButton.tsx';
 export { CommandMatches, preloadCommandMatches, ShortcutSheet } from './ui/lazy.ts';
 export type { PaletteKeys } from './ui/CommandMatches.tsx';

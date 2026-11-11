@@ -12,18 +12,18 @@ import { LaterTooltip } from '../../../shared/LaterTooltip.tsx';
 import { StampDot } from '../../../app/theme/StampDot.tsx';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, Folder, View } from '../../mail/core/index.ts';
-import type { SidebarRail } from './Sidebar.tsx';
 import { lift, troubleOf } from './Tree.tsx';
 import { UNIFIED_VIEWS, type ViewCounts } from './views.ts';
 
 /**
- * The folded sidebar: its header turned on its side, one target wide, with the views and each
- * account's stamp below it, so folding gives up the tree without taking anything the member needs.
- * Each shows its name as a tooltip, a stamp opens its account's Inbox, and an account that needs
- * the member marks its stamp. The gear the sidebar pins over both layouts ends it.
+ * The folded sidebar, one target wide: under the fold button and a rule, the views and each
+ * account's stamp, then Add account and New message over a rule and the gear, so folding gives up
+ * the tree without taking anything the member needs. Each shows its name as a tooltip, a stamp
+ * opens its account's Inbox, and an account that needs the member marks its stamp. The fold button
+ * and the gear are the sidebar's, pinned over both layouts.
  */
 export function RailContent({
-  rail,
+  compose,
   view,
   onSelect,
   accounts,
@@ -31,7 +31,7 @@ export function RailContent({
   counts,
   onAddAccount,
 }: {
-  rail: SidebarRail;
+  compose?: ReactNode;
   view: View;
   onSelect: (view: View) => void;
   accounts: readonly Account[];
@@ -41,8 +41,8 @@ export function RailContent({
 }) {
   return (
     <>
+      {/* Where the pinned fold button lands. */}
       <span {...stylex.props(styles.foldRoom)} />
-      {rail.top}
       <span {...stylex.props(styles.rule)} />
       <div {...stylex.props(styles.railScroll)}>
         {UNIFIED_VIEWS.map(({ in: unified, label, icon }) => {
@@ -89,6 +89,7 @@ export function RailContent({
           <Icon icon={MailPlus} size="sm" />
         </RailButton>
       )}
+      {compose}
       <span {...stylex.props(styles.rule)} />
       {/* Where the pinned gear lands. */}
       <span {...stylex.props(styles.foldRoom)} />

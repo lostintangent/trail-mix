@@ -83,7 +83,6 @@ import { OPEN_SETTINGS, workbenchCommands } from './commands.ts';
 import { FoldToggle } from './FoldToggle.tsx';
 import {
   CommandButton,
-  PrimaryCommandButton,
   RegisteredCommandButton,
   Commands,
   focusSearch,
@@ -154,12 +153,15 @@ type Pane = 'sidebar' | 'list' | 'reader';
 
 /** The one search field, wherever it sits. It reads the search from `SearchContext`. */
 const SEARCH_FIELD = <SearchField />;
+/** The same field in the sidebar's head, beside the fold button, with fewer words. */
+const SIDEBAR_SEARCH_FIELD = <SearchField isCompact />;
 
 /**
- * New message, at the top of a desktop's sidebar. It reads its command as it renders, so the
- * sidebar, memoized around it, doesn't render again with every key.
+ * New message, at the foot of a desktop's sidebar and on its rail, as a small button with the accent
+ * fill, the sidebar's one primary button. It reads its command as it renders, so the sidebar,
+ * memoized around it, doesn't render again with every key.
  */
-const NEW_MESSAGE = <PrimaryCommandButton id="message.new" />;
+const NEW_MESSAGE = <RegisteredCommandButton id="message.new" isAccent />;
 
 /** The Settings gear at the foot of the sidebar, drawn from its command. */
 const SETTINGS_GEAR = <RegisteredCommandButton id={OPEN_SETTINGS} />;
@@ -170,11 +172,10 @@ const OFFLINE: Record<Exclude<Reach, 'online'>, { said: string; more?: string }>
   'offline-kept': { said: 'Offline', more: 'kept mail' },
 };
 
-/** How a desktop's sidebar folds: to its rail, led by New message, with a button that holds still. */
+/** How a desktop's sidebar folds: to its rail, with a button that holds still. */
 const RAIL: SidebarRail = {
   width: PANELS.sidebar.rail,
   fold: <FoldToggle />,
-  top: <RegisteredCommandButton id="message.new" isAccent />,
 };
 
 /** Where a phone's toasts rise to: above the island, where the pane's actions float. */
@@ -917,9 +918,9 @@ export function Workbench({
                 folderActions={folderEditing.actionsFor}
                 accountActions={accountActions}
                 onAddAccount={addAccount}
-                header={isPhone ? undefined : NEW_MESSAGE}
-                search={isFieldInSidebar ? SEARCH_FIELD : undefined}
+                search={isFieldInSidebar ? SIDEBAR_SEARCH_FIELD : undefined}
                 settings={SETTINGS_GEAR}
+                compose={isPhone ? undefined : NEW_MESSAGE}
                 note={isVisitor ? VISITORS_NOTE : undefined}
                 isBusy={isChecking}
               />

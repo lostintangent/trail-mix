@@ -6,6 +6,7 @@ import { unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 import { atRest } from '../atRest.ts';
+import { PANELS } from '../../src/features/workbench/ui/panels.ts';
 
 /**
  * The sidebar, end to end: the built app on workerd, on a member of its own, whose demo mailbox
@@ -42,6 +43,49 @@ async function open(options: BrowserContextOptions): Promise<Page> {
 const personal = (page: Page) => page.getByRole('region', { name: 'Personal' });
 const folderRow = (page: Page, name: string) =>
   personal(page).getByRole('button', { name: new RegExp(`^${name}( \\d+)?$`) });
+
+/** How a desktop's foot fits: everything whole, in order, apart, and inside the sidebar. */
+const FITS = { isNameWhole: true, isInOrder: true, isInside: true, isLevel: true };
+
+async function footFits(page: Page) {
+  return page.getByRole('navigation', { name: 'Mailboxes' }).evaluate((nav) => {
+    const shown = (element: Element) => !element.closest('[inert]');
+    const button = (name: string) =>
+      [...nav.querySelectorAll('button')].find(
+        (each) => shown(each) && each.getAttribute('aria-label') === name,
+      )!;
+    const name = [...nav.querySelectorAll('span')].find(
+      (span) => shown(span) && span.textContent === 'Trail Mix',
+    )!;
+    const [gear, words, compose] = [button('Open settings'), name, button('New message')].map(
+      (element) => element.getBoundingClientRect(),
+    ) as [DOMRect, DOMRect, DOMRect];
+    const edge = nav.getBoundingClientRect();
+    const middle = ({ top, height }: DOMRect) => top + height / 2;
+    return {
+      isNameWhole: name.scrollWidth <= name.clientWidth,
+      isInOrder: gear.right <= words.left && words.left + name.scrollWidth <= compose.left,
+      isInside: gear.left >= edge.left && compose.right <= edge.right,
+      isLevel: Math.abs(middle(gear) - middle(compose)) < 1,
+    };
+  });
+}
+
+/** What the search field says while it's empty, and whether all of it shows. */
+function searchSays(page: Page) {
+  return page
+    .getByRole('searchbox', { name: 'Search mail' })
+    .evaluate((input: HTMLInputElement) => {
+      const { fontWeight, fontSize, fontFamily, paddingInline } = getComputedStyle(input);
+      const pen = document.createElement('canvas').getContext('2d')!;
+      pen.font = `${fontWeight} ${fontSize} ${fontFamily}`;
+      const room = input.clientWidth - 2 * parseFloat(paddingInline || '0');
+      return {
+        words: input.placeholder,
+        isWhole: pen.measureText(input.placeholder).width <= room,
+      };
+    });
+}
 
 async function readable(page: Page, screen: string) {
   await page.screenshot({ path: join(SHOTS, `sidebar-${screen}.png`) });
@@ -125,7 +169,8 @@ test('the foot holds the Settings gear, a rule and Trail Mix, and says nothing a
       const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
       const name = sidebar.getByText('Trail Mix', { exact: true });
       const gear = sidebar.getByRole('button', { name: 'Open settings' });
-      // The gear, then the name, side by side at the very foot, and nothing below or after them.
+      // The gear, then the name, side by side at the very foot, then on a desktop New message at its
+      // far end, and nothing below or after them.
       const [nameBox, gearBox, sidebarBox] = await Promise.all([
         name.boundingBox(),
         gear.boundingBox(),
@@ -135,6 +180,10 @@ test('the foot holds the Settings gear, a rule and Trail Mix, and says nothing a
         Math.abs(nameBox!.y + nameBox!.height / 2 - (gearBox!.y + gearBox!.height / 2)),
       ).toBeLessThan(2);
       expect(gearBox!.x).toBeLessThan(nameBox!.x);
+      if (size === 'desktop') {
+        expect(await footFits(page)).toEqual(FITS);
+        expect(await searchSays(page)).toEqual({ words: 'Search', isWhole: true });
+      }
       expect(sidebarBox!.y + sidebarBox!.height - (gearBox!.y + gearBox!.height)).toBeLessThan(40);
       const atFoot = {
         size,
@@ -152,7 +201,11 @@ test('the foot holds the Settings gear, a rule and Trail Mix, and says nothing a
           gearBox!.y - 1,
         ),
       };
-      expect(atFoot).toEqual({ size, colorScheme, controls: ['Open settings'] });
+      expect(atFoot).toEqual({
+        size,
+        colorScheme,
+        controls: size === 'desktop' ? ['Open settings', 'New message'] : ['Open settings'],
+      });
       expect((await sidebar.getByRole('status').allTextContents()).join('')).toBe('');
       expect(await page.getByText(/Up to date|Checking for mail/).count()).toBe(0);
       if (size === 'phone') {
@@ -160,11 +213,45 @@ test('the foot holds the Settings gear, a rule and Trail Mix, and says nothing a
       }
       await readable(page, `${size}-${colorScheme}-foot`);
       if (size === 'desktop') {
-        // Folded, the rail keeps the gear where it was, alone at its foot.
+        // Folded, the rail keeps the gear where it was, with a rule over it and New message above
+        // that, and a rule under the fold button at its head.
         await page.keyboard.press('ControlOrMeta+b');
         await sidebar.getByRole('button', { name: 'Unfold the sidebar' }).waitFor();
         await atRest(page);
         expect(await gear.boundingBox()).toEqual(gearBox);
+        // The search moves above the list, where its words have room.
+        expect(await searchSays(page)).toEqual({ words: 'Search and commands', isWhole: true });
+        expect(
+          await sidebar.evaluate((nav) => {
+            const shown = (element: Element) => !element.closest('[inert]');
+            const box = (name: string) =>
+              [...nav.querySelectorAll('button')]
+                .find((button) => shown(button) && button.getAttribute('aria-label') === name)!
+                .getBoundingClientRect();
+            const [fold, add, compose, gear] = [
+              'Unfold the sidebar',
+              'Add account',
+              'New message',
+              'Open settings',
+            ].map(box) as [DOMRect, DOMRect, DOMRect, DOMRect];
+            const first = [...nav.querySelectorAll('button')]
+              .filter(shown)
+              .map((button) => button.getBoundingClientRect())
+              .filter(({ top }) => top > fold.bottom)
+              .sort((one, other) => one.top - other.top)[0]!;
+            const rules = [...nav.querySelectorAll('span')]
+              .filter(shown)
+              .map((span) => span.getBoundingClientRect())
+              .filter(({ width, height }) => height === 1 && width === 16);
+            const ruled = (above: DOMRect, below: DOMRect) =>
+              rules.some(({ top, bottom }) => top >= above.bottom && bottom <= below.top);
+            return {
+              isRuledUnderFold: ruled(fold, first),
+              isComposeOverAdd: compose.top >= add.bottom,
+              isRuledOverGear: ruled(compose, gear),
+            };
+          }),
+        ).toEqual({ isRuledUnderFold: true, isComposeOverAdd: true, isRuledOverGear: true });
         await readable(page, `${size}-${colorScheme}-rail-foot`);
         await page.keyboard.press('ControlOrMeta+b');
         await sidebar.getByRole('button', { name: 'Fold the sidebar' }).waitFor();
@@ -215,6 +302,39 @@ test('the foot holds the Settings gear, a rule and Trail Mix, and says nothing a
     }
   }
 }, 90_000);
+
+test('at its narrowest, the foot still holds the gear, the rule, the name and New message, uncut, under a mouse or a finger', async () => {
+  for (const [pointer, options] of [
+    ['mouse', { colorScheme: 'light' }],
+    ['finger', { colorScheme: 'dark', hasTouch: true }],
+  ] as const) {
+    const context = await app.context({ ...DESKTOP, deviceScaleFactor: 2, ...options });
+    await context.addInitScript(
+      ([key, width]) => localStorage.setItem(key, JSON.stringify({ width, isCollapsed: false })),
+      [PANELS.sidebar.key, PANELS.sidebar.min] as const,
+    );
+    const page = await context.newPage();
+    page.on('pageerror', (error) => errors.push(error.message));
+    await page.goto(app.url);
+    await mailIsIn(page);
+    await atRest(page);
+    const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
+    expect(Math.round((await sidebar.boundingBox())!.width)).toBe(PANELS.sidebar.min);
+    expect({ pointer, fits: await footFits(page) }).toEqual({ pointer, fits: FITS });
+    expect(await searchSays(page)).toEqual({ words: 'Search', isWhole: true });
+    const target = pointer === 'finger' ? 44 : 32;
+    for (const name of ['Open settings', 'New message']) {
+      const box = (await sidebar.getByRole('button', { name }).boundingBox())!;
+      expect({ name, width: box.width, height: box.height }).toEqual({
+        name,
+        width: target,
+        height: target,
+      });
+    }
+    await readable(page, `desktop-${options.colorScheme}-narrowest-${pointer}`);
+    await context.close();
+  }
+}, 60_000);
 
 test('every folder and account has its menu without a hover, for itself rather than the view', async () => {
   const page = await open({ ...DESKTOP, colorScheme: 'light' });
@@ -304,14 +424,18 @@ test('the tree is one Tab stop, whose arrows move through it and fold it, and wh
     stops.push(await focused());
   }
   expect(stops).toEqual([
-    'BUTTON: New message',
     'INPUT: Search mail',
     'BUTTON: Inbox',
     'BUTTON: Add account',
+    'BUTTON: Open settings',
   ]);
+  // The foot reads from left to right, from the gear to New message at its far end.
+  await moveTo('Tab', 'BUTTON: New message');
+  for (const back of ['Open settings', 'Add account', 'Inbox']) {
+    await moveTo('Shift+Tab', `BUTTON: ${back}`);
+  }
 
   // The arrows step through the lines, into an account and back out of it, and reach either end.
-  await moveTo('Shift+Tab', 'BUTTON: Inbox');
   await moveTo('ArrowDown', 'BUTTON: Flagged');
   await moveTo('End', 'BUTTON: Trash');
   await moveTo('Home', 'BUTTON: Inbox');

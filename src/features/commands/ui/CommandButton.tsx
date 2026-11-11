@@ -1,7 +1,6 @@
 import { Button } from '@astryxdesign/core/Button';
 import { Icon } from '@astryxdesign/core/Icon';
 import { IconButton } from '@astryxdesign/core/IconButton';
-import { spacingVars, typeScaleVars, typographyVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import type { StyleXStyles } from '@stylexjs/stylex';
 import { memo } from 'react';
@@ -68,57 +67,8 @@ export function RegisteredCommandButton({ id, isAccent }: { id: string; isAccent
   return command ? <CommandButton command={command} isAccent={isAccent} /> : null;
 }
 
-/**
- * A pane's primary command as a full-width button, with its icon, its title and, at the end, the
- * key that runs it. It finds the command in the registry by id as it renders, so the same element
- * serves every render, and a pane memoized around it renders only when it must.
- */
-export function PrimaryCommandButton({ id }: { id: string }) {
-  const command = useCommands().find((each) => each.id === id);
-  return command ? <PrimaryButton command={command} /> : null;
-}
-
-// Like CommandButton, it renders again only when its command changes how it looks.
-const PrimaryButton = memo(function PrimaryButton({ command }: { command: Command }) {
-  return (
-    <Button
-      label={command.title}
-      variant="primary"
-      width="100%"
-      isDisabled={command.isEnabled === false}
-      onClick={() => void command.run()}
-      endContent={
-        command.shortcut && (
-          <span aria-hidden {...stylex.props(styles.key)}>
-            {label(command.shortcut, isApple)}
-          </span>
-        )
-      }
-      xstyle={styles.button}
-    >
-      <span {...stylex.props(styles.title)}>
-        {command.icon && <Icon icon={command.icon} size="sm" />}
-        {command.title}
-      </span>
-    </Button>
-  );
-});
-
 const styles = stylex.create({
   farEnd: {
     marginInlineStart: 'auto',
-  },
-  // The icon and title start the line, and the key ends it.
-  button: {
-    justifyContent: 'space-between',
-  },
-  title: {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: spacingVars['--spacing-2'],
-  },
-  key: {
-    fontFamily: typographyVars['--font-family-code'],
-    fontSize: typeScaleVars['--text-supporting-size'],
   },
 });

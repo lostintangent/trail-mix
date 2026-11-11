@@ -26,22 +26,22 @@ export type SidebarRail = {
   width: number;
   /** The button that folds and unfolds the sidebar, which holds still across the fold. */
   fold: ReactNode;
-  /** What leads the rail, such as New message. */
-  top: ReactNode;
 };
 
 /** The name at the foot of the sidebar. */
 const NAME = 'Trail Mix';
 
 /**
- * The sidebar, lying directly on the desk: the unified views, then each account under its stamp,
- * with its folders, and at its foot the Settings gear, a short rule and Trail Mix's name. The
+ * The sidebar, lying directly on the desk: on a desktop, the fold button and the search at its
+ * head, then the unified views, then each account under its stamp, with its folders, and at its
+ * foot the Settings gear, a short rule, Trail Mix's name and, at the far end, New message. The
  * current view lifts onto a pane.
  *
  * On a desktop it has two layouts over one origin, as Toy Box's and GistPad's do: the whole tree,
- * and the rail it folds to, which keeps the views and each account's stamp in reach. They crossfade
- * rather than swap, and the fold button at the top and the gear at the foot are pinned outside
- * both, so they hold still while the content around them leaves and arrives.
+ * and the rail it folds to, which keeps the views, each account's stamp and New message in reach.
+ * They crossfade rather than swap, and the fold button at the top and the gear at the foot are
+ * pinned outside both, so they hold still while the content around them leaves and arrives. New
+ * message is pinned after the gear, so a Tab reaches the foot from left to right.
  */
 export const Sidebar = memo(function Sidebar({
   id,
@@ -53,9 +53,9 @@ export const Sidebar = memo(function Sidebar({
   rail,
   isCollapsed,
   expandedWidth,
-  header,
   search,
   settings,
+  compose,
   note,
   isBusy = false,
   editing,
@@ -79,12 +79,15 @@ export const Sidebar = memo(function Sidebar({
    * from it, so the sidebar clips it rather than squeezing it. Nothing while it tracks a drag.
    */
   expandedWidth?: number;
-  /** What leads the sidebar beside the fold button, such as New message on a desktop. */
-  header?: ReactNode;
-  /** What sits under the header, such as the search field on a desktop. */
+  /** What heads the sidebar beside the fold button, such as the search field on a desktop. */
   search?: ReactNode;
   /** The Settings gear, at the foot, pinned there over both layouts where the sidebar folds. */
   settings: ReactNode;
+  /**
+   * New message, at the far end of the foot, and on the rail just above the gear. A phone's
+   * sidebar has none, since its bar has Write.
+   */
+  compose?: ReactNode;
   /** A quiet line above the foot, such as the public demo's naming itself. */
   note?: string;
   /**
@@ -129,16 +132,11 @@ export const Sidebar = memo(function Sidebar({
           rail && (isRail ? styles.leaving : styles.arriving),
         )}
       >
-        {(header || search) && (
+        {(rail || search) && (
           <div {...stylex.props(styles.header)}>
-            {header && (
-              <div {...stylex.props(styles.headerLine)}>
-                {/* Where the pinned fold button lands. */}
-                {rail && <span {...stylex.props(styles.foldRoom)} />}
-                {header}
-              </div>
-            )}
-            {search}
+            {/* Where the pinned fold button lands. */}
+            {rail && <span {...stylex.props(styles.foldRoom)} />}
+            {search && <div {...stylex.props(styles.search)}>{search}</div>}
           </div>
         )}
         <div onKeyDown={onTreeKey} onFocus={preloadTreeMoves} {...stylex.props(styles.scroll)}>
@@ -176,6 +174,8 @@ export const Sidebar = memo(function Sidebar({
           {rail ? <span {...stylex.props(styles.footRoom)} /> : settings}
           <span aria-hidden {...stylex.props(styles.footRule)} />
           <span {...stylex.props(styles.name)}>{NAME}</span>
+          {/* Where the pinned New message lands. */}
+          {compose && (rail ? <span {...stylex.props(styles.footRoom)} /> : compose)}
         </div>
       </div>
       {rail && (
@@ -194,7 +194,7 @@ export const Sidebar = memo(function Sidebar({
               )}
             >
               <RailContent
-                rail={rail}
+                compose={compose}
                 view={view}
                 onSelect={onSelect}
                 accounts={accounts}
@@ -208,6 +208,19 @@ export const Sidebar = memo(function Sidebar({
           <div {...stylex.props(styles.pinnedFoot, styles.width(`${rail.width}px`))}>
             {settings}
           </div>
+          {compose && (
+            <div
+              aria-hidden={isRail || undefined}
+              inert={isRail}
+              {...stylex.props(
+                styles.pinnedCompose,
+                expandedWidth !== undefined && styles.width(`${expandedWidth}px`),
+                isRail ? styles.leaving : styles.arriving,
+              )}
+            >
+              <span {...stylex.props(styles.pinnedControl)}>{compose}</span>
+            </div>
+          )}
         </>
       )}
     </nav>
@@ -293,17 +306,35 @@ const styles = stylex.create({
     display: 'flex',
     justifyContent: 'center',
   },
+  // New message, at the far end of the footer's line, as wide as the whole tree so it holds still
+  // as the sidebar narrows, and fading with the tree. Only the button itself takes the pointer.
+  pinnedCompose: {
+    position: 'absolute',
+    bottom: spacingVars['--spacing-2'],
+    insetInlineStart: 0,
+    zIndex: 1,
+    display: 'flex',
+    justifyContent: 'flex-end',
+    width: '100%',
+    paddingInlineEnd: `calc(${spacingVars['--spacing-2']} + 1px)`,
+    pointerEvents: 'none',
+    transitionProperty: 'opacity',
+    transitionTimingFunction: 'ease-out',
+  },
+  pinnedControl: {
+    display: 'flex',
+    pointerEvents: 'auto',
+  },
   header: {
     flexShrink: 0,
     display: 'flex',
-    flexDirection: 'column',
-    gap: spacingVars['--spacing-2'],
-    padding: '1px',
-  },
-  headerLine: {
-    display: 'flex',
     alignItems: 'center',
     gap: spacingVars['--spacing-1'],
+    padding: '1px',
+  },
+  search: {
+    flexGrow: 1,
+    minWidth: 0,
   },
   // The tree scrolls between the header and the footer, and fades out at either edge, as Toy Box's
   // does, so a row passing under one is never seen cut. At rest, the first and last rows sit clear
@@ -352,6 +383,7 @@ const styles = stylex.create({
     backgroundColor: tm.rule,
   },
   name: {
+    flexGrow: 1,
     minWidth: 0,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -359,8 +391,8 @@ const styles = stylex.create({
     color: colorVars['--color-text-primary'],
     fontWeight: fontWeightVars['--font-weight-semibold'],
   },
-  // Quiet, and wrapping rather than cut, since it says what this Trail Mix is.
-  // Clear of the tree's lines above, which scroll under its edge.
+  // Quiet, and wrapping rather than cut, since it says what this Trail Mix is. Clear of the tree's
+  // lines above, which scroll under its edge.
   note: {
     margin: 0,
     paddingInline: spacingVars['--spacing-2'],
