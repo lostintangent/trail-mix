@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { BrowserContextOptions, Locator, Page, Response } from 'playwright';
 import { unreadableText } from '../e2e/contrast.ts';
+import { atRest } from '../atRest.ts';
 import { suite } from '../e2e/suite.ts';
 import {
   caFile,
@@ -186,9 +187,7 @@ for (const [size, options] of Object.entries(SIZES)) {
         await page.keyboard.press('ControlOrMeta+b');
         await sidebar.getByRole('button', { name: /^trailmix\.test, Sign in again/ }).waitFor();
         // The fold swaps the sidebar's lines for the rail's, ending their transitions early.
-        await page.waitForFunction(() =>
-          document.getAnimations().every(({ playState }) => playState !== 'running'),
-        );
+        await atRest(page);
         await readable(page, size, 'dark-lapsed-rail');
         await page.keyboard.press('ControlOrMeta+b');
       }
@@ -250,7 +249,7 @@ function smallTargets(within: Locator): Promise<string[]> {
 
 async function readable(page: Page, size: string, screen: string) {
   // A theme changes over 125 ms, and a screen read mid-change has colors from both.
-  await page.evaluate(() => Promise.all(document.getAnimations().map(({ finished }) => finished)));
+  await atRest(page);
   await page.screenshot({ path: join(SHOTS, `outlook-${size}-${screen}.png`) });
   expect({ screen, unreadable: await unreadableText(page) }).toEqual({ screen, unreadable: [] });
 }

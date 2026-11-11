@@ -9,6 +9,7 @@ import { pushOf, type Notice } from '../../src/features/notifications/core/index
 import { unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
+import { atRest } from '../atRest.ts';
 
 /**
  * Notifications in the browser: Settings' switch and its command on a deployment that has a push
@@ -174,9 +175,7 @@ test('the installed app turns notifications on and off in Settings, and the Mail
   await shot(page, 'desktop-light-on');
   await page.emulateMedia({ colorScheme: 'dark' });
   // A theme changes over 125 ms, and a screen read mid-change has colors from both.
-  await page.waitForFunction(() =>
-    document.getAnimations().every(({ playState }) => playState !== 'running'),
-  );
+  await atRest(page);
   await rowsAgree(page);
   await shot(page, 'desktop-dark-on');
   await page.emulateMedia({ colorScheme: 'light' });
@@ -200,16 +199,12 @@ test('on a phone, Settings’ gear and switch are 44-pixel targets, in both them
     await page.emulateMedia({ colorScheme });
     await page.getByRole('button', { name: 'Folders', exact: true }).click();
     // The sidebar has slid into view.
-    await page.waitForFunction(() =>
-      document.getAnimations().every((animation) => animation.playState !== 'running'),
-    );
+    await atRest(page);
     const gear = (await page.getByRole('button', { name: 'Open settings' }).boundingBox())!;
     expect(Math.min(gear.width, gear.height)).toBeGreaterThanOrEqual(44);
     await page.getByRole('button', { name: 'Open settings' }).click();
     await notifying(page).waitFor();
-    await page.waitForFunction(() =>
-      document.getAnimations().every((animation) => animation.playState !== 'running'),
-    );
+    await atRest(page);
     // The switch takes a tap anywhere on its line, label and all.
     expect(
       await notifying(page).evaluate((toggle) => {

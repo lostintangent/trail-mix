@@ -5,6 +5,7 @@ import type { BrowserContextOptions, Page } from 'playwright';
 import { unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
+import { atRest } from '../atRest.ts';
 
 /**
  * The sidebar, end to end: the built app on workerd, on a member of its own, whose demo mailbox
@@ -41,13 +42,6 @@ async function open(options: BrowserContextOptions): Promise<Page> {
 const personal = (page: Page) => page.getByRole('region', { name: 'Personal' });
 const folderRow = (page: Page, name: string) =>
   personal(page).getByRole('button', { name: new RegExp(`^${name}( \\d+)?$`) });
-
-/** Waits out a pane's slide, so what's measured is where it comes to rest. */
-async function settled(page: Page) {
-  await page.waitForFunction(() =>
-    document.getAnimations().every(({ playState }) => playState !== 'running'),
-  );
-}
 
 async function readable(page: Page, screen: string) {
   await page.screenshot({ path: join(SHOTS, `sidebar-${screen}.png`) });
@@ -87,7 +81,7 @@ test('the sidebar folds to its rail and back by button and key, keeping every vi
     await sidebar.getByRole('button', { name }).waitFor({ timeout: 1_000 });
   }
   // An account's stamp opens its Inbox.
-  await settled(page);
+  await atRest(page);
   await readable(page, 'desktop-dark-rail');
   await sidebar.getByRole('button', { name: /^Work/ }).click();
   await page.getByRole('heading', { name: 'Inbox', level: 2 }).waitFor();
@@ -127,7 +121,7 @@ test('the foot holds the Settings gear, a rule and Trail Mix, and says nothing a
       const page = await open({ ...options, colorScheme });
       if (size === 'phone')
         await page.getByRole('button', { name: 'Folders', exact: true }).click();
-      await settled(page);
+      await atRest(page);
       const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
       const name = sidebar.getByText('Trail Mix', { exact: true });
       const gear = sidebar.getByRole('button', { name: 'Open settings' });
@@ -169,7 +163,7 @@ test('the foot holds the Settings gear, a rule and Trail Mix, and says nothing a
         // Folded, the rail keeps the gear where it was, alone at its foot.
         await page.keyboard.press('ControlOrMeta+b');
         await sidebar.getByRole('button', { name: 'Unfold the sidebar' }).waitFor();
-        await settled(page);
+        await atRest(page);
         expect(await gear.boundingBox()).toEqual(gearBox);
         await readable(page, `${size}-${colorScheme}-rail-foot`);
         await page.keyboard.press('ControlOrMeta+b');
@@ -182,7 +176,7 @@ test('the foot holds the Settings gear, a rule and Trail Mix, and says nothing a
         .getByRole('region', { name: 'Reader' })
         .getByRole('heading', { name: 'Settings', level: 1 })
         .waitFor();
-      await settled(page);
+      await atRest(page);
       if (size === 'phone') {
         const swatch = await page.getByLabel('Accent color').evaluate((input) => {
           const { width, height } = input.getBoundingClientRect();

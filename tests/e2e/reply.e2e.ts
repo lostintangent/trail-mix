@@ -8,6 +8,7 @@ import type { BrowserContextOptions, Page, Route } from 'playwright';
 import { unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
+import { atRest } from '../atRest.ts';
 
 const SIZES = {
   desktop: { viewport: { width: 1440, height: 900 } },
@@ -405,14 +406,7 @@ async function until(check: () => Promise<boolean>, ms: number) {
 
 async function readable(page: Page, size: string, screen: string) {
   // Running airmail never finishes, so only what ends is waited for.
-  await page.evaluate(() =>
-    Promise.all(
-      document
-        .getAnimations()
-        .filter(({ effect }) => effect?.getTiming().iterations !== Infinity)
-        .map(({ finished }) => finished),
-    ),
-  );
+  await atRest(page);
   await page.screenshot({ path: join(SHOTS, `reply-${size}-${screen}.png`) });
   expect({ screen, unreadable: await unreadableText(page) }).toEqual({ screen, unreadable: [] });
 }

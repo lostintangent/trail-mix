@@ -10,6 +10,7 @@ import { PAGE_SIZE } from '../../src/features/mailroom/client/contract.ts';
 import { textContrasts, unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
+import { atRest } from '../atRest.ts';
 
 /**
  * The smoke suite: the built app, served on workerd, driven in Chromium at a desktop and a phone
@@ -293,9 +294,7 @@ test('side panels resize by pointer and key, snap to a rail, and come back the s
 
   // The sidebar eases to its new width, carrying the list's handle with it, so the handle is found
   // once it has come to rest.
-  await page.waitForFunction(() =>
-    document.getAnimations().every(({ playState }) => playState !== 'running'),
-  );
+  await atRest(page);
   const listBox = (await list.boundingBox())!;
   await page.mouse.move(listBox.x + listBox.width / 2, listBox.y + 200);
   await page.mouse.down();
@@ -574,11 +573,10 @@ test('an accent picked in Settings shows at once, outlasts a reload, and goes ba
   await openSettings();
   const newMessage = page.getByRole('button', { name: 'New message' });
   // The button eases from one color to the next, so it is read once that has finished.
-  const buttonOf = () =>
-    newMessage.evaluate(async (button) => {
-      await Promise.all(button.getAnimations().map(({ finished }) => finished));
-      return getComputedStyle(button).backgroundColor;
-    });
+  const buttonOf = async () => {
+    await atRest(newMessage);
+    return newMessage.evaluate((button) => getComputedStyle(button).backgroundColor);
+  };
   expect(await buttonOf()).toBe(inkBlue);
 
   // A member reaches for the swatch, which opens the system's picker, before any color comes.

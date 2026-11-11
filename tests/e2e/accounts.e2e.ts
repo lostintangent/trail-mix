@@ -5,6 +5,7 @@ import type { BrowserContextOptions, Page } from 'playwright';
 import { unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
+import { atRest } from '../atRest.ts';
 
 /**
  * The first-run screen, as a member with no accounts sees it: the built app without the demo
@@ -192,7 +193,7 @@ for (const [size, options] of Object.entries(SIZES)) {
 }
 
 async function shown(page: Page, screen: string) {
-  await page.evaluate(() => Promise.all(document.getAnimations().map(({ finished }) => finished)));
+  await atRest(page);
   await page.screenshot({ path: join(SHOTS, `accounts-${screen}.png`) });
   expect({ screen, unreadable: await unreadableText(page) }).toEqual({ screen, unreadable: [] });
 }
