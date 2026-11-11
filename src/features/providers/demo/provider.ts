@@ -56,8 +56,8 @@ export { demoMailbox, type DemoMailbox } from './mailbox.ts';
 
 /**
  * `filesSent` makes the host file its own copy of what it accepts in Sent, as Zoho's and Outlook's
- * do, once `settle` lets a moment pass, so the provider leaves Sent to it while it waits for the
- * host.
+ * do, a moment later: once `settle` lets a moment pass, or by the provider's next look for it. The
+ * provider leaves Sent to the host while it waits.
  */
 export function demoServer(
   account: AccountId,
@@ -69,6 +69,8 @@ export function demoServer(
   const watchers = new Map<string, Set<() => void>>();
   /** What a host that files its own copy in Sent has accepted and not yet filed. */
   const unfiled: server.Written[] = [];
+  /** The Message-IDs the provider has looked for in Sent and not found, while waiting for the host. */
+  const looked = new Set<string>();
   let hostFiles = filesSent;
 
   /** Makes the next mailbox the current one, keeps it, and tells whoever watches what changed. */
@@ -244,7 +246,14 @@ export function demoServer(
         if (!found) return 'filed' as const;
         const sent = roleFolder('sent');
         const inSent = () => messageIdIn(sent, messageId) !== undefined;
-        if (!inSent() && filesSent && waitForHost) return 'unfiled' as const;
+        if (!inSent() && filesSent && waitForHost) {
+          if (looked.has(messageId)) {
+            await fileHostCopies((copy) => copy.content.messageId === messageId);
+          } else {
+            looked.add(messageId);
+          }
+          if (!inSent()) return 'unfiled' as const;
+        }
         const copy = inSent() ? undefined : await written(withoutBcc(bytesOf(found.message.raw())));
         // The draft may have changed while its copy was read, so it is found again.
         const still = find(draft);
@@ -252,6 +261,7 @@ export function demoServer(
         let next = mailbox;
         if (copy && !inSent()) [next] = server.append(next, sent, copy, SENT);
         await commit(server.expunge(next, still.path, [still.uid]), [still.path, sent]);
+        looked.delete(messageId);
         return 'filed' as const;
       }),
 
@@ -306,6 +316,17 @@ export function demoServer(
    * copy in Sent if it files its own. The only recipient this server holds mail for is the account
    * itself, so mail to yourself arrives.
    */
+  /** Files in Sent the host's own copies that `which` picks, of those it owes. */
+  async function fileHostCopies(which: (copy: server.Written) => boolean) {
+    const sent = server.folderWithRole(mailbox, 'sent');
+    let next = mailbox;
+    for (const copy of unfiled.filter(which)) {
+      unfiled.splice(unfiled.indexOf(copy), 1);
+      if (sent) [next] = server.append(next, sent.path, copy, SENT);
+    }
+    await commit(next, sent ? [sent.path] : []);
+  }
+
   function accepted(
     current: server.DemoMailbox,
     message: server.Written,
@@ -334,19 +355,13 @@ export function demoServer(
       const message = await written(withoutBcc(raw));
       await commit(accepted(mailbox, message, await recipientsOf(raw)), ['INBOX']);
     },
-    async settle() {
-      const sent = server.folderWithRole(mailbox, 'sent');
-      let next = mailbox;
-      for (const message of unfiled.splice(0)) {
-        if (sent) [next] = server.append(next, sent.path, message, SENT);
-      }
-      await commit(next, sent ? [sent.path] : []);
-    },
+    settle: () => fileHostCopies(() => true),
     fileSentCopies(on) {
       hostFiles = on;
     },
     async empty() {
       unfiled.length = 0;
+      looked.clear();
       await commit(server.emptied(mailbox), [...watchers.keys()]);
     },
   };

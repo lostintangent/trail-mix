@@ -121,7 +121,13 @@ export function nextExpiry(all: readonly Leaving[]): number | undefined {
 export const draftsAway = (all: readonly Leaving[]): MessageRef[] =>
   all.filter(isAway).map(({ draft }) => draft);
 
-const isAway = ({ seen }: Leaving) => seen?.goneAt !== undefined || seen?.last.state !== 'failed';
+/** Whether a send is away from its draft: on its way, or gone, but not failed and back. */
+export const isAway = ({ seen }: Leaving) =>
+  seen?.goneAt !== undefined || seen?.last.state !== 'failed';
+
+/** The conversation a send is in: where its reply was pressed, or where the Outbox places it. */
+export const conversationOf = (leaving: Leaving): ConversationId | undefined =>
+  leaving.pressedIn ?? leaving.seen?.last.conversation;
 
 /**
  * The replies on their way at the end of a conversation, given its messages, soonest to go first.
@@ -137,7 +143,7 @@ export function leavingIn(
     .filter(isAway)
     .flatMap((leaving): Shown[] => {
       const draft = messages.find((message) => sameRef(message, leaving.draft));
-      if ((leaving.pressedIn ?? leaving.seen?.last.conversation) !== conversation) return [];
+      if (conversationOf(leaving) !== conversation) return [];
       const messageId = leaving.seen?.last.messageId ?? draft?.messageId;
       const isCopied = messages.some(
         (message) => !message.flags.draft && !!messageId && message.messageId === messageId,

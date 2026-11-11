@@ -79,6 +79,9 @@ export function useLeaving() {
   return { all, drafts, pressed, forgotten };
 }
 
+/** The sends this device follows, the drafts they hold, and how a press or a refusal moves them. */
+export type LeavingSends = ReturnType<typeof useLeaving>;
+
 /**
  * Where a reply on its way stands, now. The one change time makes to it is the end of a wait for a
  * later time, when its countdown begins: the rest come with the Outbox's snapshots.

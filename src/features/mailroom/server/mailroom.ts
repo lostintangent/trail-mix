@@ -118,6 +118,11 @@ export type MailroomEnv = {
   /** Fixes the demo accounts' creation time, an ISO 8601 instant, so their dates never move. */
   DEMO_MAILBOX_AT?: string;
   /**
+   * `true` has the demo's mail server file its own copy of what it accepts in Sent, a moment late,
+   * as Zoho's does, so the Outbox waits for it.
+   */
+  DEMO_HOST_FILES_SENT?: string;
+  /**
    * The deployment's Web Push key, a P-256 private key in PKCS #8 PEM. With `OPERATOR_EMAIL`, whom
    * push services contact about its pushes, it turns notifications on.
    */
@@ -220,7 +225,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 
   constructor(ctx: DurableObjectState, env: MailroomEnv) {
     super(ctx, env);
-    this.demo = demoSettings(env.DEMO_MAILBOX, env.DEMO_MAILBOX_AT);
+    this.demo = demoSettings(env.DEMO_MAILBOX, env.DEMO_MAILBOX_AT, env.DEMO_HOST_FILES_SENT);
     this.windDown = windDownOf(env.REST_AFTER_DAYS, env.ERASE_AFTER_DAYS);
     this.sql = durableSql(ctx.storage);
     const found = upgrade(this.sql);
@@ -1074,7 +1079,9 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
         if (connection?.provider === 'demo') {
           const mailbox = this.book.demo(account);
           if (!mailbox) throw new Error('There is no such account.');
-          return demoServer(account, mailbox, (next) => this.book.saveDemo(account, next)).provider;
+          return demoServer(account, mailbox, (next) => this.book.saveDemo(account, next), {
+            filesSent: this.demo?.hostFilesSent,
+          }).provider;
         }
         if (!connection) throw new Error('There is no such account.');
         const signers = authServersFor(connection.imap.host, this.env.AUTH_SERVERS_STAND_IN);

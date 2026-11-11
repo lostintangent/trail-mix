@@ -42,7 +42,9 @@ import {
   useNotificationCommands,
   useNotificationOpenings,
 } from '../features/notifications/index.ts';
+import { useDraftsAway, useLeaving } from '../features/outbox/index.ts';
 import { REST_MS } from '../features/reader/index.ts';
+import { useHeldWhile } from '../shared/useHeldWhile.ts';
 import { Workbench } from '../features/workbench/index.ts';
 import { AppTheme } from './theme/AppTheme.tsx';
 import { tm } from './theme/tokens.stylex.ts';
@@ -230,12 +232,26 @@ function Desk({
     const kept = standing(view, foldersNow.current);
     if (kept !== view) changePlace({ view: kept }, 'replace');
   }, [view, isHeld, changePlace]);
-  const outbox = useQuery(outboxQuery).data ?? NONE;
-  const counts = useMemo(() => viewCounts(folders, outbox), [folders, outbox]);
+  const { data: outbox = NONE, isFetching: isOutboxComing } = useQuery(outboxQuery);
+  // Mail on its way is in the Outbox, and out of Drafts and its count, from the press of Send
+  // until its draft has gone from the server's Drafts.
+  const leaving = useLeaving();
+  const { onTheirWay, withoutAway } = useDraftsAway(leaving.all, folders);
+  // While the Outbox's next snapshot is on its way, the counts wait for it, since the folders may
+  // already have counted without a send the Outbox still holds.
+  const counts = useHeldWhile(
+    isOutboxComing,
+    useMemo(() => viewCounts(folders, outbox, onTheirWay), [folders, outbox, onTheirWay]),
+  );
   // The Outbox lists sends, not conversations.
-  const { conversations, isFetching, show } = useConversations(view, {
+  const {
+    conversations: listed,
+    isFetching,
+    show,
+  } = useConversations(view, {
     enabled: view.in !== 'outbox',
   });
+  const conversations = useMemo(() => withoutAway(listed, view), [withoutAway, listed, view]);
 
   return (
     <Workbench
@@ -250,6 +266,7 @@ function Desk({
       onListShown={show}
       sidebarFooter={sidebarFooter}
       extraCommands={extraCommands}
+      leaving={leaving}
     />
   );
 }

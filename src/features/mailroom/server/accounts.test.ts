@@ -69,6 +69,12 @@ test('the demo is a size and an optional instant, and anything else is refused',
     expect(() => demoSettings('2000', at)).toThrow('DEMO_MAILBOX_AT');
   }
   expect(() => demoSettings(undefined, '2026-11-09T12:00:00Z')).toThrow('DEMO_MAILBOX_AT');
+  // Its mail server files its own copies in Sent only when asked, in so many words.
+  expect(demoSettings('2000', undefined, 'true')).toEqual({ inbox: 2000, hostFilesSent: true });
+  for (const host of ['1', 'yes', 'false', '']) {
+    expect(() => demoSettings('2000', undefined, host)).toThrow('DEMO_HOST_FILES_SENT');
+  }
+  expect(() => demoSettings(undefined, undefined, 'true')).toThrow('DEMO_HOST_FILES_SENT');
 });
 
 test('a demo account from before From names writes as its demo person, and IMAP ones wait for one', () => {

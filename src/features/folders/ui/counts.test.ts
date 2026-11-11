@@ -40,3 +40,19 @@ test('Inbox counts unread mail in every account’s Inbox, Drafts every draft, a
 
   expect(viewCounts(folders, [waiting('a')])).toEqual({ inbox: 12, drafts: 3, outbox: 1 });
 });
+
+test('neither Drafts nor the Outbox counts what the server has accepted', () => {
+  const folders = [folder('personal', 'Drafts', 'drafts', 0, 3)];
+  const accepted: Outgoing = {
+    ...waiting('b'),
+    state: 'accepted',
+    acceptedAt: '2026-11-10T09:00:10Z',
+  };
+  expect(viewCounts(folders, [waiting('a'), accepted], 2)).toEqual({
+    inbox: 0,
+    drafts: 1,
+    outbox: 1,
+  });
+  // A snapshot of the folders that has caught up with the drafts' removal counts no fewer than none.
+  expect(viewCounts([folder('personal', 'Drafts', 'drafts', 0, 0)], [], 1).drafts).toBe(0);
+});

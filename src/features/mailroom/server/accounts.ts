@@ -163,23 +163,40 @@ export function accountBook(sql: Sql) {
   };
 }
 
-/** The demo mailbox a deployment offers: the size of Personal's Inbox, and when it was made. */
-export type DemoSettings = { inbox: number; createdAt?: string };
+/**
+ * The demo mailbox a deployment offers: the size of Personal's Inbox, when it was made, and whether
+ * its mail server files its own copy of what it accepts in Sent, as Zoho's does.
+ */
+export type DemoSettings = { inbox: number; createdAt?: string; hostFilesSent?: true };
 
 /**
- * Reads `DEMO_MAILBOX` and `DEMO_MAILBOX_AT`, refusing anything else, so a deployment set up wrong
- * says so when its Mailroom starts rather than showing the wrong mail. Without `DEMO_MAILBOX` there
- * is no demo. `DEMO_MAILBOX_AT` is an ISO 8601 instant, with its offset.
+ * Reads `DEMO_MAILBOX`, `DEMO_MAILBOX_AT` and `DEMO_HOST_FILES_SENT`, refusing anything else, so a
+ * deployment set up wrong says so when its Mailroom starts rather than showing the wrong mail.
+ * Without `DEMO_MAILBOX` there is no demo. `DEMO_MAILBOX_AT` is an ISO 8601 instant, with its
+ * offset, and `DEMO_HOST_FILES_SENT` is `true` or unset.
  */
-export function demoSettings(size?: string, at?: string): DemoSettings | undefined {
+export function demoSettings(
+  size?: string,
+  at?: string,
+  hostFilesSent?: string,
+): DemoSettings | undefined {
   if (!size) {
     if (at) throw new Error('DEMO_MAILBOX_AT dates the demo mailbox, so it needs DEMO_MAILBOX.');
+    if (hostFilesSent) {
+      throw new Error('DEMO_HOST_FILES_SENT changes the demo mailbox, so it needs DEMO_MAILBOX.');
+    }
     return undefined;
   }
   if (!/^[1-9]\d{0,6}$/.test(size)) {
     throw new Error(`DEMO_MAILBOX must be a number of messages, not ${JSON.stringify(size)}.`);
   }
-  if (!at) return { inbox: Number(size) };
+  if (hostFilesSent !== undefined && hostFilesSent !== 'true') {
+    throw new Error(
+      `DEMO_HOST_FILES_SENT must be true or unset, not ${JSON.stringify(hostFilesSent)}.`,
+    );
+  }
+  const host = hostFilesSent ? { hostFilesSent: true as const } : {};
+  if (!at) return { inbox: Number(size), ...host };
   const instant = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,3})?(Z|[+-]\d{2}:\d{2})$/.test(at)
     ? Date.parse(at)
     : Number.NaN;
@@ -188,5 +205,5 @@ export function demoSettings(size?: string, at?: string): DemoSettings | undefin
       `DEMO_MAILBOX_AT must be an ISO 8601 instant such as 2026-11-09T12:00:00Z, not ${JSON.stringify(at)}.`,
     );
   }
-  return { inbox: Number(size), createdAt: new Date(instant).toISOString() };
+  return { inbox: Number(size), createdAt: new Date(instant).toISOString(), ...host };
 }

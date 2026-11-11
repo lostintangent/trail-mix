@@ -168,6 +168,35 @@ test('the seeded draft to an unreachable host is refused once, with the reason, 
   ).toEqual(['Sent']);
 });
 
+test('a host that files its own copy in Sent has filed it by the provider’s next look', async () => {
+  const server = demoServer('personal', demoMailbox('personal', 20, CREATED), () => {}, {
+    filesSent: true,
+  });
+  const { messages } = await everything(server);
+  const draft = messages.find(
+    ({ path, to }) =>
+      path === 'Drafts' &&
+      to.length > 0 &&
+      to.every(({ email }) => !email.endsWith('@unreachable.example')),
+  )!;
+  const ref = {
+    account: draft.account,
+    path: draft.path,
+    uidValidity: draft.uidValidity,
+    uid: draft.uid,
+  };
+  const places = async () =>
+    (await everything(server)).messages
+      .filter(({ messageId }) => messageId === draft.messageId)
+      .map(({ path }) => path);
+
+  expect(await server.provider.submit(ref, draft.messageId)).toBe('sent');
+  expect(await server.provider.file(ref, draft.messageId, true)).toBe('unfiled');
+  expect(await places()).toEqual(['Drafts']);
+  expect(await server.provider.file(ref, draft.messageId, true)).toBe('filed');
+  expect(await places()).toEqual(['Sent']);
+});
+
 test('the first delete of the seeded Projects is turned away as in use, and its next takes Toy Box too', async () => {
   let saved: DemoMailbox | undefined;
   const server = demoServer('personal', demoMailbox('personal', 400, CREATED), (mailbox) => {

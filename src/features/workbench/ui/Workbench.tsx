@@ -37,7 +37,7 @@ import {
   OutboxList,
   SendActions,
   sendCommands,
-  useLeaving,
+  type LeavingSends,
   useOutboxCommands,
   useSend,
 } from '../../outbox/index.ts';
@@ -173,6 +173,7 @@ export function Workbench({
   onListShown,
   sidebarFooter,
   extraCommands = NO_COMMANDS,
+  leaving,
 }: {
   /** Where the member is, as the address holds it: the view, and the conversation open in it. */
   place: Place;
@@ -192,6 +193,8 @@ export function Workbench({
   sidebarFooter: ReactNode;
   /** Commands from outside the workbench, such as the theme's, for the registry. */
   extraCommands?: readonly Command[];
+  /** The sends this device follows, which the counts and the Drafts list read too. */
+  leaving: LeavingSends;
 }) {
   const queryClient = useQueryClient();
   const { view } = place;
@@ -236,7 +239,6 @@ export function Workbench({
   // Drafts on their way can't be written on until their send is undone. Each lies at the end of its
   // conversation as a reply on its way instead, until the server's copy takes its place.
   const { data: outgoing } = useQuery(outboxQuery);
-  const leaving = useLeaving();
   const composing = useComposing(selected, leaving.drafts);
   const { compose } = composing;
   // A new message is from the account the view holds, or else the first.
