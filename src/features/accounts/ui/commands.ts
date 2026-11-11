@@ -1,4 +1,4 @@
-import { Eraser, LogIn, MailMinus, MailPlus, Settings2 } from 'lucide-react';
+import { MailPlus } from 'lucide-react';
 import type { Command } from '../../commands/index.ts';
 import type { Account } from '../../mail/core/index.ts';
 
@@ -41,7 +41,7 @@ export function accountCommands({
       id: 'account.erase-everything',
       title: 'Erase everything Trail Mix holds for you',
       group,
-      icon: Eraser,
+      menuIcon: 'eraser',
       isDestructive: true,
       isEnabled: !keeps,
       run: erase,
@@ -53,23 +53,23 @@ export function accountCommands({
               id: `${SIGN_IN}${account.id}`,
               title: `Sign in to ${account.name} again`,
               group,
-              icon: LogIn,
+              menuIcon: 'logIn',
               run: () => signIn(account),
-            },
+            } satisfies Command,
           ]
         : []),
       {
         id: `${EDIT}${account.id}`,
         title: `Edit the ${account.name} account`,
         group,
-        icon: Settings2,
+        menuIcon: 'settings',
         run: () => edit(account),
       },
       {
         id: `${REMOVE}${account.id}`,
         title: `Remove the ${account.name} account`,
         group,
-        icon: MailMinus,
+        menuIcon: 'mailMinus',
         isDestructive: true,
         isEnabled: !keeps,
         run: () => remove(account),

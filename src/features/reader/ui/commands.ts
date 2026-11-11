@@ -1,4 +1,3 @@
-import { Code } from 'lucide-react';
 import type { Command } from '../../commands/index.ts';
 
 /**
@@ -10,7 +9,7 @@ export function sourceCommand(view: (() => void) | undefined): Command {
     id: 'message.source',
     title: 'View source',
     group: 'Message',
-    icon: Code,
+    menuIcon: 'code',
     isEnabled: view !== undefined,
     run: () => view?.(),
   };

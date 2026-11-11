@@ -1,12 +1,4 @@
-import {
-  ChevronLeft,
-  ChevronRight,
-  Keyboard,
-  PanelLeftClose,
-  PanelLeftOpen,
-  Search,
-  Undo2,
-} from 'lucide-react';
+import { ChevronLeft, ChevronRight, PanelLeftClose, PanelLeftOpen, Search } from 'lucide-react';
 import { SEARCH_COMMAND, type Command } from '../../commands/index.ts';
 
 /** The id of the command that folds the sidebar to its rail and back. */
@@ -67,7 +59,7 @@ export function workbenchCommands({
       title: 'Undo',
       group: 'Conversation',
       shortcut: 'Z',
-      icon: Undo2,
+      menuIcon: 'undo',
       isEnabled: undo !== undefined,
       run: () => undo?.(),
     },
@@ -94,7 +86,7 @@ export function workbenchCommands({
       title: 'Keyboard shortcuts',
       group: 'Help',
       shortcut: '?',
-      icon: Keyboard,
+      menuIcon: 'keyboard',
       run: showShortcuts,
     },
   ];

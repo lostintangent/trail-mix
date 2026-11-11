@@ -2,6 +2,7 @@ import { DropdownMenu, type DropdownMenuOption } from '@astryxdesign/core/Dropdo
 import { Icon } from '@astryxdesign/core/Icon';
 import { useEffect, useRef, useState } from 'react';
 import { isApple, shortcutLabel, type Command } from '../../commands/index.ts';
+import { menuIconOf } from './menuIcons.ts';
 import { MoreButton } from './MoreButton.tsx';
 import { rowOf } from './treeKeys.ts';
 
@@ -67,7 +68,7 @@ export function menuItems(commands: readonly Command[]): DropdownMenuOption[] {
     .map((command) => ({
       id: command.id,
       label: command.title,
-      icon: command.icon && <Icon icon={command.icon} />,
+      icon: drawn(menuIconOf(command)),
       ...(command.shortcut ? { endContent: shortcutLabel(command.shortcut, isApple) } : {}),
       ...(command.isDestructive ? { variant: 'destructive' as const } : {}),
       onClick: () => void command.run(),
@@ -75,3 +76,5 @@ export function menuItems(commands: readonly Command[]): DropdownMenuOption[] {
 }
 
 const CLOSED: DropdownMenuOption[] = [];
+
+const drawn = (icon: ReturnType<typeof menuIconOf>) => icon && <Icon icon={icon} />;

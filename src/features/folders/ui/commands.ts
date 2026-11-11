@@ -1,4 +1,3 @@
-import { FolderPen, FolderPlus, FolderX } from 'lucide-react';
 import type { Command } from '../../commands/index.ts';
 import type { Account, Folder, View } from '../../mail/core/index.ts';
 import { canHoldFolders, isOwn } from '../core/names.ts';
@@ -69,11 +68,11 @@ export function folderCommands({
         )
       : undefined;
   return [
-    ...accounts.map((each) => ({
+    ...accounts.map((each): Command => ({
       id: `${CREATE}${each.id}`,
       title: `New folder in ${each.name}`,
       group: GROUP,
-      icon: FolderPlus,
+      menuIcon: 'folderPlus',
       run: () => edit({ do: 'create', account: each }),
     })),
     ...folderActions({ folder: inView, accounts, folders, edit, remove }),
@@ -113,7 +112,7 @@ export function folderActions({
       id: 'folder.create',
       title: `New folder in ${name}`,
       group: GROUP,
-      icon: FolderPlus,
+      menuIcon: 'folderPlus',
       isEnabled: account !== undefined && folder !== undefined && canHoldFolders(folder),
       run: () => account && folder && edit({ do: 'create', account, parent: folder }),
     },
@@ -121,7 +120,7 @@ export function folderActions({
       id: 'folder.rename',
       title: `Rename ${name}`,
       group: GROUP,
-      icon: FolderPen,
+      menuIcon: 'folderPen',
       isEnabled: isMine,
       run: () => folder && isMine && edit({ do: 'rename', folder }),
     },
@@ -129,7 +128,7 @@ export function folderActions({
       id: 'folder.delete',
       title: `Delete ${name}`,
       group: GROUP,
-      icon: FolderX,
+      menuIcon: 'folderX',
       isDestructive: true,
       isEnabled: isMine,
       run: () => folder && isMine && remove(folder),

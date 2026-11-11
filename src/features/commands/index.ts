@@ -5,6 +5,7 @@ export {
   Commands,
   focusSearch,
   isApple,
+  MENU_ICON_NAMES,
   registerSearchFocus,
   runCommandKey,
   SEARCH_COMMAND,
@@ -12,6 +13,7 @@ export {
   useCommands,
   useSteadyCommands,
   type Command,
+  type MenuIconName,
 } from './registry.ts';
 export {
   CommandButton,

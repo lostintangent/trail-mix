@@ -9,13 +9,36 @@ import { commandFor, matching, type CommandLike } from './core/registry.ts';
  * commands for the state it owns, and the workbench gathers them into the registry.
  */
 export type Command = CommandLike & {
+  /** Its icon wherever it's drawn: a visible control, or a menu. */
   icon?: LucideIcon;
+  /**
+   * Its icon, named, for a command only menus draw. The menus that draw it bring the icon, so it
+   * stays off the first screen. A command a visible control draws takes `icon` instead.
+   */
+  menuIcon?: MenuIconName;
   /** A toggle's state, such as whether the conversation is flagged. */
   isChecked?: boolean;
   /** Whether it can't be taken back, as a delete can't, which a menu marks in the danger color. */
   isDestructive?: boolean;
   run: () => unknown;
 };
+
+/** The icons a command only menus draw may name, which the menus bring with them. */
+export const MENU_ICON_NAMES = [
+  'code',
+  'eraser',
+  'folderPen',
+  'folderPlus',
+  'folderX',
+  'keyboard',
+  'logIn',
+  'mailMinus',
+  'rotateCw',
+  'settings',
+  'undo',
+] as const;
+
+export type MenuIconName = (typeof MENU_ICON_NAMES)[number];
 
 /** Whether `Mod` means ⌘, as on Apple platforms, rather than Ctrl. */
 export const isApple =

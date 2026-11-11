@@ -1,5 +1,4 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { RotateCw, Undo2 } from 'lucide-react';
 import type { Command } from '../../commands/index.ts';
 import type { Outgoing } from '../../mail/core/index.ts';
 import { outboxQuery } from '../../mailroom/client/index.ts';
@@ -29,17 +28,17 @@ export function useOutboxCommands(): {
         id: 'outbox.undo',
         title: 'Undo send',
         group: GROUP,
-        icon: Undo2,
+        menuIcon: 'undo',
         isEnabled: undoable !== undefined,
         run: () => undoable?.takeBack(),
       },
       ...outbox
         .filter(({ state, error }) => state === 'failed' || error !== undefined)
-        .map((outgoing) => ({
+        .map((outgoing): Command => ({
           id: `outbox.retry:${outgoing.id}`,
           title: `Retry sending to ${briefly(outgoing.to)}`,
           group: GROUP,
-          icon: RotateCw,
+          menuIcon: 'rotateCw',
           run: async () => (await loadSending()).outboxActions(queryClient).retry(outgoing),
         })),
     ],
