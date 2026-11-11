@@ -7,6 +7,7 @@ import { Features } from 'lightningcss';
 import { defineConfig } from 'vite';
 import { astryxBuiltTheme } from './src/shared/build/astryxBuiltTheme.ts';
 import { astryxIcons } from './src/shared/build/astryxIcons.ts';
+import { astryxStyles } from './src/shared/build/astryxStyles.ts';
 import { astryxMessages } from './src/shared/build/astryxMessages.ts';
 import { astryxUseTheme } from './src/shared/build/astryxUseTheme.ts';
 import { serviceWorker } from './src/shared/build/serviceWorker.ts';
@@ -56,6 +57,8 @@ export default defineConfig(({ isPreview }) => ({
     // A built theme's fields that only generate its CSS, which its stylesheet already holds. The
     // e2e suite drives a build that throws where Astryx reads one.
     astryxBuiltTheme({ isTrapped: process.env.THEME_TRAPS === '1' }),
+    // Astryx's stylesheet, kept to the rules whose classes Astryx code the app imports names.
+    astryxStyles(),
     // The installed app's service worker, `/sw.js`, which keeps this build for offline.
     serviceWorker({ entry: 'src/app/service-worker.ts' }),
     workerModules(),
