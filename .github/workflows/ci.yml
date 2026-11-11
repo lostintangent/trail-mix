@@ -119,10 +119,17 @@ jobs:
           path: test-results/
 
   # The smoke suite, which waits through real undo windows and grows with every screen, so it runs
-  # beside the checks instead of after them.
+  # beside the checks instead of after them, in two halves side by side. Bun splits its files into
+  # halves of about equal time, by how long each took in CI, as tests/e2e/timings.json records.
   e2e:
+    name: e2e (${{ matrix.shard }} of 2)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    strategy:
+      # A half that fails leaves the other to finish, so both keep their screenshots.
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     # Both builds the suite drives throw wherever Astryx reads a field of the built theme that the
     # build leaves out, so an Astryx upgrade that starts reading one fails here.
     env:
@@ -177,14 +184,14 @@ jobs:
         run: node node_modules/wrangler/bin/wrangler.js deploy --dry-run --config dist-demo/server/wrangler.json
 
       # Drives the built app on workerd at both sizes in both themes, and saves a screenshot of each.
-      - name: Smoke test
-        run: bun run e2e
+      - name: Smoke test, half ${{ matrix.shard }}
+        run: bun run e2e --shard=${{ matrix.shard }}/2 --timings=tests/e2e/timings.json
 
       - name: Upload the screenshots
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@v7
         with:
-          name: results
+          name: results-${{ matrix.shard }}
           path: test-results/
 
   # The reader's tests again in WebKit, the engine of every iPhone browser. Its system libraries
@@ -377,8 +384,9 @@ jobs:
         if: failure()
         run: tail -n 50 .mail-server/state/dovecot.log .mail-server/state/serve.log
 
-  # Production for a push to main, and a preview for a pull request from this repository, once all
-  # four jobs pass. deploy.yml deploys nothing where the Cloudflare secrets don't exist.
+  # Production for a push to main, and a preview for a pull request from this repository, once every
+  # job passes, both halves of the smoke suite among them. deploy.yml deploys nothing where the
+  # Cloudflare secrets don't exist.
   deploy:
     needs: [check, e2e, webkit, mail]
     uses: ./.github/workflows/deploy.yml
