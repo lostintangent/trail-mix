@@ -428,7 +428,10 @@ export function Workbench({
     const newest = conversations?.[0];
     if (newest === undefined) return;
     setOpening(undefined);
-    setSelection({ ids: [newest.id], anchor: newest.id });
+    // A member's pick made in this same moment, as a key held for a row just arrived, wins.
+    setSelection((current) =>
+      current.ids.length > 0 ? current : { ids: [newest.id], anchor: newest.id },
+    );
     openedByView(newest.id);
   }, [opening, view, selected, compose, page, conversations, openedByView]);
   // Folders are named in place in the sidebar, so naming one brings it into view.
@@ -525,6 +528,7 @@ export function Workbench({
   const pick = useCallback(
     (id: ConversationId, by: SelectBy) => {
       setPage(undefined);
+      setOpening(undefined);
       setSelection((current) => select(current, id, by, by === 'only' ? [] : idsIn(order.current)));
       if (by !== 'only') return;
       setPhonePane('reader');

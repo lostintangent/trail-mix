@@ -250,10 +250,21 @@ test('choosing a view opens its newest, read only once it has stayed open two se
   await page.waitForTimeout(2_500);
   expect(await unread()).toBe(before);
 
-  // Staying reads it, and only after two seconds.
+  // Staying reads it, only after two seconds, and not while the member scrolls the list.
   await choose(/^Inbox/);
   await newestOpen('Inbox');
-  await page.waitForTimeout(1_000);
+  await page.locator('[role="listbox"][aria-multiselectable]').evaluate(
+    (list) =>
+      new Promise<void>((resolve) => {
+        const end = performance.now() + 2_600;
+        const step = () => {
+          list.scrollTop = list.scrollTop > 2_000 ? 0 : list.scrollTop + 40;
+          if (performance.now() < end) requestAnimationFrame(step);
+          else resolve();
+        };
+        requestAnimationFrame(step);
+      }),
+  );
   expect(await unread()).toBe(before);
   await unreadIs(before - 1, 5_000);
 
@@ -335,4 +346,67 @@ test('an empty view opens on the empty reader, and on a phone a view opens on it
   await expect(
     phone.locator('section[aria-label="Reader"]').evaluate((reader) => !reader.closest('[inert]')),
   ).resolves.toBe(false);
+}, 60_000);
+
+test('the member’s own choice wins over the view’s newest, however late its list comes', async () => {
+  const page = await open(DESKTOP);
+  const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
+  /** Holds the view's first page until the returned function lets it through. */
+  const hold = async (view: string) => {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => (release = resolve));
+    await page.route('**/_serverFn/**', async (route) => {
+      const asked = decodeURIComponent(route.request().url());
+      if (asked.includes('"conversations"') && asked.includes(view)) await held;
+      await route.fallback();
+    });
+    return async () => {
+      release();
+      await page.unrouteAll({ behavior: 'wait' });
+    };
+  };
+
+  // A new message begun while Drafts' list is on its way stays open once the list comes.
+  let release = await hold('drafts');
+  await sidebar
+    .getByRole('button', { name: /^Drafts/ })
+    .first()
+    .click();
+  await page.keyboard.press('c');
+  const composer = page.locator('section[aria-label="New message"]');
+  await composer.waitFor();
+  await release();
+  await page.getByRole('option').first().waitFor();
+  await page.waitForTimeout(300);
+  await expect(composer.count()).resolves.toBe(1);
+  await expect(selectedRow(page).count()).resolves.toBe(0);
+  await page.keyboard.press('Escape');
+  await composer.waitFor({ state: 'detached' });
+
+  // A row picked the moment the folder's rows arrive is the one that opens.
+  release = await hold('Archive');
+  await page
+    .getByRole('region', { name: 'Personal' })
+    .getByRole('button', { name: /^Archive/ })
+    .click();
+  await page.evaluate(() =>
+    new MutationObserver((_, watching) => {
+      const second = document.querySelectorAll<HTMLElement>('[role="option"]')[1];
+      if (!second) return;
+      watching.disconnect();
+      second.click();
+    }).observe(document.body, { subtree: true, childList: true }),
+  );
+  await release();
+  await heading(page).filter({ hasText: 'Archive' }).waitFor();
+  await page.waitForFunction(() => {
+    const row = document.querySelector('[role="option"][aria-selected="true"]');
+    const shown = document.querySelector('section[aria-label="Reader"] h1')?.textContent;
+    return (
+      row?.getAttribute('aria-posinset') === '2' &&
+      Boolean(shown && row.textContent?.includes(shown))
+    );
+  });
+  await page.waitForTimeout(500);
+  await expect(selectedRow(page).getAttribute('aria-posinset')).resolves.toBe('2');
 }, 60_000);
