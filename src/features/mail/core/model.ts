@@ -104,6 +104,8 @@ export type ConversationSummary = {
   subject: string;
   /** Newest first. */
   senders: Address[];
+  /** The latest message's To and Cc, which a row names when only the member wrote. */
+  recipients: Address[];
   /** The latest message's. */
   preview: string;
   /** The latest message's. */
@@ -114,7 +116,10 @@ export type ConversationSummary = {
   flagged: boolean;
   /** Whether any message has attachments. */
   hasAttachments: boolean;
-  /** The picture of its newest sender other than the member, as a Message names it. */
+  /**
+   * The picture of its newest sender other than the member, as a Message names it, or of its first
+   * recipient other than the member when only they wrote.
+   */
   avatar?: string;
 };
 

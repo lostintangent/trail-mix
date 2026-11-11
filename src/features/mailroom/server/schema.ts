@@ -26,6 +26,21 @@ export type SqlValue = string | number | null | ArrayBuffer | Uint8Array;
  */
 export const REREAD = `UPDATE folders SET cursor = NULL, rereading = 1`;
 
+/** The member's addresses, as every account names its own, in lower case. */
+const OWN = `SELECT lower(json_extract(account, '$.address')) FROM accounts`;
+
+/** A recipient `r`'s address. */
+const TO = `json_extract(r.value, '$.email')`;
+
+/**
+ * Whether a recipient `r` is someone other than the member, at an address with a domain after its
+ * last `@`, as `domainOf` reads it: what follows the address trimmed of everything but `@` from
+ * its end.
+ */
+const WRITTEN = `instr(${TO}, '@') > 0
+  AND trim(replace(${TO}, rtrim(${TO}, replace(${TO}, '@', '')), '')) <> ''
+  AND lower(${TO}) NOT IN (${OWN})`;
+
 export const versions: readonly (readonly string[])[] = [
   [
     `CREATE TABLE accounts (
@@ -257,6 +272,42 @@ export const versions: readonly (readonly string[])[] = [
       PRIMARY KEY (account, path, uid_validity, uid)
     )`,
     REREAD,
+  ],
+  [
+    // A row names its latest message's To and Cc, so a conversation only the member wrote can say
+    // whom it went to. Each row learns them from its latest message.
+    `UPDATE conversations SET summary = coalesce(
+      (SELECT json_set(conversations.summary, '$.recipients', json((
+          SELECT json_group_array(json(value)) FROM (
+            SELECT 0 AS part, key, value FROM json_each(latest.message, '$.to') WHERE type = 'object'
+            UNION ALL
+            SELECT 1 AS part, key, value FROM json_each(latest.message, '$.cc') WHERE type = 'object'
+            ORDER BY part, key
+          )
+        )))
+       FROM (
+         SELECT message FROM messages
+         WHERE conversation = conversations.id AND json_valid(message)
+         ORDER BY json_extract(message, '$.date') DESC LIMIT 1
+       ) AS latest),
+      json_set(summary, '$.recipients', json('[]'))
+    )
+    WHERE json_valid(summary)`,
+    // A row only the member wrote, by any of their addresses, pictures its first recipient who
+    // isn't them and has a domain.
+    `UPDATE conversations SET summary = json_set(summary, '$.avatar', (
+       SELECT lower(trim(json_extract(r.value, '$.email')))
+       FROM json_each(conversations.summary, '$.recipients') AS r
+       WHERE ${WRITTEN}
+       ORDER BY r.key LIMIT 1
+     ))
+     WHERE json_valid(summary)
+       AND json_type(summary, '$.avatar') IS NULL
+       AND NOT EXISTS (
+         SELECT 1 FROM json_each(summary, '$.senders') AS s
+         WHERE lower(json_extract(summary, s.fullkey || '.email')) NOT IN (${OWN})
+       )
+       AND EXISTS (SELECT 1 FROM json_each(summary, '$.recipients') AS r WHERE ${WRITTEN})`,
   ],
 ];
 

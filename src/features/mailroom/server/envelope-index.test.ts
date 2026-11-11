@@ -8,6 +8,7 @@ import {
   type SyncEvent,
 } from '../../mail/core/index.ts';
 import { envelopeIndex, type EnvelopeIndex } from './envelope-index.ts';
+import { upgrade } from './schema.ts';
 import { testSql } from './test-sql.ts';
 
 const FOLDERS: { account: string; path: string; role?: FolderRole }[] = [
@@ -211,10 +212,159 @@ describe('a conversation’s row', () => {
     expect(store.page({ in: 'inbox' }).items[0]).not.toHaveProperty('avatar');
   });
 
-  test('names no avatar for a conversation of the member’s own verified mail alone', () => {
+  test('names its latest message’s recipients, To and then Cc', () => {
     const store = fresh(['me@trailmix.test']);
-    store.fold(arrive(envelope('note', { from: { email: 'me@trailmix.test' }, verified: true })));
+    const ask = envelope('ask', { date: '2026-11-09T09:00:00.000Z' });
+    const reply = envelope('re-ask', {
+      path: 'Sent',
+      references: [ask.messageId],
+      from: { email: 'me@trailmix.test' },
+      to: [{ name: 'Ada Park', email: 'ada@example.com' }],
+      cc: [{ name: 'Theo Lindqvist', email: 'theo@example.com' }],
+      date: '2026-11-09T10:00:00.000Z',
+    });
+    store.fold(arrive(ask, reply));
+    expect(store.page({ in: 'inbox' }).items[0]?.recipients).toEqual([
+      { name: 'Ada Park', email: 'ada@example.com' },
+      { name: 'Theo Lindqvist', email: 'theo@example.com' },
+    ]);
+  });
+
+  test('pictures its first recipient other than the member when only they wrote', () => {
+    const store = fresh(['Me@TrailMix.test', 'me@work.trailmix.test']);
+    const sent = (id: string, to: Envelope['to'], cc: Envelope['cc'] = []) =>
+      envelope(id, { path: 'Sent', from: { email: 'me@trailmix.test' }, to, cc });
+    store.fold(
+      arrive(
+        sent('to-rae', [
+          { name: 'Rae Chen', email: 'Rae@Example.com' },
+          { email: 'theo@example.com' },
+        ]),
+        sent(
+          'to-self-cc-rae',
+          [{ email: 'me@work.trailmix.test' }],
+          [{ email: 'rae@example.com' }],
+        ),
+        sent('to-self', [{ email: 'ME@trailmix.test' }]),
+        sent('to-nobody', []),
+      ),
+    );
+    const avatars = store
+      .page({ in: 'folder', folder: { account: 'personal', path: 'Sent' } })
+      .items.map(({ subject, avatar }) => [subject, avatar]);
+    expect(Object.fromEntries(avatars)).toEqual({
+      'to-rae': 'rae@example.com',
+      'to-self-cc-rae': 'rae@example.com',
+      'to-self': undefined,
+      'to-nobody': undefined,
+    });
+  });
+
+  test('pictures no recipient when anyone else wrote, verified or not', () => {
+    const store = fresh(['me@trailmix.test']);
+    const theirs = envelope('theirs', { date: '2026-11-09T09:00:00.000Z' });
+    const reply = envelope('re-theirs', {
+      path: 'Sent',
+      references: [theirs.messageId],
+      from: { email: 'me@trailmix.test' },
+      to: [{ email: 'rae@example.com' }],
+      date: '2026-11-09T10:00:00.000Z',
+    });
+    store.fold(arrive(theirs, reply));
     expect(store.page({ in: 'inbox' }).items[0]).not.toHaveProperty('avatar');
+  });
+
+  test('learns its recipients, and its first recipient’s picture, as its Mailroom upgrades', () => {
+    // A Mailroom as the release before rows named recipients left it, whose rows the current fold
+    // wrote, less what that release didn't write.
+    const sql = testSql(16);
+    sql.run(
+      `INSERT INTO accounts (id, position, account, connection) VALUES ('personal', 0, ?, '{}')`,
+      JSON.stringify({ address: 'Me@TrailMix.test' }),
+    );
+    const store = envelopeIndex(sql, () => ['Me@TrailMix.test']);
+    store.listFolders(
+      'personal',
+      FOLDERS.filter((f) => f.account === 'personal').map((f) => ({
+        ...f,
+        name: f.path,
+        unread: 0,
+        total: 0,
+      })),
+    );
+    const ask = envelope('ask', { verified: true, date: '2026-11-09T09:00:00.000Z' });
+    const me = { email: 'me@trailmix.test' };
+    store.fold(
+      arrive(
+        ask,
+        envelope('re-ask', {
+          path: 'Sent',
+          references: [ask.messageId],
+          from: me,
+          to: [{ email: 'ada@example.com' }],
+          date: '2026-11-09T10:00:00.000Z',
+        }),
+        envelope('pat', { from: { email: 'pat@example.com' } }),
+        envelope('to-rae', {
+          path: 'Sent',
+          from: me,
+          to: [me, { name: 'Rae Chen', email: ' Rae@Example.com' }],
+          cc: [{ email: 'theo@example.com' }],
+          date: '2026-11-09T11:00:00.000Z',
+        }),
+        envelope('to-jo', {
+          path: 'Sent',
+          from: me,
+          to: [{ email: 'jo@example.com' }],
+          date: '2026-11-09T11:00:00.000Z',
+        }),
+        envelope('later-to-theo', {
+          path: 'Sent',
+          from: me,
+          references: ['<to-jo@example.com>'],
+          to: [{ email: 'theo@example.com' }],
+          date: '2026-11-09T12:00:00.000Z',
+        }),
+        envelope('to-self', { path: 'Sent', from: me, to: [me] }),
+        envelope('to-nobody', { path: 'Drafts', from: me, to: [] }),
+        envelope('to-undisclosed', {
+          path: 'Sent',
+          from: me,
+          to: [{ name: 'undisclosed-recipients', email: '' }, { email: 'rae' }],
+        }),
+        envelope('past-a-malformed-address', {
+          path: 'Sent',
+          from: me,
+          to: [{ email: 'a@b@' }, { email: 'kai@example.com' }],
+        }),
+      ),
+    );
+    const rows = () =>
+      sql
+        .all<{ id: string; summary: string }>(`SELECT id, summary FROM conversations ORDER BY id`)
+        .map(({ id, summary }) => [id, JSON.parse(summary) as Record<string, unknown>] as const);
+    const folded = rows();
+    for (const [id, row] of folded) {
+      const { recipients: _, ...before } = row;
+      const isOwn = (row['senders'] as { email: string }[]).every(
+        ({ email }) => email.toLowerCase() === 'me@trailmix.test',
+      );
+      if (isOwn) delete before['avatar'];
+      sql.run(`UPDATE conversations SET summary = ? WHERE id = ?`, JSON.stringify(before), id);
+    }
+    expect(folded.map(([, row]) => row['avatar']).toSorted()).toEqual([
+      'ada@example.com',
+      'kai@example.com',
+      'rae@example.com',
+      'theo@example.com',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+    ]);
+
+    upgrade(sql);
+    expect(rows()).toEqual(folded);
   });
 
   test('reads mail indexed before senders were verified as unverified', () => {

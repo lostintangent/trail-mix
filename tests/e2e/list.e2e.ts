@@ -1,5 +1,5 @@
 import { expect } from 'bun:test';
-import type { BrowserContextOptions, Page } from 'playwright';
+import type { BrowserContextOptions, Locator, Page } from 'playwright';
 import { PAGE_SIZE } from '../../src/features/mailroom/client/contract.ts';
 import { suite } from './suite.ts';
 
@@ -197,6 +197,50 @@ test('on a phone, tapping a row’s avatar picks the row, on a target 44 pixels 
   expect(problems).toEqual([]);
   await context.close();
 }, 30_000);
+
+test('a conversation only the member wrote names whom it went to, and leads with the first of them', async () => {
+  const { context, page, problems } = await open();
+  const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
+
+  // Sent holds the cabin bookings Sam sent Rae, and nobody wrote back.
+  await sidebar
+    .getByRole('region', { name: 'Personal' })
+    .getByRole('button', { name: /^Sent( \d+)?$/ })
+    .click();
+  await page.getByRole('heading', { name: 'Sent', level: 2 }).waitFor();
+  await row(page, 'Booking the cabin').waitFor();
+  expect(await row(page, 'Booking the cabin').textContent()).toStartWith('RHTo Rae Holm');
+
+  // Drafts names whom each is to, by first names for several, and leads with the first of them:
+  // Sofia's picture, which her verified mail brought, and Rae's initials.
+  await sidebar
+    .getByRole('button', { name: /^Drafts( \d+)?$/ })
+    .first()
+    .click();
+  await page.getByRole('heading', { name: 'Drafts', level: 2 }).waitFor();
+  await row(page, 'To Sofia, Priya, Kwame').waitFor();
+  await expect(
+    avatarOf(page, 'To Sofia, Priya, Kwame')
+      .locator('img')
+      .evaluate((image: HTMLImageElement) => image.complete && image.naturalWidth),
+  ).resolves.toBeGreaterThan(0);
+  expect(await avatarOf(page, 'To Rae Holm').textContent()).toBe('RH');
+
+  // A draft addressed to nobody yet says so, in the muted ink of a row's preview.
+  const subject = `Nobody yet ${Date.now()}`;
+  await page.keyboard.press('c');
+  await page
+    .locator('section[aria-label="New message"]')
+    .getByRole('textbox', { name: 'Subject' })
+    .fill(subject);
+  await page.getByRole('status').filter({ hasText: 'Saved to Drafts' }).waitFor();
+  const nobody = row(page, subject).getByText('No recipients', { exact: true });
+  await nobody.waitFor({ timeout: 10_000 });
+  const inkOf = (text: Locator) => text.evaluate((element) => getComputedStyle(element).color);
+  expect(await inkOf(nobody)).toBe(await inkOf(row(page, 'To Rae Holm').getByText(/^Hi Rae/)));
+  expect(problems).toEqual([]);
+  await context.close();
+}, 60_000);
 
 // Last, since it removes an account.
 test('the stamp marks rows only where a list mixes accounts', async () => {

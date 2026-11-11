@@ -1,5 +1,6 @@
 import {
   applySyncEvent,
+  domainOf,
   linkIdsOf,
   searchWords,
   type ConversationId,
@@ -457,8 +458,10 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
 /**
  * A conversation's row: its latest message speaks for it, and the rest add up. Its avatar is its
  * newest sender's other than the member, whose addresses are `mine`, when that message is verified.
- * The index keeps that sender's address, whether or not the Avatar cache holds their picture yet,
- * and a read names the picture only once the cache does.
+ * When only the member wrote, it is their first recipient's, the picture the cache holds for that
+ * address if any, though nothing is ever looked up for a recipient. The index keeps the address,
+ * whether or not the Avatar cache holds their picture yet, and a read names the picture only once
+ * the cache does.
  */
 export function summaryOf(
   id: ConversationId,
@@ -470,12 +473,21 @@ export function summaryOf(
   if (!latest) return undefined;
   const senders = new Map(newestFirst.map((m) => [m.from.email.toLowerCase(), m.from]));
   const theirs = newestFirst.find((m) => !mine.has(m.from.email.toLowerCase()));
-  const avatar = theirs?.verified ? senderOf(theirs.from.email) : '';
+  const recipients = [...latest.to, ...latest.cc];
+  const written = recipients.find(({ email }) => domainOf(email) && !mine.has(email.toLowerCase()));
+  const avatar = theirs
+    ? theirs.verified
+      ? senderOf(theirs.from.email)
+      : ''
+    : written
+      ? senderOf(written.email)
+      : '';
   return {
     id,
     account: latest.account,
     subject: latest.subject,
     senders: [...senders.values()],
+    recipients,
     preview: latest.preview,
     date: latest.date,
     count: messages.length,

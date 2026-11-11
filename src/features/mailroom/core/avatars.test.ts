@@ -50,6 +50,7 @@ const row = (id: string, avatar?: string): ConversationSummary => ({
   account: 'personal',
   subject: 'Hello',
   senders: [],
+  recipients: [],
   preview: '',
   date: '2026-11-09T12:00:00.000Z',
   count: 1,

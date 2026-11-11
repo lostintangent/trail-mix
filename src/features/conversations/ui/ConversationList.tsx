@@ -39,7 +39,7 @@ import type {
   StampColor,
 } from '../../mail/core/index.ts';
 import { avatarUrl } from '../../mailroom/client/index.ts';
-import { faceOf } from '../core/face.ts';
+import { peopleOf } from '../core/face.ts';
 import type { Listed } from '../core/pages.ts';
 import type { SelectBy, Selection } from '../core/selection.ts';
 import { formatListDate } from './dates.ts';
@@ -102,7 +102,7 @@ export function ConversationList({
   isUpdating?: boolean;
   /** Each account's stamp color, by account id, where the list mixes accounts. Elsewhere none shows. */
   stamps?: ReadonlyMap<string, StampColor>;
-  /** The member's own addresses, lowercased, whom a row's avatar passes over for its other senders. */
+  /** The member's own addresses, lowercased, whom a row passes over for the others in it. */
   selves: ReadonlySet<string>;
   selection: Selection;
   /** Whether a tap adds a row to the selection, as after a long press, instead of opening it. */
@@ -332,8 +332,8 @@ const Row = memo(function Row({
   onSwipe: ((id: ConversationId) => void) | undefined;
   onAhead: ((id: ConversationId, isPressed: boolean) => void) | undefined;
 }) {
-  const { subject, senders, preview, date, unread, flagged, hasAttachments, avatar } = conversation;
-  const who = faceOf(senders, selves);
+  const { subject, preview, date, unread, flagged, hasAttachments, avatar } = conversation;
+  const { names, face } = peopleOf(conversation, selves);
   // A finger that taps the avatar picks the row instead of opening it.
   const pointer = useRef('');
   const isUnread = unread > 0;
@@ -378,7 +378,7 @@ const Row = memo(function Row({
         {...stylex.props(styles.avatar)}
       >
         <SenderAvatar
-          name={who ? who.name || who.email : ''}
+          name={face ? face.name || face.email : ''}
           picture={avatar && avatarUrl(avatar)}
           stamp={stamp}
         />
@@ -387,7 +387,11 @@ const Row = memo(function Row({
         <span {...stylex.props(styles.top, styles.line)}>
           {isUnread && <span {...stylex.props(styles.dot)} />}
           <span {...stylex.props(styles.sender, isUnread && styles.senderUnread, styles.clip)}>
-            <Marked text={senderNames(senders)} marks={marks} />
+            {names === undefined ? (
+              <span {...stylex.props(styles.nobody)}>No recipients</span>
+            ) : (
+              <Marked text={names} marks={marks} />
+            )}
           </span>
           {isUnread && <VisuallyHidden>Unread</VisuallyHidden>}
           {flagged && <Icon icon={Star} size="xsm" label="Flagged" xstyle={styles.flag} />}
@@ -620,13 +624,6 @@ function useRowHeight(ruler: RefObject<HTMLDivElement | null>): number {
   return height;
 }
 
-/** "Ada Park" for one sender, and first names for several, newest first. */
-function senderNames(senders: readonly { name?: string; email: string }[]): string {
-  const names = senders.map(({ name, email }) => name || email);
-  if (names.length <= 1) return names[0] ?? '';
-  return names.map((name) => name.split(' ')[0]).join(', ');
-}
-
 const styles = stylex.create({
   scroller: {
     position: 'relative',
@@ -762,6 +759,10 @@ const styles = stylex.create({
   },
   quiet: {
     flexShrink: 0,
+    color: tm.textQuiet,
+  },
+  // A draft addressed to nobody yet says so in the row's muted ink.
+  nobody: {
     color: tm.textQuiet,
   },
 });

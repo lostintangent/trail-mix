@@ -9,7 +9,7 @@ import { evictions, isKept, KEEP_FOR_MS, keptOf, type Kept } from '../core/kept.
 import { snapshots } from './store.ts';
 
 /** Changes when a kept snapshot's shape does, which drops everything kept before. */
-const SHAPE = '1';
+const SHAPE = '2';
 /** Whose Mailroom the kept snapshots came from, as `thisDevice` names it. */
 const OWNER_KEY = 'trail-mix.cache';
 const PREFIX = 'snapshot';
