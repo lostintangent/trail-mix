@@ -157,8 +157,16 @@ test('offline, a conversation never opened says it opens once online, and Send k
     .first()
     .waitFor();
   expect(await page.getByRole('option').filter({ hasText: NEVER_OPENED }).count()).toBe(1);
-  // The selection moved on as the row left, and the conversation it moved to says it isn't here
-  // either, rather than standing as a skeleton while the page asks again.
+  // Nothing happened, so the selection the archive moved on comes back to it, and the reader with it.
+  await page
+    .getByRole('option', { selected: true })
+    .filter({ hasText: NEVER_OPENED })
+    .waitFor({ timeout: 5_000 });
+  await page.waitForFunction(() =>
+    /Trip photos/.test(
+      document.querySelector('section[aria-label="Reader"] h1')?.textContent ?? '',
+    ),
+  );
   await reader.getByRole('alert').filter({ hasText: 'It opens once you’re back online' }).waitFor();
   await page.screenshot({ path: join(SHOTS, 'offline-desktop-light-archive.png') });
 
@@ -192,6 +200,28 @@ test('offline, a conversation never opened says it opens once online, and Send k
   await context.setOffline(false);
   await composer.getByRole('status').filter({ hasText: 'Saved to Drafts' }).waitFor();
   expect(await send.isDisabled()).toBe(false);
+  expect(errors).toEqual([]);
+  await context.close();
+}, 60_000);
+
+test('on a phone, an archive refused offline comes back to the conversation it took away', async () => {
+  const { context, page, errors } = await installed(SIZES.phone);
+  const subject = await openConversation(page, 0);
+  await page.waitForFunction(async () => (await keptCount()) >= 3, undefined, { polling: 200 });
+  await context.setOffline(true);
+  await page
+    .getByRole('toolbar', { name: 'Conversation' })
+    .getByRole('button', { name: 'Archive' })
+    .click();
+  await page
+    .getByText(/^Couldn.t archive\. This device is offline\.$/)
+    .first()
+    .waitFor();
+  // The list came back with the row, and then the reader with the conversation, off the list.
+  await page.waitForFunction((subject) => {
+    const reader = document.querySelector('section[aria-label="Reader"]');
+    return reader?.querySelector('h1')?.textContent === subject && !reader.closest('[inert]');
+  }, subject);
   expect(errors).toEqual([]);
   await context.close();
 }, 60_000);

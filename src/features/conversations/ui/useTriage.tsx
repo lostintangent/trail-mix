@@ -13,7 +13,11 @@ import { fetchedRows } from './useConversations.ts';
 export type Triage = (
   action: Action,
   conversations: readonly ConversationId[],
-  options?: { quietly?: boolean },
+  options?: {
+    quietly?: boolean;
+    /** Once the server has refused it and the rows are back as they were. */
+    onRefused?: () => void;
+  },
 ) => void;
 
 /**
@@ -57,7 +61,7 @@ export function useTriage(
   useEffect(() => afterFirstScreen(() => void loadCarrying()), []);
 
   const triage = useCallback<Triage>(
-    (action, ids, { quietly = false } = {}) => {
+    (action, ids, { quietly = false, onRefused } = {}) => {
       const overlays = overlaysOf(queryClient);
       const listed = overlaid(fetchedRows(queryClient, view, ids), overlays.on(view));
       const earlierRows = listed.filter(
@@ -82,11 +86,13 @@ export function useTriage(
             laid,
             earlierRows,
             undoKey,
+            onRefused,
           });
         } catch (error) {
           // Only what carries it out failing to load reaches here, so the rows go back as they were.
           if (laid) overlays.lift(laid);
           void toast({ type: 'error', body: `Couldn't do that. ${reasonOf(error)}` });
+          onRefused?.();
         }
       })();
     },

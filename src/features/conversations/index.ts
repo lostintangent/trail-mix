@@ -1,4 +1,10 @@
-export { NOTHING_SELECTED, select, type SelectBy, type Selection } from './core/selection.ts';
+export {
+  isSameSelection,
+  NOTHING_SELECTED,
+  select,
+  type SelectBy,
+  type Selection,
+} from './core/selection.ts';
 export { rowChange, type Action } from './core/triage.ts';
 export { ConversationList, ConversationListSkeleton } from './ui/ConversationList.tsx';
 export { preloadTriageMenus, TriageActions } from './ui/TriageActions.tsx';

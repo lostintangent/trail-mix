@@ -62,6 +62,7 @@ import {
 } from '../../reader/index.ts';
 import {
   ConversationListSkeleton,
+  isSameSelection,
   NOTHING_SELECTED,
   rowChange,
   SearchContext,
@@ -316,24 +317,45 @@ export function Workbench({
   // phone, where the reader fills the screen, the list comes back instead. The list shows the
   // conversation gone at once, and the reader turns to the next one just after, so the frame that
   // shows the archive doesn't wait for the next conversation to render.
-  const giveWay = (id: ConversationId) => {
+  const giveWay = (id: ConversationId): Selection => {
     const at = places.get(id) ?? -1;
     const leaving = conversations?.[at];
     const next = conversations?.[at + 1] ?? conversations?.[at - 1];
     if (isPhone) {
       setPhonePane('list');
       setSelection(NOTHING_SELECTED);
-    } else if (leaving) {
-      setVacating({ row: leaving, at });
-      startTransition(() => {
-        setSelection(next ? { ids: [next.id], anchor: next.id } : NOTHING_SELECTED);
-        setVacating(undefined);
-      });
+      return NOTHING_SELECTED;
     }
+    if (!leaving) return selection;
+    const left = next ? { ids: [next.id], anchor: next.id } : NOTHING_SELECTED;
+    setVacating({ row: leaving, at });
+    startTransition(() => {
+      setSelection(left);
+      setVacating(undefined);
+    });
+    return left;
   };
+  // The selection and the phone's pane as they are now, which a refused triage puts back.
+  const now = useRef({ selection, phonePane });
+  useLayoutEffect(() => {
+    now.current = { selection, phonePane };
+  });
+  /**
+   * A triage the server refuses puts its rows back, so a selection it moved on to `left` comes back
+   * too, as nothing happened, unless the member has moved it since.
+   */
+  const backIfRefused = useCallback((left: Selection) => {
+    const before = now.current;
+    return () => {
+      if (!isSameSelection(now.current.selection, left)) return;
+      setSelection(before.selection);
+      setPhonePane(before.phonePane);
+    };
+  }, []);
   const triageShown = (action: Action, id: ConversationId) => {
-    if (rowChange(action, view) === 'gone') giveWay(id);
-    triage(action, [id]);
+    if (rowChange(action, view) !== 'gone') return triage(action, [id]);
+    const onRefused = backIfRefused(giveWay(id));
+    triage(action, [id], { onRefused });
   };
   /**
    * Where a conversation sits in the list, or, while it leaves, where it was: the row that took its
@@ -350,11 +372,11 @@ export function Workbench({
   );
   // A selection that leaves the list is done with, and so is picking.
   const triageSelection = (action: Action) => {
-    if (rowChange(action, view) === 'gone') {
-      setSelection(NOTHING_SELECTED);
-      setPicking(false);
-    }
-    triage(action, selection.ids);
+    if (rowChange(action, view) !== 'gone') return triage(action, selection.ids);
+    const onRefused = backIfRefused(NOTHING_SELECTED);
+    setSelection(NOTHING_SELECTED);
+    setPicking(false);
+    triage(action, selection.ids, { onRefused });
   };
   // Opening a conversation with no network, as from what the installed app kept, leaves it
   // unread, since the mark couldn't land and nobody asked for it.
@@ -585,10 +607,13 @@ export function Workbench({
   // A swipe archives the row it moved, which leaves any selection that held it.
   const swipe = useCallback(
     (id: ConversationId) => {
-      setSelection((current) => (current.ids.includes(id) ? NOTHING_SELECTED : current));
-      triage({ do: 'archive' }, [id]);
+      const { selection } = now.current;
+      const left = selection.ids.includes(id) ? NOTHING_SELECTED : selection;
+      const onRefused = backIfRefused(left);
+      setSelection(left);
+      triage({ do: 'archive' }, [id], { onRefused });
     },
-    [triage],
+    [triage, backIfRefused],
   );
   // A conversation about to be opened is asked for before the click lands.
   const ahead = useCallback(

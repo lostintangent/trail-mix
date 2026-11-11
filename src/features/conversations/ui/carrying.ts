@@ -42,6 +42,8 @@ export type Triaged = {
   earlierRows: readonly ConversationSummary[];
   /** The key that undoes the last triage: offered this one's Undo, or spent by the toast's. */
   undoKey: { offer: (undo: () => void) => void; spend: (undo: () => void) => void };
+  /** Once the server has refused it and the rows are back as they were. */
+  onRefused: (() => void) | undefined;
 };
 
 export async function carryOut({
@@ -55,6 +57,7 @@ export async function carryOut({
   laid,
   earlierRows,
   undoKey,
+  onRefused,
 }: Triaged): Promise<void> {
   const earlierMessages = new Map<ConversationId, Message[]>();
   const restoreMessages = () => {
@@ -118,6 +121,7 @@ export async function carryOut({
     if (laid) overlays.lift(laid);
     restoreMessages();
     refused(error, doingOf(action, folders));
+    onRefused?.();
   }
 }
 

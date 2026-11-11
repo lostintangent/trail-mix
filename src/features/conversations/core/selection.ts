@@ -8,6 +8,10 @@ export type SelectBy = 'only' | 'toggle' | 'extend';
 
 export const NOTHING_SELECTED: Selection = { ids: [] };
 
+/** Whether two selections pick the same conversations, in the same order. */
+export const isSameSelection = (a: Selection, b: Selection) =>
+  a.ids.length === b.ids.length && a.ids.every((id, at) => id === b.ids[at]);
+
 /** The selection after a pick in a list whose conversations run in `order`. */
 export function select(
   selection: Selection,
