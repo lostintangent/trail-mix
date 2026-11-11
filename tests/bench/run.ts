@@ -54,11 +54,20 @@ for (const { name, slowest } of over) {
   if (!slowest?.length) continue;
   console.log(`The slowest inputs behind "${name}":`);
   console.table(
-    slowest.map(({ latency, inputDelay, processing, presentation, scripts }) => ({
+    slowest.map(({ latency, nth, inputDelay, processing, presentation, asks, scripts }) => ({
       latency,
+      'of its round': nth,
       'waited to run': inputDelay ?? '',
       handlers: processing ?? '',
       'waited for the frame': presentation ?? '',
+      'asks of the Mailroom': (asks ?? [])
+        .map(
+          ({ name, after, took, server }) =>
+            `${name} +${after} ${took} ms (${Object.entries(server)
+              .map(([part, ms]) => `${part} ${ms}`)
+              .join(', ')})`,
+        )
+        .join('; '),
       'longest scripts in its long frames': scripts
         .map(({ name, duration }) => `${name} ${duration} ms`)
         .join('; '),

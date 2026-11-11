@@ -15,11 +15,18 @@ export type Measurement = {
  */
 export type Slow = {
   latency: number;
+  /** Which of its round's inputs it was, counting from 0, as the first of a held key's repeats is 0. */
+  nth: number;
   inputDelay?: number;
   processing?: number;
   presentation?: number;
+  /** The asks of the Mailroom it waited on, from its input, with the parts the Worker timed. */
+  asks?: Ask[];
   scripts: { name: string; duration: number }[];
 };
+
+/** One ask of the Mailroom: its name, when it went after the input and how long it took, in ms. */
+export type Ask = { name: string; after: number; took: number; server: Record<string, number> };
 
 /** A part of Trail Mix whose budgets one module measures, under the numbers in AGENTS.md. */
 export type BenchArea = { name: string; measure: () => Promise<Measurement[]> };

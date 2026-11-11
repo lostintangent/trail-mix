@@ -91,23 +91,25 @@ export const workbench: BenchArea = {
         0.95,
       );
       const typed: Typed[] = [];
+      const searchSlowest: Slow[] = [];
       for (let round = 1; round <= ROUNDS; round++) {
         if (round > 1) {
           await page.reload();
           await firstRows(page);
         }
+        // A round's spans are read on its own page, by that page's clock.
+        const timing = await inputLatency(page);
         await phoneWatch.steady();
-        typed.push(
-          ...(await phoneWatch.during(`Searching as it is typed, round ${round}`, () =>
-            searchKeystrokes(page),
-          )),
+        const keystrokes = await phoneWatch.during(`Searching as it is typed, round ${round}`, () =>
+          searchKeystrokes(page),
         );
+        typed.push(...keystrokes);
+        searchSlowest.push(...(await timing.slowestSpans(keystrokes)));
       }
       const search = percentile(
         typed.map(({ latency }) => latency),
         0.95,
       );
-      const searchSlowest = await (await inputLatency(page)).slowestSpans(typed);
       await context.close();
 
       // Keys move through the list on a desktop, where the list stays in view as its selection opens.
