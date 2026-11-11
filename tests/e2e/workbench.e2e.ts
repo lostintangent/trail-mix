@@ -572,10 +572,12 @@ test('an accent picked in Settings shows at once, outlasts a reload, and goes ba
   const openSettings = () => page.getByRole('button', { name: 'Open settings' }).click();
   await openSettings();
   const newMessage = page.getByRole('button', { name: 'New message' });
-  // The button eases from one color to the next, so it is read once that has finished.
+  // Its fill shows the accent, read once nothing on it moves.
   const buttonOf = async () => {
     await atRest(newMessage);
-    return newMessage.evaluate((button) => getComputedStyle(button).backgroundColor);
+    return newMessage.evaluate(
+      (button) => getComputedStyle(button.firstElementChild!).backgroundColor,
+    );
   };
   expect(await buttonOf()).toBe(inkBlue);
 

@@ -52,6 +52,47 @@ const GIVES_WAY = { ...FITS, name: 'gives way' };
 /** A font about as wide as the sans a Linux runner draws with, which Apple's systems don't. */
 const WIDE_FONT = `nav * { font-family: Verdana, "DejaVu Sans", sans-serif !important; }`;
 
+/** New message as it should be: a fill about a line tall, in a target the gear's size, in a foot no taller than its gear needs. */
+const SMALL = { fill: 24, isGearSized: true, isFootSnug: true };
+
+function composeIsSmall(page: Page) {
+  return page.getByRole('navigation', { name: 'Mailboxes' }).evaluate((nav) => {
+    const shown = (element: Element) => !element.closest('[inert]');
+    const button = (name: string) =>
+      [...nav.querySelectorAll('button')].find(
+        (each) => shown(each) && each.getAttribute('aria-label') === name,
+      )!;
+    const [compose, gear] = [button('New message'), button('Open settings')];
+    // What it fills: the biggest of it and what it holds that isn't transparent.
+    const fill = Math.max(
+      ...[compose, ...compose.querySelectorAll('*')]
+        .filter((each) => getComputedStyle(each).backgroundColor !== 'rgba(0, 0, 0, 0)')
+        .map((each) => {
+          const { width, height } = each.getBoundingClientRect();
+          return Math.max(width, height);
+        }),
+    );
+    const name = [...nav.querySelectorAll('span')].find(
+      (span) => span.textContent === 'Trail Mix',
+    )!;
+    const foot = name.parentElement!;
+    const { paddingTop, borderTopWidth } = getComputedStyle(foot);
+    const [target, ring] = [compose, gear].map((each) => each.getBoundingClientRect()) as [
+      DOMRect,
+      DOMRect,
+    ];
+    return {
+      fill: Math.round(fill),
+      isGearSized: target.width === ring.width && target.height === ring.height,
+      isFootSnug:
+        foot.getBoundingClientRect().height -
+          parseFloat(paddingTop) -
+          parseFloat(borderTopWidth) ===
+        ring.height,
+    };
+  });
+}
+
 /** Draws a page as a Linux runner does, with its wider sans and Ctrl+K, wherever the test runs. */
 async function asLinux(context: BrowserContext) {
   await context.addInitScript((font) => {
@@ -204,6 +245,15 @@ test('the foot holds the Settings gear, a rule and Trail Mix, and says nothing a
       expect(gearBox!.x).toBeLessThan(nameBox!.x);
       if (size === 'desktop') {
         expect(await footFits(page)).toEqual(FITS);
+        expect(await composeIsSmall(page)).toEqual(SMALL);
+        // The foot stands where it stood before New message joined it: its rule 57 pixels above the
+        // window's bottom edge, and the gear 9 below that.
+        expect(
+          await name.evaluate((words) =>
+            Math.round(words.parentElement!.getBoundingClientRect().top),
+          ),
+        ).toBe(843);
+        expect([gearBox!.y, gearBox!.height]).toEqual([852, 32]);
         expect(await searchSays(page)).toEqual({ words: 'Search', isWhole: true });
       }
       expect(sidebarBox!.y + sidebarBox!.height - (gearBox!.y + gearBox!.height)).toBeLessThan(40);
@@ -274,6 +324,7 @@ test('the foot holds the Settings gear, a rule and Trail Mix, and says nothing a
             };
           }),
         ).toEqual({ isRuledUnderFold: true, isComposeOverAdd: true, isRuledOverGear: true });
+        expect(await composeIsSmall(page)).toEqual(SMALL);
         await readable(page, `${size}-${colorScheme}-rail-foot`);
         await page.keyboard.press('ControlOrMeta+b');
         await sidebar.getByRole('button', { name: 'Fold the sidebar' }).waitFor();
@@ -350,6 +401,11 @@ test('at its narrowest, the foot holds the gear, the rule, the name and New mess
     const promised = isWide || (!isApple && pointer === 'finger') ? [FITS, GIVES_WAY] : [FITS];
     const kept = promised.find((each) => Bun.deepEquals(each, fits)) ?? FITS;
     expect({ pointer, isWide, fits }).toEqual({ pointer, isWide, fits: kept });
+    expect({ pointer, isWide, small: await composeIsSmall(page) }).toEqual({
+      pointer,
+      isWide,
+      small: SMALL,
+    });
     // The search's words show whole, its key giving way first where they need its room.
     expect(await searchSays(page)).toEqual({ words: 'Search', isWhole: true });
     const target = pointer === 'finger' ? 44 : 32;
@@ -464,6 +520,17 @@ test('the tree is one Tab stop, whose arrows move through it and fold it, and wh
   ]);
   // The foot reads from left to right, from the gear to New message at its far end.
   await moveTo('Tab', 'BUTTON: New message');
+  // Its ring hugs the fill, not the target around it.
+  expect(
+    await page.evaluate(() => {
+      const fill = document.activeElement!.firstElementChild!;
+      const { outlineStyle, outlineWidth } = getComputedStyle(fill);
+      return [
+        `${outlineStyle} ${outlineWidth}`,
+        getComputedStyle(document.activeElement!).outlineStyle,
+      ];
+    }),
+  ).toEqual(['solid 2px', 'none']);
   for (const back of ['Open settings', 'Add account', 'Inbox']) {
     await moveTo('Shift+Tab', `BUTTON: ${back}`);
   }
