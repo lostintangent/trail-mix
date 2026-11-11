@@ -188,6 +188,31 @@ test('light paper, chosen in the palette, holds for a sender on every device unt
   await shows(second, 'dark');
   await shows(first, 'dark');
   expect(await control(first).getAttribute('aria-pressed')).toBe('false');
+
+  // A sender's plain-text mail goes on light paper too, its whole sheet.
+  await row(first, 'Lunch Thursday?').click();
+  const plain = reader(first).getByRole('article').last();
+  await plain.getByText('Thursday at 12:30').waitFor();
+  // Whether the sheet's paper, as the screen draws it, is light.
+  const isLight = () =>
+    plain.evaluate((sheet) => {
+      const context = new OffscreenCanvas(1, 1).getContext('2d', { willReadFrequently: true })!;
+      context.fillStyle = getComputedStyle(sheet).backgroundColor;
+      context.fillRect(0, 0, 1, 1);
+      const [r = 0, g = 0, b = 0] = context.getImageData(0, 0, 1, 1).data;
+      return r + g + b > 3 * 128;
+    });
+  const becomes = async (light: boolean) => {
+    for (const start = Date.now(); Date.now() - start < 5_000; await first.waitForTimeout(20)) {
+      if ((await isLight()) === light) return true;
+    }
+    return false;
+  };
+  expect(await isLight()).toBe(false);
+  await control(first).click();
+  expect(await becomes(true)).toBe(true);
+  await control(first).click();
+  expect(await becomes(false)).toBe(true);
 }, 60_000);
 
 for (const colorScheme of ['light', 'dark'] as const) {
@@ -305,10 +330,18 @@ for (const [size, options] of Object.entries({ desktop: DESKTOP, phone: PHONE })
       const sheet = 'section[aria-label="Reader"] article:first-of-type header';
       await shown(page, 'section[aria-label="Reader"] article [role="status"][aria-busy="true"]');
       const header = await boxOf(page, sheet);
+      // Its controls are there from the start, so none arrives with the body to squeeze its line.
+      const controls = () =>
+        page
+          .locator(sheet)
+          .getByRole('button')
+          .evaluateAll((buttons) => buttons.map((button) => button.getAttribute('aria-label')));
+      const waiting = await controls();
       await shot('body');
       await body();
       await bodies(page);
       expect(await boxOf(page, sheet)).toEqual(header);
+      expect(await controls()).toEqual(waiting);
 
       // A draft opened while its words are on their way shows the composer's sheet with lines.
       const words = await holding(page, 'body');

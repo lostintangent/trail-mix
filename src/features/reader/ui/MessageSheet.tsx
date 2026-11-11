@@ -51,7 +51,8 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
   const allowed = showOnce || imagesAllowed(message, account.allowImagesFrom);
   const allowImages = useAllowImages(account);
   const queryClient = useQueryClient();
-  // In the dark theme, the member may show a sender's HTML mail on light paper, as designed.
+  // In the dark theme, the member may show a sender's mail on light paper, as designed. The
+  // control stands from the first frame, so the header holds still when the body arrives.
   const isDark = useDarkTheme();
   const lightPaper = isDark && isLightPaper(message.from.email, account.lightPaperFrom);
   const [quotes, setQuotes] = useState<'folded' | 'shown'>('folded');
@@ -74,7 +75,7 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
       aria-label={`Message from ${displayName(message.from)}`}
       {...stylex.props(
         sheetStyles.sheet,
-        mail && (mail.paper === 'light' || lightPaper) && styles.fixedPaper,
+        (mail?.paper === 'light' || lightPaper) && styles.fixedPaper,
       )}
     >
       <header {...stylex.props(sheetStyles.from)}>
@@ -89,11 +90,11 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
             <time dateTime={message.date}>{when(message.date)}</time>
           </small>
         </div>
-        {mail && isDark && (
+        {isDark && (
           <ToggleButton
             label="Light paper"
             tooltip={
-              mail.paper === 'light'
+              mail?.paper === 'light'
                 ? 'This message’s colors can’t be darkened, so it stays on light paper'
                 : lightPaper
                   ? `Darken mail from ${message.from.email} again`
@@ -101,8 +102,8 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
             }
             icon={<Icon icon={Sun} />}
             isIconOnly
-            isPressed={mail.paper === 'light' || lightPaper}
-            isDisabled={mail.paper === 'light'}
+            isPressed={mail?.paper === 'light' || lightPaper}
+            isDisabled={mail?.paper === 'light'}
             onPressedChange={(on) =>
               setLightPaper(queryClient, { account: account.id, sender: message.from.email, on })
             }
