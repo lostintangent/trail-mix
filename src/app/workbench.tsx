@@ -1,7 +1,7 @@
 import { Button } from '@astryxdesign/core/Button';
 import { EmptyState } from '@astryxdesign/core/EmptyState';
 import { Icon } from '@astryxdesign/core/Icon';
-import { colorVars, spacingVars } from '@astryxdesign/core/theme/tokens.stylex';
+import { colorVars, spacingVars, typeScaleVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { useInfiniteQuery, useQuery } from '@tanstack/react-query';
 import { createFileRoute, useRouter } from '@tanstack/react-router';
@@ -35,10 +35,12 @@ import {
   foldersQuery,
   outboxQuery,
   useHints,
+  whatFailed,
 } from '../features/mailroom/client/index.ts';
 import { REST_MS } from '../features/reader/index.ts';
 import { Workbench } from '../features/workbench/index.ts';
 import { AppTheme } from './theme/AppTheme.tsx';
+import { tm } from './theme/tokens.stylex.ts';
 import { trailMixTheme } from './theme/built/trail-mix.js';
 import { AccentChoice } from './theme/AccentChoice.tsx';
 import { ThemeChoice } from './theme/ThemeChoice.tsx';
@@ -77,11 +79,13 @@ function App() {
   // shows here.
   useHints();
   const accounts = useQuery(accountsQuery);
+  const { refetch } = accounts;
+  const askAgain = useCallback(() => void refetch(), [refetch]);
   const isFirstRun = accounts.data?.length === 0;
   const welcome = useLoaded(preloadFirstRun, isFirstRun);
   const screen =
     accounts.data === undefined ? (
-      accounts.isError && <Unreachable />
+      accounts.isError && <Unreachable failed={accounts.error} onTryAgain={askAgain} />
     ) : !isFirstRun ? (
       <Desk
         sidebarFooter={
@@ -122,10 +126,24 @@ function useLoaded(load: () => Promise<unknown>, isWanted: boolean) {
 }
 
 /**
- * The Mailroom couldn't be asked, as when the network is down or the sign-in has run out. Loading
- * the page again signs in anew where it has.
+ * The Mailroom couldn't be asked, as when the network is down or the sign-in has run out, and what
+ * failed. It asks again by itself when the page is seen again or the network comes back, as after
+ * a deploy that cut it off for a moment. Try again loads the page anew, which signs in again where
+ * the sign-in has run out.
  */
-function Unreachable() {
+function Unreachable({ failed, onTryAgain }: { failed?: unknown; onTryAgain?: () => void }) {
+  useEffect(() => {
+    if (!onTryAgain) return;
+    const again = () => {
+      if (document.visibilityState === 'visible' && navigator.onLine) onTryAgain();
+    };
+    document.addEventListener('visibilitychange', again);
+    window.addEventListener('online', again);
+    return () => {
+      document.removeEventListener('visibilitychange', again);
+      window.removeEventListener('online', again);
+    };
+  }, [onTryAgain]);
   return (
     <main {...stylex.props(styles.desk)}>
       <EmptyState
@@ -133,7 +151,12 @@ function Unreachable() {
         icon={<Icon icon={CloudOff} size="lg" color="secondary" />}
         title="Trail Mix can’t reach your mail"
         description="The connection or your sign-in may have lapsed."
-        actions={<Button label="Try again" variant="primary" onClick={() => location.reload()} />}
+        actions={
+          <div {...stylex.props(styles.actions)}>
+            <Button label="Try again" variant="primary" onClick={() => location.reload()} />
+            {failed !== undefined && <p {...stylex.props(styles.failed)}>{whatFailed(failed)}</p>}
+          </div>
+        }
       />
     </main>
   );
@@ -146,6 +169,20 @@ const styles = stylex.create({
     placeItems: 'center',
     padding: spacingVars['--spacing-6'],
     backgroundColor: colorVars['--color-background-body'],
+  },
+  actions: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: spacingVars['--spacing-3'],
+  },
+  failed: {
+    margin: 0,
+    maxWidth: '36rem',
+    color: tm.textQuiet,
+    fontSize: typeScaleVars['--text-supporting-size'],
+    textAlign: 'center',
+    overflowWrap: 'anywhere',
   },
 });
 

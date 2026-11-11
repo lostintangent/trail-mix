@@ -91,6 +91,29 @@ test('a Mailroom that can’t be reached says so, and Try again comes back to it
   await page.getByRole('heading', { name: 'Welcome to Trail Mix' }).waitFor();
 }, 30_000);
 
+test('a Mailroom that answered with an error says what failed, and comes back once the tab is seen', async () => {
+  const page = await (await app.context(SIZES.desktop)).newPage();
+  // Every query is answered with an error, as when a deploy restarts the Mailroom.
+  await page.route('**/_serverFn/**', (route) =>
+    route.request().method() === 'GET'
+      ? route.fulfill({
+          status: 503,
+          contentType: 'text/plain',
+          body: 'The Mailroom is restarting.',
+        })
+      : route.fallback(),
+  );
+  await page.goto(app.url);
+  await page
+    .getByRole('heading', { name: 'Trail Mix can’t reach your mail' })
+    .waitFor({ timeout: 15_000 });
+  await page.getByText('Trail Mix answered 503: The Mailroom is restarting.').waitFor();
+  await page.unroute('**/_serverFn/**');
+  // Coming back to the tab asks again, with no button pressed.
+  await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+  await page.getByRole('heading', { name: 'Welcome to Trail Mix' }).waitFor();
+}, 30_000);
+
 // Erasing everything Trail Mix holds for a member, from the palette and from an account's page, on
 // two devices at once: each a member of their own, with the demo mailbox to erase.
 for (const [size, options] of Object.entries(SIZES)) {

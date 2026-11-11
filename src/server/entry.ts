@@ -50,13 +50,18 @@ export default {
       { name: 'access', ms: performance.now() - begun },
     ];
 
-    const mailroom = env.MAILROOM.get(env.MAILROOM.idFromName(member));
-    if (url.pathname === '/updates') return updates(request, mailroom);
+    // A new stub each time it's reached, since one that threw stays broken.
+    const mailroom = () => env.MAILROOM.get(env.MAILROOM.idFromName(member));
+    if (url.pathname === '/updates') return updates(request, mailroom());
     const message = readMessagePath(url.pathname);
-    if (message) return serveMessageBytes(message, mailroom);
+    if (message) return serveMessageBytes(message, mailroom());
     if (url.pathname === '/images') return proxyImage(request);
     const response = await start.fetch(request, {
-      context: { mailroom, members: membersOf(env, member), timing },
+      context: {
+        mailroom,
+        members: membersOf(env, member),
+        timing,
+      },
     });
     return withTiming(response, [...timing, { name: 'worker', ms: performance.now() - begun }]);
   },

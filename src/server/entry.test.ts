@@ -11,11 +11,11 @@ import type { MessageBytes } from './routes/messages.ts';
  */
 
 const reachedApp: { url: string; mailroom: unknown; members: Members }[] = [];
-type Context = { mailroom: unknown; members: Members; timing: Timed[] };
+type Context = { mailroom: () => unknown; members: Members; timing: Timed[] };
 await mock.module('@tanstack/react-start/server-entry', () => ({
   default: {
     fetch(request: Request, { context }: { context: Context }) {
-      reachedApp.push({ url: request.url, mailroom: context.mailroom, members: context.members });
+      reachedApp.push({ url: request.url, mailroom: context.mailroom(), members: context.members });
       // A call notes its parts of the request's time, as `rpc.ts` does.
       if (request.url.includes('/_serverFn/')) {
         context.timing.push({ name: 'mailroom', ms: 12.34, note: 'conversation' });

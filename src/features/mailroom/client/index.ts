@@ -12,6 +12,7 @@ export type {
   SignInSetup,
   ThisDevice,
 } from './contract.ts';
+export { whatFailed } from './failed.ts';
 export { useHints } from './hints.ts';
 export {
   accountsQuery,
@@ -24,5 +25,5 @@ export {
   signInsQuery,
   thisDeviceQuery,
 } from './queries.ts';
-export { mailroom } from './rpc.ts';
+export { mailroom, type Unanswered } from './rpc.ts';
 export { imageUrl, messageUrl, partUrl, readMessagePath } from './urls.ts';

@@ -225,11 +225,11 @@ declare module '@tanstack/react-start' {
   interface Register {
     server: {
       /**
-       * The Worker hands each request its signed-in member's Mailroom, and nothing that names them,
-       * the Members page's side for them, which answers the operator alone, and the parts of the
+       * The Worker hands each request a way to reach its signed-in member's Mailroom, a new stub
+       * each time, and nothing that names them, the Members page's side for them, which answers the operator alone, and the parts of the
        * request's time, which a call adds to and the Worker sends as Server-Timing.
        */
-      requestContext: { mailroom: Mailroom; members: Members; timing: Timed[] };
+      requestContext: { mailroom: () => Mailroom; members: Members; timing: Timed[] };
     };
   }
 }

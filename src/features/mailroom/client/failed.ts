@@ -1,0 +1,19 @@
+/**
+ * What failed when a call to the Mailroom did, in a line a member can pass on: the status the
+ * Worker answered with and its reason, which is the Mailroom's own when the Mailroom failed, or that
+ * no answer came at all, as when the network is down or a sign-in has lapsed.
+ */
+export function whatFailed(error: unknown): string {
+  const { status, message } = (typeof error === 'object' && error !== null ? error : {}) as {
+    status?: unknown;
+    message?: unknown;
+  };
+  // An error page arrives whole as the message, so only its words are kept, and only the first.
+  const words = typeof message === 'string' ? message.replace(/<[^>]*>/g, ' ') : '';
+  const said = words.replace(/\s+/g, ' ').trim();
+  const reason = said.length > REASON_LENGTH ? `${said.slice(0, REASON_LENGTH - 1)}…` : said;
+  if (typeof status !== 'number') return reason ? `No answer came: ${reason}` : 'No answer came.';
+  return reason ? `Trail Mix answered ${status}: ${reason}` : `Trail Mix answered ${status}.`;
+}
+
+const REASON_LENGTH = 160;

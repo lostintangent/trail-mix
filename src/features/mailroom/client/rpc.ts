@@ -1,4 +1,5 @@
 import { createServerFn } from '@tanstack/react-start';
+import { ask } from './ask.ts';
 import {
   COMMANDS,
   QUERIES,
@@ -6,12 +7,8 @@ import {
   receivedCall,
   sendable,
   type Call,
-  type CommandName,
   type Commands,
-  type Mailroom,
   type Queries,
-  type QueryName,
-  type Timed,
 } from './contract.ts';
 
 /**
@@ -30,39 +27,36 @@ const command = createServerFn({ method: 'POST', strict: { output: false } })
   .handler(({ data, context }) => ask(context, data));
 
 /**
- * Asks the member's Mailroom, and notes for the response's Server-Timing how long the Mailroom took
- * as the Worker saw it, and how much of that was reaching it, running there and coming back, and
- * whether it had to start first. Coming back counts an answer the Mailroom holds until what it
- * wrote is safely stored, as Cloudflare holds every answer a Durable Object sends. Names and times
- * only, never what a call carried.
+ * The browser's Mailroom: every query and command, typed as the contract has them. A call that
+ * fails carries the status the Worker answered it with, as `status`, when it answered at all.
  */
-async function ask(
-  { mailroom, timing }: { mailroom: Mailroom; timing: Timed[] },
-  call: Call<QueryName | CommandName>,
-) {
-  const sent = Date.now();
-  const at = performance.now();
-  const noted = timing.length;
-  try {
-    const { value, reached, ran, cold } = await mailroom.answer(call, sent);
-    const took = performance.now() - at;
-    timing.push(
-      { name: 'reached', ms: Math.max(0, reached) },
-      { name: 'ran', ms: ran },
-      { name: 'returned', ms: Math.max(0, took - Math.max(0, reached) - ran) },
-      ...(cold ? [{ name: 'cold', note: 'The Mailroom started for this call' }] : []),
-    );
-    return value;
-  } finally {
-    timing.splice(noted, 0, { name: 'mailroom', ms: performance.now() - at, note: call.name });
-  }
-}
-
-/** The browser's Mailroom: every query and command, typed as the contract has them. */
 export const mailroom = Object.fromEntries([
-  ...QUERIES.map((name) => [name, (...args: unknown[]) => query({ data: { name, args } })]),
+  ...QUERIES.map((name) => [
+    name,
+    (...args: unknown[]) => answered((fetch) => query({ data: { name, args }, fetch })),
+  ]),
   ...COMMANDS.map((name) => [
     name,
-    (...args: unknown[]) => command({ data: sendable({ name, args }) }),
+    (...args: unknown[]) => answered((fetch) => command({ data: sendable({ name, args }), fetch })),
   ]),
 ]) as unknown as Queries & Commands;
+
+/** A call that failed, with the status of the Worker's answer if one came. */
+export type Unanswered = Error & { status?: number };
+
+/** Makes a call, noting the status of a failed answer on the error it brings. */
+async function answered<T>(
+  call: (fetch: (...args: Parameters<typeof globalThis.fetch>) => Promise<Response>) => Promise<T>,
+): Promise<T> {
+  let status: number | undefined;
+  try {
+    return await call(async (...args) => {
+      const response = await fetch(...args);
+      if (!response.ok) status = response.status;
+      return response;
+    });
+  } catch (error) {
+    if (error instanceof Error && status !== undefined) Object.assign(error, { status });
+    throw error;
+  }
+}
