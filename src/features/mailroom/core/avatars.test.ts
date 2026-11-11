@@ -7,15 +7,15 @@ import {
   enforces,
   isSafeLogo,
   LOGO_BYTES,
-  logoCandidates,
+  avatarCandidates,
   namedMessages,
   namedRows,
   organizationalOf,
   txtOf,
-  verifiedDomains,
+  verifiedSenders,
   walkOf,
   type Dmarc,
-} from './logos.ts';
+} from './avatars.ts';
 
 const envelope = (email: string, verified: boolean, uid = 1): Envelope => ({
   account: 'personal',
@@ -40,7 +40,7 @@ const message = (email: string, verified: boolean, uid = 1): Message => ({
   conversation: 'c',
 });
 
-const row = (id: string, logo?: string): ConversationSummary => ({
+const row = (id: string, avatar?: string): ConversationSummary => ({
   id,
   account: 'personal',
   subject: 'Hello',
@@ -51,7 +51,7 @@ const row = (id: string, logo?: string): ConversationSummary => ({
   unread: 0,
   flagged: false,
   hasAttachments: false,
-  ...(logo ? { logo } : {}),
+  ...(avatar ? { avatar } : {}),
 });
 
 describe('who may show a logo', () => {
@@ -63,51 +63,51 @@ describe('who may show a logo', () => {
       { type: 'flags', ref: envelope('x@other.example', true, 4), flags: envelope('', true).flags },
       { type: 'gone', ref: envelope('x@gone.example', true, 5) },
     ];
-    expect(verifiedDomains(events)).toEqual(['brand.example']);
+    expect(verifiedSenders(events)).toEqual(['news@brand.example', 'deals@brand.example']);
   });
 
-  test('a row names its logo only while the cache holds it', () => {
-    const rows = [row('a', 'brand.example'), row('b', 'lapsed.example'), row('c')];
-    const named = namedRows(rows, new Set(['brand.example']));
+  test('a row names its sender’s picture by its key, only while the cache holds one', () => {
+    const rows = [row('a', 'news@brand.example'), row('b', 'gone@lapsed.example'), row('c')];
+    const named = namedRows(rows, new Map([['news@brand.example', 'k1']]));
 
-    expect(named[0]).toEqual(row('a', 'brand.example'));
+    expect(named[0]).toEqual(row('a', 'k1'));
     expect(named[1]).toEqual(row('b'));
-    expect(named[1]).not.toHaveProperty('logo');
+    expect(named[1]).not.toHaveProperty('avatar');
     expect(named[2]).toEqual(row('c'));
   });
 
-  test('a message names its From domain only when it is verified and the cache holds it', () => {
-    const held = new Set(['brand.example']);
+  test('a message names its sender’s picture only when it is verified and the cache holds one', () => {
+    const pictures = new Map([['news@brand.example', 'k1']]);
     const [verified, unverified, elsewhere] = namedMessages(
       [
-        message('news@Brand.Example', true),
+        message('News@Brand.Example', true),
         message('news@brand.example', false),
         message('hi@other.example', true),
       ],
-      held,
+      pictures,
     );
-    expect(verified?.logo).toBe('brand.example');
-    expect(unverified).not.toHaveProperty('logo');
-    expect(elsewhere).not.toHaveProperty('logo');
-    // A logo a message carried in is never trusted.
+    expect(verified?.avatar).toBe('k1');
+    expect(unverified).not.toHaveProperty('avatar');
+    expect(elsewhere).not.toHaveProperty('avatar');
+    // A picture a message carried in is never trusted.
     const [carried] = namedMessages(
-      [{ ...message('a@forged.example', false), logo: 'brand.example' }],
-      held,
+      [{ ...message('a@forged.example', false), avatar: 'k1' }],
+      pictures,
     );
-    expect(carried).not.toHaveProperty('logo');
+    expect(carried).not.toHaveProperty('avatar');
   });
 
-  test('the cache is asked only about the logos rows and verified messages could name', () => {
+  test('the cache is asked only about the senders rows and verified messages could name', () => {
     expect(
-      logoCandidates(
-        [row('a', 'brand.example'), row('b')],
+      avatarCandidates(
+        [row('a', 'news@brand.example'), row('b')],
         [
-          message('x@shop.example', true),
+          message('X@Shop.example', true),
           message('y@person.example', false),
           message('nobody', true),
         ],
       ),
-    ).toEqual(['brand.example', 'shop.example']);
+    ).toEqual(['news@brand.example', 'x@shop.example']);
   });
 });
 

@@ -9,7 +9,7 @@ import {
   txtOf,
   walkOf,
   type Dmarc,
-} from '../core/logos.ts';
+} from '../core/avatars.ts';
 import { isPublicHost } from '../../../shared/public-host.ts';
 import type { Sql } from './schema.ts';
 

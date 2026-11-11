@@ -22,7 +22,7 @@ import type { Account, Address, Message } from '../../mail/core/index.ts';
 import {
   accountsQuery,
   bodyQuery,
-  logoUrl,
+  avatarUrl,
   mailroom,
   partUrl,
 } from '../../mailroom/client/index.ts';
@@ -80,7 +80,7 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
       <header {...stylex.props(sheetStyles.from)}>
         <SenderAvatar
           name={displayName(message.from)}
-          logo={message.logo && logoUrl(message.logo)}
+          picture={message.avatar && avatarUrl(message.avatar)}
         />
         <div {...stylex.props(sheetStyles.who)}>
           <strong {...stylex.props(sheetStyles.name)}>{displayName(message.from)}</strong>

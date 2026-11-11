@@ -8,10 +8,13 @@ import * as stylex from '@stylexjs/stylex';
 import { useState } from 'react';
 import type { StampColor } from '../../features/mail/core/index.ts';
 import { stampStyles } from './stamps.ts';
+import { tm } from './tokens.stylex.ts';
 
 /**
- * Who a message is from, as a round mark 32 pixels across: their brand's logo when their mail is
- * verified, or their initials on a quiet plate, also when the logo fails to load. Where a list
+ * Who a message is from, as a round mark 32 pixels across: their picture when their mail is
+ * verified and one is known, or their initials on a quiet plate, also when the picture fails to
+ * load. A picture fills its circle on a light plate in both themes, so a transparent icon drawn for
+ * light pages still reads in the dark theme. Where a list
  * mixes accounts, the account's stamp lies on its corner like a postmark. It repeats the name
  * beside it, so assistive technology passes over it.
  *
@@ -21,21 +24,26 @@ import { stampStyles } from './stamps.ts';
  */
 export function SenderAvatar({
   name,
-  logo,
+  picture,
   stamp,
 }: {
   name: string;
-  /** Where the sender's logo is served, when there is one to show. */
-  logo?: string;
+  /** Where the sender's picture is served, when there is one to show. */
+  picture?: string;
   stamp?: StampColor;
 }) {
   const [failed, setFailed] = useState<string>();
-  const showsLogo = logo !== undefined && failed !== logo;
+  const showsPicture = picture !== undefined && failed !== picture;
   return (
     <span aria-hidden data-avatar {...stylex.props(styles.avatar)}>
-      <span {...stylex.props(styles.plate, !showsLogo && styles.initials)}>
-        {showsLogo ? (
-          <img src={logo} alt="" onError={() => setFailed(logo)} {...stylex.props(styles.logo)} />
+      <span {...stylex.props(styles.plate, showsPicture ? styles.lightPlate : styles.initials)}>
+        {showsPicture ? (
+          <img
+            src={picture}
+            alt=""
+            onError={() => setFailed(picture)}
+            {...stylex.props(styles.picture)}
+          />
         ) : (
           initialsOf(name)
         )}
@@ -88,7 +96,11 @@ const styles = stylex.create({
     fontWeight: fontWeightVars['--font-weight-medium'],
     lineHeight: 1,
   },
-  logo: {
+  // Light in both themes, as the pages pictures are drawn for are, so a transparent one reads.
+  lightPlate: {
+    backgroundColor: tm.paperFixed,
+  },
+  picture: {
     width: '100%',
     height: '100%',
     objectFit: 'cover',

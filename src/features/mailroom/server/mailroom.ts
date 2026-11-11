@@ -6,6 +6,7 @@ import * as signing from '../../accounts/core/index.ts';
 import { messageOf } from '../../composer/index.ts';
 import { createProblem, deleteProblem, inside, renameProblem } from '../../folders/core/index.ts';
 import {
+  domainOf,
   messageIdOf,
   referencesOf,
   sameRef,
@@ -85,7 +86,13 @@ import {
   type ThisDevice,
 } from '../client/contract.ts';
 import { erasesAt, idlenessOf, isWorthNoting, windDownOf, type WindDown } from '../core/idle.ts';
-import { logoCandidates, namedMessages, namedRows, verifiedDomains } from '../core/logos.ts';
+import {
+  avatarCandidates,
+  namedMessages,
+  namedRows,
+  verifiedSenders,
+  type Picture,
+} from '../core/avatars.ts';
 import {
   accountBook,
   connectionOf,
@@ -269,7 +276,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       },
       landed: (folder, events) => {
         this.noteNews(folder, events);
-        this.logos.note(verifiedDomains(events), Date.now());
+        this.logos.note(domainsOf(verifiedSenders(events)), Date.now());
       },
     });
     this.sending = outboxQueue({
@@ -342,7 +349,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 
   conversation(id: ConversationId): Promise<Message[]> {
     const messages = opened(input.conversationOf(id), this.store, this.found?.outside ?? []);
-    return Promise.resolve(namedMessages(messages, this.logos.held(logoCandidates([], messages))));
+    return Promise.resolve(namedMessages(messages, this.pictures(avatarCandidates([], messages))));
   }
 
   async body(ref: MessageRef): Promise<Body> {
@@ -497,7 +504,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       this.book.remove(account);
       this.store.forget(account);
       // A logo stays only for a sender of the mail that's left.
-      this.logos.keep(this.store.verifiedDomains());
+      this.logos.keep(new Set(domainsOf([...this.store.verifiedSenders()])));
       this.sending.forget(account);
       this.underWay.forget(account);
       this.notifying.forgetAccount(account);
@@ -758,10 +765,15 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 
   // A message's bytes, for the Worker's routes. Null means the message or part is gone.
 
-  /** A verified sender's logo, from the Logo cache, as SVG. */
-  logo(domain: string): Promise<string | null> {
+  /** A verified sender's picture, from the Avatar cache, by the key a read named it with. */
+  avatar(key: string): Promise<Picture | null> {
     this.noteOpened();
-    return Promise.resolve(this.logos.logo(domain) ?? null);
+    const svg = this.logos.logo(key);
+    return Promise.resolve(
+      svg === undefined
+        ? null
+        : { type: 'image/svg+xml', bytes: new Uint8Array(new TextEncoder().encode(svg)) },
+    );
   }
 
   async source(ref: MessageRef): Promise<ReadableStream<Uint8Array> | null> {
@@ -926,12 +938,20 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
         }
       }),
     );
-    if (changed.includes(true)) this.hint({ changed: 'logos' });
+    if (changed.includes(true)) this.hint({ changed: 'avatars' });
   }
 
-  /** A page with the logos the cache holds named, and no others. */
+  /** A page with the pictures the cache holds named, and no others. */
   private named(page: Page): Page {
-    return { ...page, items: namedRows(page.items, this.logos.held(logoCandidates(page.items))) };
+    return { ...page, items: namedRows(page.items, this.pictures(avatarCandidates(page.items))) };
+  }
+
+  /** The key of each sender's picture the cache holds, by sender. */
+  private pictures(senders: readonly string[]): Map<string, string> {
+    const held = this.logos.held(domainsOf(senders));
+    return new Map(
+      senders.flatMap((sender) => (held.has(domainOf(sender)) ? [[sender, domainOf(sender)]] : [])),
+    );
   }
 
   private checkAll(at = Date.now()) {
@@ -1624,4 +1644,9 @@ async function attachmentOf(bytes: Uint8Array, index: number): Promise<MimeAttac
     content,
     ...(attachment.contentId ? { contentId: attachment.contentId.replace(/^<|>$/g, '') } : {}),
   };
+}
+
+/** The domains of these senders, once each. */
+function domainsOf(senders: readonly string[]): string[] {
+  return [...new Set(senders.map(domainOf))];
 }

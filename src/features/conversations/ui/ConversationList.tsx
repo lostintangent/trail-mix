@@ -38,7 +38,7 @@ import type {
   Marks,
   StampColor,
 } from '../../mail/core/index.ts';
-import { logoUrl } from '../../mailroom/client/index.ts';
+import { avatarUrl } from '../../mailroom/client/index.ts';
 import { faceOf } from '../core/face.ts';
 import type { Listed } from '../core/pages.ts';
 import type { SelectBy, Selection } from '../core/selection.ts';
@@ -332,7 +332,7 @@ const Row = memo(function Row({
   onSwipe: ((id: ConversationId) => void) | undefined;
   onAhead: ((id: ConversationId, isPressed: boolean) => void) | undefined;
 }) {
-  const { subject, senders, preview, date, unread, flagged, hasAttachments, logo } = conversation;
+  const { subject, senders, preview, date, unread, flagged, hasAttachments, avatar } = conversation;
   const who = faceOf(senders, selves);
   // A finger that taps the avatar picks the row instead of opening it.
   const pointer = useRef('');
@@ -379,7 +379,7 @@ const Row = memo(function Row({
       >
         <SenderAvatar
           name={who ? who.name || who.email : ''}
-          logo={logo && logoUrl(logo)}
+          picture={avatar && avatarUrl(avatar)}
           stamp={stamp}
         />
       </span>

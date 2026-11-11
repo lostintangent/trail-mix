@@ -1,6 +1,5 @@
 import {
   applySyncEvent,
-  domainOf,
   linkIdsOf,
   searchWords,
   type ConversationId,
@@ -15,6 +14,7 @@ import {
   type View,
 } from '../../mail/core/index.ts';
 import { MATCHES_LISTED, PAGE_SIZE, type Page } from '../client/contract.ts';
+import { senderOf } from '../core/avatars.ts';
 import type { Sql, SqlValue } from './schema.ts';
 
 /**
@@ -32,7 +32,7 @@ export type EnvelopeIndex = ReturnType<typeof envelopeIndex>;
 const SECOND = 2 ** 20;
 
 /**
- * `own` gives the member's addresses, so a conversation's row can name the logo of its newest
+ * `own` gives the member's addresses, so a conversation's row can name the picture of its newest
  * sender other than the member.
  */
 export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => []) {
@@ -366,15 +366,15 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
     summaryOf: (id: ConversationId, messages: readonly Message[]) =>
       summaryOf(id, messages, ownNow()),
 
-    /** The From domains of the verified mail the index holds. */
-    verifiedDomains(): Set<string> {
+    /** The senders of the verified mail the index holds. */
+    verifiedSenders(): Set<string> {
       return new Set(
         sql
           .all<{ sender: string }>(
             `SELECT DISTINCT json_extract(message, '$.from.email') AS sender FROM messages
              WHERE json_extract(message, '$.verified') = 1`,
           )
-          .map((row) => domainOf(row.sender)),
+          .map((row) => senderOf(row.sender)),
       );
     },
 
@@ -399,10 +399,10 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
 }
 
 /**
- * A conversation's row: its latest message speaks for it, and the rest add up. Its logo is its
+ * A conversation's row: its latest message speaks for it, and the rest add up. Its avatar is its
  * newest sender's other than the member, whose addresses are `mine`, when that message is verified.
- * The index keeps it whether or not the Logo cache holds that logo yet, and a read names it only
- * once the cache does.
+ * The index keeps that sender's address, whether or not the Avatar cache holds their picture yet,
+ * and a read names the picture only once the cache does.
  */
 export function summaryOf(
   id: ConversationId,
@@ -414,7 +414,7 @@ export function summaryOf(
   if (!latest) return undefined;
   const senders = new Map(newestFirst.map((m) => [m.from.email.toLowerCase(), m.from]));
   const theirs = newestFirst.find((m) => !mine.has(m.from.email.toLowerCase()));
-  const logo = theirs?.verified ? domainOf(theirs.from.email) : '';
+  const avatar = theirs?.verified ? senderOf(theirs.from.email) : '';
   return {
     id,
     account: latest.account,
@@ -426,7 +426,7 @@ export function summaryOf(
     unread: messages.filter((m) => !m.flags.seen).length,
     flagged: messages.some((m) => m.flags.flagged),
     hasAttachments: messages.some((m) => m.hasAttachments),
-    ...(logo ? { logo } : {}),
+    ...(avatar ? { avatar } : {}),
   };
 }
 

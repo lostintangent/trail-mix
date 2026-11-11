@@ -6,17 +6,18 @@ import {
 } from '../../mail/core/index.ts';
 
 /**
- * The Logo cache's rules: which senders may show a logo, what DNS says about a domain's logo, which
- * logos are safe to keep, and how lists and conversations name them.
+ * The Avatar cache's rules: which senders may show a picture, what DNS says about a domain's logo,
+ * which pictures are safe to keep, and how lists and conversations name them.
  *
- * A message is verified when its own server says DMARC passed for its From domain. That proves who
- * sent it, not that the domain's owner wants a logo shown, so a domain's logo is kept only while
- * its DMARC policy quarantines or rejects mail that fails, in full, and its BIMI record names an
- * SVG over HTTPS. A logo is a picture of a brand and nothing more: one that could run or fetch
+ * A message is verified when its own server says DMARC passed for its From domain. Only a verified
+ * sender shows a picture, and anyone else shows their initials. A brand's BIMI logo proves more
+ * than who sent the mail, that the domain's owner wants that logo shown, so it is kept only while
+ * the domain's DMARC policy quarantines or rejects mail that fails, in full, and its BIMI record
+ * names an SVG over HTTPS. A picture is a picture and nothing more: one that could run or fetch
  * anything is refused.
  */
 
-/** How long a domain's lookup stands before a logo it found is looked up again. */
+/** How long a lookup stands before what it found is looked up again. */
 export const RECHECK_MS = 7 * 24 * 60 * 60_000;
 
 /** The most a logo may weigh, in bytes. */
@@ -25,47 +26,62 @@ export const LOGO_BYTES = 32 * 1024;
 /** The most domains a lookup asks DNS about for one sender's domain: it, and those above it. */
 const WALK = 5;
 
-// Who may show a logo
+// Who may show a picture
 
-/** The domains of the verified senders among the messages a batch of sync events brings. */
-export function verifiedDomains(events: readonly SyncEvent[]): string[] {
-  const domains = new Set<string>();
+/** A picture the Avatar cache holds: its type, as its first bytes showed, and its bytes. */
+export type Picture = { type: string; bytes: Uint8Array<ArrayBuffer> };
+
+/** A sender's address as the Avatar cache keys it. */
+export const senderOf = (address: string) => address.trim().toLowerCase();
+
+/** The verified senders among the messages a batch of sync events brings, once each. */
+export function verifiedSenders(events: readonly SyncEvent[]): string[] {
+  const senders = new Set<string>();
   for (const event of events) {
     if (event.type !== 'message' || !event.envelope.verified) continue;
-    const domain = domainOf(event.envelope.from.email);
-    if (domain) domains.add(domain);
+    const sender = senderOf(event.envelope.from.email);
+    if (domainOf(sender)) senders.add(sender);
   }
-  return [...domains];
+  return [...senders];
 }
 
-/** Each row with its logo named only while the cache holds it. */
+/**
+ * Each row with its avatar named by the key its picture is served under, while the cache holds
+ * one. The index keeps a row's avatar as the address of its newest verified sender other than the
+ * member, and a read names it here.
+ */
 export function namedRows(
   rows: readonly ConversationSummary[],
-  held: ReadonlySet<string>,
+  pictures: ReadonlyMap<string, string>,
 ): ConversationSummary[] {
-  return rows.map(({ logo, ...row }) => (logo && held.has(logo) ? { ...row, logo } : row));
-}
-
-/** Each message with its From domain named as its logo, when it's verified and the cache holds it. */
-export function namedMessages(messages: readonly Message[], held: ReadonlySet<string>): Message[] {
-  return messages.map(({ logo: _, ...message }) => {
-    const domain = message.verified ? domainOf(message.from.email) : '';
-    return held.has(domain) ? { ...message, logo: domain } : message;
+  return rows.map(({ avatar, ...row }) => {
+    const key = avatar === undefined ? undefined : pictures.get(avatar);
+    return key ? { ...row, avatar: key } : row;
   });
 }
 
-/** The domains whose logos a set of rows and messages would name, if the cache holds them. */
-export function logoCandidates(
+/** Each message with its sender's picture named, when it's verified and the cache holds one. */
+export function namedMessages(
+  messages: readonly Message[],
+  pictures: ReadonlyMap<string, string>,
+): Message[] {
+  return messages.map(({ avatar: _, ...message }) => {
+    const key = message.verified ? pictures.get(senderOf(message.from.email)) : undefined;
+    return key ? { ...message, avatar: key } : message;
+  });
+}
+
+/** The senders whose pictures a set of rows and messages would name, if the cache holds them. */
+export function avatarCandidates(
   rows: readonly ConversationSummary[],
   messages: readonly Message[] = [],
 ): string[] {
-  const domains = new Set<string>();
-  for (const { logo } of rows) if (logo) domains.add(logo);
+  const senders = new Set<string>();
+  for (const { avatar } of rows) if (avatar) senders.add(avatar);
   for (const message of messages) {
-    if (message.verified) domains.add(domainOf(message.from.email));
+    if (message.verified) senders.add(senderOf(message.from.email));
   }
-  domains.delete('');
-  return [...domains];
+  return [...senders].filter((sender) => domainOf(sender));
 }
 
 // What DNS says

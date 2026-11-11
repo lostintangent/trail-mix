@@ -1,10 +1,10 @@
 import start from '@tanstack/react-start/server-entry';
 import type { Mailroom, Timed } from '../features/mailroom/client/contract.ts';
-import { readLogoPath, readMessagePath } from '../features/mailroom/client/urls.ts';
+import { readAvatarPath, readMessagePath } from '../features/mailroom/client/urls.ts';
 import { CLOUDFLARE_API, cloudflareApi, membersFor } from '../features/members/server/index.ts';
 import { signInFor, signsInDevelopers, type SignInConfig } from './access.ts';
 import { noRemoteImages, proxyImage } from './routes/images.ts';
-import { serveLogo, type LogoBytes } from './routes/logos.ts';
+import { serveAvatar, type AvatarBytes } from './routes/avatars.ts';
 import { serveMessageBytes, type MessageBytes } from './routes/messages.ts';
 import { act } from './routes/notifications.ts';
 import { updates } from './routes/updates.ts';
@@ -24,7 +24,7 @@ export type Env = Omit<SignInConfig, 'VISITOR_GATE'> &
     /** One Mailroom per member, named by their verified email address. */
     MAILROOM: {
       idFromName(name: string): unknown;
-      get(id: unknown): Mailroom & MessageBytes & LogoBytes;
+      get(id: unknown): Mailroom & MessageBytes & AvatarBytes;
     };
     /** The commit this deployment runs. */
     VERSION?: string;
@@ -60,14 +60,14 @@ export default {
     if (!signIn) return setupPage(url);
     if (!isFromTrailMix(request)) return new Response('Forbidden', { status: 403 });
     const message = readMessagePath(url.pathname);
-    const logo = readLogoPath(url.pathname);
+    const avatar = readAvatarPath(url.pathname);
     // Everything but the page and remote images reaches the member's Mailroom, which may make one.
     const reachesMailroom =
       url.pathname.startsWith('/_serverFn/') ||
       url.pathname === '/updates' ||
       url.pathname === '/notifications/act' ||
       message !== null ||
-      logo !== null;
+      avatar !== null;
     const signed = await signIn(request, { reachesMailroom });
     if (signed instanceof Response) return signed;
     const { member, setCookie, isLetIn = true } = signed;
@@ -89,7 +89,7 @@ export default {
     };
     if (url.pathname === '/updates') return answer(await updates(request, mailroom()));
     if (message) return answer(await serveMessageBytes(message, mailroom()));
-    if (logo) return answer(await serveLogo(logo, mailroom()));
+    if (avatar) return answer(await serveAvatar(avatar, mailroom()));
     if (url.pathname === '/images') {
       // The demo mailbox's images are at reserved addresses that never resolve, so a deployment
       // that serves only it fetches nothing from the internet for anyone.

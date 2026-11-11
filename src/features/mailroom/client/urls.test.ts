@@ -1,6 +1,13 @@
 import { expect, test } from 'bun:test';
 import type { MessageRef } from '../../mail/core/index.ts';
-import { imageUrl, logoUrl, messageUrl, partUrl, readLogoPath, readMessagePath } from './urls.ts';
+import {
+  avatarUrl,
+  imageUrl,
+  messageUrl,
+  partUrl,
+  readAvatarPath,
+  readMessagePath,
+} from './urls.ts';
 
 const ref = (path: string, account = 'personal'): MessageRef => ({
   account,
@@ -65,20 +72,20 @@ test('a remote image goes through the proxy with its whole address as one parame
   expect(url.searchParams.get('url')).toBe(remote);
 });
 
-test('a logo reads back as its domain, in lowercase, and any other path names none', () => {
-  for (const domain of ['news.example.com', 'xn--bcher-kva.example', 'bücher.example']) {
-    expect(readLogoPath(pathOf(logoUrl(domain)))).toBe(domain);
+test('an avatar reads back as its key, and any other path names none', () => {
+  for (const key of ['news.example.com', 'xn--bcher-kva.example']) {
+    expect(readAvatarPath(pathOf(avatarUrl(key)))).toBe(key);
   }
-  expect(readLogoPath('/logos/News.Example.COM')).toBe('news.example.com');
   for (const path of [
-    '/logos',
-    '/logos/',
-    '/logos/a/b',
-    '/logos/a%2Fb',
-    '/logos/%E0%A4%A',
+    '/avatars',
+    '/avatars/',
+    '/avatars/a/b',
+    '/avatars/a%2Fb',
+    '/avatars/News.Example',
+    '/avatars/%E0%A4%A',
     '/images',
   ]) {
-    expect(readLogoPath(path)).toBeNull();
+    expect(readAvatarPath(path)).toBeNull();
   }
-  expect(readLogoPath(`/logos/${'a'.repeat(254)}`)).toBeNull();
+  expect(readAvatarPath(`/avatars/${'a'.repeat(254)}`)).toBeNull();
 });

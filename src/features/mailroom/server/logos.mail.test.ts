@@ -9,7 +9,7 @@ import { ImapFlow } from 'imapflow';
 import type { ConversationSummary, Message } from '../../mail/core/index.ts';
 import type { AccountSetup } from '../client/contract.ts';
 import { DEMO_LOGOS } from '../../providers/index.ts';
-import { LOGO_BYTES } from '../core/logos.ts';
+import { LOGO_BYTES } from '../core/avatars.ts';
 import { caFile, empty, ports, start, stop, users } from '../../../../tests/mail-server/server.ts';
 import { mailrooms, member } from '../../../../tests/mailrooms.ts';
 import type { LocalWorker } from '../../../../tests/workerd.ts';
@@ -119,14 +119,14 @@ describe('Verified senders’ logos', () => {
   test('a verified sender whose domain enforces DMARC shows its logo, in lists and conversations', async () => {
     await ada.call('addAccount', setup('localhost'));
     await ada.until(
-      async () => rowFrom(await ada.page({ in: 'inbox' }), 'brand.test')?.logo !== undefined,
+      async () => rowFrom(await ada.page({ in: 'inbox' }), 'brand.test')?.avatar !== undefined,
     );
 
     const row = rowFrom(await ada.page({ in: 'inbox' }), 'brand.test')!;
-    expect(row.logo).toBe('brand.test');
+    expect(row.avatar).toBe('brand.test');
     const [message] = await ada.call<Message[]>('conversation', row.id);
-    expect(message).toMatchObject({ verified: true, logo: 'brand.test' });
-    expect(await ada.call('logo', 'brand.test')).toBe(LOGOS['/brand.svg']!);
+    expect(message).toMatchObject({ verified: true, avatar: 'brand.test' });
+    expect(await pictureOf(ada, 'brand.test')).toBe(LOGOS['/brand.svg']!);
   }, 60_000);
 
   test('no logo shows for a header forged below the server’s, a domain whose policy is none, or an oversized or scripted logo', async () => {
@@ -154,11 +154,11 @@ describe('Verified senders’ logos', () => {
     const rows = await ada.page({ in: 'inbox' });
     for (const domain of ['forged.test', 'lax.test', 'heavy.test', 'scripted.test']) {
       const row = rowFrom(rows, domain)!;
-      expect(row).not.toHaveProperty('logo');
+      expect(row).not.toHaveProperty('avatar');
       const [message] = await ada.call<Message[]>('conversation', row.id);
-      expect(message).not.toHaveProperty('logo');
+      expect(message).not.toHaveProperty('avatar');
       expect(message?.verified).toBe(domain !== 'forged.test');
-      expect(await ada.call('logo', domain)).toBeNull();
+      expect(await pictureOf(ada, domain)).toBeNull();
     }
   }, 60_000);
 
@@ -175,12 +175,12 @@ describe('Verified senders’ logos', () => {
       async () => rowFrom(await ada.page({ in: 'inbox' }), 'late.test') !== undefined,
     );
     await ada.until(() => Promise.resolve(asked.includes('_dmarc.late.test')));
-    expect(rowFrom(await ada.page({ in: 'inbox' }), 'late.test')).not.toHaveProperty('logo');
+    expect(rowFrom(await ada.page({ in: 'inbox' }), 'late.test')).not.toHaveProperty('avatar');
 
-    const hinted = device.next((hint) => hint.changed === 'logos');
+    const hinted = device.next((hint) => hint.changed === 'avatars');
     answer.resolve();
     await hinted;
-    expect(rowFrom(await ada.page({ in: 'inbox' }), 'late.test')?.logo).toBe('late.test');
+    expect(rowFrom(await ada.page({ in: 'inbox' }), 'late.test')?.avatar).toBe('late.test');
     device.close();
   }, 60_000);
 
@@ -193,7 +193,7 @@ describe('Verified senders’ logos', () => {
     );
 
     const row = rowFrom(await gus.page({ in: 'inbox' }), 'brand.test')!;
-    expect(row).not.toHaveProperty('logo');
+    expect(row).not.toHaveProperty('avatar');
     const [message] = await gus.call<Message[]>('conversation', row.id);
     expect(message).toMatchObject({ verified: false });
     expect(await storedLogos('gus')).toEqual([]);
@@ -203,16 +203,16 @@ describe('Verified senders’ logos', () => {
     const [account] = await ada.call<{ id: string }[]>('accounts');
     await ada.call('removeAccount', account!.id);
     expect(await storedLogos('ada')).toEqual([]);
-    expect(await ada.call('logo', 'brand.test')).toBeNull();
+    expect(await pictureOf(ada, 'brand.test')).toBeNull();
 
     const hal = member('hal', () => worker);
     await hal.call('addAccount', setup('localhost'));
     await hal.until(
-      async () => rowFrom(await hal.page({ in: 'inbox' }), 'brand.test')?.logo !== undefined,
+      async () => rowFrom(await hal.page({ in: 'inbox' }), 'brand.test')?.avatar !== undefined,
     );
     await hal.call('eraseEverything');
     expect(await storedLogos('hal')).toEqual([]);
-    expect(await hal.call('logo', 'brand.test')).toBeNull();
+    expect(await pictureOf(hal, 'brand.test')).toBeNull();
   }, 60_000);
 });
 
@@ -231,14 +231,20 @@ describe('The demo mailbox’s logos', () => {
     const dee = member('dee', () => demo);
     asked.length = 0;
     await dee.until(async () =>
-      (await dee.page({ in: 'inbox' })).some((row) => row.logo === 'kernelweekly.example.com'),
+      (await dee.page({ in: 'inbox' })).some((row) => row.avatar === 'kernelweekly.example.com'),
     );
-    expect(await dee.call('logo', 'kernelweekly.example.com')).toBe(
+    expect(await pictureOf(dee, 'kernelweekly.example.com')).toBe(
       DEMO_LOGOS['kernelweekly.example.com']!,
     );
     expect(asked).toEqual([]);
   }, 60_000);
 });
+
+/** The picture a member's Avatar cache serves under a key, as text, or null. */
+async function pictureOf(who: ReturnType<typeof member>, key: string): Promise<string | null> {
+  const picture = await who.call<{ bytes: Record<string, number> } | null>('avatar', key);
+  return picture && new TextDecoder().decode(new Uint8Array(Object.values(picture.bytes)));
+}
 
 type LogoRow = { domain: string; svg: string | null; checked_at: number | null };
 

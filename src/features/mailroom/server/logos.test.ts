@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import { LOGO_BYTES, RECHECK_MS } from '../core/logos.ts';
+import { LOGO_BYTES, RECHECK_MS } from '../core/avatars.ts';
 import { logoCache, logoNetwork, lookUpLogo, type LogoNetwork } from './logos.ts';
 import { testSql } from './test-sql.ts';
 

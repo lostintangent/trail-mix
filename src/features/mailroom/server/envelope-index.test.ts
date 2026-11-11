@@ -182,7 +182,7 @@ describe('a conversation’s row', () => {
     });
   });
 
-  test('names the logo of its newest sender other than the member, when that message is verified', () => {
+  test('names the avatar of its newest sender other than the member, when that message is verified', () => {
     const store = fresh(['Me@TrailMix.test']);
     const news = envelope('news', {
       from: { email: 'news@Brand.Example' },
@@ -198,23 +198,23 @@ describe('a conversation’s row', () => {
     });
     store.fold(arrive(news, reply));
     const id = store.reads.message(news)!.conversation;
-    expect(store.page({ in: 'inbox' }).items[0]?.logo).toBe('brand.example');
-    expect(store.summaryOf(id, store.conversation(id))?.logo).toBe('brand.example');
+    expect(store.page({ in: 'inbox' }).items[0]?.avatar).toBe('news@brand.example');
+    expect(store.summaryOf(id, store.conversation(id))?.avatar).toBe('news@brand.example');
 
-    // A newer sender who isn't verified takes the row, logo and all.
+    // A newer sender who isn't verified takes the row, avatar and all.
     const forwarded = envelope('fwd-news', {
       references: [news.messageId, reply.messageId],
       from: { email: 'pat@person.example' },
       date: '2026-11-09T11:00:00.000Z',
     });
     store.fold(arrive(forwarded));
-    expect(store.page({ in: 'inbox' }).items[0]).not.toHaveProperty('logo');
+    expect(store.page({ in: 'inbox' }).items[0]).not.toHaveProperty('avatar');
   });
 
-  test('names no logo for a conversation of the member’s own verified mail alone', () => {
+  test('names no avatar for a conversation of the member’s own verified mail alone', () => {
     const store = fresh(['me@trailmix.test']);
     store.fold(arrive(envelope('note', { from: { email: 'me@trailmix.test' }, verified: true })));
-    expect(store.page({ in: 'inbox' }).items[0]).not.toHaveProperty('logo');
+    expect(store.page({ in: 'inbox' }).items[0]).not.toHaveProperty('avatar');
   });
 
   test('reads mail indexed before senders were verified as unverified', () => {
@@ -226,7 +226,7 @@ describe('a conversation’s row', () => {
     expect(store.reads.message(old)?.verified).toBe(false);
   });
 
-  test('knows the domains of the verified mail it holds', () => {
+  test('knows the senders of the verified mail it holds', () => {
     const store = fresh();
     store.fold(
       arrive(
@@ -235,7 +235,7 @@ describe('a conversation’s row', () => {
         envelope('c', { from: { email: 'pat@person.example' } }),
       ),
     );
-    expect(store.verifiedDomains()).toEqual(new Set(['brand.example']));
+    expect(store.verifiedSenders()).toEqual(new Set(['news@brand.example', 'deals@brand.example']));
   });
 
   test('leaves every list once its last message is gone', () => {
