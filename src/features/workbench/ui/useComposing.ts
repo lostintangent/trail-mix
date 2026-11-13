@@ -73,11 +73,19 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
     },
     [replyTo],
   );
-  /** Answers the selected conversation, once its messages are at hand. */
+  /**
+   * Answers the selected conversation once its messages are at hand: within the key's own event
+   * when they are, so the reply and the cursor in it are in the page before the next key, which is
+   * then typed rather than taken as a command.
+   */
   const reply = useCallback(
     async (all: boolean) => {
       if (selected === undefined) return;
-      replyIn(await queryClient.ensureQueryData(conversationQuery(selected)), all);
+      const query = conversationQuery(selected);
+      replyIn(
+        queryClient.getQueryData(query.queryKey) ?? (await queryClient.ensureQueryData(query)),
+        all,
+      );
     },
     [queryClient, selected, replyIn],
   );

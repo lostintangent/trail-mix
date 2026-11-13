@@ -128,6 +128,31 @@ for (const [size, options] of Object.entries(SIZES)) {
       await readable(page, size, 'light-opened');
     }, 60_000);
 
+    test('a key pressed straight after R goes to the reply, though nothing else has run', async () => {
+      const page = await inbox('dark');
+      await open(page);
+      await composerLoaded(page);
+      await painted(page);
+      // A busy browser may handle the next key before any task React has waiting, so the reply and
+      // the cursor in it are in the page by the end of R's own event, and E reaches it, not Archive.
+      const focused = await page.evaluate(async () => {
+        const press = (key: string) =>
+          (document.activeElement ?? document.body).dispatchEvent(
+            new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true }),
+          );
+        press('r');
+        for (let tick = 0; tick < 20; tick++) await Promise.resolve();
+        const label = document.activeElement?.getAttribute('aria-label');
+        press('e');
+        return label;
+      });
+      expect(focused).toBe('Reply');
+      await painted(page);
+      const row = page.getByRole('option').filter({ hasText: 'Workers migration plan' });
+      expect(await row.count()).toBe(1);
+      expect(await composer(page).count()).toBe(1);
+    }, 60_000);
+
     test('whom the member chose a reply is to stays chosen when the parent’s Reply-To comes', async () => {
       const page = await inbox('dark');
       await slowBodies(page);
