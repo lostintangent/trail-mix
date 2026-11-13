@@ -344,17 +344,26 @@ test('the first screen draws every control it settles with, from the first load 
   expect(firstLoad.size).toBeGreaterThan(1);
 
   // A phone's first rows ask for nothing past the first load. A desktop's open conversation does.
+  // Its own ask is held as well, so its bar is drawn from its row however soon it would come.
   let heldBack = 0;
   for (const [size, options] of Object.entries(SIZES)) {
     const context = await app.context({ ...options, serviceWorkers: 'block' });
     const page = await context.newPage();
     const held: Route[] = [];
+    const asked: Route[] = [];
     let isHolding = true;
     await page.route(/\/assets\/[^/]+\.js$/, async (route) => {
       const { pathname } = new URL(route.request().url());
       if (isHolding && !firstLoad.has(pathname)) held.push(route);
       else await route.continue();
     });
+    await page.route(
+      (url) => url.href.includes(encodeURIComponent('"conversation"')),
+      async (route) => {
+        if (isHolding) asked.push(route);
+        else await route.continue();
+      },
+    );
     await page.goto(app.url);
     await page.getByRole('option').first().waitFor();
     await page.evaluate(() => new Promise(requestAnimationFrame));
@@ -366,7 +375,7 @@ test('the first screen draws every control it settles with, from the first load 
     heldBack += held.length;
 
     isHolding = false;
-    await Promise.all(held.map((route) => route.continue()));
+    await Promise.all([...held, ...asked].map((route) => route.continue()));
     // Past what loads once the first screen has settled, and the browser is idle again.
     await page.waitForTimeout(2_000);
     await page.waitForLoadState('networkidle');

@@ -51,7 +51,7 @@ import { ListPane } from './ListPane.tsx';
 import { PanelEdge } from './PanelEdge.tsx';
 import { PANELS } from './panels.ts';
 import { useReadMark } from './useReadMark.ts';
-import { ReaderPane, type ActionsPlace, type Reading } from './ReaderPane.tsx';
+import { ReaderPane, type Acting, type ActionsPlace } from './ReaderPane.tsx';
 import { ReaderPlace } from './ReaderPlace.tsx';
 import {
   askAhead,
@@ -406,7 +406,7 @@ export function Workbench({
   // A desktop's reader bar files and marks the conversation, with its place and arrows at the far
   // end. On a phone, marks sit at the top of the screen and filing sits in the island beside Reply.
   const readerActions = useCallback(
-    ({ id, conversation, account }: Reading, place: ActionsPlace) => {
+    ({ id, account, isFlagged, isUnread, conversation }: Acting, place: ActionsPlace) => {
       // A desktop shows the bar, and a phone the top and island, so only those are drawn.
       if (isPhone === (place === 'bar')) return null;
       const triage = (
@@ -414,14 +414,14 @@ export function Workbench({
           commands={triageCommands({
             accounts: [account],
             folders,
-            isFlagged: conversation.some(({ flags }) => flags.flagged),
-            isUnread: conversation.some(({ flags }) => !flags.seen),
+            isFlagged,
+            isUnread,
             onTriage: (action) => latestTriageShown.current(action, id),
           })}
           part={place === 'bar' ? 'all' : place === 'top' ? 'marking' : 'filing'}
         />
       );
-      if (place !== 'island') return triage;
+      if (place !== 'island' || !conversation) return triage;
       const [, reply] = composerCommands({
         write: undefined,
         reply: (all) => replyIn(conversation, all),
@@ -629,11 +629,10 @@ export function Workbench({
     (id: ConversationId, isPressed: boolean) => askAhead(queryClient, id, { body: isPressed }),
     [queryClient],
   );
-  // The list's subject shows at once while the rest of the conversation is on its way, and stays
+  // The list's row shows at once while the rest of the conversation is on its way, and stays
   // while the conversation leaves the list.
-  const subjectOf = useCallback(
-    (id: ConversationId) =>
-      rowOf(id)?.subject ?? (vacating?.row.id === id ? vacating.row.subject : undefined),
+  const shownRowOf = useCallback(
+    (id: ConversationId) => rowOf(id) ?? (vacating?.row.id === id ? vacating.row : undefined),
     [rowOf, vacating],
   );
   const stopPicking = () => {
@@ -1014,7 +1013,7 @@ export function Workbench({
                   hidden={composing.hidden}
                   leaving={leaving.all}
                   onOpenDraft={composing.openDraft}
-                  subjectOf={subjectOf}
+                  rowOf={shownRowOf}
                   choose={
                     view.in === 'outbox'
                       ? 'Choosing a send opens its conversation here.'

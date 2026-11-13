@@ -23,6 +23,7 @@ import type { Command } from '../../commands/index.ts';
 import type {
   Account,
   ConversationId,
+  ConversationSummary,
   Folder,
   Message,
   MessageRef,
@@ -43,6 +44,18 @@ import { PhoneIsland } from './PhoneIsland.tsx';
 
 /** The conversation the reader shows, with its messages and the account they belong to. */
 export type Reading = { id: ConversationId; conversation: Message[]; account: Account };
+
+/**
+ * What a conversation's actions act on: the conversation once it's here, or what its row in the
+ * list says while it's on its way, so they stand in the bar before it arrives.
+ */
+export type Acting = {
+  id: ConversationId;
+  account: Account;
+  isFlagged: boolean;
+  isUnread: boolean;
+  conversation?: Message[];
+};
 
 /** Where a conversation's actions are drawn: a desktop's bar, or a phone's top bar and island. */
 export type ActionsPlace = 'bar' | 'top' | 'island';
@@ -67,7 +80,7 @@ export function ReaderPane({
   leaving,
   onOpenDraft,
   page,
-  subjectOf,
+  rowOf,
   choose = 'Choose one from the list to read it here.',
   onBack,
 }: {
@@ -84,9 +97,10 @@ export function ReaderPane({
   onShown?: (conversation: ConversationId) => void;
   /**
    * What can be done to the conversation shown: in the reader's bar on a desktop, and on a phone
-   * split between the bar at the top of the screen and the island at the bottom.
+   * split between the bar at the top of the screen and the island at the bottom. The island, whose
+   * Reply needs the conversation, waits for it.
    */
-  actions?: (reading: Reading, place: ActionsPlace) => ReactNode;
+  actions?: (acting: Acting, place: ActionsPlace) => ReactNode;
   /** Where the conversation shown sits in the list, at the end of a desktop's bar. */
   place?: (shown: ConversationId) => ReactNode;
   /** What can be done with one of its messages, as the reader's own. The same function each render. */
@@ -106,8 +120,11 @@ export function ReaderPane({
   onOpenDraft?: (draft: Message, conversation: Message[]) => void;
   /** A page that lies on the sheet in place of a conversation, such as an account's. */
   page?: ReactNode;
-  /** A conversation's subject as the list has it, to show at once while the rest is on its way. */
-  subjectOf?: (id: ConversationId) => string | undefined;
+  /**
+   * A conversation's row in the list, whose subject and actions show at once while the rest is on
+   * its way.
+   */
+  rowOf?: (id: ConversationId) => ConversationSummary | undefined;
   /** What the empty reader asks the member to choose, in the words of the list beside it. */
   choose?: string;
   onBack: () => void;
@@ -136,10 +153,6 @@ export function ReaderPane({
       shown && conversation?.length && account ? { id: shown, conversation, account } : undefined,
     [shown, conversation, account],
   );
-  // Made once for each conversation shown, so the moves of a held key pass them by.
-  const bar = useMemo(() => reading && actions?.(reading, 'bar'), [reading, actions]);
-  const top = useMemo(() => reading && actions?.(reading, 'top'), [reading, actions]);
-  const island = useMemo(() => reading && actions?.(reading, 'island'), [reading, actions]);
   const isShowing = reading !== undefined;
   // Asked for and refused, or with no network asked for once in vain and waiting to ask again, as
   // for one this device didn't keep. A selection never shows the empty reader, so it says why
@@ -160,6 +173,31 @@ export function ReaderPane({
     () =>
       shown !== undefined && (isShowing || isOpening || isUnopened) ? place?.(shown) : undefined,
     [shown, isShowing, isOpening, isUnopened, place],
+  );
+  // So are its actions, from its row, so the bar doesn't fill in as the conversation arrives.
+  const row = shown !== undefined && (isOpening || isUnopened) ? rowOf?.(shown) : undefined;
+  const acting = useMemo<Acting | undefined>(() => {
+    if (reading) {
+      const { id, account, conversation } = reading;
+      return {
+        id,
+        account,
+        conversation,
+        isFlagged: conversation.some(({ flags }) => flags.flagged),
+        isUnread: conversation.some(({ flags }) => !flags.seen),
+      };
+    }
+    const account = row && accounts.find(({ id }) => id === row.account);
+    return row && account
+      ? { id: row.id, account, isFlagged: row.flagged, isUnread: row.unread > 0 }
+      : undefined;
+  }, [reading, row, accounts]);
+  // Made once for each conversation shown, so the moves of a held key pass them by.
+  const bar = useMemo(() => acting && actions?.(acting, 'bar'), [acting, actions]);
+  const top = useMemo(() => acting && actions?.(acting, 'top'), [acting, actions]);
+  const island = useMemo(
+    () => acting?.conversation && actions?.(acting, 'island'),
+    [acting, actions],
   );
   const openDraft = useMemo(
     () => reading && onOpenDraft && ((draft: Message) => onOpenDraft(draft, reading.conversation)),
@@ -218,7 +256,7 @@ export function ReaderPane({
       ) : null}
       {isFilled ? null : reading ? (
         <div {...stylex.props(styles.scroll, actions && styles.underBar)}>
-          <Suspense fallback={<ReaderSkeleton subject={subjectOf?.(reading.id)} />}>
+          <Suspense fallback={<ReaderSkeleton subject={rowOf?.(reading.id)?.subject} />}>
             <Reader
               conversation={reading.conversation}
               account={reading.account}
@@ -236,12 +274,12 @@ export function ReaderPane({
         </div>
       ) : isOpening ? (
         <div {...stylex.props(styles.scroll, actions && styles.underBar)}>
-          <ReaderSkeleton subject={shown && subjectOf?.(shown)} />
+          <ReaderSkeleton subject={shown && rowOf?.(shown)?.subject} />
         </div>
       ) : isUnopened ? (
         <div {...stylex.props(styles.scroll, actions && styles.underBar)}>
           <ConversationUnopened
-            subject={subjectOf?.(shown)}
+            subject={rowOf?.(shown)?.subject}
             isOffline={isOffline}
             onTryAgain={() => void refetch()}
           />
