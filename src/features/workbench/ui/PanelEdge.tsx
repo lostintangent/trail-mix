@@ -5,8 +5,9 @@ import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { dragPanel, nudgePanel, panelSize, type PanelSpec, type PanelState } from './panels.ts';
 
 /**
- * The draggable edge on a side panel's inline end, in the desk gap beside it. It moves the panel's
- * width by pointer and by key, and past the midpoint toward the rail it collapses the panel.
+ * The draggable edge on a side panel's inline end, in the gutter beside it: the desk's edge beside
+ * the sidebar, or the gap between two sheets. It moves the panel's width by pointer and by key, and
+ * past the midpoint toward the rail it collapses the panel.
  *
  * While a pointer drags, the edge writes the size straight to the panel's custom property, so
  * following the pointer re-renders only the edge. The panel's owner hears about a width when the
@@ -17,6 +18,7 @@ export const PanelEdge = memo(function PanelEdge({
   state,
   label,
   controls,
+  gutter,
   onChange,
   onResizingChange,
 }: {
@@ -25,6 +27,8 @@ export const PanelEdge = memo(function PanelEdge({
   label: string;
   /** The id of the panel the edge resizes. */
   controls: string;
+  /** The gutter the edge fills: the desk's edge after the sidebar, or the gap between sheets. */
+  gutter: 'desk' | 'sheets';
   onChange: (state: PanelState) => void;
   onResizingChange: (isResizing: boolean) => void;
 }) {
@@ -57,7 +61,7 @@ export const PanelEdge = memo(function PanelEdge({
       aria-valuemin={spec.rail}
       aria-valuemax={spec.max}
       tabIndex={0}
-      {...stylex.props(styles.edge, drag && styles.dragging)}
+      {...stylex.props(styles.edge, gutters[gutter], drag && styles.dragging)}
       onPointerDown={(event) => {
         if (event.button !== 0) return;
         event.preventDefault();
@@ -91,7 +95,6 @@ const styles = stylex.create({
     position: 'absolute',
     insetBlock: 0,
     insetInlineStart: '100%',
-    width: tm.deskGap,
     zIndex: 1,
     cursor: 'col-resize',
     touchAction: 'none',
@@ -107,7 +110,6 @@ const styles = stylex.create({
       content: { default: null, [media.coarse]: '""' },
       position: 'absolute',
       insetBlock: 0,
-      insetInline: `calc((${tm.deskGap} - ${tm.target}) / 2)`,
     },
     // Nothing shows at rest. On hover or drag a line of the accent runs down the gutter's middle,
     // fading out toward both ends, as Toy Box's does, and twice as wide for the keyboard's focus.
@@ -128,5 +130,17 @@ const styles = stylex.create({
   },
   dragging: {
     '::after': { opacity: 1 },
+  },
+});
+
+// Each gutter's edge is as wide as the gutter, and under a finger reaches a target's width about it.
+const gutters = stylex.create({
+  desk: {
+    width: tm.deskEdge,
+    '::before': { insetInline: `calc((${tm.deskEdge} - ${tm.target}) / 2)` },
+  },
+  sheets: {
+    width: tm.deskGap,
+    '::before': { insetInline: `calc((${tm.deskGap} - ${tm.target}) / 2)` },
   },
 });

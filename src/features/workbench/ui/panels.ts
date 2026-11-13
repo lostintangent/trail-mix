@@ -31,9 +31,8 @@ export const PANELS: Record<PanelName, PanelSpec> = {
     width: 240,
     min: 200,
     max: 360,
-    // Twice the distance to the middle of the sidebar's icons (its 8px inset, a pixel, a row's 8px
-    // padding and half a 16px icon), so the fold button, centered on the rail, heads that column.
-    rail: 50,
+    // The rail a mouse folds it to, tm.sidebarRail's, which a finger's targets widen.
+    rail: 40,
   },
   list: {
     key: 'trail-mix.panel.list',

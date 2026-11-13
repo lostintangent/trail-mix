@@ -187,7 +187,6 @@ const OFFLINE: Record<Exclude<Reach, 'online'>, { said: string; more?: string }>
 
 /** How a desktop's sidebar folds: to its rail, with a button that holds still. */
 const RAIL: SidebarRail = {
-  width: PANELS.sidebar.rail,
   fold: <FoldToggle />,
 };
 
@@ -197,8 +196,11 @@ const ABOVE_ISLAND = { blockEnd: `calc(${tm.target} + ${spacingVars['--spacing-1
 /** What the sidebar is shown while a search is typed: no mailbox open, the same at every key. */
 const SEARCHING: View = { in: 'search', text: '' };
 
-/** The desktop columns: each side panel at the size on its custom property, then the reader. */
-const COLUMNS = `var(${PANELS.sidebar.variable}) var(${PANELS.list.variable}) minmax(0, 1fr)`;
+/**
+ * The desktop columns: each side panel at the size on its custom property, then the reader. The
+ * sidebar is never narrower than the rail it draws, which a finger's targets widen.
+ */
+const COLUMNS = `max(var(${PANELS.sidebar.variable}), ${tm.sidebarRail}) var(${PANELS.list.variable}) minmax(0, 1fr)`;
 
 /**
  * The desk and what lies on it: the sidebar directly on the desk, then the list and reader sheets.
@@ -1139,6 +1141,7 @@ export function Workbench({
                 state={sidebar}
                 label="Resize the sidebar"
                 controls={sidebarId}
+                gutter="desk"
                 onChange={setSidebar}
                 onResizingChange={setIsResizing}
               />
@@ -1220,11 +1223,12 @@ export function Workbench({
                 state={list}
                 label="Resize the conversation list"
                 controls={listId}
+                gutter="sheets"
                 onChange={setList}
                 onResizingChange={setIsResizing}
               />
             </div>
-            <div inert={isOffscreen('reader')} {...stylex.props(styles.pane)}>
+            <div inert={isOffscreen('reader')} {...stylex.props(styles.pane, styles.reader)}>
               {isMany && !isPhone ? (
                 <SelectionPane count={selection.ids.length} onClear={stopPicking}>
                   <Suspense>{selectionActions('bar')}</Suspense>
@@ -1546,9 +1550,11 @@ const styles = stylex.create({
     overflow: 'hidden',
     backgroundColor: colorVars['--color-background-body'],
   },
+  // The sidebar lies on the desk, a desk's edge from the list. The list and the reader are sheets,
+  // which the reader's margin sets a sheet's gap apart.
   track: {
     display: { default: 'grid', [media.phone]: 'flex' },
-    gap: { default: tm.deskGap, [media.phone]: 0 },
+    gap: { default: tm.deskEdge, [media.phone]: 0 },
     padding: { default: tm.deskEdge, [media.phone]: 0 },
     width: { default: '100%', [media.phone]: '300%' },
     height: '100%',
@@ -1572,6 +1578,9 @@ const styles = stylex.create({
     height: '100%',
     flexBasis: { default: null, [media.phone]: 0 },
     flexGrow: { default: null, [media.phone]: 1 },
+  },
+  reader: {
+    marginInlineStart: { default: `calc(${tm.deskGap} - ${tm.deskEdge})`, [media.phone]: 0 },
   },
 });
 

@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, expect } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { BrowserContext, BrowserContextOptions, Page } from 'playwright';
+import type { BrowserContext, BrowserContextOptions, Locator, Page } from 'playwright';
 import { unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
@@ -165,8 +165,9 @@ test('the sidebar folds to its rail and back by button and key, keeping every vi
   const gearAt = await gear.boundingBox();
   await fold.click();
   await page.waitForFunction(
-    () =>
-      getComputedStyle(document.documentElement).getPropertyValue('--workbench-sidebar') === '50px',
+    (rail) =>
+      getComputedStyle(document.documentElement).getPropertyValue('--workbench-sidebar') === rail,
+    `${PANELS.sidebar.rail}px`,
   );
   // The fold button at the top and the gear at the foot hold still across the fold, and the search
   // moves above the list.
@@ -218,6 +219,60 @@ test('the sidebar folds to its rail and back by button and key, keeping every vi
     await page.evaluate(() => (window as unknown as { firstFold: string[] }).firstFold),
   ).toEqual(['Unfold the sidebar']);
 }, 30_000);
+
+test('the rail is centered on the tree’s icons, and holds each target whole, under a mouse or a finger', async () => {
+  const TABLET = { viewport: { width: 1180, height: 820 }, isMobile: true, hasTouch: true };
+  for (const [pointer, options, rail] of [
+    ['mouse', DESKTOP, 40],
+    ['finger', TABLET, 50],
+  ] as const) {
+    const page = await open(options);
+    const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
+    const middle = async (element: Locator) => {
+      const { x, width } = (await element.boundingBox())!;
+      return x + width / 2;
+    };
+    const edge = (await sidebar.boundingBox())!.x;
+    const fold = sidebar.getByRole('button', { name: 'Fold the sidebar' });
+    const inbox = sidebar
+      .getByRole('button', { name: /^Inbox/ })
+      .first()
+      .locator('svg')
+      .first();
+    const column = await middle(inbox);
+    expect({ pointer, fold: await middle(fold) }).toEqual({ pointer, fold: column });
+
+    await fold.click();
+    const unfold = sidebar.getByRole('button', { name: 'Unfold the sidebar' });
+    await unfold.waitFor();
+    await atRest(page);
+    const shown = await sidebar.evaluate((nav) => {
+      const box = nav.getBoundingClientRect();
+      const targets = [...nav.querySelectorAll('button')].filter(
+        (each) => !each.closest('[inert]'),
+      );
+      return {
+        width: box.width,
+        whole: targets.every(
+          (each) =>
+            each.getBoundingClientRect().left >= box.left &&
+            each.getBoundingClientRect().right <= box.right,
+        ),
+      };
+    });
+    // The rail is twice the way to the icons' middle, so the fold button heads their column in both
+    // forms, and every target on it shows whole, 44 pixels under a finger.
+    expect({ pointer, column: column - edge, ...shown }).toEqual({
+      pointer,
+      column: rail / 2,
+      width: rail,
+      whole: true,
+    });
+    expect(await middle(unfold)).toBe(column);
+    await readable(page, `rail-${pointer}`);
+    await page.context().close();
+  }
+}, 60_000);
 
 test('the foot holds the Settings gear, a rule and Trail Mix, and says nothing about the mail', async () => {
   for (const [size, options] of [

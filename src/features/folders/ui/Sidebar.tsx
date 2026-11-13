@@ -22,8 +22,6 @@ import type { ViewCounts } from './views.ts';
 
 /** What a desktop's sidebar needs to fold to its rail. A phone's never folds. */
 export type SidebarRail = {
-  /** The rail's width, in pixels. */
-  width: number;
   /** The button that folds and unfolds the sidebar, which holds still across the fold. */
   fold: ReactNode;
 };
@@ -119,9 +117,7 @@ export const Sidebar = memo(function Sidebar({
   return (
     <nav id={id} aria-label="Mailboxes" aria-busy={isBusy} {...stylex.props(styles.sidebar)}>
       {/* First, as it reads: it heads both layouts. */}
-      {rail && (
-        <div {...stylex.props(styles.pinned, styles.width(`${rail.width}px`))}>{rail.fold}</div>
-      )}
+      {rail && <div {...stylex.props(styles.pinned)}>{rail.fold}</div>}
       <div
         aria-hidden={isRail || undefined}
         inert={isRail}
@@ -184,12 +180,9 @@ export const Sidebar = memo(function Sidebar({
             <div
               aria-hidden={!isRailShown || undefined}
               inert={!isRailShown}
-              // The rail holds its own width rather than the sidebar's, so its icons sit where they'll
-              // stay from the first frame of a fold, rather than sliding in as the sidebar narrows.
               {...stylex.props(
                 styles.layer,
                 styles.rail,
-                styles.width(`${rail.width}px`),
                 isRailShown ? styles.arriving : styles.leaving,
               )}
             >
@@ -205,9 +198,7 @@ export const Sidebar = memo(function Sidebar({
             </div>
           )}
           {/* Last, as it reads: it ends both layouts. */}
-          <div {...stylex.props(styles.pinnedFoot, styles.width(`${rail.width}px`))}>
-            {settings}
-          </div>
+          <div {...stylex.props(styles.pinnedFoot)}>{settings}</div>
           {compose && (
             <div
               aria-hidden={isRail || undefined}
@@ -265,9 +256,10 @@ const styles = stylex.create({
     transitionProperty: 'opacity',
     transitionTimingFunction: 'ease-out',
   },
+  // Its lines start the sidebar's inset in, after the pixel of room their header and tree keep.
   expanded: {
     width: '100%',
-    paddingInline: spacingVars['--spacing-2'],
+    paddingInline: `calc(${tm.sidebarInset} - 1px)`,
   },
   width: (width: string) => ({ width }),
   arriving: {
@@ -291,6 +283,7 @@ const styles = stylex.create({
     zIndex: 1,
     display: 'flex',
     justifyContent: 'center',
+    width: tm.sidebarRail,
   },
   foldRoom: {
     flexShrink: 0,
@@ -305,6 +298,7 @@ const styles = stylex.create({
     zIndex: 1,
     display: 'flex',
     justifyContent: 'center',
+    width: tm.sidebarRail,
   },
   // New message, at the far end of the footer's line, as wide as the whole tree so it holds still
   // as the sidebar narrows, and fading with the tree. Only the button itself takes the pointer.
@@ -316,7 +310,7 @@ const styles = stylex.create({
     display: 'flex',
     justifyContent: 'flex-end',
     width: '100%',
-    paddingInlineEnd: `calc(${spacingVars['--spacing-2']} + 1px)`,
+    paddingInlineEnd: tm.sidebarInset,
     pointerEvents: 'none',
     transitionProperty: 'opacity',
     transitionTimingFunction: 'ease-out',
@@ -356,14 +350,14 @@ const styles = stylex.create({
     paddingInline: spacingVars['--spacing-1'],
   },
   // A rule across the sidebar sets the footer off from the tree above it, as in Toy Box. Its gear
-  // starts where the header's fold button does, a pixel in, so the pinned one lines up with both.
+  // starts where the header's fold button does, the inset in, so the pinned one lines up with both.
   footer: {
     display: 'flex',
     alignItems: 'center',
     gap: spacingVars['--spacing-2'],
-    marginInline: `calc(-1 * ${spacingVars['--spacing-2']})`,
+    marginInline: `calc(1px - ${tm.sidebarInset})`,
     paddingTop: spacingVars['--spacing-2'],
-    paddingInline: `calc(${spacingVars['--spacing-2']} + 1px)`,
+    paddingInline: tm.sidebarInset,
     borderTopWidth: '1px',
     borderTopStyle: 'solid',
     borderTopColor: colorVars['--color-border'],
@@ -400,7 +394,10 @@ const styles = stylex.create({
     color: tm.textQuiet,
     fontSize: typeScaleVars['--text-supporting-size'],
   },
+  // It holds its own width rather than the sidebar's, so its icons sit where they'll stay from the
+  // first frame of a fold, rather than sliding in as the sidebar narrows.
   rail: {
+    width: tm.sidebarRail,
     alignItems: 'center',
     gap: spacingVars['--spacing-0-5'],
   },

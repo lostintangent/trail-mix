@@ -3,12 +3,13 @@ import * as stylex from '@stylexjs/stylex';
 /** Every value Astryx has no name for. Components use these or Astryx's tokens, never a literal. */
 
 const COARSE = '@media (pointer: coarse)';
+const PHONE = '@media (width < 768px)';
 const VERMILION = 'oklch(0.64 0.19 30)';
 const INK_BLUE = 'light-dark(oklch(0.5 0.19 265), oklch(0.77 0.13 265))';
 
 /** Width picks the layout and pointer picks the size. Each component declares its own motion. */
 export const media = stylex.defineConsts({
-  phone: '@media (width < 768px)', // one pane at a time, on a sliding track
+  phone: PHONE, // one pane at a time, on a sliding track
   coarse: COARSE, // every target at least 44px
   reducedMotion: '@media (prefers-reduced-motion: reduce)', // nothing moves
   forcedColors: '@media (forced-colors: active)', // shadows and fills are gone, so edges are drawn
@@ -17,7 +18,13 @@ export const media = stylex.defineConsts({
 export const tm = stylex.defineVars({
   // Geometry
   deskGap: '12px', // the gutter between sheets
-  deskEdge: '8px', // the desk's margin around them, as in Toy Box
+  deskEdge: '8px', // the desk's margin around them and the sidebar, as in Toy Box
+  // From the sidebar's edge to its lines, which puts its icons 20px in, as GistPad's are. A phone's
+  // sidebar fills the screen, so it keeps a wider margin, and so does one built for a finger.
+  sidebarInset: { default: '4px', [COARSE]: '9px', [PHONE]: '9px' },
+  // The rail the sidebar folds to: twice the way to its icons' middle (its inset, a line's 8px
+  // padding and half a 16px icon), so the fold button and the gear head that column in both forms.
+  sidebarRail: { default: '40px', [COARSE]: '50px' },
   paneRadius: '14px',
   sheetRadius: '12px', // a message, the composer
   target: { default: '32px', [COARSE]: '44px' },
