@@ -203,6 +203,8 @@ const ALARM_SLACK_MS = 1_000;
 const MOVED_IN_HELD = 1_000;
 /** The most domains and senders one wake looks up pictures for. */
 const AVATAR_LOOKUPS = { domains: 6, senders: 16 };
+/** The most cached bodies one wake lets go, in deletes of at most as many keys as a bucket takes. */
+const BODIES_LET_GO = { wake: 10_000, delete: 1_000 };
 /** Where the id that names what an installed app keeps is stored. */
 const CACHE_KEY = 'cache';
 
@@ -917,9 +919,14 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     await this.tellNews();
     // A new account's Inbox is known only once its folders are.
     await this.watchAll(this.devices() > 0);
+    const isOwingBodies = await this.letBodiesGo().catch((error: unknown) => {
+      // What the bucket didn't delete stays owed, for the next wake.
+      report(error);
+      return false;
+    });
     const isOwingAvatars = await this.lookUpAvatars();
     const sendAt = this.sending.nextWake() ?? poll;
-    if (this.queue.owing() || isOwingAvatars || sendAt <= Date.now()) {
+    if (this.queue.owing() || isOwingBodies || isOwingAvatars || sendAt <= Date.now()) {
       await this.ctx.storage.setAlarm(Date.now());
     } else await this.ctx.storage.setAlarm(Math.min(poll, sendAt, this.signInWake() ?? poll));
     return landed;
@@ -1466,7 +1473,11 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     return this.ctx.id.toString();
   }
 
-  /** A message's raw bytes: from the cache, or from the server once and kept from then on. */
+  /**
+   * A message's raw bytes: from the cache, or from the server once and kept from then on, while
+   * the index holds the message. A body whose message leaves the index, or that the index never
+   * held, goes at the next wake.
+   */
   private async bytes(ref: MessageRef): Promise<Uint8Array<ArrayBuffer> | null> {
     const key = this.bodyKey(ref);
     const cached = await this.env.BODIES.get(key);
@@ -1475,6 +1486,8 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     const stream = await (await this.provider(ref.account)).body(ref);
     const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
     await this.env.BODIES.put(key, bytes);
+    // A draft just saved is indexed by the sync its save owes.
+    if (!this.store.reads.message(ref) && !this.drafts.has(refKeyOf(ref))) this.store.oweBody(ref);
     return bytes;
   }
 
@@ -1546,6 +1559,21 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       if (!listed.truncated) return;
       cursor = listed.cursor;
     }
+  }
+
+  /**
+   * Deletes the cached bodies owed a delete, a bucket's batch at a time, and clears what was owed
+   * once each batch is gone, so a wake that ends midway leaves the rest, and the batch it was
+   * deleting, for the next. Returns whether more are owed than one wake lets go.
+   */
+  protected async letBodiesGo(): Promise<boolean> {
+    for (let gone = 0; gone < BODIES_LET_GO.wake; gone += BODIES_LET_GO.delete) {
+      const refs = this.store.owedBodies(BODIES_LET_GO.delete);
+      if (refs.length === 0) return false;
+      await this.env.BODIES.delete(refs.map((ref) => this.bodyKey(ref)));
+      this.store.bodiesLetGo(refs);
+    }
+    return this.store.owedBodies(1).length > 0;
   }
 
   // The member's own accounts and folders

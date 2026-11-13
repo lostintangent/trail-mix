@@ -31,6 +31,7 @@ import {
   pauseSending,
   ports,
   refuseSubmissionSignIn,
+  resetUidValidity,
   settled,
   start,
   stop,
@@ -244,15 +245,30 @@ describe('The Mailroom', () => {
   });
 
   test('finds what only an older message holds on the server, opens it, and leaves the index be', async () => {
-    const before = (await ada.call<{ tables: Record<string, unknown[]> }>('stored')).tables;
+    type Stored = { tables: Record<string, unknown[]>; bodies: string[] };
+    // Once the cache owes nothing for the mail the tests before moved.
+    await ada.until(
+      async () => (await ada.call<Stored>('stored')).tables.gone_bodies!.length === 0,
+    );
+    const before = (await ada.call<Stored>('stored')).tables;
     const rows = await ada.page({ in: 'search', text: 'periwinkle', fullText: true });
     expect(rows.map((row) => row.subject)).toEqual(['Old letter']);
     const [message] = await ada.call<Message[]>('conversation', rows[0]!.id);
     expect(message).toMatchObject({ subject: 'Old letter', path: 'Archive' });
     expect((await ada.call<{ text: string }>('body', message)).text).toContain('periwinkle');
-    expect((await ada.call<{ tables: Record<string, unknown[]> }>('stored')).tables).toEqual(
-      before,
-    );
+    // No sync will report it gone, so the cache owes its body a delete from the start.
+    const { tables, bodies } = await ada.call<Stored>('stored');
+    const { account, path, uidValidity, uid } = refOf(message!);
+    const key = `/${account}/${encodeURIComponent(path)}/${uidValidity}/${uid}`;
+    expect(bodies.filter((each) => each.endsWith(key))).toHaveLength(1);
+    expect(tables).toEqual({
+      ...before,
+      gone_bodies: [{ account, path, uid_validity: uidValidity, uid }],
+    });
+    await ada.call('wakeNow');
+    const woken = await ada.call<Stored>('stored');
+    expect(woken.bodies.filter((each) => each.endsWith(key))).toEqual([]);
+    expect(woken.tables).toEqual(before);
 
     // A restart forgets what the search found, and the conversation reads as one gone elsewhere.
     await ada.call('restart').catch(() => {});
@@ -732,6 +748,178 @@ describe('The Mailroom', () => {
       expect(await answered(saved)).toEqual({ inReplyTo: undefined, references: undefined });
       await ada.call('move', [saved], 'trash');
     }, 30_000);
+  });
+
+  describe('the body cache, as sync reports mail gone', () => {
+    type Stored = { tables: Record<string, unknown[]>; bodies: string[] };
+    const stored = () => ada.call<Stored>('stored');
+    /** Whether the cache holds a message's body. */
+    const cached = async ({ account, path, uidValidity, uid }: MessageRef) => {
+      const tail = `/${account}/${encodeURIComponent(path)}/${uidValidity}/${uid}`;
+      return (await stored()).bodies.some((key) => key.endsWith(tail));
+    };
+    /** Whether the cache owes a message's body a delete. */
+    const owed = async (ref: MessageRef) =>
+      (await stored()).tables.gone_bodies!.some((row) =>
+        Bun.deepEquals(row, {
+          account: ref.account,
+          path: ref.path,
+          uid_validity: ref.uidValidity,
+          uid: ref.uid,
+        }),
+      );
+    /** Resolves once the cache has let a message's body go, and the message opens as gone. */
+    const letGo = async (ref: MessageRef) => {
+      await ada.until(async () => !(await cached(ref)));
+      await expect(ada.call('body', ref)).rejects.toThrow(
+        'That message is no longer in this mailbox.',
+      );
+    };
+    /** Has the Mailroom check every folder, as a device opening does. */
+    const checkNow = async () => {
+      const device = ada.device();
+      await device.opened;
+      device.close();
+    };
+    /** The message with this subject in a folder, as the index holds it there now. */
+    const heldIn = async (path: string, subject: string) => {
+      const rows = await ada.page({ in: 'folder', folder: { account: account.id, path } });
+      const row = rows.find((each) => each.subject === subject);
+      const messages = row ? await ada.call<Message[]>('conversation', row.id) : [];
+      const message = messages.find((each) => each.path === path && each.subject === subject);
+      return message && refOf(message);
+    };
+    /** The message with this subject in a folder, once the index holds it there by a ref other than `was`. */
+    const indexed = async (path: string, subject: string, was?: MessageRef) => {
+      let found: MessageRef | undefined;
+      await ada.until(async () => {
+        found = await heldIn(path, subject);
+        return found !== undefined && !Bun.deepEquals(found, was);
+      });
+      return found!;
+    };
+    /** A folder of Alice's on the server holding one message, once the index holds it. */
+    const folderWith = async (path: string, subject: string) => {
+      await asAlice(async (client) => {
+        await client.mailboxCreate(path);
+        await client.append(path, raw({ id: subject.toLowerCase(), subject, minutesAgo: 5 }));
+      });
+      await checkNow();
+      return indexed(path, subject);
+    };
+    /** Deletes a folder of Alice's on the server, once the index no longer lists it. */
+    const dropFolder = async (path: string) => {
+      await asAlice((client) => client.mailboxDelete(path));
+      await checkNow();
+      await ada.until(
+        async () => !(await ada.call<Folder[]>('folders')).some((folder) => folder.path === path),
+      );
+    };
+    /** Expunges a message in another client. */
+    const expungeElsewhere = (ref: MessageRef) =>
+      asAlice(async (client) => {
+        const lock = await client.getMailboxLock(ref.path);
+        try {
+          await client.messageDelete(String(ref.uid), { uid: true });
+        } finally {
+          lock.release();
+        }
+      });
+
+    test('lets a body go once its message is deleted, moved or expunged elsewhere, and fetches a moved one again where it lands', async () => {
+      const ids = ['deleted', 'moved', 'expunged'];
+      await asAlice(async (client) => {
+        for (const id of ids)
+          await client.append(
+            'INBOX',
+            raw({ id: `cache-${id}`, subject: `Cache ${id}`, minutesAgo: 3 }),
+          );
+      });
+      await checkNow();
+      const [deleted, moved, expunged] = await Promise.all(
+        ids.map((id) => indexed('INBOX', `Cache ${id}`)),
+      );
+      for (const ref of [deleted!, moved!, expunged!]) {
+        await ada.call('body', ref);
+        expect(await cached(ref)).toBe(true);
+      }
+
+      await ada.call('move', [deleted], 'trash');
+      const [archived] = await ada.call<{ from: MessageRef; to: MessageRef }[]>(
+        'move',
+        [moved],
+        'archive',
+      );
+      const landed = archived!.to;
+      await expungeElsewhere(expunged!);
+      await checkNow();
+      for (const ref of [deleted!, moved!, expunged!]) await letGo(ref);
+
+      // The moved message's body comes from the server again, the first time it opens where it landed.
+      expect(await indexed('Archive', 'Cache moved')).toEqual(landed);
+      expect(await cached(landed)).toBe(false);
+      expect((await ada.call<Body>('body', landed)).text).toContain('This is Cache moved.');
+      expect(await cached(landed)).toBe(true);
+    }, 60_000);
+
+    test('lets a folder’s bodies go when it starts over, and when the server no longer lists it', async () => {
+      const before = await folderWith('Keepsakes', 'Keepsake');
+      await ada.call('body', before);
+
+      await resetUidValidity(alice.email, 'Keepsakes');
+      await checkNow();
+      const after = await indexed('Keepsakes', 'Keepsake', before);
+      expect(after.uidValidity).not.toBe(before.uidValidity);
+      await letGo(before);
+      expect(await cached(after)).toBe(false);
+      await ada.call('body', after);
+      expect(await cached(after)).toBe(true);
+
+      await dropFolder('Keepsakes');
+      await letGo(after);
+    }, 60_000);
+
+    test('lets a body go whose message a folder read again no longer holds', async () => {
+      const ref = await folderWith('Leftovers', 'Leftover');
+      await ada.call('body', ref);
+      // Expunged elsewhere while nothing syncs, then every folder is read again from a cold start.
+      await ada.call('holdWakes');
+      await expungeElsewhere(ref);
+      await ada.call('rereadAsUpgraded').catch(() => {});
+      await checkNow();
+      await letGo(ref);
+      await dropFolder('Leftovers');
+    }, 60_000);
+
+    test('lets a body go after a restart that came first, and owes nothing when its going is reported again', async () => {
+      const ref = await folderWith('Replays', 'Replayed');
+      await ada.call('body', ref);
+      const cursor = await ada.call<string>('cursorOf', account.id, 'Replays');
+
+      // Its going lands in the index, and the instance ends before the wake can let the body go.
+      await ada.call('holdBodies', true);
+      await expungeElsewhere(ref);
+      await checkNow();
+      await ada.until(async () => (await heldIn('Replays', 'Replayed')) === undefined);
+      expect(await cached(ref)).toBe(true);
+      expect(await owed(ref)).toBe(true);
+      await ada.call('restart').catch(() => {});
+      await checkNow();
+      await letGo(ref);
+      expect(await owed(ref)).toBe(false);
+
+      // The same going, folded again from where the folder's sync stood before it.
+      await ada.call('holdBodies', true);
+      try {
+        await ada.call('rewind', account.id, 'Replays', cursor);
+        await checkNow();
+        await ada.until(async () => (await ada.call('cursorOf', account.id, 'Replays')) !== cursor);
+        expect(await owed(ref)).toBe(false);
+      } finally {
+        await ada.call('holdBodies', false);
+      }
+      await dropFolder('Replays');
+    }, 60_000);
   });
 
   test('another member reaches none of it', async () => {

@@ -188,6 +188,32 @@ export class TestMailroom extends Mailroom {
     await super.forgetBodies(prefix);
   }
 
+  private isHoldingBodies = false;
+
+  /**
+   * Has every wake keep the bodies it owes a delete, as if each ended before letting them go, until
+   * a test lets them go again or the instance restarts.
+   */
+  holdBodies(isHeld: boolean): Promise<void> {
+    this.isHoldingBodies = isHeld;
+    return Promise.resolve();
+  }
+
+  protected override letBodiesGo(): Promise<boolean> {
+    return this.isHoldingBodies ? Promise.resolve(false) : super.letBodiesGo();
+  }
+
+  /** Where a folder's sync stands, as its provider left the cursor. */
+  cursorOf(account: string, path: string): Promise<string | null> {
+    return Promise.resolve(this.store.cursor(account, path));
+  }
+
+  /** Sets a folder's sync back to a cursor it left, so its next sync reports again what followed. */
+  rewind(account: string, path: string, cursor: string): Promise<void> {
+    this.store.saveCursor(account, path, cursor);
+    return Promise.resolve();
+  }
+
   private readonly pushed: Pushed[] = [];
   private pushAnswer = 201;
 

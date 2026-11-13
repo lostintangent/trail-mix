@@ -309,6 +309,18 @@ export const versions: readonly (readonly string[])[] = [
        )
        AND EXISTS (SELECT 1 FROM json_each(summary, '$.recipients') AS r WHERE ${WRITTEN})`,
   ],
+  [
+    // The messages whose bodies the Body cache owes a delete: each that left the index, and each
+    // opened from outside it. A wake lets their bodies go once its sync is done. Losing one only
+    // keeps a body longer.
+    `CREATE TABLE gone_bodies (
+      account TEXT NOT NULL,
+      path TEXT NOT NULL,
+      uid_validity INTEGER NOT NULL,
+      uid INTEGER NOT NULL,
+      PRIMARY KEY (account, path, uid_validity, uid)
+    )`,
+  ],
 ];
 
 /**

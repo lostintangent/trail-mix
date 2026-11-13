@@ -83,6 +83,14 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
     role: (folder) => (roles ?? rolesNow()).get(placeOf(folder)),
   };
 
+  /** Notes that the Body cache owes a message's body a delete, should it hold one. */
+  function oweBody(ref: MessageRef) {
+    sql.run(
+      `INSERT OR IGNORE INTO gone_bodies (account, path, uid_validity, uid) VALUES (?, ?, ?, ?)`,
+      ...keyOf(ref),
+    );
+  }
+
   /**
    * Writes one change: its removals, then its messages. A message already held changes in place,
    * its flags or its conversation, or what it says when it is read again, so its links stand and
@@ -102,6 +110,7 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
       if (!unwritten.delete(gone.rowid)) sql.run(`DELETE FROM search WHERE rowid = ?`, gone.rowid);
       sql.run(`DELETE FROM messages WHERE rowid = ?`, gone.rowid);
       sql.run(`DELETE FROM links WHERE ${BY_REF}`, ...keyOf(ref));
+      oweBody(ref);
     }
     for (const message of change.put) {
       touched.add(message.conversation);
@@ -435,6 +444,38 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
       );
     },
 
+    /**
+     * Notes a message the index doesn't hold whose body the cache took, as a full-text result's,
+     * so its body goes as one whose message left the index does: no sync will report it gone.
+     */
+    oweBody,
+
+    /** Messages whose cached bodies are owed a delete, at most `most` of them. */
+    owedBodies(most: number): MessageRef[] {
+      return sql
+        .all<{ account: string; path: string; uid_validity: number; uid: number }>(
+          `SELECT account, path, uid_validity, uid FROM gone_bodies LIMIT ?`,
+          most,
+        )
+        .map(({ account, path, uid_validity, uid }) => ({
+          account,
+          path,
+          uidValidity: uid_validity,
+          uid,
+        }));
+    },
+
+    /** Clears what was owed for bodies the cache has let go. */
+    bodiesLetGo(refs: readonly MessageRef[]) {
+      sql.run(
+        `DELETE FROM gone_bodies WHERE (account, path, uid_validity, uid) IN (
+           SELECT json_extract(value, '$[0]'), json_extract(value, '$[1]'),
+                  json_extract(value, '$[2]'), json_extract(value, '$[3]')
+           FROM json_each(?))`,
+        JSON.stringify(refs.map(keyOf)),
+      );
+    },
+
     /** Forgets an account's mail and folders, leaving nothing of them on disk. */
     forget(account: string) {
       const ids = sql.all<{ conversation: string }>(
@@ -445,7 +486,7 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
         `DELETE FROM search WHERE rowid IN (SELECT rowid FROM messages WHERE account = ?)`,
         account,
       );
-      for (const table of ['messages', 'links', 'folders', 'placements', 'reread'])
+      for (const table of ['messages', 'links', 'folders', 'placements', 'reread', 'gone_bodies'])
         sql.run(`DELETE FROM ${table} WHERE account = ?`, account);
       for (const { conversation } of ids)
         sql.run(`DELETE FROM conversations WHERE id = ?`, conversation);
