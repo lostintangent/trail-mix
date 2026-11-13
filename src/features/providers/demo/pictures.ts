@@ -1,5 +1,8 @@
 import { domainOf } from '../../mail/core/index.ts';
 
+/** Kernel Weekly's K, in a 64-unit square, which its logo and its newsletter's masthead carry. */
+export const KERNEL_MARK = 'M20 18v28M20 32l16-14M24 30l14 16';
+
 /**
  * The demo mailbox's pictures, which it brings with it rather than looking any up: its brands'
  * logos, as their BIMI records would name them, one brand's site icon, and two people's photos, as
@@ -14,7 +17,7 @@ export const DEMO_PICTURES: {
   logos: {
     'kernelweekly.example.com': logo(
       '#1d2b53',
-      '<path d="M20 18v28M20 32l16-14M24 30l14 16" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>',
+      `<path d="${KERNEL_MARK}" stroke="#fff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" fill="none"/>`,
     ),
     'shop.example.com': logo(
       '#e2632b',

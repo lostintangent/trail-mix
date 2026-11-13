@@ -3,7 +3,7 @@ import type { Mailroom, Timed } from '../features/mailroom/client/contract.ts';
 import { readAvatarPath, readMessagePath } from '../features/mailroom/client/urls.ts';
 import { CLOUDFLARE_API, cloudflareApi, membersFor } from '../features/members/server/index.ts';
 import { signInFor, signsInDevelopers, type SignInConfig } from './access.ts';
-import { noRemoteImages, proxyImage } from './routes/images.ts';
+import { demoImages, proxyImage } from './routes/images.ts';
 import { serveAvatar, type AvatarBytes } from './routes/avatars.ts';
 import { serveMessageBytes, type MessageBytes } from './routes/messages.ts';
 import { act } from './routes/notifications.ts';
@@ -91,9 +91,7 @@ export default {
     if (message) return answer(await serveMessageBytes(message, mailroom()));
     if (avatar) return answer(await serveAvatar(avatar, mailroom()));
     if (url.pathname === '/images') {
-      // The demo mailbox's images are at reserved addresses that never resolve, so a deployment
-      // that serves only it fetches nothing from the internet for anyone.
-      return answer(env.DEMO_MAILBOX ? noRemoteImages() : await proxyImage(request));
+      return answer(env.DEMO_MAILBOX ? demoImages(request) : await proxyImage(request));
     }
     if (url.pathname === '/notifications/act') return answer(await act(request, mailroom()));
     const response = await start.fetch(request, {

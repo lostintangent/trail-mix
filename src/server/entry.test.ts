@@ -388,13 +388,33 @@ test('the image proxy refuses a signed-in member’s request that another site s
   internet.mockRestore();
 });
 
-test('a deployment of the demo mailbox alone fetches no remote image for anyone', async () => {
+test('a deployment of the demo mailbox alone shows its newsletter’s own pictures, and fetches no remote image', async () => {
   const internet = anImage();
   const { env } = developer();
-  const request = new Request(`${LOCAL}${PROXIED}`, {
-    headers: { 'Sec-Fetch-Site': 'same-origin' },
-  });
-  expect((await worker.fetch(request, { ...env, DEMO_MAILBOX: '200' })).status).toBe(404);
+  const image = (url: string) =>
+    worker.fetch(
+      new Request(`${LOCAL}/images?url=${encodeURIComponent(url)}`, {
+        headers: { 'Sec-Fetch-Site': 'same-origin' },
+      }),
+      { ...env, DEMO_MAILBOX: '200' },
+    );
+
+  for (const shown of ['masthead.svg', 'img/flame-2.svg']) {
+    const response = await image(`https://kernelweekly.example.com/${shown}`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('image/svg+xml');
+    expect(response.headers.get('content-security-policy')).toStartWith('sandbox');
+    expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+    expect(await response.text()).toStartWith('<svg xmlns="http://www.w3.org/2000/svg"');
+  }
+  // Its open pixel, and every address its mail doesn't name, has nothing.
+  for (const missing of [
+    'https://kernelweekly.example.com/open/0.gif',
+    'https://kernelweekly.example.com/img/constructor-0.svg',
+    'https://images.example.com/photo.png',
+  ]) {
+    expect((await image(missing)).status).toBe(404);
+  }
   expect(internet).not.toHaveBeenCalled();
   internet.mockRestore();
 });

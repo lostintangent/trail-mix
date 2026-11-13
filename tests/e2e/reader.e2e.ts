@@ -230,6 +230,42 @@ test('light paper, chosen in the palette, holds for a sender on every device unt
 }, 60_000);
 
 for (const colorScheme of ['light', 'dark'] as const) {
+  test(`in ${colorScheme}, the demo newsletter’s images, once shown, are its own pictures, and its open pixel stays blocked`, async () => {
+    const page = await open({ ...DESKTOP, colorScheme });
+    // Each remote image the page asked the Worker for, by the address it names.
+    const asked: { url: string; status: number }[] = [];
+    page.on('response', (response) => {
+      const url = new URL(response.url());
+      if (url.pathname !== '/images') return;
+      asked.push({ url: url.searchParams.get('url') ?? '', status: response.status() });
+    });
+    await row(page, 'Kernel Weekly').click();
+    const newest = reader(page).getByRole('article').last();
+    await newest.getByText('Images from Kernel Weekly are hidden.').waitFor();
+    await newest.getByRole('button', { name: 'Show', exact: true }).click();
+
+    // Every remote image in the newest message's frame comes in as a picture, not a broken box.
+    await page.waitForFunction(
+      () => {
+        const frame = [...document.querySelectorAll('iframe')].at(-1)?.contentDocument;
+        const remote = [...(frame?.images ?? [])].filter(
+          (image) => new URL(image.src).pathname === '/images',
+        );
+        return (
+          remote.length >= 3 && remote.every((image) => image.complete && image.naturalWidth > 0)
+        );
+      },
+      undefined,
+      { timeout: 15_000 },
+    );
+    expect(asked.some(({ url }) => url.endsWith('/masthead.svg'))).toBe(true);
+    expect(asked.filter(({ status }) => status !== 200)).toEqual([]);
+    expect(asked.filter(({ url }) => url.includes('/open/'))).toEqual([]);
+    await readable(page, `desktop-${colorScheme}-newsletter-images`);
+  }, 30_000);
+}
+
+for (const colorScheme of ['light', 'dark'] as const) {
   test(`on a phone, in ${colorScheme}, a sheet keeps its time whole, and a new message’s title sits on its buttons’ line`, async () => {
     const page = await open({ ...PHONE, colorScheme });
     await row(page, 'Q4 planning').click();

@@ -1,3 +1,4 @@
+import { demoImage } from '../../features/providers/index.ts';
 import { isPublicHost } from '../../shared/public-host.ts';
 import { byteHeaders, rasterImage } from './messages.ts';
 
@@ -59,8 +60,22 @@ export async function proxyImage(
   });
 }
 
-/** The answer where no remote image loads, as on a deployment that serves only the demo mailbox. */
-export const noRemoteImages = () => refuse(404, 'This Trail Mix loads no remote images.');
+/**
+ * The answer on a deployment that serves only the demo mailbox, whose images are at reserved
+ * addresses that never resolve: the demo's own picture for an address its mail names, and nothing
+ * for any other, so it fetches nothing from the internet for anyone.
+ */
+export function demoImages(request: Request): Response {
+  const picture = demoImage(new URL(request.url).searchParams.get('url') ?? '');
+  if (picture === undefined) return refuse(404, 'This Trail Mix loads no remote images.');
+  return new Response(picture, {
+    headers: byteHeaders({
+      type: 'image/svg+xml',
+      name: 'image.svg',
+      cache: 'private, max-age=86400',
+    }),
+  });
+}
 
 /** An http or https address on the public internet, or null. */
 export function remoteUrl(raw: string): URL | null {

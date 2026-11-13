@@ -10,6 +10,7 @@ import {
   type StampColor,
 } from '../../mail/core/index.ts';
 import { seededRandom } from '../../../shared/random.ts';
+import { figureAt, MASTHEAD, type Figure } from './images.ts';
 import { isDemoVerified } from './pictures.ts';
 
 /**
@@ -1242,10 +1243,10 @@ function newsletterHtml(topic: string, cycle: number): string {
   const text = "font-family:Georgia,'Times New Roman',serif;color:#1d2b3a";
   const paragraph = `margin:0 0 14px;font-size:16px;line-height:1.6;${text}`;
   const heading = `margin:0 0 10px;font-size:20px;line-height:1.3;font-weight:bold;${text}`;
-  const article = (title: string, body: string[], i: number) =>
+  const article = (title: string, figure: Figure, body: string[], i: number) =>
     `<tr><td class="article" style="padding:24px 32px;border-top:1px solid #e4dccb;background:#fdf6e3">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr>
-<td class="figure" width="160" valign="top" style="padding:0 20px 0 0"><img src="https://kernelweekly.example.com/img/${cycle}/${i}.png" width="160" height="100" alt="" style="display:block;border:0;border-radius:6px"></td>
+<td class="figure" width="160" valign="top" style="padding:0 20px 0 0"><img src="${figureAt(figure, i)}" width="160" height="100" alt="" style="display:block;border:0;border-radius:6px"></td>
 <td valign="top"><h2 style="${heading}">${escape(title)}</h2>
 ${body.map((sentences) => `<p style="${paragraph}">${escape(sentences)}</p>`).join('\n')}
 <p style="margin:0;font-size:14px;${text}"><a href="https://kernelweekly.example.com/r/${cycle}/${i}" style="color:#2a5d8f;text-decoration:underline">Read the whole piece</a></p>
@@ -1254,6 +1255,7 @@ ${body.map((sentences) => `<p style="${paragraph}">${escape(sentences)}</p>`).jo
   const articles = [
     article(
       'Connection migration in practice',
+      'migration',
       [
         'A phone that moves from Wi-Fi to cellular keeps its QUIC connection, because the connection is named by an ID rather than by an address. The catch is in the middle boxes that still expect the old way.',
       ],
@@ -1261,6 +1263,7 @@ ${body.map((sentences) => `<p style="${paragraph}">${escape(sentences)}</p>`).jo
     ),
     article(
       'A long read on congestion control',
+      'congestion',
       [
         'Why a slow start is not slow, and how the congestion window grows back after a loss. The second half is a careful tour of pacing.',
       ],
@@ -1272,7 +1275,8 @@ ${body.map((sentences) => `<p style="${paragraph}">${escape(sentences)}</p>`).jo
     const body = Array.from({ length: 3 }, () =>
       Array.from({ length: 4 }, () => pick(SENTENCES)).join(' '),
     );
-    const next = article(pick(TITLES), body, i);
+    const [title, figure] = pick(TITLES);
+    const next = article(title, figure, body, i);
     articles.push(next);
     size += next.length;
   }
@@ -1290,7 +1294,7 @@ body { margin: 0; padding: 0; background: #1d2b3a; }
 <body style="margin:0;padding:0;background:#1d2b3a">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" bgcolor="#1d2b3a" style="background:#1d2b3a"><tr><td align="center" style="padding:24px">
 <table class="wrapper" role="presentation" width="640" cellpadding="0" cellspacing="0" bgcolor="#fdf6e3" style="background:#fdf6e3;border-radius:8px">
-<tr><td><img src="https://kernelweekly.example.com/masthead.png" width="640" height="140" alt="Kernel Weekly" style="display:block;border:0"></td></tr>
+<tr><td><img src="${MASTHEAD}" width="640" height="140" alt="Kernel Weekly" style="display:block;border:0"></td></tr>
 <tr><td style="padding:24px 32px"><h1 style="margin:0 0 12px;font-size:28px;line-height:1.25;${text}">This week: ${escape(topic)}</h1>
 <p style="${paragraph}">Plus connection migration in practice, a long read on congestion control, and the rest of the week in systems.</p></td></tr>
 ${articles.join('\n')}
@@ -1300,17 +1304,18 @@ ${articles.join('\n')}
 </body></html>`;
 }
 
-const TITLES = [
-  'What the scheduler does while you wait',
-  'Page tables, briefly',
-  'The hidden cost of a context switch',
-  'Reading a flame graph without fooling yourself',
-  'Why your fsync is slower than you think',
-  'Allocators that never give memory back',
-  'A tour of io_uring',
-  'Timers, ticks and tickless kernels',
-  'Lock-free is not wait-free',
-  'Where the TLB misses go',
+/** The newsletter's other articles, each with the figure it shows. */
+const TITLES: readonly [title: string, figure: Figure][] = [
+  ['What the scheduler does while you wait', 'lanes'],
+  ['Page tables, briefly', 'tree'],
+  ['The hidden cost of a context switch', 'lanes'],
+  ['Reading a flame graph without fooling yourself', 'flame'],
+  ['Why your fsync is slower than you think', 'latency'],
+  ['Allocators that never give memory back', 'memory'],
+  ['A tour of io_uring', 'terminal'],
+  ['Timers, ticks and tickless kernels', 'lanes'],
+  ['Lock-free is not wait-free', 'terminal'],
+  ['Where the TLB misses go', 'tree'],
 ];
 
 const SENTENCES = [
