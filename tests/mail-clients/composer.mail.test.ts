@@ -133,9 +133,10 @@ describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix
       await reply.getByText('notes.txt').waitFor();
       await text.focus();
       await page.keyboard.press('ControlOrMeta+Enter');
+      // Its countdown lies on its line at the end of the conversation.
       await page
-        .getByRole('region', { name: 'Notifications' })
-        .getByText(/^Sending to Bob in \d+s/)
+        .getByRole('region', { name: 'Reader' })
+        .getByText(/^Sending in \d+s$/)
         .waitFor();
 
       // Once the undo window closes, the Mailroom sends it.
