@@ -1534,8 +1534,12 @@ for (const profile of ['full', 'outlook'] as const satisfies Profile[]) {
       const fixed = await cal.call<MessageRef>('saveDraft', draftOf('Fixed, again'), saved);
       expect(await outbox()).toEqual([]);
       const sending = await cal.call<Outgoing>('send', fixed);
-      expect(await outbox()).toEqual([sending]);
-      await cal.call('cancelSend', sending.id);
+      try {
+        // The sync the save owed may fold the draft in between, naming its conversation as well.
+        expect(await outbox()).toMatchObject([{ id: sending.id, draft: fixed, state: 'waiting' }]);
+      } finally {
+        await cal.call('cancelSend', sending.id);
+      }
     }, 90_000);
 
     test('a restart before the Outbox records acceptance holds the send, saying it may have gone', async () => {
