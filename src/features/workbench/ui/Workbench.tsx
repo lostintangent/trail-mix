@@ -306,13 +306,14 @@ export function Workbench({
   const listId = useId();
   const { title, unread, scope } = describeView(view, accounts, folders, counts);
   // An empty list while an account the view holds is on its first sync, or before the page has
-  // caught up with its Mailroom, may be mail on its way, which stands as skeleton rows. Search and
-  // the Outbox say what they found at once.
+  // caught up with its Mailroom, may be mail on its way, which stands as skeleton rows and counts
+  // nothing. Search and the Outbox say what they found at once.
   const isCaughtUp = useIsCaughtUp();
   const isFilling =
     view.in !== 'search' &&
     view.in !== 'outbox' &&
     (!isCaughtUp || (scope ? [scope] : accounts).some(({ status }) => status === 'syncing'));
+  const listed = isFilling && conversations?.length === 0 ? undefined : conversations;
   const { move, onViewChange, chooseView, written, pushed } = useAddress({
     place,
     onPlaceChange,
@@ -1150,6 +1151,7 @@ export function Workbench({
                 id={listId}
                 icon={viewIcon(view, folders)}
                 title={title}
+                total={view.in === 'outbox' ? counts.outbox : listed?.length}
                 unread={unread}
                 offline={reach === 'online' ? undefined : OFFLINE[reach]}
                 scope={scope}
@@ -1182,7 +1184,7 @@ export function Workbench({
                 }
                 viewIn={view.in}
                 listKey={hashKey([view])}
-                conversations={isFilling && conversations?.length === 0 ? undefined : conversations}
+                conversations={listed}
                 isUpdating={isFetching}
                 marks={marks}
                 stamps={mixesAccounts ? stamps : undefined}

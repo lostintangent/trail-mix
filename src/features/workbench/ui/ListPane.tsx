@@ -2,6 +2,7 @@ import { EmptyState } from '@astryxdesign/core/EmptyState';
 import { Heading } from '@astryxdesign/core/Heading';
 import { Icon } from '@astryxdesign/core/Icon';
 import { IconButton } from '@astryxdesign/core/IconButton';
+import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
 import {
   borderVars,
   colorVars,
@@ -33,7 +34,8 @@ import type {
 import { StampDot } from '../../../app/theme/StampDot.tsx';
 
 /**
- * The conversation list's sheet, under the view's icon, title and unread count. On a desktop the
+ * The conversation list's sheet, under the view's icon, its title, how many conversations it lists
+ * and how many are unread, and at the header's end the folder's menu. On a desktop the
  * whole pane is the sheet, and collapsed to its rail it keeps only a way to open it again. On a
  * phone the title sits on the desk, the sheet starts below it, and the way back to the folders
  * floats at the bottom with the pane's other actions.
@@ -42,6 +44,7 @@ export function ListPane({
   id,
   icon,
   title,
+  total,
   unread,
   offline,
   scope,
@@ -73,9 +76,11 @@ export function ListPane({
   /** The view's icon, the one the sidebar shows for it. */
   icon: LucideIcon;
   title: string;
+  /** How many conversations the list holds, or sends the Outbox holds, once it's known. */
+  total: number | undefined;
   unread: number | undefined;
   /**
-   * What the list says in place of the unread count while the device has no network, as mail read
+   * What the list says in place of its counts while the device has no network, as mail read
    * then may be old: a word, and more where there's room. The title matters more, so they give way
    * before it does, the more first, though the status still says all of them.
    */
@@ -117,7 +122,7 @@ export function ListPane({
   onShowFolders: () => void;
   /** On a phone, what the island holds after the way to the folders: search, then Write. */
   island?: ReactNode;
-  /** What can be done to the folder in view, beside its title. */
+  /** What can be done to the folder in view, at the header's end. */
   actions?: ReactNode;
 }) {
   const titleId = useId();
@@ -141,7 +146,7 @@ export function ListPane({
         <Heading level={2} id={titleId} xstyle={styles.title}>
           {title}
         </Heading>
-        {offline && (
+        {offline ? (
           // Each part wraps whole to a second line its box hides, the last first, where they can't
           // all fit beside the title.
           <span role="status" {...stylex.props(styles.offline)}>
@@ -151,13 +156,33 @@ export function ListPane({
               <span {...stylex.props(styles.offlinePart)}>{`: ${offline.more}`}</span>
             )}
           </span>
-        )}
-        {unread ? (
-          // Where the count can't fit whole, it moves past a break to a second line its box hides,
-          // so it goes before the title gives up a letter.
-          <span {...stylex.props(styles.unread, offline !== undefined && styles.besideOffline)}>
-            {'\u200b'}
-            <span {...stylex.props(styles.unreadText)}>{unread} unread</span>
+        ) : total || unread ? (
+          // One line tall, each count wraps whole past a break to a second line its box hides,
+          // unread first, so they go before the title gives up a letter.
+          <span {...stylex.props(styles.counts)}>
+            {total ? (
+              <>
+                {'\u200b'}
+                <span {...stylex.props(styles.count)}>
+                  {total.toLocaleString('en')}
+                  <VisuallyHidden>
+                    {viewIn === 'outbox'
+                      ? ' to send'
+                      : total === 1
+                        ? ' conversation'
+                        : ' conversations'}
+                  </VisuallyHidden>
+                </span>
+              </>
+            ) : null}
+            {unread ? (
+              <>
+                {'\u200b'}
+                <span {...stylex.props(styles.count, styles.unread, total ? styles.after : null)}>
+                  {unread} unread
+                </span>
+              </>
+            ) : null}
           </span>
         ) : null}
         <span {...stylex.props(styles.scope)}>
@@ -289,8 +314,8 @@ const styles = stylex.create({
     alignItems: 'center',
     paddingBlock: spacingVars['--spacing-2'],
   },
-  // A narrow list's header gives up its unread count, then truncates its title, so the
-  // conversation's buttons keep their place at its end, at any width and under a finger too.
+  // A narrow list's header gives up its counts, then truncates its title, so the folder's menu
+  // keeps its place at its end, at any width and under a finger too.
   header: {
     flexShrink: 0,
     display: 'flex',
@@ -312,10 +337,11 @@ const styles = stylex.create({
     alignSelf: 'center',
     color: colorVars['--color-text-secondary'],
   },
-  // The folder's own menu, beside its title.
+  // The folder's own menu, at the header's end on a desktop, and after the account's chip on a phone.
   actions: {
     display: 'flex',
     alignSelf: 'center',
+    marginInlineStart: { default: 'auto', [media.phone]: null },
     marginBlock: `calc(-1 * ${spacingVars['--spacing-2']})`,
   },
   below: {
@@ -360,25 +386,38 @@ const styles = stylex.create({
     fontWeight: fontWeightVars['--font-weight-semibold'],
     whiteSpace: 'nowrap',
   },
-  // It shrinks far ahead of the title, and one line tall, it shows its count whole or not at all.
-  unread: {
+  // It shrinks far ahead of the title, and one line of the title's tall, it shows each count whole
+  // or not at all. The view's total reads at the title's size, and its unread count beside it.
+  counts: {
     flexShrink: 1_000_000,
     minWidth: 0,
-    height: `calc(${typeScaleVars['--text-supporting-size']} * ${typeScaleVars['--text-supporting-leading']})`,
+    height: {
+      default: `calc(${typeScaleVars['--text-heading-3-size']} * ${typeScaleVars['--text-heading-3-leading']})`,
+      [media.phone]: `calc(${typeScaleVars['--text-heading-1-size']} * ${typeScaleVars['--text-heading-1-leading']})`,
+    },
     overflow: 'hidden',
     color: tm.textQuiet,
-    fontSize: typeScaleVars['--text-supporting-size'],
-    lineHeight: typeScaleVars['--text-supporting-leading'],
+    fontSize: {
+      default: typeScaleVars['--text-heading-3-size'],
+      [media.phone]: typeScaleVars['--text-heading-1-size'],
+    },
+    lineHeight: {
+      default: typeScaleVars['--text-heading-3-leading'],
+      [media.phone]: typeScaleVars['--text-heading-1-leading'],
+    },
   },
-  unreadText: {
+  count: {
     display: 'inline-block',
     whiteSpace: 'nowrap',
   },
-  // A list that says it's offline says nothing else beside its title.
-  besideOffline: {
-    display: 'none',
+  unread: {
+    fontSize: typeScaleVars['--text-supporting-size'],
+    lineHeight: typeScaleVars['--text-supporting-leading'],
   },
-  // As the unread count, it gives way before the title gives up a letter, one line tall.
+  after: {
+    marginInlineStart: spacingVars['--spacing-2'],
+  },
+  // A list that says it's offline says that in place of its counts, and gives way as they do.
   offline: {
     flexShrink: 1_000_000,
     minWidth: 0,

@@ -1091,14 +1091,22 @@ test('reader triage sits at the left of its bar, with place at the right, in bot
   }
 }, 90_000);
 
-test('a narrow list’s header gives up its unread count, whole, before a letter of its title, under a finger too', async () => {
+test('a narrow list’s header gives up its counts, each whole and unread first, before a letter of its title, under a finger too', async () => {
   const TABLET = { viewport: { width: 1180, height: 820 }, isMobile: true, hasTouch: true };
-  for (const [pointer, options] of [
-    ['fine', SIZES.desktop],
-    ['coarse', TABLET],
-  ] as const) {
-    for (const width of [380, 560]) {
-      const context = await app.context(options);
+  const NARROW_PHONE = { ...SIZES.phone, viewport: { width: 320, height: 700 } };
+  const cases = [
+    ...[300, 380, 560].flatMap((width) => [
+      { name: `fine ${width}`, options: SIZES.desktop, width },
+      { name: `coarse ${width}`, options: TABLET, width },
+    ]),
+    { name: 'phone 390', options: SIZES.phone, width: undefined },
+    { name: 'phone 320', options: NARROW_PHONE, width: undefined },
+  ];
+  const seen: { name: string; header: { title: string | null; total: string; unread: string } }[] =
+    [];
+  for (const { name, options, width } of cases) {
+    const context = await app.context(options);
+    if (width !== undefined) {
       await context.addInitScript(
         (width) =>
           localStorage.setItem(
@@ -1107,37 +1115,53 @@ test('a narrow list’s header gives up its unread count, whole, before a letter
           ),
         width,
       );
-      const page = await context.newPage();
-      await page.goto(app.url);
-      await page.getByRole('option').first().waitFor();
-      await page.getByText(/^\d+ unread$/).waitFor({ state: 'attached' });
-      const header = await page.evaluate(() => {
-        const header = document.querySelector('section[aria-labelledby] header')!;
-        const title = header.querySelector('h2')!;
-        const count = [...header.querySelectorAll('span span')].find((span) =>
-          /unread$/.test(span.textContent ?? ''),
-        )!;
-        const box = count.parentElement!.getBoundingClientRect();
-        const text = count.getBoundingClientRect();
-        return {
-          title: title.scrollWidth <= title.clientWidth ? title.textContent : 'truncated',
-          // Shown whole, inside its box, or moved out of it.
-          count: text.bottom <= box.bottom && text.right <= box.right + 0.5 ? 'whole' : 'hidden',
-          shown: text.top < box.bottom ? 'on its line' : 'gone',
-        };
-      });
-      // The count is whole on its line or gone, never cut, and the title stays whole either way.
-      const whole = { title: 'Inbox', count: 'whole', shown: 'on its line' };
-      const gone = { title: 'Inbox', count: 'hidden', shown: 'gone' };
-      expect({ pointer, width, header }).toEqual({
-        pointer,
-        width,
-        header: width === 560 || header.count === 'whole' ? whole : gone,
-      });
-      await context.close();
     }
+    const page = await context.newPage();
+    await page.goto(app.url);
+    await page.getByRole('option').first().waitFor();
+    await page.getByText(/^\d+ unread$/).waitFor({ state: 'attached' });
+    const header = await page.evaluate(() => {
+      const header = document.querySelector('section[aria-labelledby] header')!;
+      const title = header.querySelector('h2')!;
+      const counts = title.nextElementSibling!;
+      const box = counts.getBoundingClientRect();
+      // Shown whole, inside its box, or moved out of it below.
+      const shown = (pattern: RegExp) => {
+        const count = [...counts.children].find((part) => pattern.test(part.textContent ?? ''))!;
+        const text = count.getBoundingClientRect();
+        if (text.top >= box.bottom) return 'gone';
+        return text.bottom <= box.bottom && text.right <= box.right + 0.5 ? 'whole' : 'cut';
+      };
+      return {
+        title: title.scrollWidth <= title.clientWidth ? title.textContent : 'truncated',
+        total: shown(/^[\d,]+ conversations$/),
+        unread: shown(/^\d+ unread$/),
+      };
+    });
+    seen.push({ name, header });
+    await context.close();
   }
-}, 60_000);
+  // Each count is whole on its line or gone, never cut, the unread count goes before the total, and
+  // the title stays whole throughout.
+  for (const { name, header } of seen) {
+    const { total, unread } = header;
+    expect({ name, header }).toEqual({
+      name,
+      header: {
+        title: 'Inbox',
+        total: total === 'whole' ? 'whole' : 'gone',
+        unread: total === 'whole' && unread === 'whole' ? 'whole' : 'gone',
+      },
+    });
+  }
+  // Where there's room, both show, and a narrow phone's large title leaves too little for both, so
+  // the unread count goes first.
+  const at = (name: string) => seen.find((each) => each.name === name)?.header;
+  expect([at('fine 560'), at('phone 320')]).toEqual([
+    { title: 'Inbox', total: 'whole', unread: 'whole' },
+    { title: 'Inbox', total: 'whole', unread: 'gone' },
+  ]);
+}, 90_000);
 
 test('on a phone, the list’s header has no buttons, and the reader’s island files what’s open', async () => {
   const { context, page, problems } = await open(SIZES.phone);
