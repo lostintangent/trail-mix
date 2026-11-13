@@ -17,14 +17,17 @@ import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 
 const FOCUS_RING = `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`;
 
-/** A conversation: its subject, the line under it, and its messages, folded or open. */
+/**
+ * A conversation: its subject, the line under it, and its messages, folded or open. On a desktop
+ * its margin lines it up with the actions in the reader's bar above it.
+ */
 export const threadStyles = stylex.create({
   thread: {
     display: 'flex',
     flexDirection: 'column',
     gap: spacingVars['--spacing-2'],
     paddingInline: {
-      default: spacingVars['--spacing-6'],
+      default: spacingVars['--spacing-4'],
       [media.phone]: spacingVars['--spacing-3'],
     },
     paddingBottom: spacingVars['--spacing-6'],

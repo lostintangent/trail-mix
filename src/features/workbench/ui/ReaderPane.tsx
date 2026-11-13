@@ -487,7 +487,7 @@ const styles = stylex.create({
   // The composer lies on the desk's paper like the conversation's messages, in the same margins.
   writing: {
     paddingInline: {
-      default: spacingVars['--spacing-6'],
+      default: spacingVars['--spacing-4'],
       [media.phone]: spacingVars['--spacing-3'],
     },
     paddingBottom: spacingVars['--spacing-6'],
