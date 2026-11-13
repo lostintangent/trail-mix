@@ -121,7 +121,93 @@ export type ConversationSummary = {
    * recipient other than the member when only they wrote.
    */
   avatar?: string;
+  /** What it is about on GitHub, when every message in its Inbox is a notification of one thread. */
+  github?: GitHubThread;
 };
+
+/** An account and a GitHub repository, as `<account>:<owner/repo>`, each part URI-encoded. */
+export type BundleId = string;
+
+/** What a GitHub notification is about. */
+export type GitHubKind = 'pull' | 'issue' | 'discussion' | 'run';
+
+/** Why GitHub notified the member, as the Cc it adds says. */
+export type GitHubReason =
+  | 'assign'
+  | 'author'
+  | 'ci_activity'
+  | 'comment'
+  | 'manual'
+  | 'mention'
+  | 'push'
+  | 'review_requested'
+  | 'security_alert'
+  | 'state_change'
+  | 'subscribed'
+  | 'team_mention'
+  | 'your_activity';
+
+/**
+ * The pull request, issue, discussion or workflow run a conversation of verified GitHub
+ * notifications is about, as its messages tell it.
+ */
+export type GitHubThread = {
+  /** `owner/repo`, as GitHub writes it. */
+  repository: string;
+  kind: GitHubKind;
+  /** A pull request's, issue's or discussion's number, or a run's id where its mail names one. */
+  number?: number;
+  /** A run's commit, abbreviated as its subject names it. */
+  commit?: string;
+  /** The newest message's subject, without the repository and number. */
+  title: string;
+  /** What the newest message that changed it said: merged or closed. Reopened is neither. */
+  state?: 'merged' | 'closed';
+  /** How the newest run or checks it reports on ended. */
+  outcome?: 'passed' | 'failed' | 'cancelled';
+  /** Every reason its messages give, those that ask something of the member first, then newest first. */
+  reasons: GitHubReason[];
+};
+
+/**
+ * One row of an Inbox view that stands for an account's GitHub notifications about one
+ * repository: every conversation in its Inbox whose `github` names that repository. As tall as a
+ * conversation's row, and placed by its newest message.
+ */
+export type BundleSummary = {
+  kind: 'bundle';
+  id: BundleId;
+  account: AccountId;
+  /** `owner/repo`, as its newest thread writes it. */
+  repository: string;
+  /** The newest message's. */
+  date: string;
+  /** Its newest thread. */
+  newest: Omit<GitHubThread, 'repository' | 'reasons'>;
+  /** How many conversations it holds. */
+  threads: number;
+  /** How many messages they hold, and how many of those are unread. */
+  count: number;
+  unread: number;
+  /** Whether any message is flagged. */
+  flagged: boolean;
+  /**
+   * One for each of its first threads, each its first reason: the unread ones that ask something of
+   * the member first, then the rest newest first. `threads` counts the ones left out.
+   */
+  chips: BundleChip[];
+  /** Its newest conversation's. */
+  avatar?: string;
+};
+
+/** A thread as its bundle's row shows it. */
+export type BundleChip = Pick<GitHubThread, 'kind' | 'state' | 'outcome'> & {
+  reason?: GitHubReason;
+  unread: boolean;
+};
+
+/** One row of a list: a conversation, or in an Inbox view, a bundle. */
+export type ListItem = ConversationSummary | BundleSummary;
 
 /** The content of one message, fetched on first open. It never changes for a `MessageRef`. */
 export type Body = {
@@ -138,8 +224,11 @@ export type View =
   | { in: 'inbox' | 'flagged' | 'drafts' | 'outbox' }
   | { in: 'search'; text: string; fullText?: boolean };
 
-/** Where a member is, as the address names it: the view open, and the conversation open in it. */
-export type Place = { view: View; open?: ConversationId };
+/**
+ * Where a member is, as the address names it: the view open, the bundle open in an Inbox view, and
+ * the conversation open in either.
+ */
+export type Place = { view: View; bundle?: BundleId; open?: ConversationId };
 
 /**
  * A message on the WebSocket that names what changed, so the browser knows what to refetch. Hints

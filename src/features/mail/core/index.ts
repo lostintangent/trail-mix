@@ -3,6 +3,17 @@ export { addressesIn, domainOf } from './addresses.ts';
 export { sameRef } from './refs.ts';
 export { linkIdsOf, messageIdOf, referencesOf } from './conversations.ts';
 export {
+  asks,
+  BUNDLE_CHIPS,
+  bundleIdOf,
+  bundlePartsOf,
+  bundleSummaryOf,
+  isBundle,
+  repositoryAddressOf,
+  threadAddressOf,
+  threadOf,
+} from './github.ts';
+export {
   addressOf,
   paramsOf,
   placeAt,

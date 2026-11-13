@@ -56,11 +56,12 @@ Every layer uses the same nouns, with the same names in the index, the contracts
 | Verified     | A message whose own server's topmost Authentication-Results, under the name the account's preset gives, says DMARC passed for From.    |
 | Avatar       | A verified sender's logo, photo or site icon, which a message or a row names by its key only while the Avatar cache holds it.          |
 | Conversation | The messages of one account that reply to each other, gathered from its Inbox, Sent, Archive and Drafts.                               |
+| Bundle       | An account's verified GitHub notifications about one repository, gathered into one row of its Inbox views.                             |
 | Body         | The content of one message, fetched on first open. It never changes for a `MessageRef`.                                                |
 | Draft        | A message in a folder whose role is `drafts`. It lives on the mail server, not in Trail Mix.                                           |
 | Outgoing     | An Outbox entry: a draft, when to send it, and how the attempt is going.                                                               |
 | View         | What a list shows: one folder, a unified Inbox, Flagged, Drafts or Outbox across every account, or a search.                           |
-| Place        | Where a member is: a view and the conversation open in it, which the address names, so a reload or a link opens the same place.        |
+| Place        | Where a member is: a view, the bundle and the conversation open in it, which the address names, so a reload or a link opens it again.  |
 | Hint         | A message on the WebSocket that names what changed, so the browser knows what to refetch.                                              |
 | Stamp        | An account's color. In a list that mixes accounts it lies on the corner of each row's avatar, and it marks the composer's From chip.   |
 

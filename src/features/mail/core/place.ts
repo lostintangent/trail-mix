@@ -1,5 +1,6 @@
 import { partsOf } from './conversations.ts';
-import type { Place, View } from './model.ts';
+import { bundlePartsOf } from './github.ts';
+import type { AccountId, Place, View } from './model.ts';
 
 /**
  * A place as an address, and back: the address is `/` and a query that names the view and the
@@ -10,19 +11,21 @@ import type { Place, View } from './model.ts';
  * - `/?in=flagged`, and the same for `drafts` and `outbox`
  * - `/?account=<id>&folder=<path>` for a folder
  * - `/?q=<text>` for a search, and `&bodies=1` when it reads message bodies too
- * - `&open=<conversation>` after any of them
+ * - `&bundle=<bundle>` after the unified Inbox or a folder of the bundle's account, which an Inbox
+ *   view lists
+ * - `&open=<conversation>` after any of them, of the bundle's account when one is open
  */
 
 /** An address's parameters, each at most once, in the order an address writes them. */
 export type PlaceParams = Partial<Record<(typeof KEYS)[number], string>>;
 
-const KEYS = ['in', 'account', 'folder', 'q', 'bodies', 'open'] as const;
+const KEYS = ['in', 'account', 'folder', 'q', 'bodies', 'bundle', 'open'] as const;
 const UNIFIED = ['inbox', 'flagged', 'drafts', 'outbox'] as const;
 
 const INBOX: Place = { view: { in: 'inbox' } };
 
 /** A place's parameters, with nothing the place doesn't need. */
-export function paramsOf({ view, open }: Place): PlaceParams {
+export function paramsOf({ view, bundle, open }: Place): PlaceParams {
   const params: PlaceParams =
     view.in === 'folder'
       ? { account: view.folder.account, folder: view.folder.path }
@@ -31,7 +34,11 @@ export function paramsOf({ view, open }: Place): PlaceParams {
         : view.in === 'inbox'
           ? {}
           : { in: view.in };
-  return open === undefined ? params : { ...params, open };
+  return {
+    ...params,
+    ...(bundle === undefined ? {} : { bundle }),
+    ...(open === undefined ? {} : { open }),
+  };
 }
 
 /** The place an address's parameters name, read forgivingly. */
@@ -42,11 +49,17 @@ export function placeOf(params: Readonly<Record<string, unknown>>): Place {
   };
   const view = viewOf(text);
   if (!view) return INBOX;
+  // A folder holds its own account's conversations and bundle alone, and a bundle its account's
+  // conversations, so whatever names another account is left out.
+  const holds = (account: AccountId | undefined) =>
+    account !== undefined && (view.in !== 'folder' || view.folder.account === account);
+  const bundle = view.in === 'inbox' || view.in === 'folder' ? text('bundle') : undefined;
+  const bundled = bundle === undefined ? undefined : bundlePartsOf(bundle)?.account;
   const open = text('open');
-  const account = open === undefined ? undefined : partsOf(open)?.account;
-  // A folder holds its own account's conversations alone.
-  const fits = account !== undefined && (view.in !== 'folder' || view.folder.account === account);
-  return fits ? { view, open } : { view };
+  const opened = open === undefined ? undefined : partsOf(open)?.account;
+  const inBundle = bundle !== undefined && holds(bundled);
+  const opens = open !== undefined && holds(opened) && (!inBundle || opened === bundled);
+  return { view, ...(inBundle ? { bundle } : {}), ...(opens ? { open } : {}) };
 }
 
 function viewOf(text: (key: (typeof KEYS)[number]) => string | undefined): View | undefined {

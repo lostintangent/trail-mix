@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { conversationIdOf } from './conversations.ts';
+import { bundleIdOf } from './github.ts';
 import type { Place, View } from './model.ts';
 import { addressOf, paramsOf, placeAt, placeOf, readQuery, writeQuery } from './place.ts';
 
@@ -8,6 +9,7 @@ const WORK = 'f00dfeed-0000-4000-8000-000000000042';
 /** A conversation of an account, as the index names one, with every part's encoding in it. */
 const conversation = (account: string, root = '<CAF=1+x/y@mail.example.com>') =>
   conversationIdOf(account, 'inbox', root);
+const bundle = (account: string) => bundleIdOf(account, 'TrailMix-Demo/toy.box_2');
 
 const VIEWS: View[] = [
   { in: 'inbox' },
@@ -32,12 +34,18 @@ describe('every place comes back from its address', () => {
         : [conversation(PERSONAL), conversation(WORK, 'plain')];
     for (const open of [undefined, ...opens]) {
       const place: Place = open === undefined ? { view } : { view, open };
-      test(addressOf(place), () => {
-        expect(placeAt(addressOf(place))).toEqual(place);
-        // As the router reads and writes it, and as a whole URL another device pastes.
-        expect(placeOf(readQuery(writeQuery(paramsOf(place))))).toEqual(place);
-        expect(placeAt(`https://trail-mix.example${addressOf(place)}`)).toEqual(place);
-      });
+      // An Inbox view holds a bundle of the account the conversation open is of.
+      const account = view.in === 'folder' ? view.folder.account : PERSONAL;
+      const lists =
+        (view.in === 'inbox' || view.in === 'folder') && open !== conversation(WORK, 'plain');
+      for (const each of lists ? [place, { ...place, bundle: bundle(account) }] : [place]) {
+        test(addressOf(each), () => {
+          expect(placeAt(addressOf(each))).toEqual(each);
+          // As the router reads and writes it, and as a whole URL another device pastes.
+          expect(placeOf(readQuery(writeQuery(paramsOf(each))))).toEqual(each);
+          expect(placeAt(`https://trail-mix.example${addressOf(each)}`)).toEqual(each);
+        });
+      }
     }
   }
 });
@@ -81,6 +89,19 @@ test('a part of an address that doesn’t fit is left out, and the rest still op
     view: work,
   });
   expect(placeOf({ in: 'drafts', open: 'a:b' })).toEqual({ view: { in: 'drafts' } });
+  // A bundle is listed only by an Inbox view, and holds its own account's conversations alone.
+  expect(placeAt(`/?in=flagged&bundle=${bundle(PERSONAL)}`)).toEqual({ view: { in: 'flagged' } });
+  expect(placeOf({ ...paramsOf({ view: work }), bundle: bundle(PERSONAL) })).toEqual({
+    view: work,
+  });
+  expect(placeOf({ bundle: bundle(PERSONAL), open: conversation(WORK) })).toEqual({
+    view: { in: 'inbox' },
+    bundle: bundle(PERSONAL),
+  });
+  expect(placeOf({ bundle: 'personal:not-a-repository', open: conversation(WORK) })).toEqual({
+    view: { in: 'inbox' },
+    open: conversation(WORK),
+  });
   // Only the first of a repeated parameter counts.
   expect(placeAt('/?in=flagged&in=drafts')).toEqual({ view: { in: 'flagged' } });
 });
