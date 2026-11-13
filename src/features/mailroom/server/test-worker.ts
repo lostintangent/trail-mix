@@ -2,7 +2,7 @@ import { COMMANDS, QUERIES, receivedCall } from '../client/contract.ts';
 import { HOST_FILING_SECONDS } from '../../outbox/core/index.ts';
 import type { MailProvider, Preset, PresetName } from '../../providers/index.ts';
 import { Mailroom, type MailroomEnv } from './mailroom.ts';
-import { REREAD } from './schema.ts';
+import { REREAD, SWEEP_BODIES } from './schema.ts';
 
 /**
  * The Mailroom on workerd, for tests. A path's first segment names the member, standing in for the
@@ -97,6 +97,21 @@ export class TestMailroom extends Mailroom {
     this.sql.run(REREAD);
     await this.ctx.storage.sync();
     await this.restart();
+  }
+
+  /**
+   * Has the cache keep bodies at these keys under the member's, as a release from before sync let
+   * them go could have left them, and sweeps it as the version after that release asks.
+   */
+  async cachedAsBefore(keys: string[]): Promise<void> {
+    await Promise.all(keys.map((key) => this.env.BODIES.put(`${this.member}/${key}`, 'kept')));
+    this.sql.run(SWEEP_BODIES);
+    await this.ctx.storage.sync();
+  }
+
+  /** Sweeps a page of one key at a time, two a wake, so a sweep of a few keys takes several. */
+  protected override sweepBodies(): Promise<boolean> {
+    return super.sweepBodies({ wake: 2, delete: 1 });
   }
 
   private restartOnAcceptance = false;

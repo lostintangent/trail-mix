@@ -26,6 +26,13 @@ export type SqlValue = string | number | null | ArrayBuffer | Uint8Array;
  */
 export const REREAD = `UPDATE folders SET cursor = NULL, rereading = 1`;
 
+/**
+ * Has the Body cache swept once, from its first key, for bodies of messages the index doesn't hold,
+ * as a version does after a release that kept them. A Mailroom with no account has none to sweep.
+ */
+export const SWEEP_BODIES = `INSERT OR REPLACE INTO body_sweep (one, after)
+  SELECT 1, NULL WHERE EXISTS (SELECT 1 FROM accounts)`;
+
 /** The member's addresses, as every account names its own, in lower case. */
 const OWN = `SELECT lower(json_extract(account, '$.address')) FROM accounts`;
 
@@ -320,6 +327,13 @@ export const versions: readonly (readonly string[])[] = [
       uid INTEGER NOT NULL,
       PRIMARY KEY (account, path, uid_validity, uid)
     )`,
+  ],
+  [
+    // How far the Body cache's sweep has come, in its one row while it is owed: the last key it
+    // listed, or none before its first page.
+    `CREATE TABLE body_sweep (one INTEGER PRIMARY KEY CHECK (one = 1), after TEXT)`,
+    // Releases before `gone_bodies` kept each body after its message left, so the cache sweeps once.
+    SWEEP_BODIES,
   ],
 ];
 

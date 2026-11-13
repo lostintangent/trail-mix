@@ -965,9 +965,20 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       report(error);
       return false;
     });
+    const isSweeping = await this.sweepBodies().catch((error: unknown) => {
+      // The sweep picks up where it stopped, at the next wake.
+      report(error);
+      return false;
+    });
     const isOwingAvatars = await this.lookUpAvatars();
     const sendAt = this.sending.nextWake() ?? poll;
-    if (this.queue.owing() || isOwingBodies || isOwingAvatars || sendAt <= Date.now()) {
+    if (
+      this.queue.owing() ||
+      isOwingBodies ||
+      isSweeping ||
+      isOwingAvatars ||
+      sendAt <= Date.now()
+    ) {
       await this.ctx.storage.setAlarm(Date.now());
     } else await this.ctx.storage.setAlarm(Math.min(poll, sendAt, this.signInWake() ?? poll));
     return landed;
@@ -1547,6 +1558,29 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     return `${this.member}/${ref.account}/${encodeURIComponent(ref.path)}/${ref.uidValidity}/${ref.uid}`;
   }
 
+  /** The message a key in the cache keeps the body of, or nothing for a key of another shape. */
+  private bodyRef(key: string): MessageRef | undefined {
+    const prefix = `${this.member}/`;
+    if (!key.startsWith(prefix)) return undefined;
+    const [account, path, uidValidity = '', uid = '', ...more] = key
+      .slice(prefix.length)
+      .split('/');
+    const isNumber = (part: string) => /^\d+$/.test(part);
+    if (!account || path === undefined || more.length || !isNumber(uidValidity) || !isNumber(uid))
+      return undefined;
+    try {
+      return {
+        account,
+        path: decodeURIComponent(path),
+        uidValidity: Number(uidValidity),
+        uid: Number(uid),
+      };
+    } catch {
+      // Not a path `encodeURIComponent` wrote.
+      return undefined;
+    }
+  }
+
   /**
    * Who a draft is to and what it's about, as its send keeps them, and its Message-ID, which the
    * send needs to find its copy in Sent. From the index, or from the draft itself before sync has it.
@@ -1626,6 +1660,34 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       this.store.bodiesLetGo(refs);
     }
     return this.store.owedBodies(1).length > 0;
+  }
+
+  /**
+   * Sweeps the cache once, as a version asks after a release that kept each body after its message
+   * left: a page of the bucket at a time, it lets go every body whose message the index doesn't
+   * hold, unless it is a draft just saved, and notes the last key it listed, so a wake cut short or
+   * a restart goes on from there. Returns whether more is left than one wake lists.
+   */
+  protected async sweepBodies(pages = BODIES_LET_GO): Promise<boolean> {
+    for (let listed = 0; listed < pages.wake; listed += pages.delete) {
+      const [sweep] = this.sql.all<{ after: string | null }>(`SELECT after FROM body_sweep`);
+      if (!sweep) return false;
+      const page = await this.env.BODIES.list({
+        prefix: `${this.member}/`,
+        limit: pages.delete,
+        ...(sweep.after === null ? {} : { startAfter: sweep.after }),
+      });
+      const strays = page.objects.flatMap(({ key }) => {
+        const ref = this.bodyRef(key);
+        const isKept = !ref || this.store.reads.message(ref) || this.drafts.has(refKeyOf(ref));
+        return isKept ? [] : [key];
+      });
+      if (strays.length) await this.env.BODIES.delete(strays);
+      const last = page.objects.at(-1)?.key;
+      if (!page.truncated) this.sql.run(`DELETE FROM body_sweep`);
+      else if (last) this.sql.run(`UPDATE body_sweep SET after = ?`, last);
+    }
+    return this.sql.all(`SELECT 1 FROM body_sweep`).length > 0;
   }
 
   // The member's own accounts and folders

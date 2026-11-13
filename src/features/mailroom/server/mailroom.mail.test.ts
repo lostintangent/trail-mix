@@ -920,6 +920,27 @@ describe('The Mailroom', () => {
       }
       await dropFolder('Replays');
     }, 60_000);
+
+    test('sweeps once, a page at a time, for every body an earlier release kept that the index doesn’t hold', async () => {
+      const kept = await folderWith('Sweepings', 'Kept');
+      await ada.call('body', kept);
+      // Bodies a release that never let one go could have kept: of a message gone from a folder still
+      // here, of a folder gone, and of an account removed, which sorts after every other key.
+      const left = [
+        `${account.id}/Sweepings/${kept.uidValidity}/${kept.uid + 1}`,
+        `${account.id}/${encodeURIComponent('Gone folder')}/1/1`,
+        `removed-account/INBOX/1/1`,
+      ];
+
+      await ada.call('cachedAsBefore', left);
+      await checkNow();
+      await ada.until(async () => (await stored()).tables.body_sweep!.length === 0);
+
+      const { bodies } = await stored();
+      for (const key of left) expect(bodies.some((body) => body.endsWith(`/${key}`))).toBe(false);
+      expect(await cached(kept)).toBe(true);
+      await dropFolder('Sweepings');
+    }, 60_000);
   });
 
   test('another member reaches none of it', async () => {
