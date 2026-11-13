@@ -2,6 +2,21 @@
 
 An open-source, keyboard-first mail client that you host yourself. One Cloudflare Worker serves you and the people you invite. Each of them gets a private Mailroom for their own IMAP accounts, on a desktop or a phone.
 
+Beyond reading and writing quickly, Trail Mix keeps the parts of mail that waste your time out of the way: tracking pixels, lookalike senders, piles of notifications, and the worry of a message sent too soon. Your mail server stays the source of truth, so you can try Trail Mix without moving anything.
+
+## Features
+
+- **Every account in one Inbox:** Connect Zoho, Outlook or any IMAP host, and read them together in one Inbox, with Flagged, Drafts and Outbox across them all. Each account has its own color, stamped on its mail and on the From chip, so you always know which inbox a message came from and which one it will leave from.
+- **Keyboard-first and fast:** Gmail-style keys for everything, such as J and K to move, E to archive and R to reply, plus a command palette on ⌘K and search that answers as you type. A 50,000-message folder scrolls at 60 frames a second.
+- **Sending you can take back:** Every send can be undone for ten seconds or scheduled for later. Your draft is saved to your mail server as you write and stays there until the send is accepted, so a closed tab or a dropped connection never costs a message, and exactly one copy lands in Sent.
+- **Write in Markdown:** Bold, lists, links, code and pasted images go out as clean HTML mail with a plain-text part, so it reads well in any client.
+- **Private reading:** Remote images wait until you allow the sender, then load through your own Worker, so senders never learn your IP address. Known tracking pixels are dropped before anything loads, and each message says how many it carried. Message HTML is sanitized and shown in a sandbox where nothing can run.
+- **Senders you can trust at a glance:** Mail that passes DMARC shows its sender's logo or photo, from BIMI, Gravatar or their website. Mail that doesn't keeps plain initials, so a lookalike can't borrow a brand's face. Newsletters that prove who they are get a one-click Unsubscribe.
+- **A dark mode made for mail:** Trail Mix follows your system's light or dark setting, with any accent color you like. In the dark, HTML mail is repainted to sit on charcoal while its images and brand colors stay as sent, and any sender whose mail reads better on light paper can stay on it.
+- **GitHub notifications, bundled:** Notifications from GitHub gather into one row per repository, so a morning of reviews and comments is one line to work through.
+- **At home on your phone:** Add it to your Home Screen for a full-screen app with swipe to archive and notifications for new mail, which offer Archive and Mark read wherever your device shows a notification's buttons. Every open device stays current as mail arrives, and the app shows the mail you last saw while it reconnects.
+- **Yours to run, for people you invite:** One Worker on Cloudflare's $5-a-month plan, set up with one button. Cloudflare Access emails each person a one-time code, so Trail Mix holds no password of yours, and each person's mail lives in a Mailroom of their own.
+
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/lostintangent/trail-mix)
 
 ## Set up your own
