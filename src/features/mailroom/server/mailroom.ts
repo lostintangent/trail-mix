@@ -753,10 +753,14 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     const raw = new TextEncoder().encode(writeMime(message));
     const saved = await (await this.provider(account.id)).saveDraft(raw, older);
     this.drafts.add(refKeyOf(saved));
+    // The composer reads the draft back at once, and the server's copy would wait behind the sync
+    // this save owes. Once the draft is filed, a failure here costs only that wait, so it never
+    // fails the save, which a retry would file again.
+    await this.env.BODIES.put(this.bodyKey(saved), raw).catch(report);
     if (older) {
       // Each save replaces the last, so the cache keeps only the newest draft's bytes.
       this.drafts.delete(refKeyOf(older));
-      await this.env.BODIES.delete(this.bodyKey(older));
+      this.store.oweBody(older);
       this.sending.release(older);
     }
     await this.owe(() => this.queue.folder({ account: account.id, path: saved.path }));
@@ -1596,8 +1600,8 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 
   /**
    * A message's raw bytes: from the cache, or from the server once and kept from then on, while
-   * the index holds the message. A body whose message leaves the index, or that the index never
-   * held, goes at the next wake.
+   * the index holds the message. A draft this Mailroom saved is kept as it wrote it. A body whose
+   * message leaves the index, or that the index never held, goes at the next wake.
    */
   private async bytes(ref: MessageRef): Promise<Uint8Array<ArrayBuffer> | null> {
     const key = this.bodyKey(ref);

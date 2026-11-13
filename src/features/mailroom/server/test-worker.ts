@@ -1,4 +1,5 @@
 import { COMMANDS, QUERIES, receivedCall } from '../client/contract.ts';
+import type { MessageRef } from '../../mail/core/index.ts';
 import { HOST_FILING_SECONDS } from '../../outbox/core/index.ts';
 import type { MailProvider, Preset, PresetName } from '../../providers/index.ts';
 import { Mailroom, type MailroomEnv } from './mailroom.ts';
@@ -171,8 +172,12 @@ export class TestMailroom extends Mailroom {
   }
 
   private readonly synced: Synced[] = [];
+  private readonly fetched: MessageRef[] = [];
 
-  /** Records what each folder's sync downloads: the messages it reports, by path. */
+  /**
+   * Records what each folder's sync downloads, the messages it reports by path, and each body
+   * fetched from the server.
+   */
   protected override reached(provider: MailProvider): MailProvider {
     return {
       ...provider,
@@ -182,12 +187,21 @@ export class TestMailroom extends Mailroom {
         this.synced.push({ path, messages });
         return batch;
       },
+      body: (ref) => {
+        this.fetched.push(ref);
+        return provider.body(ref);
+      },
     };
   }
 
   /** Each folder sync since the Mailroom started, with how many messages it downloaded. */
   syncLog(): Promise<Synced[]> {
     return Promise.resolve(this.synced);
+  }
+
+  /** Each message whose body the Mailroom asked its server for since it started. */
+  fetchLog(): Promise<MessageRef[]> {
+    return Promise.resolve(this.fetched);
   }
 
   private bucketDelay = 0;

@@ -614,9 +614,11 @@ describe('The Mailroom', () => {
         'saveDraft',
         draft({ attachments: [{ file: notes() }] }),
       );
-      // Saved a moment ago and not yet in the index, it answers what it holds all the same.
+      // Saved a moment ago and not yet in the index, it answers what it holds all the same, as it
+      // wrote it, without waiting on the server behind the sync the save owes.
       const [held] = (await ada.call<Body>('body', first)).attachments;
       expect(held).toMatchObject({ name: 'notes.txt' });
+      expect(await ada.call<MessageRef[]>('fetchLog')).not.toContainEqual(first);
 
       const second = await ada.call<MessageRef>(
         'saveDraft',
@@ -635,9 +637,12 @@ describe('The Mailroom', () => {
           new TextDecoder().decode(part.content as ArrayBuffer),
         ]),
       ).toEqual([['notes.txt', 'Bring a jacket.']]);
-      // The replaced draft's bytes leave the body cache with it.
-      const { bodies } = await ada.call<{ bodies: string[] }>('stored');
-      expect(bodies.filter((key) => key.includes('/Drafts/'))).toEqual([]);
+      // The replaced draft's bytes leave the body cache with it, and the newest's stay.
+      await ada.until(async () => {
+        const { bodies } = await ada.call<{ bodies: string[] }>('stored');
+        const drafts = bodies.filter((key) => key.includes('/Drafts/'));
+        return drafts.length === 1 && drafts[0]!.endsWith(`/${second.uidValidity}/${second.uid}`);
+      });
 
       await ada.until(async () => {
         const rows = await ada.page({ in: 'drafts' });
