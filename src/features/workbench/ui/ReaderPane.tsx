@@ -26,7 +26,6 @@ import type {
   ConversationSummary,
   Folder,
   Message,
-  MessageRef,
 } from '../../mail/core/index.ts';
 import { conversationQuery } from '../../mailroom/client/index.ts';
 import { preloadTriageMenus } from '../../conversations/index.ts';
@@ -41,6 +40,7 @@ import {
   REST_MS,
 } from '../../reader/index.ts';
 import { PhoneIsland } from './PhoneIsland.tsx';
+import { hiddenIn, type Hiding } from './useComposing.ts';
 
 /** The conversation the reader shows, with its messages and the account they belong to. */
 export type Reading = { id: ConversationId; conversation: Message[]; account: Account };
@@ -76,7 +76,7 @@ export function ReaderPane({
   actionsFor,
   onMessageKey,
   writing,
-  hidden,
+  hiding,
   leaving,
   onOpenDraft,
   page,
@@ -113,7 +113,7 @@ export function ReaderPane({
    */
   writing?: { composer: ReactNode; place: 'docked' | 'filled' | 'over' };
   /** Drafts the reader leaves out, such as the one being written. */
-  hidden?: readonly MessageRef[];
+  hiding?: Hiding;
   /** The sends this device follows, each at the end of its conversation while it is on its way. */
   leaving?: readonly Leaving[];
   /** Opens a draft in the conversation to go on writing it. */
@@ -154,6 +154,11 @@ export function ReaderPane({
     [shown, conversation, account],
   );
   const isShowing = reading !== undefined;
+  // Decided from the messages about to show, so the two always agree.
+  const hidden = useMemo(
+    () => reading && hiding && hiddenIn(hiding, reading.id, reading.conversation),
+    [reading, hiding],
+  );
   // Asked for and refused, or with no network asked for once in vain and waiting to ask again, as
   // for one this device didn't keep. A selection never shows the empty reader, so it says why
   // under the subject instead.

@@ -1010,7 +1010,7 @@ export function Workbench({
                   actionsFor={messageActions}
                   onMessageKey={runCommandKey}
                   writing={writing}
-                  hidden={composing.hidden}
+                  hiding={composing.hiding}
                   leaving={leaving.all}
                   onOpenDraft={composing.openDraft}
                   rowOf={shownRowOf}

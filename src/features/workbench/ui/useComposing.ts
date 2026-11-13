@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   sameRef,
@@ -15,7 +15,9 @@ import type { Compose, Writing } from '../../composer/ui/index.ts';
  * the conversation open when it started, and opening another conversation closes it, which saves
  * what it holds. The drafts it has saved stay out of the reader: every draft that comes to its
  * conversation while the composer is open, which a hint can bring before the save that made it has
- * answered, and every one a later save replaced, which the server has dropped.
+ * answered, and every one a later save replaced, which the server has dropped. The reader asks
+ * which to leave out of the messages it is about to show, so it never draws one that came in the
+ * same snapshot as the conversation.
  */
 export function useComposing(selected: ConversationId | undefined, leaving: readonly MessageRef[]) {
   const queryClient = useQueryClient();
@@ -108,22 +110,13 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
     },
     [],
   );
-  // The conversation as the reader has it, without asking for it.
-  const { data: held } = useQuery({ ...conversationQuery(started?.in ?? ''), enabled: false });
-  const written = useMemo(
-    () =>
-      compose && started
-        ? (held ?? []).filter(
-            (message) =>
-              message.flags.draft && !started.before.some((draft) => sameRef(draft, message)),
-          )
-        : [],
-    [compose, started, held],
-  );
   // Drafts on their way stay out too, since they can't be written on until their send is undone.
-  const hidden = useMemo(
-    () => [...replaced, ...leaving, ...written, ...(editing && compose ? [editing] : [])],
-    [editing, compose, replaced, leaving, written],
+  const hiding = useMemo<Hiding>(
+    () => ({
+      writing: compose && started && { in: started.in, before: started.before, editing },
+      gone: [...replaced, ...leaving],
+    }),
+    [compose, started, editing, replaced, leaving],
   );
 
   return {
@@ -137,8 +130,42 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
     resume,
     close,
     noteDraft,
-    hidden,
+    hiding,
   };
+}
+
+/**
+ * What the reader leaves out while the member writes: the composer open, if any, with the
+ * conversation it started in, the drafts that conversation held then and the draft it edits, and
+ * the drafts gone from every conversation.
+ */
+export type Hiding = {
+  writing?: {
+    in: ConversationId | undefined;
+    before: readonly MessageRef[];
+    editing: MessageRef | undefined;
+  };
+  gone: readonly MessageRef[];
+};
+
+/**
+ * The drafts the reader leaves out of a conversation's messages, decided from those very messages,
+ * so a draft the composer saved is out of the first snapshot that holds it.
+ */
+export function hiddenIn(
+  { writing, gone }: Hiding,
+  id: ConversationId,
+  conversation: readonly Message[],
+): MessageRef[] {
+  if (!writing) return [...gone];
+  const written =
+    writing.in === id
+      ? conversation.filter(
+          (message) =>
+            message.flags.draft && !writing.before.some((draft) => sameRef(draft, message)),
+        )
+      : [];
+  return [...gone, ...written, ...(writing.editing ? [writing.editing] : [])];
 }
 
 /** A conversation's newest message that isn't a draft, which its keys answer and show. */
