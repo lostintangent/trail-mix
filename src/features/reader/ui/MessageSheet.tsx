@@ -180,11 +180,6 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
               {shownTrackers}
             </span>
           )}
-          {shownTrackers && offer && (
-            <span aria-hidden {...stylex.props(styles.between)}>
-              ·
-            </span>
-          )}
           {offer && <Unsubscribe message={ref} address={offer} />}
         </div>
       )}
@@ -356,12 +351,12 @@ const styles = stylex.create({
     display: 'flex',
     flexWrap: 'wrap',
     alignItems: 'center',
-    gap: spacingVars['--spacing-1'],
+    gap: spacingVars['--spacing-3'],
     paddingInline: spacingVars['--spacing-2'],
     color: colorVars['--color-text-secondary'],
     fontSize: typeScaleVars['--text-supporting-size'],
   },
-  // Led by the offer, whose button's own padding sets it in, and lines its box up with the note's.
+  // Led by the offer, whose button lines its box up with the note's.
   quietLineAtOffer: {
     paddingInline: 0,
   },
@@ -369,10 +364,6 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     gap: spacingVars['--spacing-1'],
-  },
-  // As far from the count as the offer's label stands from it, inside its button.
-  between: {
-    paddingInlineStart: spacingVars['--spacing-3'],
   },
   // The two choices wrap as one, so they stay together on a narrow sheet.
   imagesActions: {

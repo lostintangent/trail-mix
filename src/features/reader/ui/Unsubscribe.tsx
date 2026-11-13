@@ -1,6 +1,8 @@
 import { Button } from '@astryxdesign/core/Button';
+import { Icon } from '@astryxdesign/core/Icon';
 import { sizeVars, spacingVars, typeScaleVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
+import { MailMinus } from 'lucide-react';
 import type { MessageRef } from '../../mail/core/index.ts';
 import { unsubscribe, useUnsubscribing } from './unsubscribe.ts';
 
@@ -19,25 +21,24 @@ export function Unsubscribe({ message, address }: { message: MessageRef; address
         : standing.is === 'refused'
           ? `Couldn’t unsubscribe. ${standing.reason}`
           : '';
-  // The words stand in the button's place, in a status that's there from the first, so a screen
-  // reader hears each change.
+  // The words stand in the button's place, led by its icon, in a status that's there from the
+  // first, so a screen reader hears each change.
   return (
     <>
       {standing.is === 'offered' && (
         <Button
           label="Unsubscribe"
           tooltip={`Tell ${hostOf(address)} to stop sending you this list`}
-          variant="ghost"
+          icon={<Icon icon={MailMinus} />}
           size="sm"
           onClick={ask}
         />
       )}
       <span role="status" {...stylex.props(told !== '' && styles.said)}>
+        {told !== '' && <Icon icon={MailMinus} size="sm" color="secondary" />}
         {told}
       </span>
-      {standing.is === 'refused' && (
-        <Button label="Try again" variant="ghost" size="sm" onClick={ask} />
-      )}
+      {standing.is === 'refused' && <Button label="Try again" size="sm" onClick={ask} />}
     </>
   );
 }
@@ -51,11 +52,12 @@ function hostOf(address: string): string {
 }
 
 const styles = stylex.create({
-  // Where the button's label stood, at its size and the button's height, so the words take its
-  // place and nothing moves.
+  // Where the button's icon and label stood, at their size and the button's height, so the words
+  // take its place and nothing moves.
   said: {
     display: 'inline-flex',
     alignItems: 'center',
+    gap: spacingVars['--spacing-2'],
     minHeight: sizeVars['--size-element-sm'],
     paddingInline: spacingVars['--spacing-3'],
     fontSize: typeScaleVars['--text-label-size'],
