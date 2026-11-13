@@ -455,6 +455,13 @@ test('on a phone, a long press starts picking, a tap adds, and the island acts o
   }
   // With nothing picked, the island offers the folders again.
   await here.getByRole('button', { name: 'Folders', exact: true }).waitFor();
+
+  // The other tests here share the member's mail, so the archive is undone once the server has it,
+  // and the test ends only when the Mailroom has taken the Undo too.
+  const undone = here.waitForResponse((response) => response.request().method() === 'POST');
+  await undoButton(here).click();
+  expect((await undone).ok()).toBe(true);
+  for (const text of picked) await options.filter({ hasText: text ?? '' }).waitFor();
 }, 30_000);
 
 test('on a phone, a row swiped far enough left is archived, and a short swipe slides back', async () => {
@@ -600,7 +607,8 @@ test('Delete and Backspace stay in the search field and palette while typing', a
 
   // A docked reply leaves the conversation's commands available, but its editor keeps its own keys.
   const writing = await inbox();
-  const original = writing.getByRole('option').nth(1);
+  // Known by its subject, since a GitHub bundle, which has no Reply, can sit at any place near the top.
+  const original = row(writing, /Lunch Thursday/);
   await original.click();
   await shownSubject(writing);
   const reply = reader(writing)
