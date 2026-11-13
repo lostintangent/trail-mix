@@ -1,4 +1,5 @@
 import {
+  domainOf,
   writeMime,
   type Address,
   type Envelope,
@@ -25,6 +26,12 @@ import { isDemoVerified } from './pictures.ts';
  */
 
 export type DemoKind = 'personal' | 'work';
+
+/**
+ * The name the demo's receiving server signs its Authentication-Results with, as a preset names a
+ * real host's. It vouches for the demo's verified list mail and for nothing else.
+ */
+export const DEMO_SIGNERS: readonly string[] = ['mx.trailmix.test'];
 
 /** What a message says, apart from where it is and its flags. */
 export type Content = Omit<Envelope, keyof MessageRef | 'flags'>;
@@ -149,8 +156,10 @@ export function seededMessage(
         : {}),
     };
   };
+  const sender = author(step.from).email;
   const list: [string, string][] = thread.list
     ? [
+        ...(isDemoVerified(sender) ? vouchedFor(domainOf(sender), `${key}.${cycle}.${index}`) : []),
         ['List-Id', `${thread.list.name} <${thread.list.id}>`],
         ['List-Unsubscribe', thread.list.unsubscribe],
         ['List-Unsubscribe-Post', 'List-Unsubscribe=One-Click'],
@@ -173,6 +182,25 @@ export function seededMessage(
         boundary: `${key}.${cycle}.${index}`,
       }),
   };
+}
+
+/**
+ * What a verified sender's list mail carries, as a real one would: the sender's DKIM signature over
+ * its list headers, and the demo's server's word that it and DMARC passed, so its one-click offer
+ * qualifies. Nothing checks the signature's bytes, which only stand in for one.
+ */
+function vouchedFor(domain: string, seed: string): [string, string][] {
+  const bytes = btoa(`${seed}@${domain}`.padEnd(48, '.'));
+  return [
+    [
+      'Authentication-Results',
+      `${DEMO_SIGNERS[0]}; dkim=pass header.d=${domain} header.s=demo; spf=pass smtp.mailfrom=${domain}; dmarc=pass (p=reject) header.from=${domain}`,
+    ],
+    [
+      'DKIM-Signature',
+      `v=1; a=rsa-sha256; c=relaxed/relaxed; d=${domain}; s=demo; h=From:To:Subject:Date:Message-ID:List-Id:List-Unsubscribe:List-Unsubscribe-Post; bh=${bytes}; b=${bytes}`,
+    ],
+  ];
 }
 
 /** Where the message `rank` places back from the newest sits: its story, folder and flags. */
@@ -254,6 +282,9 @@ export const UNREACHABLE = 'unreachable.example';
 
 /** The seeded folder the demo's server won't delete on the first try, as if another session had it open. */
 export const BUSY_FOLDER = 'Projects';
+
+/** The one-click unsubscribe the shop's list server turns away on its first try. */
+export const BUSY_LIST = 'https://shop.example.com/unsubscribe?list=orders&u=demo';
 
 const PEOPLE: Address[] = [
   { name: 'Ada Park', email: 'ada@example.com' },
@@ -848,6 +879,7 @@ const STORIES: Record<string, (cycle: number) => Thread> = {
     return {
       subject,
       cast: [{ name: 'Orders', email: 'orders@shop.example.com' }],
+      list: { name: 'Shop orders', id: 'orders.shop.example.com', unsubscribe: `<${BUSY_LIST}>` },
       folder: 'Trash',
       steps: [{ from: 0, text }],
     };

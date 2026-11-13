@@ -1,4 +1,5 @@
 import {
+  isVerified,
   messageIdOf,
   referencesOf,
   type Address,
@@ -6,7 +7,6 @@ import {
   type Flags,
   type MessageRef,
 } from '../../../mail/core/index.ts';
-import { isVerified } from './authentication.ts';
 import { previewFrom } from './preview.ts';
 
 /**

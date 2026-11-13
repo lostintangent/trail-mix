@@ -6,6 +6,7 @@ import { messageOf } from '../../composer/index.ts';
 import { createProblem, deleteProblem, inside, renameProblem } from '../../folders/core/index.ts';
 import {
   messageIdOf,
+  oneClickUnsubscribe,
   referencesOf,
   sameRef,
   writeMime,
@@ -36,6 +37,7 @@ import {
 import { deliver, pushKeyOf, type PushKey } from '../../notifications/server/index.ts';
 import {
   DEMO_ACCOUNTS,
+  DEMO_SIGNERS,
   PRESETS,
   authServersFor,
   codeFrom,
@@ -53,6 +55,7 @@ import {
   type Answer,
   type Client,
   type DemoKind,
+  type DemoServer,
   type DeviceSignIn,
   type ImapAccount,
   type MailProvider,
@@ -80,6 +83,7 @@ import {
   type SignInPreset,
   type SignInSetup,
   type ThisDevice,
+  type Unsubscribed,
 } from '../client/contract.ts';
 import { erasesAt, idlenessOf, isWorthNoting, windDownOf, type WindDown } from '../core/idle.ts';
 import {
@@ -117,6 +121,7 @@ import { outboxQueue, type OutboxQueue } from './outbox.ts';
 import { foundOf, opened, type Found } from './search.ts';
 import { signInBook, type SignInBook } from './sign-ins.ts';
 import { syncQueue, WAKE, type SyncQueue } from './sync.ts';
+import { headerOf, internet, unsubscribeAt } from './unsubscribe.ts';
 
 export type MailroomEnv = {
   /** The body cache: raw messages, by member, account and ref. */
@@ -169,6 +174,11 @@ export type MailroomEnv = {
    * at `/sites/<domain>/`. Honored only when it names this machine.
    */
   AVATARS_STAND_IN?: string;
+  /**
+   * A test's stand-in for the senders' servers a one-click unsubscribe posts to, as one origin.
+   * Honored only when it names this machine.
+   */
+  UNSUBSCRIBE_STAND_IN?: string;
 };
 
 /** Where each preset that can sign in finds the operator's app in the Worker's settings. */
@@ -229,6 +239,8 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   /** A refresh under way per account, so connections opening at once share it. */
   private readonly refreshing = new Map<AccountId, Promise<Tokens>>();
   private readonly providers = new Map<AccountId, Promise<MailProvider>>();
+  /** The demo's world beyond each demo account's provider, made with it: its list servers. */
+  private readonly demoServers = new Map<AccountId, DemoServer>();
   private readonly watchers = new Map<AccountId, () => void>();
   protected readonly queue: SyncQueue;
   protected readonly sending: OutboxQueue;
@@ -370,6 +382,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     const bytes = await this.bytes(input.refOf(ref));
     if (!bytes) throw new Error('That message is no longer in this mailbox.');
     const parsed = await PostalMime.parse(bytes);
+    const unsubscribe = oneClickUnsubscribe(headerOf(bytes), this.signersOf(ref.account));
     return {
       ...(parsed.html === undefined ? {} : { html: parsed.html }),
       ...(parsed.text === undefined ? {} : { text: parsed.text }),
@@ -381,6 +394,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
         ...(attachment.contentId ? { contentId: attachment.contentId.replace(/^<|>$/g, '') } : {}),
       })),
       headers: parsed.headers.map((header) => [header.originalKey, header.value]),
+      ...(unsubscribe ? { unsubscribe } : {}),
     };
   }
 
@@ -556,6 +570,33 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     if (!known) throw new Error('There is no such account.');
     this.hint({ changed: 'accounts' });
     return Promise.resolve();
+  }
+
+  /**
+   * Leaves the list a message came from, by the one-click offer its body names: checked again from
+   * the message itself, then posted as `unsubscribeAt` says. The demo's list servers answer it
+   * without the network, since nothing in the demo is real.
+   */
+  async unsubscribe(ref: MessageRef): Promise<Unsubscribed> {
+    const message = input.refOf(ref);
+    const bytes = await this.bytes(message);
+    if (!bytes) throw new Error('That message is no longer in this mailbox.');
+    const address = oneClickUnsubscribe(headerOf(bytes), this.signersOf(message.account));
+    if (!address) {
+      return { taken: false, reason: 'This message doesn’t offer to unsubscribe in one click.' };
+    }
+    if (this.book.get(message.account)?.connection.provider === 'demo') {
+      await this.provider(message.account);
+      const lists = this.demoServers.get(message.account);
+      if (!lists) throw new Error('There is no such account.');
+      return unsubscribeAt(address, (url) => lists.unsubscribe(url.href));
+    }
+    const standIn = this.env.UNSUBSCRIBE_STAND_IN;
+    return unsubscribeAt(
+      address,
+      internet,
+      standIn && namesThisMachine(standIn) ? standIn : undefined,
+    );
   }
 
   eraseEverything(): Promise<void> {
@@ -1199,12 +1240,14 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
         if (connection?.provider === 'demo') {
           const mailbox = this.book.demo(account);
           if (!mailbox) throw new Error('There is no such account.');
-          return demoServer(account, mailbox, (next) => this.book.saveDemo(account, next), {
+          const demo = demoServer(account, mailbox, (next) => this.book.saveDemo(account, next), {
             filesSent: this.demo?.hostFilesSent,
-          }).provider;
+          });
+          this.demoServers.set(account, demo);
+          return demo.provider;
         }
         if (!connection) throw new Error('There is no such account.');
-        const signers = authServersFor(connection.imap.host, this.env.AUTH_SERVERS_STAND_IN);
+        const signers = this.signersOf(account);
         if (deviceOf(this.book.get(account)?.account.preset)) {
           const accessToken = () => this.accessToken(account);
           return imapOver(await this.imapCode(), account, connection, { accessToken }, signers);
@@ -1218,6 +1261,14 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       provider.catch(() => this.providers.delete(account));
     }
     return provider;
+  }
+
+  /** The names whose Authentication-Results an account's mail is verified by. */
+  private signersOf(account: AccountId): readonly string[] {
+    const connection = this.book.get(account)?.connection;
+    if (!connection) return [];
+    if (connection.provider === 'demo') return DEMO_SIGNERS;
+    return authServersFor(connection.imap.host, this.env.AUTH_SERVERS_STAND_IN);
   }
 
   // Signing in at a vendor
@@ -1401,6 +1452,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     this.unwatch(account);
     const provider = this.providers.get(account);
     this.providers.delete(account);
+    this.demoServers.delete(account);
     const opened = await provider?.catch(() => undefined);
     await opened?.close().catch(report);
   }

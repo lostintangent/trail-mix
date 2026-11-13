@@ -33,8 +33,9 @@ export type DemoMailbox = {
   /** Every message that is not where the seed put it. */
   stored: Stored[];
   /**
-   * What the server has turned away once, so the next try goes: a message by its Message-ID, or a
-   * folder's delete as `DELETE` and its path.
+   * What the server has turned away once, so the next try goes: a message by its Message-ID, a
+   * folder's delete as `DELETE` and its path, or a one-click unsubscribe as `UNSUBSCRIBE` and its
+   * address, which the demo's list servers turn away.
    */
   refused?: string[];
 };

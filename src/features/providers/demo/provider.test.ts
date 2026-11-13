@@ -3,6 +3,7 @@ import PostalMime from 'postal-mime';
 import {
   applySyncEvent,
   memoryIndex,
+  oneClickUnsubscribe,
   referencesOf,
   writeMime,
   type Folder,
@@ -12,6 +13,7 @@ import {
 } from '../../mail/core/index.ts';
 import { seededRandom } from '../../../shared/random.ts';
 import { SendFailure, type MailProvider } from '../provider.ts';
+import { DEMO_SIGNERS } from './stories.ts';
 import {
   DEMO_ACCOUNTS,
   demoMailbox,
@@ -223,6 +225,31 @@ test('the first delete of the seeded Projects is turned away as in use, and its 
   expect(await paths(reopened.provider)).toEqual([]);
   const { messages } = await everything(reopened);
   expect(messages.filter(({ path }) => path.startsWith('Projects'))).toEqual([]);
+});
+
+test('the demo’s list servers take a one-click unsubscribe, but the shop’s turns its first try away', async () => {
+  let saved: DemoMailbox | undefined;
+  const server = demoServer('personal', demoMailbox('personal', 400, CREATED), (mailbox) => {
+    saved = mailbox;
+  });
+  const offers = new Map<string, string>();
+  for (const message of (await everything(server)).messages) {
+    const raw = await new Response(await server.provider.body(message)).text();
+    const offer = oneClickUnsubscribe(raw, DEMO_SIGNERS);
+    if (offer) offers.set(message.from.email, offer);
+  }
+  const shop = offers.get('orders@shop.example.com')!;
+  const weekly = offers.get('hello@kernelweekly.example.com')!;
+  expect(weekly).toBe('https://kernelweekly.example.com/unsubscribe?u=demo');
+
+  expect((await server.unsubscribe(weekly)).status).toBe(200);
+  const refused = await server.unsubscribe(shop);
+  expect([refused.status, refused.statusText]).toEqual([503, 'Service Unavailable']);
+
+  // The refusal is remembered with the mailbox, so a Mailroom that restarts is taken next time.
+  const reopened = demoServer('personal', saved!, () => {});
+  expect((await reopened.unsubscribe(shop)).status).toBe(200);
+  expect((await reopened.unsubscribe(shop)).status).toBe(200);
 });
 
 test('whatever happens to the mailbox, syncing keeps up, and reopening what was saved gives the same server', async () => {

@@ -10,6 +10,7 @@ export type {
   SignInPreset,
   SignInSetup,
   ThisDevice,
+  Unsubscribed,
 } from './contract.ts';
 export { MATCHES_LISTED, PAGE_SIZE } from './contract.ts';
 export { whatFailed } from './failed.ts';

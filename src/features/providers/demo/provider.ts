@@ -19,7 +19,7 @@ import {
   type Moved,
 } from '../provider.ts';
 import * as server from './mailbox.ts';
-import { BUSY_FOLDER, DEMO_ACCOUNTS, UNREACHABLE, type DemoKind } from './stories.ts';
+import { BUSY_FOLDER, BUSY_LIST, DEMO_ACCOUNTS, UNREACHABLE, type DemoKind } from './stories.ts';
 
 /**
  * The demo provider: a MailProvider over the demo mailbox, for tests, agents, previews and the
@@ -49,6 +49,11 @@ export type DemoServer = {
   fileSentCopies(on: boolean): void;
   /** Removes every message, and every folder the mailbox did not start with, and every copy owed. */
   empty(): Promise<void>;
+  /**
+   * Answers a one-click unsubscribe posted to `address` as the demo's list servers do, with no
+   * network: each takes it, but the shop's turns its first try away.
+   */
+  unsubscribe(address: string): Promise<Response>;
 };
 
 export { DEMO_ACCOUNTS, type DemoKind };
@@ -363,6 +368,15 @@ export function demoServer(
       unfiled.length = 0;
       looked.clear();
       await commit(server.emptied(mailbox), [...watchers.keys()]);
+    },
+    async unsubscribe(address) {
+      const refused = mailbox.refused ?? [];
+      const asked = `UNSUBSCRIBE ${address}`;
+      if (address === BUSY_LIST && !refused.includes(asked)) {
+        await commit({ ...mailbox, refused: [...refused, asked] }, []);
+        return new Response(null, { status: 503, statusText: 'Service Unavailable' });
+      }
+      return new Response(null, { status: 200 });
     },
   };
 }

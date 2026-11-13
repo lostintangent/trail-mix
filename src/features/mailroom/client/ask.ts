@@ -45,6 +45,8 @@ const REPEATABLE: ReadonlySet<string> = new Set<QueryName | CommandName>([
   'updateAccount',
   'allowImages',
   'setLightPaper',
+  // A sender asked again to unsubscribe the same address is left as the first ask left it.
+  'unsubscribe',
   'setFlags',
   'send',
   'deleteFolder',

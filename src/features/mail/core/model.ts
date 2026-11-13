@@ -216,6 +216,11 @@ export type Body = {
   text?: string;
   attachments: { id: string; name: string; type: string; size: number; contentId?: string }[];
   headers: [name: string, value: string][];
+  /**
+   * The HTTPS address the message offers to unsubscribe at in one click, when the account's own
+   * server vouches for the whole offer, as `oneClickUnsubscribe` reads it.
+   */
+  unsubscribe?: string;
 };
 
 /** What a list shows: one folder, a unified view across every account, or a search. */

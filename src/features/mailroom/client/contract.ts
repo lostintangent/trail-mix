@@ -73,6 +73,12 @@ export interface Commands {
   allowImages(account: AccountId, sender: string): Promise<void>;
   /** This sender's HTML mail on light paper in the dark theme, as designed, or darkened again. */
   setLightPaper(account: AccountId, sender: string, on: boolean): Promise<void>;
+  /**
+   * Leaves the list a message came from, in one click (RFC 8058). The Mailroom reads the message
+   * again, checks its offer as `Body.unsubscribe` does, and posts to the address it finds itself.
+   * Nothing is kept: the answer says whether the sender took it.
+   */
+  unsubscribe(ref: MessageRef): Promise<Unsubscribed>;
   /** This member's accounts, index, cache and credentials. */
   eraseEverything(): Promise<void>;
   setFlags(refs: MessageRef[], change: Partial<Flags>): Promise<void>;
@@ -110,6 +116,12 @@ export interface Commands {
   notifyDevice(subscription: Subscription): Promise<void>;
   forgetDevice(endpoint: string): Promise<void>;
 }
+
+/**
+ * How a one-click unsubscribe went: the sender's server took it, or the reason it didn't, in words
+ * that name the host.
+ */
+export type Unsubscribed = { taken: true } | { taken: false; reason: string };
 
 /**
  * One page of a list, newest first: its conversations, the place of its first, with 0 the newest,
@@ -280,6 +292,7 @@ export const COMMANDS = [
   'removeAccount',
   'allowImages',
   'setLightPaper',
+  'unsubscribe',
   'eraseEverything',
   'setFlags',
   'move',

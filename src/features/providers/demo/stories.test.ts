@@ -1,6 +1,12 @@
 import { expect, test } from 'bun:test';
-import { applySyncEvent, memoryIndex } from '../../mail/core/index.ts';
-import { SEEDED_FOLDERS, seededMessage, seededSize, type DemoKind } from './stories.ts';
+import { applySyncEvent, memoryIndex, oneClickUnsubscribe } from '../../mail/core/index.ts';
+import {
+  DEMO_SIGNERS,
+  SEEDED_FOLDERS,
+  seededMessage,
+  seededSize,
+  type DemoKind,
+} from './stories.ts';
 
 /** The benches' mailbox: an Inbox of 50,000 messages in each account. */
 const BENCH_INBOX = 50_000;
@@ -66,4 +72,19 @@ test('no two rows of the public demo share a subject and how their preview opens
   const shown = Map.groupBy(rows, ({ subject, preview }) => `${subject}: ${preview.slice(0, 40)}`);
   expect([...shown].filter(([, alike]) => alike.length > 1).map(([row]) => row)).toEqual([]);
   expect(rows.length).toBeGreaterThan(200);
+});
+
+test('the demo’s verified list mail offers one-click unsubscribe, and its other mail doesn’t', () => {
+  const offered = new Set<string>();
+  for (const kind of ['personal', 'work'] as const) {
+    const size = seededSize(kind, DEMO_INBOX[kind]);
+    for (let uid = 1; uid <= size; uid++) {
+      const message = seededMessage(kind, size, CREATED_AT, uid)!;
+      const { from, list, verified } = message.content();
+      const offer = oneClickUnsubscribe(message.raw(), DEMO_SIGNERS);
+      expect({ uid, offers: offer !== undefined }).toEqual({ uid, offers: !!list && verified });
+      if (offer) offered.add(from.email);
+    }
+  }
+  expect(offered).toContain('hello@kernelweekly.example.com');
 });
