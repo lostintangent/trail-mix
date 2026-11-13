@@ -1,4 +1,5 @@
 import { Button } from '@astryxdesign/core/Button';
+import { ButtonGroup } from '@astryxdesign/core/ButtonGroup';
 import { Dialog, DialogHeader } from '@astryxdesign/core/Dialog';
 import { DropdownMenu, type DropdownMenuOption } from '@astryxdesign/core/DropdownMenu';
 import { Icon } from '@astryxdesign/core/Icon';
@@ -14,7 +15,7 @@ import {
   typographyVars,
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { Clock, Send } from 'lucide-react';
+import { ChevronDown, Send } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { isApple, primaryShortcut, shortcutLabel, type Command } from '../../commands/index.ts';
@@ -23,21 +24,19 @@ import { SEND, SEND_LATER } from './sendCommands.ts';
 import { loadSending } from './useSend.ts';
 
 /**
- * Send, and Send later beside it, drawn from the send commands: each time ahead they offer, or a
- * date and time picked in the member's own time zone, which goes to the Mailroom as an instant. A
- * time already past sends now, through the undo window. Where room is short, Send later is an icon,
- * and Send keeps its word, as the main action.
+ * Send as a split button, drawn from the send commands: the button sends now, and its chevron opens
+ * Send later, with each time ahead they offer, or a date and time picked in the member's own time
+ * zone, which goes to the Mailroom as an instant. A time already past sends now, through the undo
+ * window.
  */
 export function SendActions({
   commands,
   onPick,
-  isCompact = false,
 }: {
   /** From `sendCommands`. */
   commands: readonly Command[];
   /** Sends at a picked time. */
   onPick: (at: string) => void;
-  isCompact?: boolean;
 }) {
   const [isPicking, setPicking] = useState(false);
   // Sending can't wait for its code once Send is pressed.
@@ -57,26 +56,29 @@ export function SendActions({
     : undefined;
   return (
     <span {...stylex.props(styles.actions)}>
-      <DropdownMenu
-        button={{
-          label: 'Send later',
-          tooltip: isCompact ? 'Send later' : undefined,
-          icon: <Icon icon={Clock} />,
-          isIconOnly: isCompact,
-          variant: 'ghost',
-          isDisabled: !isEnabled,
-        }}
-        hasChevron={false}
-        items={later}
-      />
-      <Button
-        label={send.title}
-        tooltip={tooltip}
-        icon={<Icon icon={Send} />}
-        variant="primary"
-        isDisabled={!isEnabled}
-        onClick={() => void send.run()}
-      />
+      <ButtonGroup label="Send" isDisabled={!isEnabled}>
+        <Button
+          label={send.title}
+          tooltip={tooltip}
+          icon={<Icon icon={Send} />}
+          variant="primary"
+          isDisabled={!isEnabled}
+          onClick={() => void send.run()}
+        />
+        <DropdownMenu
+          button={{
+            label: 'Send later',
+            tooltip: 'Send later',
+            icon: <Icon icon={ChevronDown} />,
+            isIconOnly: true,
+            variant: 'primary',
+            isDisabled: !isEnabled,
+          }}
+          hasChevron={false}
+          alignment="end"
+          items={later}
+        />
+      </ButtonGroup>
       {isPicking && (
         <PickTime
           onPick={(at) => {

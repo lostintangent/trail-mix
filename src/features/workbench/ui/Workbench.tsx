@@ -544,16 +544,18 @@ export function Workbench({
 
   // Moving the selection re-renders only what shows it: the list, its two changed rows, and the
   // reader. The sidebar and the panel edges are memoized, and what they're handed stays the same.
-  // Choosing a view opens it afresh, at its newest conversation where it opens one.
+  // Choosing a view opens it afresh, at its newest conversation where it opens one, and leaves
+  // what was being written in Drafts, even a new message begun with nothing open.
   const openView = useCallback(
     (next: View) => {
+      closeComposer();
       chooseView(next);
       setPhonePane('list');
       setSelection(NOTHING_SELECTED);
       setPicking(false);
       setOpening(opensNewest(next, isPhone) ? next : undefined);
     },
-    [chooseView, isPhone],
+    [chooseView, closeComposer, isPhone],
   );
   // Before the frame is drawn, so the reader shows no empty sheet between the two. A list still
   // empty may be filling, as a new member's first sync fills it, so the view waits for its newest,
@@ -1083,11 +1085,7 @@ export function Workbench({
             onSendable={setSendable}
             sendActions={
               <Suspense>
-                <SendActions
-                  commands={writingCommands}
-                  onPick={(at) => sender.current?.(at)}
-                  isCompact={isPhone}
-                />
+                <SendActions commands={writingCommands} onPick={(at) => sender.current?.(at)} />
               </Suspense>
             }
             isSheet={isPhone}

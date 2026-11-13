@@ -27,7 +27,7 @@ export function sendCommands({
     { id: SEND, title: 'Send', group: GROUP, icon: Send, shortcut, isEnabled, run: () => onSend() },
     ...laterTimes(new Date()).map(({ label, at: offered }) => ({
       id: `${SEND_LATER}${label}`,
-      title: `Send ${label.toLowerCase()}`,
+      title: `Send ${phrase(label)}`,
       group: GROUP,
       icon: Clock,
       isEnabled,
@@ -35,3 +35,6 @@ export function sendCommands({
     })),
   ];
 }
+
+/** A time ahead in the middle of a sentence: "in an hour", but "Monday morning" keeps its capital. */
+const phrase = (label: Later['label']) => (/^\w+day /.test(label) ? label : label.toLowerCase());

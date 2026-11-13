@@ -85,7 +85,7 @@ export type ComposerProps = {
   sender: Sender;
   /** Whether what's written can be sent now, which it can once it is to someone. */
   onSendable: (isSendable: boolean) => void;
-  /** The Send and Send later buttons, drawn from the registry's commands. */
+  /** Send, split with Send later, drawn from the registry's commands. */
   sendActions: ReactNode;
   /**
    * How the composer lies: on the page, under a conversation or filling the reader, or, on a
@@ -321,18 +321,6 @@ function Writer({
       {(isOffline ? OFFLINE : SAVED[autosave.state]) || '\u00a0'}
     </span>
   );
-  const close = isSheet ? (
-    <Button label="Close" variant="ghost" onClick={onClose} />
-  ) : (
-    <IconButton
-      label="Close"
-      tooltip={tip('Close, keeping the draft')}
-      icon={<Icon icon={X} />}
-      variant="ghost"
-      onClick={onClose}
-    />
-  );
-
   const writer = (
     <section
       aria-label={title}
@@ -346,7 +334,7 @@ function Writer({
     >
       {isSheet && (
         <header {...stylex.props(styles.sheetHeader)}>
-          {close}
+          <Button label="Close" variant="ghost" onClick={onClose} />
           <div {...stylex.props(styles.sheetTitle)}>
             <h2 {...stylex.props(styles.title)}>{title}</h2>
             {status}
@@ -355,7 +343,7 @@ function Writer({
         </header>
       )}
       <div {...stylex.props(isSheet && styles.sheetBody)}>
-        <div {...stylex.props(styles.fields)}>
+        <div {...stylex.props(styles.fields, !isSheet && styles.fieldsOnPage)}>
           <div {...stylex.props(styles.row, styles.fromRow)}>
             <div {...stylex.props(styles.fromBox)}>
               <span {...stylex.props(styles.fromLabel)}>From</span>
@@ -517,7 +505,6 @@ function Writer({
           variant="ghost"
           onClick={discard}
         />
-        {!isSheet && close}
         {!isSheet && sendActions}
       </div>
     </section>
@@ -842,6 +829,8 @@ const styles = stylex.create({
     fontSize: typeScaleVars['--text-body-size'],
     fontWeight: fontWeightVars['--font-weight-semibold'],
   },
+  // The From chip, on its own line at the top, as far below the header's rule as the To line is
+  // below it.
   sheetBody: {
     flexGrow: 1,
     minHeight: 0,
@@ -851,6 +840,7 @@ const styles = stylex.create({
     flexDirection: 'column',
     gap: spacingVars['--spacing-2'],
     paddingInline: spacingVars['--spacing-4'],
+    paddingBlockStart: spacingVars['--spacing-2'],
   },
   sheetToolbar: {
     flexWrap: 'nowrap',
@@ -881,6 +871,11 @@ const styles = stylex.create({
     borderBottomWidth: borderVars['--border-width'],
     borderBottomStyle: 'solid',
     borderBottomColor: colorVars['--color-border'],
+  },
+  // The From chip is the fields' tallest line, and the sheet's padding is the room above it, so
+  // the rule under the fields keeps as much below them.
+  fieldsOnPage: {
+    paddingBlockEnd: spacingVars['--spacing-4'],
   },
   row: {
     display: 'flex',

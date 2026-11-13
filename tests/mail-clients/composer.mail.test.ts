@@ -517,7 +517,8 @@ describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix
       await page.getByRole('status').filter({ hasText: 'Saved to Drafts' }).waitFor();
       await page.keyboard.press('ControlOrMeta+A');
       await page.keyboard.press('ControlOrMeta+C');
-      await composer.getByRole('button', { name: 'Close' }).click();
+      // Escape leaves the composer, keeping the draft, as a desktop has no Close.
+      await page.keyboard.press('Escape');
       await composer.waitFor({ state: 'detached' });
 
       await page

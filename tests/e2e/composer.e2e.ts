@@ -57,6 +57,16 @@ const composerNamed = (page: Page, name: 'Reply' | 'New message') =>
 const replyButton = (page: Page) =>
   reader(page).getByRole('button', { name: 'Reply', exact: true }).filter({ visible: true }).last();
 
+/**
+ * Leaves the composer, which keeps what was written in Drafts: by Escape on a desktop, which has no
+ * Close, and by the Close of a phone's sheet.
+ */
+async function leave(page: Page, composer: Locator) {
+  if (IS_PHONE) await composer.getByRole('button', { name: 'Close' }).click();
+  else await page.keyboard.press('Escape');
+  await composer.waitFor({ state: 'detached' });
+}
+
 /** Goes to the unified Drafts, through the folders on a phone. */
 async function goToDrafts(page: Page) {
   if (IS_PHONE) {
@@ -90,8 +100,7 @@ test('a reply is saved as it is written, opens again with its words and files, a
   await page.screenshot({
     path: join(SHOTS, `composer-${ENGINE.name()}-${IS_PHONE ? 'phone' : 'desktop'}.png`),
   });
-  await composer.getByRole('button', { name: 'Close' }).click();
-  await composer.waitFor({ state: 'detached' });
+  await leave(page, composer);
 
   // The draft joins its conversation once the Mailroom has synced Drafts, folded like a message.
   const draft = reader(page).getByRole('button', { name: /^Draft/ });
@@ -135,8 +144,7 @@ test('a pasted image shows as it is pasted, once its draft is saved, and when it
   await expect(shown(image, 'blob:')).resolves.toEqual([4, 3]);
   await saved(page).waitFor({ timeout: 10_000 });
   await expect(shown(image, '/messages/')).resolves.toEqual([4, 3]);
-  await composer.getByRole('button', { name: 'Close' }).click();
-  await composer.waitFor({ state: 'detached' });
+  await leave(page, composer);
 
   const draft = reader(page).getByRole('button', { name: /^Draft/ });
   await draft.waitFor({ timeout: 10_000 });
@@ -171,8 +179,7 @@ test('pasted HTML brings no remote image, which never loads, even as the compose
   });
   await text.locator('strong').waitFor();
   await expect(text.locator('img').count()).resolves.toBe(0);
-  await composer.getByRole('button', { name: 'Close' }).click();
-  await composer.waitFor({ state: 'detached' });
+  await leave(page, composer);
   await page.waitForTimeout(500);
   expect(tracked).toEqual([]);
 }, 60_000);
@@ -286,11 +293,59 @@ test('a draft another client wrote as HTML opens with its words, and closed unto
   );
   await expect(words.getByRole('listitem').count()).resolves.toBe(3);
 
-  await page.getByRole('button', { name: 'Close' }).click();
+  await leave(page, composerNamed(page, 'New message'));
   await page.waitForTimeout(SAVE_AFTER_MS + 1_000);
   expect(sent.filter((body) => /saveDraft|"move"/.test(body))).toEqual([]);
   await line.waitFor();
 }, 60_000);
+
+// A phone's sheet lies over everything and leaves by its Close.
+if (!IS_PHONE) {
+  test('a desktop leaves a reply for another conversation, and a new message for another view or by Escape, keeping each', async () => {
+    const page = await inbox();
+    const row = (subject: string) => page.getByRole('option').filter({ hasText: subject });
+    await row('Design review notes').click();
+    await replyButton(page).click();
+    const reply = composerNamed(page, 'Reply');
+    await reply.getByRole('textbox', { name: 'Reply' }).waitFor();
+    await page.keyboard.type('Left for another conversation.');
+    await row('Trip photos').click();
+    await reply.waitFor({ state: 'detached' });
+    await row('Design review notes').click();
+    await reader(page)
+      .getByRole('button', { name: /^Draft/ })
+      .filter({ hasText: 'Left for another conversation.' })
+      .waitFor({ timeout: 10_000 });
+
+    // From the Outbox, which opens no conversation, so the new message belongs to none.
+    const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
+    await sidebar.getByRole('button', { name: /^Outbox/ }).click();
+    const forView = `Left for a view ${Date.now()}`;
+    const forEscape = `Left by Escape ${Date.now()}`;
+    const written = composerNamed(page, 'New message');
+    for (const [subject, leaveIt] of [
+      [
+        forView,
+        () =>
+          sidebar
+            .getByRole('button', { name: /^Inbox/ })
+            .first()
+            .click(),
+      ],
+      [forEscape, () => page.keyboard.press('Escape')],
+    ] as const) {
+      await page.keyboard.press('c');
+      await written.getByRole('textbox', { name: 'Subject' }).fill(subject);
+      await written.getByRole('textbox', { name: 'Message' }).click();
+      await page.keyboard.type('Bring the map.');
+      await leaveIt();
+      await written.waitFor({ state: 'detached' });
+    }
+    await goToDrafts(page);
+    await row(forView).waitFor({ timeout: 10_000 });
+    await row(forEscape).waitFor({ timeout: 10_000 });
+  }, 60_000);
+}
 
 test('a tab closed mid-sentence keeps all but the last few seconds of what was written', async () => {
   const page = await inbox();

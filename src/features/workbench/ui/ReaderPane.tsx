@@ -334,7 +334,9 @@ export function ReaderPane({
               isPassing={isPassing}
             />
           </Suspense>
-          {isDocked && <div {...stylex.props(styles.writing)}>{writing?.composer}</div>}
+          {isDocked && (
+            <div {...stylex.props(styles.writing, styles.docked)}>{writing?.composer}</div>
+          )}
         </div>
       ) : isOpening ? (
         <div {...stylex.props(styles.scroll, actions && styles.underBar)}>
@@ -608,6 +610,11 @@ const styles = stylex.create({
       [media.phone]: spacingVars['--spacing-3'],
     },
     paddingBottom: spacingVars['--spacing-6'],
+  },
+  // Docked, it takes back the room the conversation ends with, so it lies a message's gap under
+  // the last message, where the reply will lie once sent.
+  docked: {
+    marginTop: `calc(${spacingVars['--spacing-2']} - ${spacingVars['--spacing-6']})`,
   },
   empty: {
     flexGrow: 1,
