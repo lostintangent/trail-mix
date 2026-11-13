@@ -112,6 +112,7 @@ import {
   composerCommands,
   ComposerSkeleton,
   isDocked,
+  useIsReplyOnItsWay,
   type Sender,
   type Writing,
 } from '../../composer/ui/index.ts';
@@ -872,18 +873,22 @@ export function Workbench({
   const isDark = useDarkTheme();
   const reading = isDark ? opened : undefined;
   const { data: read } = useQuery({ ...conversationQuery(reading ?? ''), enabled: false });
+  const isReplyOnItsWay = useIsReplyOnItsWay();
 
   // The registry is made anew each render, as the selection moves, but its commands keep their
   // identity while they look the same, so what draws them and the palette render only on a change.
   // A new message fills the reader, over the conversation open behind it, so neither keys nor the
   // palette act on that conversation or move the list from under it. Keys typed straight after
-  // New message, before its fields are drawn, then do nothing.
-  const isBehindComposer = compose !== undefined && (isPhone || !isDocked(compose));
-  const isOpenInView = opened !== undefined && !isMany && !isBehindComposer;
+  // New message, before its fields are drawn, then do nothing. A reply on its way to its editor
+  // counts as the composer too, while its conversation stays in view with its place in the list.
+  const isOverReader = compose !== undefined && (isPhone || !isDocked(compose));
+  const isBehindComposer = isOverReader || isReplyOnItsWay;
+  const isInView = opened !== undefined && !isMany && !isOverReader;
+  const isOpenInView = isInView && !isBehindComposer;
   // A send on its way says where it stands on its line in its conversation while that's on screen,
   // and in a toast while the member is elsewhere.
   const shown =
-    (!isPhone || phonePane === 'reader') && page === undefined && isOpenInView ? opened : undefined;
+    (!isPhone || phonePane === 'reader') && page === undefined && isInView ? opened : undefined;
   useLeavingToasts(leaving.all, shown);
   // What GitHub shows of what's open: the thread, or the bundle's repository.
   const openRow = threadRow ?? (selected === undefined ? undefined : rowOf(selected));
@@ -969,12 +974,12 @@ export function Workbench({
   const commands = useSteadyCommands([
     ...(isBehindComposer ? [] : selectedCommands),
     ...workbenchCommands({
-      next: isBehindComposer
+      next: isOverReader
         ? undefined
         : thread !== undefined
           ? stepToThread(threadAt + 1)
           : stepTo(anchor.after),
-      previous: isBehindComposer
+      previous: isOverReader
         ? undefined
         : thread !== undefined
           ? threadAt > 0

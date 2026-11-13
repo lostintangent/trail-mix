@@ -16,6 +16,7 @@ import { useEffect, useLayoutEffect, useRef } from 'react';
 import { tm } from '../../../app/theme/tokens.stylex.ts';
 import { DraftImage, DraftParagraph } from './draftImage.ts';
 import { editableHtml } from './editable.ts';
+import { heldTyping, releaseKeys } from './heldKeys.ts';
 
 /**
  * Where the member writes: Markdown, edited as the text it makes. Typing Markdown formats it as it
@@ -94,7 +95,6 @@ export function Editor({
     onCreate: ({ editor: created }) => {
       known.current = created.getMarkdown();
       if ('html' in start) latest.current.onChange(known.current, false);
-      if (isFocused && !created.isFocused) focusAtEnd(created);
     },
     editorProps: {
       attributes: {
@@ -146,14 +146,23 @@ export function Editor({
   useEffect(() => {
     if (editor) onEditor(editor);
   }, [editor, onEditor]);
-  // The cursor is in the text in the commit that shows it, so a key pressed straight after Reply is
-  // typed rather than taken as a command. Tiptap's own create comes a task later. The view is in
-  // the page once its container has placed it, which it may not have yet when the editor's code
-  // has only just loaded, and then the cursor waits for the create.
+  // The cursor is in the text in the commit that shows it, so a phone raises its keyboard for the
+  // tap on Reply and a key pressed straight after is the editor's. Tiptap makes its editor again
+  // when the commit that shows the first is slow to run its effects, and even the one it lets go
+  // is created, so the cursor and what was typed while a reply was on its way go into the editor it
+  // keeps, once its effects have run. What was typed is the member's own edit. An editor the cursor
+  // doesn't start in lets the keys go, and what they typed with them.
   const isFocusedAtStart = useRef(isFocused);
   useLayoutEffect(() => {
     const placed: Placed | null = editor;
-    if (placed?.isEditorContentInitialized && isFocusedAtStart.current) focusAtEnd(placed);
+    if (!isFocusedAtStart.current) releaseKeys();
+    else if (placed?.isEditorContentInitialized && !heldTyping()) focusAtEnd(placed, '');
+  }, [editor]);
+  useEffect(() => {
+    if (!editor || editor.isDestroyed || !isFocusedAtStart.current) return;
+    const typed = releaseKeys();
+    if (typed !== '') known.current ??= editor.getMarkdown();
+    if (typed !== '' || !editor.isFocused) focusAtEnd(editor, typed);
   }, [editor]);
   // A file the composer took shows once the composer has it, and a saved one from its draft.
   useEffect(() => {
@@ -167,12 +176,13 @@ export function Editor({
 type Placed = TiptapEditor & { isEditorContentInitialized?: boolean };
 
 /**
- * Puts the cursor at the end of the text. Tiptap's own `focus` builds its transaction before it
- * focuses the page on a phone, which applies one of its own first, so its transaction no longer
- * fits. The cursor moves first here, then the page focuses.
+ * Puts the cursor at the end of the text, after what is `typed` there. Tiptap's own `focus` builds
+ * its transaction before it focuses the page on a phone, which applies one of its own first, so its
+ * transaction no longer fits. The cursor moves first here, then the page focuses.
  */
-function focusAtEnd(editor: TiptapEditor) {
-  editor.view.dispatch(editor.state.tr.setSelection(Selection.atEnd(editor.state.doc)));
+function focusAtEnd(editor: TiptapEditor, typed: string) {
+  const atEnd = editor.state.tr.setSelection(Selection.atEnd(editor.state.doc));
+  editor.view.dispatch(typed === '' ? atEnd : atEnd.insertText(typed));
   editor.view.focus();
   editor.commands.scrollIntoView();
 }

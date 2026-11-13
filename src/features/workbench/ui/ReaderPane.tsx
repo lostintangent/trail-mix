@@ -261,7 +261,7 @@ export function ReaderPane({
     };
   }, [shown, isShowing]);
   usePreloadedReader(upcoming.length > 0);
-  usePreloadedComposer(isShowing ? shown : undefined);
+  usePreloadedComposer(upcoming.length > 0 || isShowing);
   // Preparing what comes next is never urgent, so a change to it, as when the open conversation
   // leaves the list, doesn't make the open conversation render again in the change's own frame.
   const preparing = useDeferredValue(upcoming);
@@ -444,28 +444,47 @@ const AWAITING_COPY_MS = 2_000;
 /** How long after the list first shows something to open the reader starts loading. */
 const PRELOAD_AFTER_MS = 1_000;
 
-/** How long a conversation stays open before the composer loads for a reply. */
+/** How long the member rests from keys, pointer and scrolling before the composer loads. */
 const PRELOAD_COMPOSER_AFTER_MS = 2_000;
 
+/** What the member does to move through the list, or anything else, which the composer waits out. */
+const MOVES = ['keydown', 'pointerdown', 'scroll'] as const;
+
 /**
- * Once a conversation has stayed open a moment, the composer loads while the browser is idle,
- * ready for a reply. Its code is large, so it never loads while the member moves through the list.
+ * Once the first screen has something to open, the composer loads while the browser is idle, so a
+ * reply rarely waits for its code. Its code is large, so it loads only once the member has rested a
+ * moment, never while they move through the list.
  */
-function usePreloadedComposer(shown: ConversationId | undefined) {
+function usePreloadedComposer(isWanted: boolean) {
   useEffect(() => {
-    if (shown === undefined) return;
+    if (!isWanted) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     let idleId: number | undefined;
-    const timer = setTimeout(() => {
-      // Safari has no idle callback.
-      const preload = () => void Promise.all([preloadComposer(), preloadSendActions()]);
-      if ('requestIdleCallback' in window) idleId = requestIdleCallback(preload);
-      else preload();
-    }, PRELOAD_COMPOSER_AFTER_MS);
-    return () => {
+    const settle = () => {
       clearTimeout(timer);
       if (idleId !== undefined) cancelIdleCallback(idleId);
+      idleId = undefined;
+      timer = setTimeout(() => {
+        // Safari has no idle callback.
+        if ('requestIdleCallback' in window) idleId = requestIdleCallback(preload);
+        else preload();
+      }, PRELOAD_COMPOSER_AFTER_MS);
     };
-  }, [shown]);
+    const stop = () => {
+      clearTimeout(timer);
+      if (idleId !== undefined) cancelIdleCallback(idleId);
+      for (const move of MOVES) window.removeEventListener(move, settle, { capture: true });
+    };
+    const preload = () => {
+      stop();
+      void Promise.all([preloadComposer(), preloadSendActions()]);
+    };
+    for (const move of MOVES) {
+      window.addEventListener(move, settle, { capture: true, passive: true });
+    }
+    settle();
+    return stop;
+  }, [isWanted]);
 }
 
 function usePreloadedReader(isWanted: boolean) {

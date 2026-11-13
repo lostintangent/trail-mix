@@ -8,7 +8,7 @@ import {
   type MessageRef,
 } from '../../mail/core/index.ts';
 import { conversationQuery } from '../../mailroom/client/index.ts';
-import type { Compose, Writing } from '../../composer/ui/index.ts';
+import { holdKeys, releaseKeys, type Compose, type Writing } from '../../composer/ui/index.ts';
 
 /**
  * What the member is writing, if anything, and how writing starts and ends. A composer belongs to
@@ -47,6 +47,9 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
         (was) => next && { compose: next, in: opened, session: (was?.session ?? 0) + 1, before },
       );
       setEditing(next?.as === 'draft' || next?.as === 'resumed' ? next.draft : undefined);
+      // A reply holds the keys pressed from the moment it begins until its editor takes them.
+      if (next?.as === 'reply') holdKeys();
+      else releaseKeys();
     },
     [queryClient],
   );
@@ -78,16 +81,18 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
   /**
    * Answers the selected conversation once its messages are at hand: within the key's own event
    * when they are, so the reply and the cursor in it are in the page before the next key, which is
-   * then typed rather than taken as a command.
+   * then typed rather than taken as a command. Keys pressed while they come are the reply's too.
    */
   const reply = useCallback(
     async (all: boolean) => {
       if (selected === undefined) return;
       const query = conversationQuery(selected);
-      replyIn(
-        queryClient.getQueryData(query.queryKey) ?? (await queryClient.ensureQueryData(query)),
-        all,
-      );
+      const held = queryClient.getQueryData(query.queryKey);
+      if (held) return replyIn(held, all);
+      holdKeys();
+      const conversation = await queryClient.ensureQueryData(query).catch(() => []);
+      if (newestOf(conversation)) replyIn(conversation, all);
+      else releaseKeys();
     },
     [queryClient, selected, replyIn],
   );

@@ -153,6 +153,61 @@ for (const [size, options] of Object.entries(SIZES)) {
       expect(await composer(page).count()).toBe(1);
     }, 60_000);
 
+    test('the composer’s code loads ahead once the first screen rests, with nothing open', async () => {
+      const page = await inbox('light');
+      await composerLoaded(page);
+    }, 60_000);
+
+    test('keys pressed while a reply’s code loads wait for it, and what they type is the reply’s', async () => {
+      // The composer's code comes only once the test lets it, past any worker that keeps it.
+      let letCome = () => {};
+      const comes = new Promise<void>((resolve) => (letCome = resolve));
+      const page = await inbox('light', { serviceWorkers: 'block' }, async (page) => {
+        await page.route('**/assets/Composer-*.js', async (route) => {
+          await comes;
+          await route.fallback();
+        });
+      });
+      await open(page);
+      const saved = page.waitForRequest(
+        (request) =>
+          request.method() === 'POST' &&
+          (request.postData() ?? '').includes('saveDraft') &&
+          (request.postData() ?? '').includes('just ask'),
+      );
+      await page.keyboard.press('r');
+      // E archives, J and K move, # deletes and Mod+K opens the palette, were the reply not on its
+      // way. A slip is taken back as it would be in the reply.
+      await page.keyboard.type('Count me in, just askk');
+      await page.keyboard.press('Backspace');
+      await page.keyboard.press('#');
+      await page.keyboard.press('ControlOrMeta+k');
+      await painted(page);
+      const selected = page.locator('[role="option"][aria-selected="true"]');
+      expect(await selected.innerText()).toContain('Workers migration plan');
+      expect(await page.getByRole('listbox', { name: 'Commands' }).count()).toBe(0);
+      expect(await composer(page).getByRole('textbox', { name: 'Reply' }).count()).toBe(0);
+
+      letCome();
+      const editor = composer(page).getByRole('textbox', { name: 'Reply' });
+      // The editor takes what was typed once it is made, a task after it shows.
+      await until(async () => (await editor.innerText()).trim() !== '', 5000);
+      expect(await editor.innerText()).toBe('Count me in, just ask#');
+      // The cursor is after it, and the draft saved holds it, as the member's own words.
+      await page.keyboard.type('.');
+      expect(await editor.innerText()).toBe('Count me in, just ask#.');
+      await saved;
+      expect(await selected.innerText()).toContain('Workers migration plan');
+      // Keys reach the list again once the reply has its editor.
+      await page.keyboard.press('Escape');
+      await composer(page).waitFor({ state: 'detached' });
+      await page.keyboard.press('j');
+      await until(
+        async () => !(await selected.innerText()).includes('Workers migration plan'),
+        5000,
+      );
+    }, 60_000);
+
     test('whom the member chose a reply is to stays chosen when the parent’s Reply-To comes', async () => {
       const page = await inbox('dark');
       await slowBodies(page);
