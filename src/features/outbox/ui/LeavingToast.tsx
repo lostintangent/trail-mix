@@ -1,5 +1,6 @@
 import { Button } from '@astryxdesign/core/Button';
 import { Icon } from '@astryxdesign/core/Icon';
+import { IconButton } from '@astryxdesign/core/IconButton';
 import {
   fontWeightVars,
   radiusVars,
@@ -11,7 +12,7 @@ import * as stylex from '@stylexjs/stylex';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, CircleAlert, Clock, Send, Undo2, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react';
-import { useCommands } from '../../commands/index.ts';
+import { tooltipOf, UNDO_COMMAND, useCommands } from '../../commands/index.ts';
 import { conversationQuery, foldersQuery, outboxQuery } from '../../mailroom/client/index.ts';
 import { formatAhead } from '../core/later.ts';
 import {
@@ -25,6 +26,7 @@ import {
   type Standing,
 } from '../core/standing.ts';
 import { media } from '../../../app/theme/tokens.stylex.ts';
+import { ToastRule } from '../../../shared/ToastRule.tsx';
 import { Airmail } from './Airmail.tsx';
 import { takeBack as takeBackSend } from './asked.ts';
 import { offerUndo } from './undoable.ts';
@@ -130,7 +132,9 @@ export default function LeavingToast({
     if (!canTakeBack) return;
     return offerUndo({ id: outgoing.id, takeBack: () => void latestTakeBack.current() });
   }, [canTakeBack, outgoing.id]);
-  const goToOutbox = useCommands().find(({ id }) => id === 'go.outbox');
+  const commands = useCommands();
+  const goToOutbox = commands.find(({ id }) => id === 'go.outbox');
+  const undoCommand = commands.find(({ id }) => id === UNDO_COMMAND);
 
   const who = briefly(outgoing.to);
   const refused = typeof undo === 'object' ? undo.refused : undefined;
@@ -151,25 +155,32 @@ export default function LeavingToast({
         </VisuallyHidden>
         <div {...stylex.props(styles.actions)}>
           {isUndoable(standing) && undo !== 'done' ? (
-            <Button
-              label="Undo"
-              variant="ghost"
-              size="sm"
-              isLoading={undo === 'asking'}
-              onClick={() => void takeBack()}
-              xstyle={styles.action}
-            />
+            <>
+              <IconButton
+                label="Undo"
+                tooltip={undoCommand ? tooltipOf(undoCommand) : 'Undo'}
+                icon={<Icon icon={Undo2} size="sm" color="inherit" />}
+                variant="ghost"
+                size="sm"
+                isLoading={undo === 'asking'}
+                onClick={() => void takeBack()}
+              />
+              <ToastRule />
+            </>
           ) : goToOutbox && (standing.is === 'failed' || standing.is === 'retrying') ? (
-            <Button
-              label="Open Outbox"
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                dismiss();
-                void goToOutbox.run();
-              }}
-              xstyle={styles.action}
-            />
+            <>
+              <Button
+                label="Open Outbox"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  dismiss();
+                  void goToOutbox.run();
+                }}
+                xstyle={styles.action}
+              />
+              <ToastRule />
+            </>
           ) : null}
           <Button
             label="Dismiss"

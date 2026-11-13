@@ -6,7 +6,7 @@ import {
   Search,
   Settings,
 } from 'lucide-react';
-import { SEARCH_COMMAND, type Command } from '../../commands/index.ts';
+import { SEARCH_COMMAND, UNDO_COMMAND, type Command } from '../../commands/index.ts';
 
 /** The id of the command that folds the sidebar to its rail and back. */
 export const FOLD_SIDEBAR = 'sidebar.fold';
@@ -67,7 +67,7 @@ export function workbenchCommands({
       run: () => back?.(),
     },
     {
-      id: 'conversation.undo',
+      id: UNDO_COMMAND,
       title: 'Undo',
       group: 'Conversation',
       shortcut: 'Z',

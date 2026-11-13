@@ -1,6 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import { createContext, use, useEffect, useLayoutEffect, useRef } from 'react';
-import { matches, shortcutsOf, worksWhileTyping } from './core/keys.ts';
+import { labelShortcuts, matches, shortcutsOf, worksWhileTyping } from './core/keys.ts';
 import { commandFor, matching, type CommandLike } from './core/registry.ts';
 
 /**
@@ -134,6 +134,22 @@ export const focusSearch = () => searchFocus?.();
 
 /** The id of the command that opens the palette, which the palette leaves out of what it offers. */
 export const SEARCH_COMMAND = 'search.focus';
+
+/** The id of Undo, whose keys a toast's Undo names, since they take back what the toast offers. */
+export const UNDO_COMMAND = 'conversation.undo';
+
+/** What a command's control says when pointed at: its title, and the keys that run it. */
+export const tooltipOf = ({ title, shortcut }: Pick<Command, 'title' | 'shortcut'>): string =>
+  shortcut ? `${title} (${labelShortcuts(shortcut, isApple)})` : title;
+
+/**
+ * The tooltip of the command bound now under an id, for a control drawn outside the registry's
+ * tree, as a toast made outside React is.
+ */
+export function boundTooltipOf(id: string): string | undefined {
+  const command = bound.find((each) => each.id === id);
+  return command && tooltipOf(command);
+}
 
 /** How many commands the palette offers at once, best first. */
 const PALETTE_SIZE = 8;

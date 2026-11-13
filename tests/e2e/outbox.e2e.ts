@@ -158,6 +158,9 @@ test('the countdown matches the time the Mailroom stored, and Undo leaves the dr
   // Never more time than the Mailroom gives, and no more than a second less.
   expect(shown).toBeLessThanOrEqual(left);
   expect(shown).toBeGreaterThanOrEqual(left - 1);
+  // Its Undo is an icon, and its tooltip names the key that takes the send back too.
+  await page.locator('.astryx-toast').getByRole('button', { name: 'Undo', exact: true }).hover();
+  await page.getByRole('tooltip').filter({ hasText: 'Undo (Z)' }).waitFor();
 
   await goTo(page, 'Outbox');
   const row = page.getByRole('listitem').filter({ hasText: /To Jonas Weber/ });

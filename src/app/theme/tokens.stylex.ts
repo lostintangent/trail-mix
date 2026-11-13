@@ -33,7 +33,8 @@ export const tm = stylex.defineVars({
 
   // Color roles beyond Astryx's
   textQuiet: 'light-dark(oklch(0.52 0.015 265), oklch(0.66 0 0))', // previews, times: still 4.5:1
-  // The short rule that parts the foot's gear from the name, and the rail's groups: quiet ink at half
+  // The short rule that parts the foot's gear from the name, the rail's groups, and a toast's action
+  // from its close: quiet ink at half
   rule: 'light-dark(oklch(0.52 0.015 265 / 0.5), oklch(0.66 0 0 / 0.5))',
   paperFixed: 'oklch(0.975 0.004 85)', // HTML mail on light paper sits on this in both themes
   highlight: 'oklch(0.86 0.17 92)', // the suite yellow: flagged, search match

@@ -1,4 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query';
+import { Undo2 } from 'lucide-react';
+import { boundTooltipOf, UNDO_COMMAND } from '../../commands/index.ts';
 import { folderName } from '../../folders/index.ts';
 import {
   bundlePartsOf,
@@ -143,7 +145,12 @@ export async function carryOut({
     const count = conversationIds.length + bundles.reduce((sum, { threads }) => sum + threads, 0);
     const dismissing = toast({
       body: said(action, count, folders),
-      action: { label: 'Undo', onAction: undoThis },
+      action: {
+        label: 'Undo',
+        icon: Undo2,
+        tooltip: boundTooltipOf(UNDO_COMMAND),
+        onAction: undoThis,
+      },
     });
     const undoFromKey = () => {
       void dismissing.then((dismiss) => dismiss());

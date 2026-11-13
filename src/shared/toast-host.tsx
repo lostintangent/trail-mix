@@ -1,6 +1,8 @@
 import { Button } from '@astryxdesign/core/Button';
+import { Icon } from '@astryxdesign/core/Icon';
 import { ToastViewport, useToast, type ToastViewportProps } from '@astryxdesign/core/Toast';
 import { useCallback, useEffect } from 'react';
+import { ToastRule } from './ToastRule.tsx';
 import type { Show } from './toasts.tsx';
 
 type Ready = { onReady: (show: Show) => void };
@@ -22,8 +24,9 @@ export default function ToastHost({
 }
 
 /**
- * Shows a toast in the viewport above it. Its action becomes a button at its end, which dismisses
- * the toast as it acts, and a toast that draws itself is Astryx's custom content.
+ * Shows a toast in the viewport above it. Its action becomes a button at its end, ruled off from
+ * the close, which dismisses the toast as it acts, and a toast that draws itself is Astryx's custom
+ * content.
  */
 function Shows({ onReady }: Ready) {
   const showToast = useToast();
@@ -35,15 +38,23 @@ function Shows({ onReady }: Ready) {
         ...(onHide && { onHide: () => onHide() }),
         ...(render && { renderContent: ({ dismiss }) => render(dismiss), isAutoHide: false }),
         endContent: action && (
-          <Button
-            label={action.label}
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              dismiss();
-              action.onAction();
-            }}
-          />
+          <>
+            <Button
+              label={action.label}
+              {...(action.icon && {
+                icon: <Icon icon={action.icon} size="sm" color="inherit" />,
+                isIconOnly: true,
+                tooltip: action.tooltip ?? action.label,
+              })}
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                dismiss();
+                action.onAction();
+              }}
+            />
+            <ToastRule />
+          </>
         ),
       });
       return dismiss;

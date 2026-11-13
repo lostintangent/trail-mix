@@ -1,4 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
+import { Undo2 } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from '../../../shared/toasts.tsx';
 import type { MessageRef } from '../../mail/core/index.ts';
@@ -174,6 +175,7 @@ export function useAutosave({
       body: 'Draft discarded',
       action: {
         label: 'Undo',
+        icon: Undo2,
         onAction: () =>
           void mailroom.move(
             moved.map(({ to }) => to),

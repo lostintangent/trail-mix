@@ -1,4 +1,5 @@
 import type { ToastDismissFn, ToastViewportProps } from '@astryxdesign/core/Toast';
+import type { LucideIcon } from 'lucide-react';
 import { lazy, memo, Suspense, useEffect, useState, type ReactNode } from 'react';
 
 /**
@@ -15,8 +16,12 @@ export type Toast = {
   /** What the toast says, and what assistive tech announces as it appears. */
   body: ReactNode;
   type?: 'info' | 'error';
-  /** A button at the toast's end, such as Undo, which also dismisses the toast. */
-  action?: { label: string; onAction: () => void };
+  /**
+   * A button at the toast's end, set off from its close by a short rule, which also dismisses the
+   * toast. With an icon, as Undo has, it shows the icon alone, named by its label, and its tooltip
+   * says what it does and the keys that do it too.
+   */
+  action?: { label: string; icon?: LucideIcon; tooltip?: string; onAction: () => void };
   /**
    * Draws the whole card in place of `body` and `action`, for a toast that changes as it shows.
    * `body` is still what's announced. Such a toast stays until it calls `dismiss`.

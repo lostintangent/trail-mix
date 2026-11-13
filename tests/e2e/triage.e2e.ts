@@ -1,5 +1,8 @@
-import { afterEach, expect } from 'bun:test';
+import { afterEach, beforeAll, expect } from 'bun:test';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import type { Page, Request, Route } from 'playwright';
+import { unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 
@@ -9,6 +12,7 @@ import { mailIsIn } from '../mailIsIn.ts';
  * reaches it. A fresh member each run starts from the seeded mailbox.
  */
 
+const SHOTS = join(import.meta.dir, '../../test-results');
 const MEMBER = `triage-${Date.now()}@trailmix.test`;
 const DESKTOP = { viewport: { width: 1440, height: 900 } };
 const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
@@ -18,6 +22,10 @@ const ELSEWHERE_MS = 5_000;
 const app = suite({ vars: { DEV_MEMBER: MEMBER } });
 // A test that fails leaves a screenshot of each page and what it showed, for CI to keep.
 const { test } = app;
+
+beforeAll(() => {
+  mkdirSync(SHOTS, { recursive: true });
+});
 
 /** Every error a page threw during a test, which fails it. */
 const errors: string[] = [];
@@ -586,6 +594,58 @@ test('Delete and Backspace delete the whole selection together, and Undo restore
     await here.context().close();
   }
 }, 30_000);
+
+test("a toast's Undo is its icon alone, ruled off from the close, and its tooltip names Undo's key", async () => {
+  for (const [size, options] of [
+    ['desktop', DESKTOP],
+    ['phone', PHONE],
+  ] as const) {
+    for (const colorScheme of ['light', 'dark'] as const) {
+      const here = await inbox(options);
+      await here.emulateMedia({ colorScheme });
+      const target = row(here, /Trip photos/);
+      await target.click();
+      await shownSubject(here);
+      await bar(here).getByRole('button', { name: 'Archive' }).click();
+      await target.waitFor({ state: 'detached' });
+      const undo = undoButton(here);
+      await undo.waitFor();
+      // Undo, then a rule as tall as a line and a pixel wide, then the close.
+      const shape = await undo.evaluate((button) => {
+        const card = button.closest('.astryx-toast')!;
+        const buttons = [...card.querySelectorAll('button')];
+        const close = buttons[buttons.indexOf(button as HTMLButtonElement) + 1]!;
+        const [left, right] = [button, close].map((each) => each.getBoundingClientRect());
+        const rules = [...card.querySelectorAll('span')].filter((span) => {
+          const box = span.getBoundingClientRect();
+          return box.width === 1 && box.height >= 12 && box.left >= left!.right;
+        });
+        return {
+          words: button.textContent?.trim(),
+          close: close.getAttribute('aria-label'),
+          ruled: rules.some((rule) => rule.getBoundingClientRect().right <= right!.left),
+          targets: [left!, right!].map(({ width, height }) => Math.min(width, height)),
+        };
+      });
+      expect(shape).toMatchObject({ words: '', close: 'Dismiss notification', ruled: true });
+      for (const side of shape.targets)
+        expect(side).toBeGreaterThanOrEqual(size === 'phone' ? 44 : 28);
+      if (size === 'desktop') {
+        await undo.hover();
+        await here.getByRole('tooltip').filter({ hasText: 'Undo (Z)' }).waitFor();
+      }
+      await here.screenshot({ path: join(SHOTS, `toast-undo-${size}-${colorScheme}.png`) });
+      expect({ colorScheme, size, unreadable: await unreadableText(here) }).toEqual({
+        colorScheme,
+        size,
+        unreadable: [],
+      });
+      await undo.click();
+      await target.waitFor({ timeout: ELSEWHERE_MS });
+      await here.context().close();
+    }
+  }
+}, 60_000);
 
 test('Delete and Backspace stay in the search field and palette while typing', async () => {
   const here = await inbox();

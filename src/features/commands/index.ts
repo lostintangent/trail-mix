@@ -7,6 +7,7 @@ export {
 export { commandFor, matching, problemsOf } from './core/registry.ts';
 export {
   bestCommandFor,
+  boundTooltipOf,
   Commands,
   focusSearch,
   isApple,
@@ -14,6 +15,8 @@ export {
   registerSearchFocus,
   runCommandKey,
   SEARCH_COMMAND,
+  tooltipOf,
+  UNDO_COMMAND,
   useCommandKeys,
   useCommands,
   useSteadyCommands,
