@@ -16,7 +16,8 @@ export const media = stylex.defineConsts({
 
 export const tm = stylex.defineVars({
   // Geometry
-  deskGap: '8px', // the gutter between sheets, as in Toy Box
+  deskGap: '12px', // the gutter between sheets
+  deskEdge: '8px', // the desk's margin around them, as in Toy Box
   paneRadius: '14px',
   sheetRadius: '12px', // a message, the composer
   target: { default: '32px', [COARSE]: '44px' },

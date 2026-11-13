@@ -1551,7 +1551,7 @@ const styles = stylex.create({
   track: {
     display: { default: 'grid', [media.phone]: 'flex' },
     gap: { default: tm.deskGap, [media.phone]: 0 },
-    padding: { default: tm.deskGap, [media.phone]: 0 },
+    padding: { default: tm.deskEdge, [media.phone]: 0 },
     width: { default: '100%', [media.phone]: '300%' },
     height: '100%',
     // Panes and the phone track move on the layout easing, and nothing moves under reduced motion.
