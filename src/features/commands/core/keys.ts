@@ -4,6 +4,21 @@
  * `?`, matches whatever modifiers made it, since keyboards differ in which Shift gives it.
  */
 export type Shortcut = string;
+export type Shortcuts = Shortcut | readonly [Shortcut, ...Shortcut[]];
+
+/** The keys that run a command, whether it has one key or aliases. */
+export const shortcutsOf = (shortcuts: Shortcuts): readonly Shortcut[] =>
+  typeof shortcuts === 'string' ? [shortcuts] : shortcuts;
+
+/** The key cap shown in the palette and shortcut sheet. */
+export const primaryShortcut = (shortcuts: Shortcuts): Shortcut =>
+  typeof shortcuts === 'string' ? shortcuts : shortcuts[0];
+
+/** Every key that runs a command, for its tooltip. */
+export const labelShortcuts = (shortcuts: Shortcuts, isApple: boolean): string =>
+  shortcutsOf(shortcuts)
+    .map((shortcut) => label(shortcut, isApple))
+    .join(', ');
 
 /** What a shortcut needs of a key event. */
 export type KeyPress = {

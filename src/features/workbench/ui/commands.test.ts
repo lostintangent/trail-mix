@@ -1,6 +1,12 @@
 import { expect, test } from 'bun:test';
 import { accentCommands } from '../../../app/theme/commands.ts';
-import { commandFor, matching, problemsOf, type Command } from '../../commands/index.ts';
+import {
+  commandFor,
+  matching,
+  problemsOf,
+  shortcutsOf,
+  type Command,
+} from '../../commands/index.ts';
 import { triageCommands } from '../../conversations/index.ts';
 import { viewCommands } from '../../folders/index.ts';
 import { sendCommands } from '../../outbox/index.ts';
@@ -76,14 +82,20 @@ test('every key resolves to its own command, and typing a command’s title find
       const start = words.slice(0, 2).join(' ').toLowerCase();
       expect(matching(commands, start)).toContain(command);
       if (command.shortcut) {
-        expect(commandFor(commands, pressFor(command.shortcut), true)?.id).toBe(command.id);
+        for (const shortcut of shortcutsOf(command.shortcut)) {
+          expect(commandFor(commands, pressFor(shortcut), true)?.id).toBe(command.id);
+        }
       }
     }
   }
 });
 
 test('the keys the prototypes promise are all there', () => {
-  const keys = new Set([...registry(true), ...registry(false)].map(({ shortcut }) => shortcut));
+  const keys = new Set(
+    [...registry(true), ...registry(false)].flatMap(({ shortcut }) =>
+      shortcut ? shortcutsOf(shortcut) : [],
+    ),
+  );
   for (const key of ['E', '#', 'S', 'Shift+I', 'Shift+U', 'Z', 'J', 'K', 'Escape', '?', 'Mod+K']) {
     expect(keys).toContain(key);
   }

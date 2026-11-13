@@ -1,6 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import { createContext, use, useEffect, useLayoutEffect, useRef } from 'react';
-import { worksWhileTyping } from './core/keys.ts';
+import { matches, shortcutsOf, worksWhileTyping } from './core/keys.ts';
 import { commandFor, matching, type CommandLike } from './core/registry.ts';
 
 /**
@@ -60,11 +60,12 @@ export function runCommandKey(event: KeyboardEvent) {
   if (event.isComposing || event.keyCode === 229 || event.defaultPrevented) return;
   const command = commandFor(bound, event, isApple);
   if (!command?.shortcut) return;
+  const shortcut = shortcutsOf(command.shortcut).find((key) => matches(key, event, isApple));
   const target = event.target instanceof Element ? event.target : null;
   const isTyping = target?.closest(
     'input, textarea, select, [contenteditable]:not([contenteditable="false"])',
   );
-  if (isTyping && !worksWhileTyping(command.shortcut)) return;
+  if (isTyping && (!shortcut || !worksWhileTyping(shortcut))) return;
   event.preventDefault();
   void command.run();
 }

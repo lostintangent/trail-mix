@@ -3,6 +3,7 @@ import { Skeleton } from '@astryxdesign/core/Skeleton';
 import {
   colorVars,
   durationVars,
+  focusVars,
   fontWeightVars,
   radiusVars,
   spacingVars,
@@ -71,8 +72,7 @@ const SWIPE_SHARE = 0.4;
  * its way selects it once it arrives. A click selects one, Cmd or Ctrl adds or removes one, and
  * Shift selects the range from the last pick. A finger held on a row starts picking, and while
  * picking, a tap adds or removes. A finger that swipes a row far enough to the left archives it.
- * The sheet the list lies on draws its focus ring, so the list carries StyleX's default marker for
- * `stylex.when.descendant(':focus-visible')`.
+ * Arrow keys draw focus around the active row, not the sheet the list lies on.
  */
 export function ConversationList({
   label,
@@ -125,6 +125,7 @@ export function ConversationList({
 }) {
   const scroller = useRef<HTMLDivElement>(null);
   const ruler = useRef<HTMLDivElement>(null);
+  const [isKeyboardFocused, setKeyboardFocused] = useState(false);
   const listId = useId();
   const rowHeight = useRowHeight(ruler);
   // The row the keys move from and the list names as active: the last one picked.
@@ -238,6 +239,7 @@ export function ConversationList({
     }[event.key];
     if (to === undefined || to < 0) return;
     event.preventDefault();
+    setKeyboardFocused(true);
     const target = conversations[to];
     const by = event.shiftKey ? 'extend' : 'only';
     if (target) {
@@ -264,7 +266,10 @@ export function ConversationList({
       aria-busy={isUpdating || drawn.some(({ index }) => !conversations[index])}
       tabIndex={0}
       onKeyDown={move}
-      {...stylex.props(styles.scroller, stylex.defaultMarker())}
+      onPointerDown={() => setKeyboardFocused(false)}
+      onFocus={() => setKeyboardFocused(scroller.current?.matches(':focus-visible') ?? false)}
+      onBlur={() => setKeyboardFocused(false)}
+      {...stylex.props(styles.scroller)}
     >
       <RowRuler ref={ruler} />
       <div {...stylex.props(styles.canvas(virtualizer.getTotalSize()))}>
@@ -284,6 +289,7 @@ export function ConversationList({
               position={index + 1}
               size={conversations.length}
               isSelected={selected.has(conversation.id)}
+              isKeyboardFocused={isKeyboardFocused && selectedIndex === index}
               isPicking={isPicking}
               onSelect={onSelect}
               onLongPress={onLongPress}
@@ -309,6 +315,7 @@ const Row = memo(function Row({
   position,
   size,
   isSelected,
+  isKeyboardFocused,
   isPicking,
   onSelect,
   onLongPress,
@@ -325,6 +332,7 @@ const Row = memo(function Row({
   position: number;
   size: number;
   isSelected: boolean;
+  isKeyboardFocused: boolean;
   isPicking: boolean;
   onSelect: (id: ConversationId, by: SelectBy) => void;
   onLongPress: ((id: ConversationId) => void) | undefined;
@@ -366,7 +374,12 @@ const Row = memo(function Row({
       }}
       onPointerEnter={ahead.onPointerEnter}
       onPointerLeave={ahead.onPointerLeave}
-      {...stylex.props(styles.row, styles.placed(top), isSelected && styles.selected)}
+      {...stylex.props(
+        styles.row,
+        styles.placed(top),
+        isSelected && styles.selected,
+        isKeyboardFocused && styles.keyboardFocused,
+      )}
     >
       <span
         onPointerDown={(event) => (pointer.current = event.pointerType)}
@@ -693,6 +706,14 @@ const styles = stylex.create({
     boxShadow: `0 0 0 1px ${colorVars['--color-border']}, 0 6px 16px -10px ${tm.shade}`,
     color: { default: null, [media.forcedColors]: 'HighlightText' },
     forcedColorAdjust: 'none',
+  },
+  // The keyboard's active descendant gets the same focus ring as the folder tree's focused line.
+  keyboardFocused: {
+    outline: {
+      default: `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`,
+      [media.forcedColors]: '2px solid Highlight',
+    },
+    outlineOffset: '-2px',
   },
   // The sender's avatar leads the row from its top. Under a finger it's a 44-pixel target, reaching
   // past its 32 pixels without moving anything around it.

@@ -4,6 +4,7 @@ import { Kbd } from '@astryxdesign/core/Kbd';
 import { colorVars, spacingVars, typeScaleVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { useCommands } from '../registry.ts';
+import { primaryShortcut } from '../core/keys.ts';
 
 /** The shortcut sheet, opened with ?: every command that has a key, by group. */
 export function ShortcutSheet({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
@@ -20,7 +21,7 @@ export function ShortcutSheet({ isOpen, onClose }: { isOpen: boolean; onClose: (
               <div key={id} {...stylex.props(styles.key)}>
                 <dt>{title}</dt>
                 <dd {...stylex.props(styles.cap)}>
-                  <Kbd keys={shortcut!.toLowerCase()} />
+                  <Kbd keys={primaryShortcut(shortcut!).toLowerCase()} />
                 </dd>
               </div>
             ))}

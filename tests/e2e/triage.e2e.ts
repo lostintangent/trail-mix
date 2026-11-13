@@ -177,20 +177,31 @@ async function shownSubject(page: Page): Promise<string> {
 const row = (page: Page, subject: RegExp) => page.getByRole('option').filter({ hasText: subject });
 /** The row at a place in the list, counting from 1. */
 const at = (page: Page, place: number) => page.locator(`[role="option"][aria-posinset="${place}"]`);
+const summaryAt = (page: Page, place: number) =>
+  Promise.all(
+    [2, 3].map((line) =>
+      at(page, place).locator(`:scope > span:nth-child(2) > span:nth-child(${line})`).textContent(),
+    ),
+  );
+const listedSummary = (page: Page, [subject, preview]: (string | null)[]) =>
+  page
+    .getByRole('option')
+    .filter({ hasText: subject ?? '' })
+    .filter({ hasText: preview ?? '' });
 /**
  * A row's text, less its read mark. The demo repeats stories, even within the rows on screen, but
  * never two alike in a row, so a row is known by its place and its text.
  */
 const textAt = async (page: Page, place: number) =>
   (await at(page, place).textContent())?.replace('Unread', '');
-/** The list header's buttons for the open conversation. */
+/** The reader bar's buttons for the open conversation. */
 const bar = (page: Page) => page.getByRole('toolbar', { name: 'Conversation' });
 const reader = (page: Page) => page.locator('section[aria-label="Reader"]');
 /** The toast's Undo. Its name is exact, since a folded message's preview can mention undoing. */
 const undoButton = (page: Page) => page.getByRole('button', { name: 'Undo', exact: true });
 
 /**
- * Clicks one of the open conversation's actions, at the head of the list, and says how many
+ * Clicks one of the open conversation's actions in the reader bar, and says how many
  * milliseconds pass until the list, in a painted frame, no longer holds the conversation.
  */
 function msUntilGone(page: Page, action: string, subject: string): Promise<number> {
@@ -198,7 +209,7 @@ function msUntilGone(page: Page, action: string, subject: string): Promise<numbe
     ([action, subject]) =>
       new Promise<number>((resolve) => {
         const button = document.querySelector<HTMLElement>(
-          `[role="toolbar"][aria-label="Conversation"] button[aria-label="${action}"]`,
+          `section[aria-label="Reader"] [role="toolbar"][aria-label="Conversation"] button[aria-label="${action}"]`,
         )!;
         const isListed = () =>
           [...document.querySelectorAll('[role="option"]')].some((row) =>
@@ -215,6 +226,37 @@ function msUntilGone(page: Page, action: string, subject: string): Promise<numbe
     [action, subject] as const,
   );
 }
+
+test('arrowing the list rings its active row, never the sheet, and a pointer clears that ring', async () => {
+  for (const colorScheme of ['light', 'dark'] as const) {
+    const here = await inbox(DESKTOP);
+    await here.emulateMedia({ colorScheme });
+    const list = here.getByRole('listbox', { name: 'Inbox' });
+    await list.focus();
+    await list.press('ArrowDown');
+    const state = () =>
+      list.evaluate((element) => {
+        const row = document.getElementById(element.getAttribute('aria-activedescendant')!)!;
+        const sheet = element.closest('section')!;
+        const { outlineStyle, outlineWidth, outlineColor } = getComputedStyle(row);
+        return {
+          sheet: getComputedStyle(sheet).outlineStyle,
+          row: `${outlineStyle} ${outlineWidth} ${outlineColor}`,
+          isWhole: row.getBoundingClientRect().width > 0,
+        };
+      });
+    const focused = await state();
+    expect(focused.sheet).toBe('none');
+    expect(focused.row).toMatch(/^solid 2px /);
+    expect(focused.isWhole).toBe(true);
+
+    await here.getByRole('option').nth(1).click();
+    const pointer = await state();
+    expect(pointer.sheet).toBe('none');
+    expect(pointer.row.startsWith('none')).toBe(true);
+    await here.context().close();
+  }
+}, 30_000);
 
 test('archiving shows at once, reaches another open browser, and Undo brings it back to both', async () => {
   const [here, there] = await Promise.all([inbox(), inbox()]);
@@ -240,13 +282,13 @@ test('archiving shows at once, reaches another open browser, and Undo brings it 
   await row(there, subject).waitFor({ timeout: ELSEWHERE_MS });
 }, 30_000);
 
-test('the frame that shows a conversation archived from the list’s header keeps its place, its moves and its actions', async () => {
+test('the frame that shows a conversation archived from the reader bar keeps its place, its moves and its actions', async () => {
   const page = await inbox();
   await at(page, 3).click();
   const archived = await shownSubject(page);
   const third = await textAt(page, 3);
   await bar(page).getByRole('button', { name: 'Archive' }).waitFor();
-  // Every state of the reader's place and the header's buttons, as each change to them lands, from
+  // Every state of the reader's place and the bar's buttons, as each change to them lands, from
   // the click until the reader shows the next conversation. Until a row is selected again, it is
   // what the click's frame shows.
   const states = await page.evaluate(
@@ -261,11 +303,10 @@ test('the frame that shows a conversation archived from the list’s header keep
             ? !button.hasAttribute('disabled') && button.getAttribute('aria-disabled') !== 'true'
             : undefined;
         const look = () => {
-          const toolbar = reader.querySelector('[role="toolbar"][aria-label="Place"]');
-          const previous = toolbar?.querySelector('button[aria-label="Previous conversation"]');
+          const previous = header.querySelector('button[aria-label="Previous conversation"]');
           return {
             title: reader.querySelector('h1')?.textContent ?? '',
-            place: [...(toolbar?.querySelectorAll('span') ?? [])]
+            place: [...header.querySelectorAll('span')]
               .map(({ textContent }) => textContent ?? '')
               .find((text) => /^\d+ of \d+\+?$/.test(text)),
             previous: isEnabled(previous),
@@ -380,7 +421,6 @@ test('a selection made with Cmd and Shift is archived together, and Undo brings 
   await here.getByRole('heading', { name: '2 conversations selected' }).waitFor();
   await options.nth(5).click({ modifiers: ['ControlOrMeta'] });
   await here.getByRole('heading', { name: '3 conversations selected' }).waitFor();
-
   const selection = here.getByRole('toolbar', { name: 'Selected conversations' });
   await selection.getByRole('button', { name: 'Archive' }).click();
   for (const text of picked) {
@@ -436,7 +476,7 @@ test('on a phone, a row swiped far enough left is archived, and a short swipe sl
   await options.filter({ hasText: far ?? '' }).waitFor({ timeout: ELSEWHERE_MS });
 }, 30_000);
 
-test('keys run the registry’s commands: from the list, from inside a message, and ? lists them', async () => {
+test('keys run the registry’s commands: from the list, inside a message, and ? lists them', async () => {
   const here = await inbox();
   const options = here.getByRole('option');
   const selected = here.locator('[role="option"][aria-selected="true"]');
@@ -474,7 +514,106 @@ test('keys run the registry’s commands: from the list, from inside a message, 
   const sheet = here.getByRole('dialog');
   await sheet.getByRole('heading', { name: 'Keyboard shortcuts' }).waitFor();
   await expect(sheet.getByText('Archive', { exact: true }).isVisible()).resolves.toBe(true);
+  const conversationKeys = sheet.getByRole('region', { name: 'Conversation' });
+  await expect(conversationKeys.getByText('Delete', { exact: true }).isVisible()).resolves.toBe(
+    true,
+  );
+  await expect(conversationKeys.getByText('#', { exact: true }).isVisible()).resolves.toBe(true);
 }, 30_000);
+
+test('Delete and Backspace delete an open conversation from the list and message, with Undo', async () => {
+  for (const key of ['Delete', 'Backspace']) {
+    for (const insideMessage of [false, true]) {
+      const here = await inbox();
+      const target = row(here, /Trip photos/);
+      await target.click();
+      await shownSubject(here);
+      if (!insideMessage && key === 'Delete') {
+        await bar(here).getByRole('button', { name: 'Delete' }).hover();
+        await here
+          .getByRole('tooltip')
+          .filter({ hasText: 'Delete (#, Delete, Backspace)' })
+          .waitFor();
+      }
+      if (insideMessage) {
+        await framesShown(here, 1);
+        await reader(here).locator('iframe').last().contentFrame().locator('body').click();
+      } else {
+        await here.getByRole('listbox', { name: 'Inbox' }).focus();
+      }
+
+      await here.keyboard.press(key);
+      await target.waitFor({ state: 'detached', timeout: 1_000 });
+      await undoButton(here).waitFor();
+      await here.keyboard.press('z');
+      await target.waitFor({ timeout: 1_000 });
+      await here.context().close();
+    }
+  }
+}, 60_000);
+
+test('Delete and Backspace delete the whole selection together, and Undo restores it', async () => {
+  for (const key of ['Delete', 'Backspace']) {
+    const here = await inbox();
+    const options = here.getByRole('option');
+    const picked = await Promise.all([5, 6, 7].map((place) => summaryAt(here, place)));
+    await options.nth(4).click();
+    await options.nth(6).click({ modifiers: ['Shift'] });
+    await options.nth(5).click({ modifiers: ['ControlOrMeta'] });
+    await here.getByRole('heading', { name: '2 conversations selected' }).waitFor();
+    await options.nth(5).click({ modifiers: ['ControlOrMeta'] });
+    await here.getByRole('heading', { name: '3 conversations selected' }).waitFor();
+    await here.getByRole('listbox', { name: 'Inbox' }).focus();
+    await here.keyboard.press(key);
+    for (const text of picked) {
+      await listedSummary(here, text).waitFor({ state: 'detached', timeout: 1_000 });
+    }
+    await undoButton(here).waitFor();
+    await here.keyboard.press('z');
+    for (const text of picked) await listedSummary(here, text).waitFor({ timeout: ELSEWHERE_MS });
+    await here.context().close();
+  }
+}, 30_000);
+
+test('Delete and Backspace stay in the search field and palette while typing', async () => {
+  const here = await inbox();
+  const field = here.getByRole('searchbox', { name: 'Search mail' });
+
+  await field.fill('z');
+  await field.press('Delete');
+  await expect(field.inputValue()).resolves.toBe('z');
+  await field.press('Backspace');
+  await expect(field.inputValue()).resolves.toBe('');
+  await expect(undoButton(here).count()).resolves.toBe(0);
+
+  await here.keyboard.press('ControlOrMeta+k');
+  await field.fill('Delete');
+  await field.press('Backspace');
+  await expect(field.inputValue()).resolves.toBe('Delet');
+  await expect(undoButton(here).count()).resolves.toBe(0);
+  await here.context().close();
+
+  // A docked reply leaves the conversation's commands available, but its editor keeps its own keys.
+  const writing = await inbox();
+  const original = writing.getByRole('option').nth(1);
+  await original.click();
+  await shownSubject(writing);
+  const reply = reader(writing)
+    .getByRole('button', { name: 'Reply', exact: true })
+    .filter({ visible: true })
+    .last();
+  await reply.click();
+  const editor = writing
+    .getByRole('region', { name: 'Reply' })
+    .getByRole('textbox', { name: 'Reply' });
+  await editor.fill('typed text');
+  await editor.press('Backspace');
+  await expect(editor.textContent()).resolves.toBe('typed tex');
+  await editor.press('Delete');
+  await expect(editor.textContent()).resolves.toBe('typed tex');
+  await original.waitFor();
+  await writing.context().close();
+}, 45_000);
 
 test('straight after Z, a conversation opens with its messages, under the refs Undo gave them', async () => {
   const here = await inbox();
@@ -536,7 +675,7 @@ test('folders are created, renamed and deleted, and a move to one deleted elsewh
   await folderRow(there, 'Trips').waitFor({ timeout: ELSEWHERE_MS });
 
   await folderRow(here, 'Trips').click();
-  await here.getByRole('button', { name: 'Folder', exact: true }).click();
+  await here.getByRole('button', { name: 'More for Trips' }).click();
   await here.getByRole('menuitem', { name: 'Rename Trips' }).click();
   await here.getByLabel('New name for Trips').fill('Journeys');
   await here.keyboard.press('Enter');
@@ -552,7 +691,7 @@ test('folders are created, renamed and deleted, and a move to one deleted elsewh
   const [moving, below] = [await textAt(here, 1), await textAt(here, 2)];
 
   await folderRow(there, 'Journeys').click();
-  await there.getByRole('button', { name: 'Folder', exact: true }).click();
+  await there.getByRole('button', { name: 'More for Journeys' }).click();
   await there.getByRole('menuitem', { name: 'Delete Journeys' }).click();
   await there.getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click();
   await folderRow(there, 'Journeys').waitFor({ state: 'detached', timeout: ELSEWHERE_MS });

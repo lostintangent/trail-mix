@@ -19,7 +19,7 @@ import { MOVE } from './commands.ts';
  * The reader makes its commands anew for each conversation it opens, though they mostly look the
  * same, so the controls draw from steady commands and render again only where something changed.
  *
- * The controls draw with the first screen, in the list's header. Only what their menus open loads
+ * The controls draw with the first screen, in the reader's bar. Only what their menus open loads
  * apart from it.
  */
 export function TriageActions({

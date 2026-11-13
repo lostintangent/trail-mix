@@ -4,7 +4,7 @@ import { commandFor, matching, problemsOf, type CommandLike } from './registry.t
 const command = (
   id: string,
   title: string,
-  shortcut?: string,
+  shortcut?: CommandLike['shortcut'],
   isEnabled?: boolean,
 ): CommandLike => ({
   id,
@@ -30,6 +30,17 @@ test('a key runs the command that has it, and nothing when that command can’t 
   expect(commandFor([archive, unread, flag], press('e'), true)).toBe(archive);
   expect(commandFor([archive, unread, flag], press('U', true), true)).toBe(unread);
   expect(commandFor([archive, unread, flag], press('s'), true)).toBeUndefined();
+});
+
+test('one command may answer to more than one key, and each key is unique across commands', () => {
+  const remove = command('delete', 'Delete', ['#', 'Delete', 'Backspace']);
+  const commands = [remove];
+  for (const key of ['#', 'Delete', 'Backspace']) {
+    expect(commandFor(commands, press(key), true)).toBe(remove);
+  }
+  expect(problemsOf([remove, command('forward', 'Forward', 'Delete')])).toEqual([
+    'Delete is the key of both delete and forward.',
+  ]);
 });
 
 test('the palette lists every command that can run, and narrows by word prefixes, starts first', () => {

@@ -1,4 +1,4 @@
-import { matches, type KeyPress, type Shortcut } from './keys.ts';
+import { matches, shortcutsOf, type KeyPress, type Shortcuts } from './keys.ts';
 
 /** What every command has, whatever draws it. */
 export type CommandLike = {
@@ -6,7 +6,7 @@ export type CommandLike = {
   title: string;
   /** Where the palette and the shortcut sheet list it, such as "Conversation" or "Go to". */
   group: string;
-  shortcut?: Shortcut;
+  shortcut?: Shortcuts;
   /** Whether it can run now. A command that can't is left out of the palette and its key does nothing. */
   isEnabled?: boolean;
 };
@@ -21,7 +21,9 @@ export function commandFor<C extends CommandLike>(
 ): C | undefined {
   return commands.find(
     (command) =>
-      isEnabled(command) && command.shortcut && matches(command.shortcut, press, isApple),
+      isEnabled(command) &&
+      command.shortcut &&
+      shortcutsOf(command.shortcut).some((shortcut) => matches(shortcut, press, isApple)),
   );
 }
 
@@ -89,9 +91,11 @@ export function problemsOf(commands: readonly CommandLike[]): string[] {
     if (ids.has(id)) problems.push(`Two commands are called ${id}.`);
     ids.add(id);
     if (!shortcut) continue;
-    const other = keys.get(shortcut.toLowerCase());
-    if (other) problems.push(`${shortcut} is the key of both ${other} and ${id}.`);
-    keys.set(shortcut.toLowerCase(), id);
+    for (const key of shortcutsOf(shortcut)) {
+      const other = keys.get(key.toLowerCase());
+      if (other) problems.push(`${key} is the key of both ${other} and ${id}.`);
+      keys.set(key.toLowerCase(), id);
+    }
   }
   return problems;
 }

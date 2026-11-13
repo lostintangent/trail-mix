@@ -34,10 +34,9 @@ import { StampDot } from '../../../app/theme/StampDot.tsx';
 
 /**
  * The conversation list's sheet, under the view's icon, title and unread count. On a desktop the
- * whole pane is the sheet, the header ends with what can be done to the open conversation or the
- * selection, and collapsed to its rail it keeps only a way to open it again. On a phone the title
- * sits on the desk, the sheet starts below it, and the way back to the folders floats at the bottom
- * with the pane's other actions.
+ * whole pane is the sheet, and collapsed to its rail it keeps only a way to open it again. On a
+ * phone the title sits on the desk, the sheet starts below it, and the way back to the folders
+ * floats at the bottom with the pane's other actions.
  */
 export function ListPane({
   id,
@@ -68,8 +67,6 @@ export function ListPane({
   onExpand,
   onShowFolders,
   island,
-  actions,
-  triage,
 }: {
   id: string;
   /** The view's icon, the one the sidebar shows for it. */
@@ -119,14 +116,6 @@ export function ListPane({
   onShowFolders: () => void;
   /** On a phone, what the island holds after the way to the folders: search, then Write. */
   island?: ReactNode;
-  /** What can be done to the view itself, such as renaming its folder, beside its title. */
-  actions?: ReactNode;
-  /**
-   * On a desktop, what can be done to the open conversation or the selection, at the header's end,
-   * and what its toolbar is called. It stays drawn while nothing is open, disabled, so nothing in
-   * the header moves.
-   */
-  triage?: { label: string; actions: ReactNode };
 }) {
   const titleId = useId();
   if (isCollapsed) {
@@ -178,20 +167,6 @@ export function ListPane({
             'All accounts'
           )}
         </span>
-        {actions && (
-          <span role="toolbar" aria-label={title} {...stylex.props(styles.actions)}>
-            {actions}
-          </span>
-        )}
-        {triage && (
-          <span
-            role="toolbar"
-            aria-label={triage.label}
-            {...stylex.props(styles.actions, styles.triage)}
-          >
-            {triage.actions}
-          </span>
-        )}
       </header>
       {below && <div {...stylex.props(styles.below)}>{below}</div>}
       <div {...stylex.props(styles.sheet, !list && conversations?.length === 0 && styles.empty)}>
@@ -276,8 +251,6 @@ function Empty({ viewIn, icon, title }: { viewIn: View['in']; icon: LucideIcon; 
   );
 }
 
-const focusRing = `2px solid ${colorVars['--color-accent']}`;
-
 const styles = stylex.create({
   pane: {
     display: 'flex',
@@ -294,11 +267,6 @@ const styles = stylex.create({
       default: null,
       [media.forcedColors]: {
         default: `${borderVars['--border-width']} solid CanvasText`,
-        [media.phone]: 'none',
-      },
-      // The list's focus ring goes around its whole sheet, header and all.
-      [stylex.when.descendant(':focus-visible')]: {
-        default: focusRing,
         [media.phone]: 'none',
       },
     },
@@ -335,20 +303,6 @@ const styles = stylex.create({
     flexShrink: 0,
     alignSelf: 'center',
     color: colorVars['--color-text-secondary'],
-  },
-  // The header's line keeps its height, so a button's extra size reaches into its padding. They
-  // follow the unread count on a desktop, and the account's pill on a phone.
-  actions: {
-    display: 'flex',
-    alignSelf: 'center',
-    marginBlock: `calc(-1 * ${spacingVars['--spacing-2']})`,
-  },
-  // The conversation's buttons end the header, on a desktop, where the reader shares the screen.
-  triage: {
-    display: { default: 'flex', [media.phone]: 'none' },
-    flexShrink: 0,
-    gap: spacingVars['--spacing-0-5'],
-    marginInlineStart: 'auto',
   },
   below: {
     flexShrink: 0,
@@ -454,7 +408,6 @@ const styles = stylex.create({
       [media.phone]: {
         default: null,
         [media.forcedColors]: `${borderVars['--border-width']} solid CanvasText`,
-        [stylex.when.descendant(':focus-visible')]: focusRing,
       },
     },
     outlineOffset: '-2px',

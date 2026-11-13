@@ -1,5 +1,13 @@
 import { expect, test } from 'bun:test';
-import { label, matches, worksWhileTyping, type KeyPress } from './keys.ts';
+import {
+  label,
+  labelShortcuts,
+  matches,
+  primaryShortcut,
+  shortcutsOf,
+  worksWhileTyping,
+  type KeyPress,
+} from './keys.ts';
 
 const press = (key: string, held: Partial<Omit<KeyPress, 'key'>> = {}): KeyPress => ({
   key,
@@ -37,6 +45,13 @@ test('a shortcut reads as its platform writes it', () => {
   expect(label('Shift+U', true)).toBe('⇧U');
   expect(label('e', false)).toBe('E');
   expect(label('#', true)).toBe('#');
+});
+
+test('a command can answer to aliases while its key cap keeps the primary key', () => {
+  const keys = ['#', 'Delete', 'Backspace'] as const;
+  expect(shortcutsOf(keys)).toEqual(keys);
+  expect(primaryShortcut(keys)).toBe('#');
+  expect(labelShortcuts(keys, true)).toBe('#, Delete, Backspace');
 });
 
 test('only a shortcut with a modifier, or Escape, works while typing', () => {

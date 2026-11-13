@@ -420,7 +420,7 @@ async function controls(page: Page) {
   };
 }
 
-test('a list header menu reached before its code has come opens once the code is here, and keeps the focus', async () => {
+test('a reader bar menu reached before its code has come opens once the code is here, and keeps the focus', async () => {
   const context = await app.context({ ...SIZES.desktop, serviceWorkers: 'block' });
   /** A page whose menus' code waits until the returned release. */
   const opened = async () => {
@@ -916,7 +916,7 @@ test('search finds mail as it is typed, marks what matched, and reads bodies onl
   await context.close();
 }, 30_000);
 
-test('the list’s header shows its view’s icon, and the buttons for what is open or selected', async () => {
+test('the list header only names its view, and the reader bar holds triage and place together', async () => {
   const { context, page, problems } = await open(SIZES.desktop);
   const list = page.locator('section[aria-labelledby]').first();
   const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
@@ -934,8 +934,8 @@ test('the list’s header shows its view’s icon, and the buttons for what is o
     const [header, row] = await icons();
     expect(header).toBe(row);
   }
-  // The Outbox lists sends, so its header has no buttons for a conversation.
-  await expect(list.getByRole('toolbar', { name: 'Conversation' }).count()).resolves.toBe(0);
+  // The Outbox lists sends. No list header carries actions.
+  await expect(list.locator('header [role="toolbar"], header button').count()).resolves.toBe(0);
   await page
     .getByRole('region', { name: 'Personal' })
     .getByRole('button', { name: /^Sent/ })
@@ -948,70 +948,111 @@ test('the list’s header shows its view’s icon, and the buttons for what is o
     .first()
     .click();
   await page.getByRole('heading', { name: 'Inbox', level: 2 }).waitFor();
-  // The Inbox opens at its newest. An address whose conversation has gone opens it with none.
-  await page.waitForFunction(() => new URL(location.href).searchParams.has('open'));
-  const gone = new URL(page.url());
-  gone.searchParams.set(
-    'open',
-    gone.searchParams.get('open')!.replace(/:[^:]*$/, ':%3Cgone%40example.com%3E'),
-  );
-  await page.goto(gone.href);
-  await page.waitForFunction(() => !new URL(location.href).searchParams.has('open'));
-
-  // With nothing open, the buttons are there but can't be pressed, and opening one moves nothing.
-  const header = list.getByRole('toolbar', { name: 'Conversation' });
-  const buttons = header.getByRole('button');
-  const names = ['Archive', 'Delete', 'Move to', 'Flag', 'More'];
-  await buttons.last().waitFor();
+  // The reader's bar keeps triage on its left and the place on its right, with the list shown.
+  await page.getByRole('option').nth(1).click();
+  await page.locator('section[aria-label="Reader"] h1').waitFor();
+  const header = page.getByRole('toolbar', { name: 'Conversation' });
+  await header.getByRole('button', { name: 'Archive' }).waitFor();
+  const actionNames = ['Archive', 'Delete', 'Move to', 'Flag', 'More'];
   expect(
-    await buttons.evaluateAll((all) => all.map((button) => button.getAttribute('aria-label'))),
-  ).toEqual(names);
-  const states = (): Promise<{ disabled: boolean; left: number }[]> =>
-    buttons.evaluateAll((all) =>
-      all.map((button) => ({
-        disabled:
-          button.hasAttribute('disabled') || button.getAttribute('aria-disabled') === 'true',
-        left: Math.round(button.getBoundingClientRect().left),
-      })),
-    );
-  const idle = await states();
-  expect(idle.every(({ disabled }) => disabled)).toBe(true);
-  await openConversation(page, 1);
-  const opened = await states();
-  expect(opened.map(({ disabled }) => disabled)).toEqual(names.map(() => false));
-  expect(opened.map(({ left }) => left)).toEqual(idle.map(({ left }) => left));
-  // The reader's bar keeps only its place while the list shows.
-  const place = page.getByRole('toolbar', { name: 'Place' });
-  await place.getByRole('button', { name: 'Next conversation' }).waitFor();
-  await expect(place.getByRole('button', { name: 'Archive' }).count()).resolves.toBe(0);
+    (
+      await header
+        .getByRole('button')
+        .evaluateAll((all) => all.map((button) => button.getAttribute('aria-label')))
+    ).slice(0, 5),
+  ).toEqual(actionNames);
+  const place = header
+    .locator('span')
+    .filter({ hasText: /^\d+ of \d+/ })
+    .last();
+  await header.getByRole('button', { name: 'Next conversation' }).waitFor();
+  const more = (await header.getByRole('button', { name: 'More' }).boundingBox())!;
+  const placeBounds = (await place.boundingBox())!;
+  expect(more.x + more.width).toBeLessThan(placeBounds.x);
+  await expect(list.locator('header [role="toolbar"], header button').count()).resolves.toBe(0);
 
-  // A selection of several takes the same buttons, and its sheet keeps only its count.
+  // A selection of several keeps its own toolbar in its reader sheet.
   const rows = page.getByRole('option');
   await rows.nth(2).click({ modifiers: ['Shift'] });
   await page.getByRole('heading', { name: '2 conversations selected' }).waitFor();
-  await list
+  const selection = page.getByRole('region', { name: 'Selection' });
+  await selection
     .getByRole('toolbar', { name: 'Selected conversations' })
     .getByRole('button', { name: 'Archive' })
     .waitFor();
-  const selection = page.getByRole('region', { name: 'Selection' });
-  await expect(selection.getByRole('button', { name: 'Archive' }).count()).resolves.toBe(0);
+  await expect(list.locator('header [role="toolbar"], header button').count()).resolves.toBe(0);
   await selection.getByRole('button', { name: 'Clear selection' }).click();
 
-  // With the list folded to its rail, the reader stands alone and takes the buttons back.
-  await openConversation(page, 1);
+  // With the list folded to its rail, the same reader bar still holds actions and place.
+  await page.getByRole('option').nth(1).click();
+  await header.getByRole('button', { name: 'Archive' }).waitFor();
   const edge = page.getByRole('separator', { name: 'Resize the conversation list' });
   await edge.focus();
   await page.keyboard.press('Enter');
-  await page
+  const folded = page
     .locator('section[aria-label="Reader"]')
-    .getByRole('toolbar', { name: 'Conversation' })
-    .getByRole('button', { name: 'Archive' })
-    .waitFor();
+    .getByRole('toolbar', { name: 'Conversation' });
+  await folded.getByRole('button', { name: 'Archive' }).waitFor();
+  await folded.getByRole('button', { name: 'Next conversation' }).waitFor();
   await page.keyboard.press('Enter');
-  await header.waitFor();
   expect(problems).toEqual([]);
   await context.close();
 }, 30_000);
+
+test('reader triage sits at the left of its bar, with place at the right, in both themes and panes', async () => {
+  const screenshot = async (page: Page, name: string) => {
+    await page.screenshot({ path: join(SHOTS, `${name}.png`) });
+    expect({ name, unreadable: await unreadableText(page) }).toEqual({ name, unreadable: [] });
+  };
+  for (const colorScheme of THEMES) {
+    const { context, page, problems } = await open({ ...SIZES.desktop, colorScheme });
+    await page.getByRole('option').nth(1).click();
+    const reader = page.locator('section[aria-label="Reader"]');
+    await reader
+      .getByRole('toolbar', { name: 'Conversation' })
+      .getByRole('button', { name: 'Archive' })
+      .waitFor();
+    expect(await page.getByRole('toolbar', { name: 'Place' }).count()).toBe(0);
+    await screenshot(page, `t75-desktop-${colorScheme}-list`);
+
+    const rows = page.getByRole('option');
+    await rows.nth(3).click({ modifiers: ['Shift'] });
+    await page.getByRole('heading', { name: /conversations selected/ }).waitFor();
+    const selection = page.getByRole('region', { name: 'Selection' });
+    await selection.getByRole('button', { name: 'Archive' }).waitFor();
+    await screenshot(page, `t75-desktop-${colorScheme}-selection`);
+    await selection.getByRole('button', { name: 'Clear selection' }).click();
+
+    await rows.nth(1).click();
+    await reader
+      .getByRole('toolbar', { name: 'Conversation' })
+      .getByRole('button', { name: 'Archive' })
+      .waitFor();
+    const listEdge = page.getByRole('separator', { name: 'Resize the conversation list' });
+    await listEdge.focus();
+    await page.keyboard.press('Enter');
+    await page.getByRole('button', { name: /^Show Inbox/ }).waitFor();
+    const folded = reader.getByRole('toolbar', { name: 'Conversation' });
+    await folded.getByRole('button', { name: 'Next conversation' }).waitFor();
+    await screenshot(page, `t75-desktop-${colorScheme}-folded`);
+    expect(problems).toEqual([]);
+    await context.close();
+  }
+
+  for (const colorScheme of THEMES) {
+    const { context, page, problems } = await open({ ...SIZES.phone, colorScheme });
+    const list = page.locator('section[aria-labelledby]').first();
+    await page.getByRole('option').nth(1).click();
+    await page
+      .getByRole('toolbar', { name: 'Conversation' })
+      .getByRole('button', { name: 'Archive' })
+      .waitFor();
+    await expect(list.locator('header [role="toolbar"], header button').count()).resolves.toBe(0);
+    await screenshot(page, `t75-phone-${colorScheme}`);
+    expect(problems).toEqual([]);
+    await context.close();
+  }
+}, 90_000);
 
 test('a narrow list’s header gives up its unread count, whole, before a letter of its title, under a finger too', async () => {
   const TABLET = { viewport: { width: 1180, height: 820 }, isMobile: true, hasTouch: true };
@@ -1075,7 +1116,7 @@ test('on a phone, the list’s header has no buttons, and the reader’s island 
 
 test('the reader says where its conversation sits, and steps to the ones either side', async () => {
   const { context, page, problems } = await open(SIZES.desktop);
-  const bar = page.getByRole('toolbar', { name: 'Place' });
+  const bar = page.getByRole('toolbar', { name: 'Conversation' });
   const rows = page.getByRole('option');
   const listed = async () => Number(await rows.first().getAttribute('aria-setsize'));
   // The reader shows the selected row once its keys rest, and says where that row sits.
@@ -1084,7 +1125,7 @@ test('the reader says where its conversation sits, and steps to the ones either 
       (place) => {
         const title = document.querySelector('section[aria-label="Reader"] h1')?.textContent;
         const row = document.querySelector('[role="option"][aria-selected="true"]');
-        const bar = document.querySelector('[role="toolbar"][aria-label="Place"]');
+        const bar = document.querySelector('[role="toolbar"][aria-label="Conversation"]');
         return title && row?.textContent?.includes(title) && bar?.textContent?.includes(place);
       },
       place,

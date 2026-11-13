@@ -1,4 +1,9 @@
-export { label as shortcutLabel } from './core/keys.ts';
+export {
+  label as shortcutLabel,
+  labelShortcuts,
+  primaryShortcut,
+  shortcutsOf,
+} from './core/keys.ts';
 export { commandFor, matching, problemsOf } from './core/registry.ts';
 export {
   bestCommandFor,

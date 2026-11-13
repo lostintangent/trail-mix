@@ -6,6 +6,7 @@ import type { Action } from '../core/triage.ts';
 
 /** The prefix of the commands that move mail to a folder, one for each folder it can go to. */
 export const MOVE = 'conversation.move:';
+const DELETE_SHORTCUTS = ['#', 'Delete', 'Backspace'] as const;
 
 /**
  * What can be done to the open conversation or a selection, as commands: archive, delete, flag,
@@ -40,7 +41,7 @@ export function triageCommands({
       id: 'conversation.delete',
       title: 'Delete',
       group,
-      shortcut: '#',
+      shortcut: DELETE_SHORTCUTS,
       icon: Trash2,
       run: () => onTriage({ do: 'delete' }),
     },

@@ -83,9 +83,8 @@ export function ReaderPane({
    */
   onShown?: (conversation: ConversationId) => void;
   /**
-   * What can be done to the conversation shown: in a bar above it on a desktop where the reader
-   * stands alone, and on a phone split between the bar at the top of the screen and the island at
-   * the bottom. Where the list shows, its header has them, and the bar holds only the place.
+   * What can be done to the conversation shown: in the reader's bar on a desktop, and on a phone
+   * split between the bar at the top of the screen and the island at the bottom.
    */
   actions?: (reading: Reading, place: ActionsPlace) => ReactNode;
   /** Where the conversation shown sits in the list, at the end of a desktop's bar. */

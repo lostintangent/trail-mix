@@ -5,7 +5,13 @@ import * as stylex from '@stylexjs/stylex';
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { memo } from 'react';
 import { media } from '../../../app/theme/tokens.stylex.ts';
-import { isApple, shortcutLabel, useCommands, type Command } from '../../commands/index.ts';
+import {
+  isApple,
+  primaryShortcut,
+  shortcutLabel,
+  useCommands,
+  type Command,
+} from '../../commands/index.ts';
 import { FOLD_SIDEBAR } from './commands.ts';
 
 /**
@@ -25,7 +31,7 @@ const Toggle = memo(function Toggle({ command }: { command: Command }) {
       label={command.title}
       tooltip={
         command.shortcut
-          ? `${command.title} (${shortcutLabel(command.shortcut, isApple)})`
+          ? `${command.title} (${shortcutLabel(primaryShortcut(command.shortcut), isApple)})`
           : command.title
       }
       icon={

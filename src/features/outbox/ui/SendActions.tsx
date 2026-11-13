@@ -17,7 +17,7 @@ import * as stylex from '@stylexjs/stylex';
 import { Clock, Send } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
-import { isApple, shortcutLabel, type Command } from '../../commands/index.ts';
+import { isApple, primaryShortcut, shortcutLabel, type Command } from '../../commands/index.ts';
 import { instantOf } from '../core/later.ts';
 import { SEND, SEND_LATER } from './sendCommands.ts';
 import { loadSending } from './useSend.ts';
@@ -52,7 +52,9 @@ export function SendActions({
     { type: 'divider' },
     { id: 'pick', label: 'Pick a date and time…', onClick: () => setPicking(true) },
   ];
-  const tooltip = send.shortcut ? `Send (${shortcutLabel(send.shortcut, isApple)})` : undefined;
+  const tooltip = send.shortcut
+    ? `Send (${shortcutLabel(primaryShortcut(send.shortcut), isApple)})`
+    : undefined;
   return (
     <span {...stylex.props(styles.actions)}>
       <DropdownMenu

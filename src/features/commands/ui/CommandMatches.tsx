@@ -8,6 +8,7 @@ import {
 import * as stylex from '@stylexjs/stylex';
 import { useEffect, useLayoutEffect, useState } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
+import { primaryShortcut } from '../core/keys.ts';
 import { paletteOf, useCommands, type Command } from '../registry.ts';
 
 /**
@@ -84,7 +85,7 @@ export function CommandMatches({
           {...stylex.props(styles.command, place === at && styles.highlighted)}
         >
           <span {...stylex.props(styles.title)}>{command.title}</span>
-          {command.shortcut && <Kbd keys={command.shortcut.toLowerCase()} />}
+          {command.shortcut && <Kbd keys={primaryShortcut(command.shortcut).toLowerCase()} />}
         </li>
       ))}
     </ul>

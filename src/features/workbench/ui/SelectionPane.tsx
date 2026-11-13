@@ -16,8 +16,7 @@ import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 
 /**
  * On a desktop, the reader's sheet while several conversations are selected: how many, and a way to
- * let them go. The list's header has what can be done to them together, and so does this sheet when
- * the list is folded to its rail.
+ * let them go. This sheet holds what can be done to the selected conversations together.
  */
 export function SelectionPane({
   count,

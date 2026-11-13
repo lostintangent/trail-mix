@@ -1,7 +1,7 @@
 import { DropdownMenu, type DropdownMenuOption } from '@astryxdesign/core/DropdownMenu';
 import { Icon } from '@astryxdesign/core/Icon';
 import { useEffect, useRef, useState } from 'react';
-import { isApple, shortcutLabel, type Command } from '../../commands/index.ts';
+import { isApple, primaryShortcut, shortcutLabel, type Command } from '../../commands/index.ts';
 import { menuIconOf } from './menuIcons.ts';
 import { MoreButton } from './MoreButton.tsx';
 import { rowOf } from './treeKeys.ts';
@@ -69,7 +69,9 @@ export function menuItems(commands: readonly Command[]): DropdownMenuOption[] {
       id: command.id,
       label: command.title,
       icon: drawn(menuIconOf(command)),
-      ...(command.shortcut ? { endContent: shortcutLabel(command.shortcut, isApple) } : {}),
+      ...(command.shortcut
+        ? { endContent: shortcutLabel(primaryShortcut(command.shortcut), isApple) }
+        : {}),
       ...(command.isDestructive ? { variant: 'destructive' as const } : {}),
       onClick: () => void command.run(),
     }));

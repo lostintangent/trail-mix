@@ -12,7 +12,7 @@ import type { StyleXStyles } from '@stylexjs/stylex';
 import { memo, useRef } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { LaterTooltip } from '../../../shared/LaterTooltip.tsx';
-import { label } from '../core/keys.ts';
+import { labelShortcuts } from '../core/keys.ts';
 import { isApple, useCommands, type Command } from '../registry.ts';
 
 /**
@@ -55,7 +55,7 @@ export const CommandButton = memo(function CommandButton({
     );
   }
   const tooltip = command.shortcut
-    ? `${command.title} (${label(command.shortcut, isApple)})`
+    ? `${command.title} (${labelShortcuts(command.shortcut, isApple)})`
     : command.title;
   if (isAccent) return <AccentButton command={command} tooltip={tooltip} />;
   return (
