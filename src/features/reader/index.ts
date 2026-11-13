@@ -3,6 +3,7 @@
 export { REST_MS } from './core/rest.ts';
 export { sourceCommand } from './ui/commands.ts';
 export { lightPaperCommand, setLightPaper, useDarkTheme } from './ui/lightPaper.ts';
+export { useUnsubscribeCommand } from './ui/unsubscribe.ts';
 export {
   BundleReader,
   preloadBundleReader,

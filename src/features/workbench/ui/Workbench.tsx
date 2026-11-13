@@ -70,6 +70,7 @@ import {
   sourceCommand,
   SourceDialog,
   useDarkTheme,
+  useUnsubscribeCommand,
 } from '../../reader/index.ts';
 import {
   ConversationListSkeleton,
@@ -964,6 +965,7 @@ export function Workbench({
           go: closeThread,
         }
       : undefined;
+  const unsubscribe = useUnsubscribeCommand(isOpenInView ? opened : undefined);
   const commands = useSteadyCommands([
     ...(isBehindComposer ? [] : selectedCommands),
     ...workbenchCommands({
@@ -1024,6 +1026,7 @@ export function Workbench({
     lightPaperCommand(reading === undefined ? undefined : read, accounts, selves, (choice) =>
       setLightPaper(queryClient, choice),
     ),
+    unsubscribe,
     ...viewCommands(accounts, folders, openView),
     ...outbox.commands,
     ...folderEditing.commands,

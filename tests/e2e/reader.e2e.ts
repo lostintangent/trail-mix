@@ -229,6 +229,111 @@ test('light paper, chosen in the palette, holds for a sender on every device unt
   expect(await control(first).count()).toBe(1);
 }, 60_000);
 
+test('verified list mail offers to unsubscribe in one click, and says whether the sender took it', async () => {
+  const page = await open({ ...DESKTOP, colorScheme: 'light' });
+  const sheet = reader(page).getByRole('article').last();
+  const offer = sheet.getByRole('button', { name: 'Unsubscribe', exact: true });
+  const said = (words: string) =>
+    sheet.getByRole('status').getByText(words, { exact: true }).waitFor();
+
+  // Mail from no list offers none, on its sheet or in the palette.
+  await row(page, 'Lunch Thursday?').click();
+  await sheet.getByText('Thursday at 12:30').waitFor();
+  expect(await offer.count()).toBe(0);
+  expect(await offered(page)).toBe(false);
+
+  // The newsletter's sender is verified for its list. While the sender is asked, the sheet says
+  // so, and then that it took it, in the button's place, so the mail under it doesn't move. The
+  // palette offers it no more.
+  await row(page, 'Kernel Weekly').click();
+  await offer.waitFor();
+  const mail = sheet.locator('iframe');
+  const mailTop = async () => (await mail.boundingBox())?.y;
+  const before = await mailTop();
+  const release = await holdCommands(page);
+  await offer.click();
+  await said('Unsubscribing…');
+  expect(await mailTop()).toBe(before);
+  await release();
+  await said('Unsubscribed');
+  expect(await mailTop()).toBe(before);
+  await readable(page, 'desktop-light-unsubscribed');
+  expect(await offered(page)).toBe(false);
+
+  // The shop's list server turns its first try away, which the sheet says in its words, and then
+  // takes it.
+  await folder(page, 'Personal', 'Trash').click();
+  await row(page, 'Your order has shipped').click();
+  await offer.click();
+  await said('Couldn’t unsubscribe. shop.example.com answered 503 Service Unavailable.');
+  await readable(page, 'desktop-light-unsubscribe-refused');
+  await sheet.getByRole('button', { name: 'Try again' }).click();
+  await said('Unsubscribed');
+
+  // The palette's unsubscribes from the list of the conversation open, here on a page that hasn't
+  // asked, in the dark theme.
+  const dark = await open({ ...DESKTOP, colorScheme: 'dark' });
+  await row(dark, 'Kernel Weekly').click();
+  const darkSheet = reader(dark).getByRole('article').last();
+  await darkSheet.getByRole('button', { name: 'Unsubscribe', exact: true }).waitFor();
+  await darkSheet.getByRole('button', { name: 'Show', exact: true }).click();
+  await darkSheet.getByText('1 tracker blocked', { exact: true }).waitFor();
+  await readable(dark, 'desktop-dark-unsubscribe');
+  expect(await offered(dark, { run: true })).toBe(true);
+  await darkSheet.getByText('Unsubscribed', { exact: true }).waitFor();
+  await readable(dark, 'desktop-dark-unsubscribed');
+}, 60_000);
+
+for (const colorScheme of ['light', 'dark'] as const) {
+  test(`on a phone, in ${colorScheme}, a newsletter's sheet offers to unsubscribe, and says the sender took it`, async () => {
+    const page = await open({ ...PHONE, colorScheme });
+    await row(page, 'Kernel Weekly').click();
+    const sheet = reader(page).getByRole('article').last();
+    await sheet.getByRole('button', { name: 'Unsubscribe', exact: true }).tap();
+    await sheet.getByText('Unsubscribed', { exact: true }).waitFor();
+    await readable(page, `phone-${colorScheme}-unsubscribed`);
+  }, 30_000);
+}
+
+/**
+ * Whether the palette offers to unsubscribe from the list of the conversation open, and runs it
+ * when asked. Once the palette shows, it draws what matches within two frames of the typing.
+ */
+async function offered(page: Page, { run = false } = {}): Promise<boolean> {
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.getByRole('listbox', { name: 'Commands' }).waitFor();
+  await page.keyboard.type('unsubscribe');
+  await page.evaluate(
+    () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))),
+  );
+  const command = page.getByRole('option', { name: 'Unsubscribe from this list' });
+  const isOffered = (await command.count()) === 1;
+  if (isOffered && run) {
+    await page.keyboard.press('Enter');
+  } else {
+    // Closes the palette, then leaves the search it began.
+    await page.keyboard.press('Escape');
+    await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.press('Backspace');
+  }
+  return isOffered;
+}
+
+/** Holds every command this page sends until released, so what shows before is its own doing. */
+async function holdCommands(page: Page): Promise<() => Promise<void>> {
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  const hold = async (route: Route) => {
+    if (route.request().method() === 'POST') await released;
+    await route.continue().catch(() => {});
+  };
+  await page.route('**/_serverFn/**', hold);
+  return async () => {
+    release();
+    await page.unroute('**/_serverFn/**', hold);
+  };
+}
+
 for (const colorScheme of ['light', 'dark'] as const) {
   test(`in ${colorScheme}, the demo newsletter’s images, once shown, are its own pictures, and its open pixel stays blocked`, async () => {
     const page = await open({ ...DESKTOP, colorScheme });

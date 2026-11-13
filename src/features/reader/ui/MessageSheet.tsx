@@ -35,6 +35,7 @@ import { PlainText } from './PlainText.tsx';
 import { BodySkeleton } from './skeletons.tsx';
 import { refOf } from './refs.ts';
 import { imagesAllowed, safeMail } from './safeMail.ts';
+import { Unsubscribe } from './Unsubscribe.tsx';
 
 export type MessageSheetProps = {
   message: Message;
@@ -70,6 +71,8 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
   const trackers = mail?.trackers
     ? `${mail.trackers} ${mail.trackers === 1 ? 'tracker' : 'trackers'} blocked`
     : undefined;
+  const shownTrackers = mail?.blockedImages ? undefined : trackers;
+  const offer = body?.unsubscribe;
   const inline = new Set(mail?.inlineParts);
   const attachments = (body?.attachments ?? []).filter(
     ({ contentId }) => !contentId || !inline.has(contentId),
@@ -167,11 +170,23 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
           </span>
         </div>
       )}
-      {!mail?.blockedImages && trackers && (
-        <p {...stylex.props(styles.trackers)}>
-          <Icon icon={ShieldCheck} size="sm" color="secondary" />
-          {trackers}
-        </p>
+      {/* What the reader did and can do about the sender, quietly: the trackers it blocked, once
+      the note on images no longer counts them, and a list's offer to unsubscribe. */}
+      {(shownTrackers || offer) && (
+        <div {...stylex.props(styles.quietLine, !shownTrackers && styles.quietLineAtOffer)}>
+          {shownTrackers && (
+            <span {...stylex.props(styles.shield)}>
+              <Icon icon={ShieldCheck} size="sm" color="secondary" />
+              {shownTrackers}
+            </span>
+          )}
+          {shownTrackers && offer && (
+            <span aria-hidden {...stylex.props(styles.between)}>
+              ·
+            </span>
+          )}
+          {offer && <Unsubscribe message={ref} address={offer} />}
+        </div>
       )}
 
       {mail ? (
@@ -337,14 +352,27 @@ const styles = stylex.create({
     whiteSpace: 'nowrap',
   },
   // Lined up with the words of the note on images, without its box.
-  trackers: {
+  quietLine: {
     display: 'flex',
+    flexWrap: 'wrap',
     alignItems: 'center',
     gap: spacingVars['--spacing-1'],
-    margin: 0,
     paddingInline: spacingVars['--spacing-2'],
     color: colorVars['--color-text-secondary'],
     fontSize: typeScaleVars['--text-supporting-size'],
+  },
+  // Led by the offer, whose button's own padding sets it in, and lines its box up with the note's.
+  quietLineAtOffer: {
+    paddingInline: 0,
+  },
+  shield: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: spacingVars['--spacing-1'],
+  },
+  // As far from the count as the offer's label stands from it, inside its button.
+  between: {
+    paddingInlineStart: spacingVars['--spacing-3'],
   },
   // The two choices wrap as one, so they stay together on a narrow sheet.
   imagesActions: {
