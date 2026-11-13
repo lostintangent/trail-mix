@@ -5,6 +5,7 @@ import {
   type Envelope,
   type Flags,
   type FolderRole,
+  type GitHubReason,
   type MessageRef,
   type MimeAttachment,
   type StampColor,
@@ -16,9 +17,9 @@ import { isDemoVerified } from './pictures.ts';
 /**
  * What the demo mailbox says. Two accounts, Personal and Work, each a cycle of stories laid out
  * newest first and repeated back in time until the Inbox holds as many messages as asked. The
- * newest cycle is the one the prototypes show: unread mail, a flagged message, attachments, a
- * GitHub thread, a newsletter, long threads, Sent replies and drafts, one of them to a host that
- * turns its first try away. Older cycles vary who writes and what they say, by lists of different
+ * newest cycle is the one the prototypes show: unread mail, a flagged message, attachments, GitHub
+ * mail about a repository in each account, a newsletter, long threads, Sent replies and drafts, one
+ * of them to a host that turns its first try away. Older cycles vary who writes and what they say, by lists of different
  * lengths, so no two rows of the public demo share a subject and how their preview opens, and most
  * of their mail is read.
  *
@@ -146,7 +147,7 @@ export function seededMessage(
       ],
       from: author(step.from),
       to: step.from === 'me' ? thread.cast : thread.group ? [me, ...others] : [me],
-      cc: [],
+      cc: step.reason ? [reasonAddress(step.reason)] : [],
       subject: index > 0 ? `Re: ${thread.subject}` : thread.subject,
       date: dateAt(index),
       preview: step.text.replace(/\s+/g, ' ').trim().slice(0, 200),
@@ -176,7 +177,11 @@ export function seededMessage(
     raw: () =>
       writeMime({
         ...content(),
-        headers: [...list, ...(step.headers ?? [])],
+        headers: [
+          ...list,
+          ...(step.reason ? [['X-GitHub-Reason', step.reason] as [string, string]] : []),
+          ...(step.headers ?? []),
+        ],
         ...(step.htmlOnly ? {} : { text: text() }),
         ...(step.plain ? {} : { html: step.html?.() ?? htmlOf(text()) }),
         attachments: step.files?.() ?? [],
@@ -270,6 +275,8 @@ type Step = {
   /** Made only when the message's bytes are. */
   files?: () => MimeAttachment[];
   headers?: [string, string][];
+  /** Why GitHub wrote, which it says in a Cc and a header. */
+  reason?: GitHubReason;
   id?: string;
   /** How the newest cycle shows it. Older cycles are mostly read. */
   unread?: boolean;
@@ -314,6 +321,28 @@ const GITHUB = {
   id: 'toy-box.trailmix-demo.github.com',
   unsubscribe: '<https://github.com/notifications/unsubscribe/demo>',
 };
+
+/**
+ * The address GitHub copies a notification to, to say why it wrote: `Review requested
+ * <review_requested@noreply.github.com>`.
+ */
+const reasonAddress = (reason: GitHubReason): Address => ({
+  name: capital(reason.replaceAll('_', ' ')),
+  email: `${reason}@noreply.github.com`,
+});
+
+/** Work's repository, which GitHub writes about once a cycle. */
+const PIXELS = {
+  name: 'trailmix-demo/pixels',
+  id: 'pixels.trailmix-demo.github.com',
+  unsubscribe: GITHUB.unsubscribe,
+};
+
+/**
+ * The newest cycle's issue in Pixels. Each cycle takes the number before, so they stay positive for
+ * ten thousand cycles, as Toy Box's do.
+ */
+const NEWEST_PIXELS = 10_812;
 
 /** The newest cycle's review request. Its checks run on a PR three numbers before it. */
 const NEWEST_PULL = 40_412;
@@ -478,28 +507,42 @@ const STORIES: Record<string, (cycle: number) => Thread> = {
       ],
       c,
     );
-    const id = (step: number) => `<trailmix-demo/toy-box/pull/${number}/c${c}/${step}@github.com>`;
-    return {
-      subject: `[trailmix-demo/toy-box] ${title} (PR #${number})`,
+    // Further back GitHub writes about other things too: an issue I'm mentioned on, and a pull
+    // request of mine merged.
+    const about = rotate(['review', 'mention', 'merged'] as const, c);
+    const path = about === 'mention' ? 'issues' : 'pull';
+    const id = (step: number) =>
+      `<trailmix-demo/toy-box/${path}/${number}/c${c}/${step}@github.com>`;
+    const thread = {
+      subject: `[trailmix-demo/toy-box] ${title} (${about === 'mention' ? 'Issue' : 'PR'} #${number})`,
       cast: [person(3, c), person(8, c)],
       via: 'notifications@github.com',
-      root: `<trailmix-demo/toy-box/pull/${number}@github.com>`,
+      root: `<trailmix-demo/toy-box/${path}/${number}@github.com>`,
       list: GITHUB,
+    };
+    const asked: Step =
+      about === 'review'
+        ? {
+            from: 0,
+            reason: 'review_requested',
+            text: `@sam-rivera, your review was requested on #${number}.\n\n${title}: ${change}`,
+          }
+        : about === 'mention'
+          ? {
+              from: 0,
+              reason: 'mention',
+              text: `@sam-rivera could you check this on Safari? Once it's fixed, ${change}`,
+            }
+          : { from: 1, reason: 'author', text: question };
+    const answered: Step =
+      about === 'merged'
+        ? { from: 0, reason: 'author', text: `Merged #${number} into main.` }
+        : { from: 1, reason: 'comment', text: question };
+    return {
+      ...thread,
       steps: [
-        {
-          from: 0,
-          id: id(0),
-          unread: true,
-          headers: [['X-GitHub-Reason', 'review_requested']],
-          text: `@sam-rivera, your review was requested on #${number}.\n\n${title}: ${change}`,
-        },
-        {
-          from: 1,
-          id: id(1),
-          unread: true,
-          headers: [['X-GitHub-Reason', 'comment']],
-          text: question,
-        },
+        { ...asked, id: id(0), unread: true },
+        { ...answered, id: id(1), unread: true },
       ],
     };
   },
@@ -518,10 +561,86 @@ const STORIES: Record<string, (cycle: number) => Thread> = {
           from: 0,
           id: `<trailmix-demo/toy-box/pull/${number}/c${c}/checks@github.com>`,
           unread: true,
-          headers: [['X-GitHub-Reason', 'ci_activity']],
+          reason: 'ci_activity',
           text: `All checks have passed on #${number}.\n\n3 successful checks: test, lint, build.`,
         },
       ],
+    };
+  },
+
+  pixels: (c) => {
+    const number = NEWEST_PIXELS - c;
+    const { title, change } = rotate(
+      [
+        {
+          title: 'Dark paper for plain-text mail',
+          change: 'plain-text mail still shows on white paper in the dark theme.',
+        },
+        {
+          title: 'Pin the theme build',
+          change:
+            'the theme is built from whatever Astryx resolves, so a patch release can change it.',
+        },
+        {
+          title: 'Faster icon pruning',
+          change: 'pruning reads each module once, rather than once for every icon it names.',
+        },
+        {
+          title: 'Keep a picked accent readable',
+          change: 'a pale accent is darkened on paper until its text passes 4.5:1.',
+        },
+        {
+          title: 'Sharper avatars on dense screens',
+          change: 'an avatar is drawn from a picture twice its size, so it stays sharp.',
+        },
+      ],
+      c,
+    );
+    // What GitHub writes about turns: an issue I'm assigned, a pull request's comment, its checks,
+    // and a run on main that failed.
+    const about = rotate(['assign', 'comment', 'checks', 'run'] as const, c);
+    const path =
+      about === 'assign'
+        ? `issues/${number}`
+        : about === 'run'
+          ? `actions/runs/${11_843_200_000 - c}`
+          : `pull/${number}`;
+    const commit = ((0x4f2a9c1 + c * 0x9e3779b) % 0x10000000).toString(16).padStart(7, '0');
+    const subject =
+      about === 'run'
+        ? `Run failed: CI - main (${commit})`
+        : `${title} (${about === 'assign' ? 'Issue' : 'PR'} #${number})`;
+    const step: Step =
+      about === 'assign'
+        ? {
+            from: 0,
+            reason: 'assign',
+            text: `Assigned #${number} to @sam-rivera.\n\n${title}: ${change}`,
+          }
+        : about === 'comment'
+          ? {
+              from: 1,
+              reason: 'comment',
+              text: `${capital(change)} Could this land behind a setting first, so we can compare?`,
+            }
+          : about === 'checks'
+            ? {
+                from: 0,
+                reason: 'ci_activity',
+                text: `All checks have passed on #${number}.\n\n2 successful checks: test, build.`,
+              }
+            : {
+                from: 0,
+                reason: 'ci_activity',
+                text: `CI failed on main at ${commit}.\n\ntest failed after 1m 52s: ${title.toLowerCase()}`,
+              };
+    return {
+      subject: `[${PIXELS.name}] ${subject}`,
+      cast: [person(2, c), person(9, c)],
+      via: 'notifications@github.com',
+      root: `<${PIXELS.name}/${path}@github.com>`,
+      list: PIXELS,
+      steps: [{ ...step, id: `<${PIXELS.name}/${path}/0@github.com>`, unread: true }],
     };
   },
 
@@ -1115,6 +1234,7 @@ const LAYOUT: Record<DemoKind, [story: string, step: number][]> = {
   ],
   work: [
     ['q4', 5],
+    ['pixels', 0],
     ['invoice', 0],
     ['offsite', 0],
     ['review', 0],

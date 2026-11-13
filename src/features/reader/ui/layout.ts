@@ -3,6 +3,7 @@ import {
   colorVars,
   focusVars,
   fontWeightVars,
+  radiusVars,
   spacingVars,
   typeScaleVars,
   typographyVars,
@@ -54,6 +55,37 @@ export const threadStyles = stylex.create({
     marginBottom: spacingVars['--spacing-1'],
     color: tm.textQuiet,
     fontSize: typeScaleVars['--text-supporting-size'],
+  },
+  // The account's stamp, leading the line under the subject.
+  stamp: {
+    width: spacingVars['--spacing-2'],
+    height: spacingVars['--spacing-2'],
+    flexShrink: 0,
+    borderRadius: radiusVars['--radius-inner'],
+    outline: {
+      default: null,
+      [media.forcedColors]: `${borderVars['--border-width']} solid CanvasText`,
+    },
+  },
+  // A line under the subject that holds a link wraps between its parts.
+  metaWrapping: {
+    flexWrap: 'wrap',
+    columnGap: spacingVars['--spacing-1-5'],
+    rowGap: 0,
+  },
+  // Where the conversation lives on another site, as a bundle's repository or a thread on GitHub.
+  link: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: spacingVars['--spacing-1'],
+    color: colorVars['--color-text-accent'],
+    fontWeight: fontWeightVars['--font-weight-medium'],
+    textDecoration: { default: 'none', ':hover': 'underline' },
+    borderRadius: radiusVars['--radius-inner'],
+    outline: { default: null, ':focus-visible': FOCUS_RING },
+  },
+  linkIcon: {
+    color: 'inherit',
   },
   folded: {
     display: 'flex',
@@ -118,5 +150,63 @@ export const sheetStyles = stylex.create({
   quiet: {
     color: tm.textQuiet,
     fontSize: typeScaleVars['--text-supporting-size'],
+  },
+});
+
+/**
+ * A bundle's thread on its own sheet, in three columns: its kind's icon, the thread, and the arrow
+ * that opens it on GitHub. Its title is set large beside its arrow, and the lines under it, of what
+ * GitHub said and what its newest message says, reach under the arrow too.
+ */
+export const issueStyles = stylex.create({
+  // Its arrow lies over its title's reach, and under the island and bars that pass over the sheet.
+  sheet: {
+    position: 'relative',
+    isolation: 'isolate',
+    display: 'grid',
+    gridTemplateColumns: `20px minmax(0, 1fr) ${tm.target}`,
+    columnGap: spacingVars['--spacing-2'],
+    paddingBlock: spacingVars['--spacing-3'],
+    paddingInlineStart: spacingVars['--spacing-3'],
+    paddingInlineEnd: spacingVars['--spacing-2'],
+    backgroundColor: colorVars['--color-background-card'],
+    color: colorVars['--color-text-primary'],
+    borderRadius: tm.sheetRadius,
+    boxShadow: tm.sheetEdge,
+    outline: {
+      default: null,
+      [media.forcedColors]: `${borderVars['--border-width']} solid CanvasText`,
+    },
+  },
+  kind: {
+    width: '18px',
+    height: '18px',
+    marginTop: '3px',
+    color: colorVars['--color-text-secondary'],
+  },
+  head: {
+    gridColumn: '2',
+    minWidth: 0,
+  },
+  under: {
+    gridColumn: '2 / 4',
+    minWidth: 0,
+  },
+  open: {
+    gridColumn: '3',
+    gridRow: '1',
+  },
+  title: {
+    fontSize: typeScaleVars['--text-large-size'],
+    lineHeight: typeScaleVars['--text-large-leading'],
+  },
+  facts: {
+    marginTop: spacingVars['--spacing-1'],
+  },
+  act: {
+    margin: 0,
+    marginTop: spacingVars['--spacing-1-5'],
+    fontSize: typeScaleVars['--text-body-size'],
+    lineHeight: typeScaleVars['--text-body-leading'],
   },
 });

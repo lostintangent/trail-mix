@@ -1,3 +1,4 @@
+import { Button } from '@astryxdesign/core/Button';
 import { EmptyState } from '@astryxdesign/core/EmptyState';
 import { Icon } from '@astryxdesign/core/Icon';
 import { IconButton } from '@astryxdesign/core/IconButton';
@@ -61,6 +62,25 @@ export type Acting = {
 export type ActionsPlace = 'bar' | 'top' | 'island';
 
 /**
+ * Something other than a conversation that lies on the reader's sheet in its place, with its own
+ * actions where a conversation's would be, as a bundle does.
+ */
+export type ReaderSheet = {
+  /**
+   * What it shows, which the reader rests on as it does on a conversation, so a held key passing
+   * it by never draws it.
+   */
+  id: string;
+  /** What it draws, given what the reader scrolls, so it can draw only what lies in sight. */
+  content: (scroller: HTMLElement | null) => ReactNode;
+  /** What names its actions to assistive technology, as "Conversation" names a conversation's. */
+  label: string;
+  bar?: ReactNode;
+  top?: ReactNode;
+  island?: ReactNode;
+};
+
+/**
  * The reader's sheet, where an open conversation lies. On a phone it fills the screen, with a way
  * back to the list at its top. The reader itself loads soon after the list shows a conversation to
  * open, while the browser is idle, ready for the click.
@@ -81,6 +101,8 @@ export function ReaderPane({
   onOpenDraft,
   page,
   rowOf,
+  sheet: selectedSheet,
+  backTo,
   choose = 'Choose one from the list to read it here.',
   onBack,
 }: {
@@ -125,11 +147,27 @@ export function ReaderPane({
    * its way.
    */
   rowOf?: (id: ConversationId) => ConversationSummary | undefined;
+  /** What lies on the sheet while no conversation is selected, as a bundle's threads do. */
+  sheet?: ReaderSheet;
+  /**
+   * What the conversation was opened from, other than the list, as a bundle: a way back to it above
+   * the conversation on a desktop, and on a phone what Back names, shorter, and goes to.
+   */
+  backTo?: { label: string; short: string; go: () => void };
   /** What the empty reader asks the member to choose, in the words of the list beside it. */
   choose?: string;
   onBack: () => void;
 }) {
-  const { shown, isPassing } = useRestingSelection(selected);
+  const { shown: rested, isPassing } = useRestingSelection(selectedSheet?.id ?? selected);
+  // The sheet the reader rests on, which stays as it was while the selection passes from it.
+  const lastSheet = useRef(selectedSheet);
+  useEffect(() => {
+    if (selectedSheet) lastSheet.current = selectedSheet;
+  });
+  const sheet = [selectedSheet, lastSheet.current].find((each) => each && each.id === rested);
+  const shown = sheet || rested === lastSheet.current?.id ? undefined : rested;
+  // What a sheet other than a conversation scrolls in, once it is drawn.
+  const [sheetScroller, setSheetScroller] = useState<HTMLDivElement | null>(null);
   const isOffline = useReach() !== 'online';
   const {
     data: conversation,
@@ -227,14 +265,26 @@ export function ReaderPane({
   // Preparing what comes next is never urgent, so a change to it, as when the open conversation
   // leaves the list, doesn't make the open conversation render again in the change's own frame.
   const preparing = useDeferredValue(upcoming);
+  const crumbed = backTo && (
+    <div {...stylex.props(styles.crumb)}>
+      <Button
+        label={backTo.label}
+        icon={BACK_ICON}
+        variant="ghost"
+        size="sm"
+        onClick={backTo.go}
+        xstyle={styles.back}
+      />
+    </div>
+  );
 
   return (
     <section aria-label="Reader" {...stylex.props(styles.sheet)}>
       <header {...stylex.props(styles.phoneHeader)}>
-        <BackButton onClick={onBack} />
-        {top && !writing && !page ? (
+        <BackButton onClick={backTo?.go ?? onBack} label={backTo?.short} />
+        {(sheet?.top ?? top) && !writing && !page ? (
           <div role="toolbar" aria-label="Marks" {...stylex.props(styles.top)}>
-            <Suspense>{top}</Suspense>
+            <Suspense>{sheet?.top ?? top}</Suspense>
           </div>
         ) : null}
       </header>
@@ -249,7 +299,11 @@ export function ReaderPane({
       ) : null}
       {/* A composer over everything lies outside the panes, wherever it is drawn. */}
       {writing?.place === 'over' && writing.composer}
-      {(bar || placed) && !isFilled ? (
+      {sheet?.bar && !isFilled ? (
+        <div role="toolbar" aria-label={sheet.label} {...stylex.props(styles.bar)}>
+          <Suspense>{sheet.bar}</Suspense>
+        </div>
+      ) : (bar || placed) && !isFilled ? (
         <div
           role="toolbar"
           aria-label={bar ? 'Conversation' : 'Place'}
@@ -259,9 +313,14 @@ export function ReaderPane({
           {placed}
         </div>
       ) : null}
-      {isFilled ? null : reading ? (
+      {isFilled ? null : sheet ? (
+        <div ref={setSheetScroller} {...stylex.props(styles.scroll, styles.underBar)}>
+          {sheet.content(sheetScroller)}
+        </div>
+      ) : reading ? (
         <div {...stylex.props(styles.scroll, actions && styles.underBar)}>
-          <Suspense fallback={<ReaderSkeleton subject={rowOf?.(reading.id)?.subject} />}>
+          {crumbed}
+          <Suspense fallback={<ReaderSkeleton subject={headingOf(rowOf?.(reading.id))} />}>
             <Reader
               conversation={reading.conversation}
               account={reading.account}
@@ -279,12 +338,14 @@ export function ReaderPane({
         </div>
       ) : isOpening ? (
         <div {...stylex.props(styles.scroll, actions && styles.underBar)}>
-          <ReaderSkeleton subject={shown && rowOf?.(shown)?.subject} />
+          {crumbed}
+          <ReaderSkeleton subject={shown && headingOf(rowOf?.(shown))} />
         </div>
       ) : isUnopened ? (
         <div {...stylex.props(styles.scroll, actions && styles.underBar)}>
+          {crumbed}
           <ConversationUnopened
-            subject={rowOf?.(shown)?.subject}
+            subject={headingOf(rowOf?.(shown))}
             isOffline={isOffline}
             onTryAgain={() => void refetch()}
           />
@@ -298,14 +359,21 @@ export function ReaderPane({
           />
         </div>
       )}
-      {island && !writing && !page ? (
-        <PhoneIsland label="Conversation" spans>
-          <Suspense>{island}</Suspense>
+      {(sheet ? sheet.island : island) && !writing && !page ? (
+        <PhoneIsland label={sheet?.label ?? 'Conversation'} spans>
+          <Suspense>{sheet ? sheet.island : island}</Suspense>
         </PhoneIsland>
       ) : null}
     </section>
   );
 }
+
+/**
+ * What the reader heads a row's conversation with while it's on its way: a GitHub thread's title, as
+ * the conversation's own heading reads once it comes, or else the row's subject.
+ */
+const headingOf = (row: ConversationSummary | undefined) =>
+  row && (row.github?.title ?? row.subject);
 
 /**
  * The selection the reader shows, and whether the selection is passing it by. One made after a rest
@@ -419,9 +487,26 @@ function usePreloadedReader(isWanted: boolean) {
 const BACK_ICON = <Icon icon={ChevronLeft} />;
 
 // The header with Back is a phone's, and hidden on wider screens, so it costs nothing as the
-// reader changes.
-const BackButton = memo(function BackButton({ onClick }: { onClick: () => void }) {
-  return <IconButton label="Back" icon={BACK_ICON} variant="ghost" onClick={onClick} />;
+// reader changes. Back to something other than the list names it.
+const BackButton = memo(function BackButton({
+  onClick,
+  label,
+}: {
+  onClick: () => void;
+  label: string | undefined;
+}) {
+  return label === undefined ? (
+    <IconButton label="Back" icon={BACK_ICON} variant="ghost" onClick={onClick} />
+  ) : (
+    <Button
+      label={label}
+      aria-label={`Back to ${label}`}
+      icon={BACK_ICON}
+      variant="ghost"
+      onClick={onClick}
+      xstyle={styles.back}
+    />
+  );
 });
 
 const styles = stylex.create({
@@ -482,6 +567,14 @@ const styles = stylex.create({
       default: null,
       [media.phone]: `calc(${tm.target} * 2 + ${spacingVars['--spacing-1']} * 2 + ${spacingVars['--spacing-2']} * 3 + ${tm.airmailHeight} + ${spacingVars['--spacing-3']} + ${tm.safeBottom})`,
     },
+  },
+  // A way back above the conversation, at the subject's margin. A phone's Back names it instead.
+  crumb: {
+    display: { default: 'flex', [media.phone]: 'none' },
+    paddingInline: spacingVars['--spacing-5'],
+  },
+  back: {
+    paddingInlineStart: spacingVars['--spacing-1'],
   },
   // A new message's sheet fills the reader, however little is written on it.
   filled: {

@@ -226,10 +226,11 @@ test('a push shows as a notification with Archive and Mark read, and a tap opens
   await shot(page, 'desktop-dark-off');
   const reader = page.locator('section[aria-label="Reader"] h1');
   // The conversation the notice is about, known by the address that opens it, once the address
-  // has moved on from the newest, which the Inbox opened at.
+  // has moved on from the newest, which the Inbox opened at. The next is a conversation too, where
+  // further down lie the demo's GitHub bundles.
   const rows = page.getByRole('option');
   const newest = new URL(page.url()).searchParams.get('open');
-  await rows.nth(2).click();
+  await rows.nth(1).click();
   const subject = await reader.textContent();
   await page.waitForURL((url) => ![null, newest].includes(url.searchParams.get('open')));
   const open = new URL(page.url()).searchParams.get('open')!;

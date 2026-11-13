@@ -1,26 +1,26 @@
-import {
-  borderVars,
-  colorVars,
-  fontWeightVars,
-  radiusVars,
-  spacingVars,
-} from '@astryxdesign/core/theme/tokens.stylex';
+import { colorVars, fontWeightVars, spacingVars } from '@astryxdesign/core/theme/tokens.stylex';
 import { Button } from '@astryxdesign/core/Button';
+import { Icon } from '@astryxdesign/core/Icon';
 import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
 import * as stylex from '@stylexjs/stylex';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { ExternalLink } from 'lucide-react';
 import { memo, useDeferredValue, useEffect, useEffectEvent, useRef, useState } from 'react';
 import { stampStyles } from '../../../app/theme/stamps.ts';
 import { useMediaQuery } from '../../../shared/useMediaQuery.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Command } from '../../commands/index.ts';
+import { numberOf } from '../../conversations/index.ts';
 import { folderName } from '../../folders/index.ts';
-import type {
-  Account,
-  ConversationId,
-  Folder,
-  Message,
-  MessageRef,
+import {
+  threadAddressOf,
+  threadOf,
+  type Account,
+  type ConversationId,
+  type Folder,
+  type GitHubThread,
+  type Message,
+  type MessageRef,
 } from '../../mail/core/index.ts';
 import { accountsQuery, bodyQuery, conversationQuery } from '../../mailroom/client/index.ts';
 import {
@@ -32,7 +32,7 @@ import {
   type Leaving,
   type Shown,
 } from '../../outbox/index.ts';
-import { folderOf } from '../core/folder.ts';
+import { folderOf, receivedIn } from '../core/folder.ts';
 import { REST_MS } from '../core/rest.ts';
 import { bareSubject } from '../core/subject.ts';
 import { threadStyles } from './layout.ts';
@@ -156,6 +156,8 @@ const Conversation = memo(function Conversation({
   const fetchAhead = useFetchAhead(account);
   if (!newest) return null;
   const folder = folderOf(messages, folders);
+  const github = threadOf(receivedIn(messages, folders));
+  const address = github && threadAddressOf(github);
   // A draft's line already says what it is, so the count is of the mail itself, and only a
   // conversation of drafts alone counts its drafts.
   const written = messages.filter((message) => !isDraft(message)).length;
@@ -167,10 +169,14 @@ const Conversation = memo(function Conversation({
 
   return (
     <div {...stylex.props(threadStyles.thread)}>
-      <h1 {...stylex.props(threadStyles.subject)}>{subjectOf(messages)}</h1>
-      <p {...stylex.props(threadStyles.meta)}>
-        <span aria-hidden {...stylex.props(styles.stamp, stampStyles[account.stamp])} />
-        {[account.name, ...(folder ? [folderName(folder)] : []), size].join(' · ')}
+      <h1 {...stylex.props(threadStyles.subject)}>{github?.title ?? subjectOf(messages)}</h1>
+      <p {...stylex.props(threadStyles.meta, address !== undefined && threadStyles.metaWrapping)}>
+        <span aria-hidden {...stylex.props(threadStyles.stamp, stampStyles[account.stamp])} />
+        <span>
+          {[account.name, ...(folder ? [folderName(folder)] : []), size].join(' · ')}
+          {address && ' · '}
+        </span>
+        {github && address && <OnGitHub thread={github} address={address} />}
       </p>
       {messages.map((message) =>
         isDraft(message) ? (
@@ -348,20 +354,25 @@ function idle(): Promise<void> {
   });
 }
 
+/** Where a GitHub thread lives on github.com, named by its number, or by its kind when it has none. */
+function OnGitHub({ thread, address }: { thread: GitHubThread; address: string }) {
+  return (
+    <a
+      href={address}
+      target="_blank"
+      rel="noopener noreferrer"
+      {...stylex.props(threadStyles.link)}
+    >
+      {numberOf(thread)?.text ?? (thread.kind === 'run' ? 'Run' : 'Thread')} on GitHub
+      <Icon icon={ExternalLink} size="xsm" xstyle={threadStyles.linkIcon} />
+    </a>
+  );
+}
+
 /** The conversation's subject, as its first message gave it. */
 const subjectOf = (messages: Message[]) => bareSubject(messages[0]?.subject ?? '');
 
 const styles = stylex.create({
-  stamp: {
-    width: spacingVars['--spacing-2'],
-    height: spacingVars['--spacing-2'],
-    flexShrink: 0,
-    borderRadius: radiusVars['--radius-inner'],
-    outline: {
-      default: null,
-      [media.forcedColors]: `${borderVars['--border-width']} solid CanvasText`,
-    },
-  },
   // Nothing to open yet, so it neither lifts nor points.
   onItsWay: {
     position: 'relative',

@@ -1153,7 +1153,8 @@ test('on a phone, the list’s header has no buttons, and the reader’s island 
 
 test('the reader says where its conversation sits, and steps to the ones either side', async () => {
   const { context, page, problems } = await open(SIZES.desktop);
-  const bar = page.getByRole('toolbar', { name: 'Conversation' });
+  // A bundle's row is a place like any other, and its sheet's bar says so as a conversation's does.
+  const bar = page.getByRole('toolbar', { name: /^(Conversation|Repository)$/ });
   const rows = page.getByRole('option');
   const listed = async () => Number(await rows.first().getAttribute('aria-setsize'));
   // The reader shows the selected row once its keys rest, and says where that row sits.
@@ -1162,14 +1163,17 @@ test('the reader says where its conversation sits, and steps to the ones either 
       (place) => {
         const title = document.querySelector('section[aria-label="Reader"] h1')?.textContent;
         const row = document.querySelector('[role="option"][aria-selected="true"]');
-        const bar = document.querySelector('[role="toolbar"][aria-label="Conversation"]');
+        const bar = document.querySelector(
+          '[role="toolbar"][aria-label="Conversation"], [role="toolbar"][aria-label="Repository"]',
+        );
         return title && row?.textContent?.includes(title) && bar?.textContent?.includes(place);
       },
       place,
       { timeout: 5_000 },
     );
 
-  // The place counts the whole Inbox, though only its first page has arrived.
+  // The place counts the whole Inbox, though only its first page has arrived. The third row is the
+  // demo's toy-box bundle.
   await openConversation(page, 1);
   const inbox = await listed();
   expect(inbox).toBeGreaterThan(PAGE_SIZE);

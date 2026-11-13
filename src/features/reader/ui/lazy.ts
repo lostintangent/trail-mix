@@ -12,3 +12,8 @@ export const { Component: Reader, preload: preloadReader } = preloadable(
 export const { Component: SourceDialog } = preloadable(
   async () => (await import('./SourceDialog.tsx')).SourceDialog,
 );
+
+/** A bundle's threads, which load with the first bundle opened. */
+export const { Component: BundleReader, preload: preloadBundleReader } = preloadable(
+  async () => (await import('./BundleReader.tsx')).BundleReader,
+);

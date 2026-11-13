@@ -11,6 +11,7 @@ const keys = {
   folders: ['folders'],
   outbox: ['outbox'],
   page: (view: unknown, at: number) => ['conversations', view, at],
+  bundlePage: (id: string, at: number) => ['bundle', id, at],
   conversation: (id: string) => ['conversation', id],
   body: (message: typeof ref) => ['body', message],
 };
@@ -31,10 +32,11 @@ describe('what is kept', () => {
         keys.folders,
         keys.outbox,
         keys.page({ in: 'inbox' }, 0),
+        keys.bundlePage('a:trailmix-demo%2Ftoy-box', 0),
         keys.conversation('c1'),
         keys.body(ref),
       ]),
-    ).toEqual([true, true, true, true, true, true]);
+    ).toEqual([true, true, true, true, true, true, true]);
     expect(kinds([keys.signIns, keys.signInPresets, keys.thisDevice])).toEqual([
       false,
       false,
@@ -42,10 +44,14 @@ describe('what is kept', () => {
     ]);
   });
 
-  test('a list keeps its first page, which is what opens first, and no page further down', () => {
+  test('a list or a bundle keeps its first page, which is what opens first, and no page further down', () => {
     expect([0, 50, 100].map((at) => isKept(keys.page({ in: 'inbox' }, at)))).toEqual([
       true,
       false,
+      false,
+    ]);
+    expect([0, 50].map((at) => isKept(keys.bundlePage('a:trailmix-demo%2Ftoy-box', at)))).toEqual([
+      true,
       false,
     ]);
   });

@@ -25,6 +25,10 @@ export const tm = stylex.defineVars({
   swatch: '14px', // a color to pick, the size of an icon
   accentFill: '24px', // New message's fill in the sidebar's foot, a line's height at any pointer
   statusDot: '6px', // the dot before a list's word that the device is offline
+  // A GitHub thread's chip: a pill one line of small text tall, with its kind's icon
+  chipHeight: { default: '16px', [COARSE]: '20px' },
+  chipText: { default: '11px', [COARSE]: '12.5px' },
+  chipIcon: { default: '11px', [COARSE]: '13px' },
 
   // Color roles beyond Astryx's
   textQuiet: 'light-dark(oklch(0.52 0.015 265), oklch(0.66 0 0))', // previews, times: still 4.5:1

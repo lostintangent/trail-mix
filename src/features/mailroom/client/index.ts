@@ -1,5 +1,7 @@
 export type {
   AccountSetup,
+  BundlePage,
+  BundleScope,
   Commands,
   DraftInput,
   Endpoint,
@@ -18,6 +20,7 @@ export { useHints, useIsCaughtUp } from './hints.ts';
 export {
   accountsQuery,
   bodyQuery,
+  bundleQuery,
   conversationQuery,
   conversationsQuery,
   foldersQuery,

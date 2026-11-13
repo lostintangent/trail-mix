@@ -1,4 +1,4 @@
-import { Archive, Mail, MailOpen, Star, Trash2 } from 'lucide-react';
+import { Archive, ExternalLink, Mail, MailOpen, Star, Trash2 } from 'lucide-react';
 import type { Command } from '../../commands/index.ts';
 import { folderName } from '../../folders/index.ts';
 import type { Account, Folder } from '../../mail/core/index.ts';
@@ -86,4 +86,20 @@ export function triageCommands({
         })),
     ),
   ];
+}
+
+/**
+ * Opening what the member reads on GitHub, in a new tab: the thread open, or else the bundle's
+ * repository. It can't run while neither is open.
+ */
+export function gitHubCommand(address: string | undefined): Command {
+  return {
+    id: 'github.open',
+    title: 'Open on GitHub',
+    group: 'Conversation',
+    shortcut: 'O',
+    icon: ExternalLink,
+    isEnabled: address !== undefined,
+    run: () => void (address && window.open(address, '_blank', 'noopener,noreferrer')),
+  };
 }

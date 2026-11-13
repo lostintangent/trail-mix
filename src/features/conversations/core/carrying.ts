@@ -1,4 +1,6 @@
 import type {
+  BundleId,
+  BundleSummary,
   Flags,
   Folder,
   FolderRef,
@@ -20,6 +22,16 @@ import type { Action } from './triage.ts';
 export type Command =
   | { move: MessageRef[]; to: FolderRef | FolderRole }
   | { setFlags: MessageRef[]; change: Partial<Flags> };
+
+/**
+ * What the Mailroom is asked to do to a bundle's conversations, as far as its row showed them: the
+ * messages they held by its date. The Mailroom finds them, and says which it changed or moved.
+ */
+export type BundleCommand =
+  | { move: BundleScope; to: FolderRef | FolderRole }
+  | { setFlags: BundleScope; change: Partial<Flags> };
+
+type BundleScope = { bundle: BundleId; through: string };
 
 /** Where a moved message went, as the Mailroom reports it. */
 export type Moved = { from: MessageRef; to: MessageRef };
@@ -63,6 +75,37 @@ export function commandFor(
   }
 }
 
+/**
+ * The command that carries out an action on a bundle, or nothing when it can't: a move to another
+ * account, or to the Inbox its conversations lie in. A flag and an unread mark reach each
+ * conversation's newest message, and the rest reach every message.
+ */
+export function bundleCommandFor(
+  action: Action,
+  bundle: BundleSummary,
+  folders: readonly Folder[],
+): BundleCommand | undefined {
+  const scope = { bundle: bundle.id, through: bundle.date };
+  switch (action.do) {
+    case 'archive':
+    case 'delete':
+      return { move: scope, to: destination(action) };
+    case 'move':
+      return action.to.account === bundle.account &&
+        roleOf(folders, action.to.account, action.to.path) !== 'inbox'
+        ? { move: scope, to: action.to }
+        : undefined;
+    case 'flag':
+      return { setFlags: scope, change: { flagged: true } };
+    case 'unflag':
+      return { setFlags: scope, change: { flagged: false } };
+    case 'read':
+      return { setFlags: scope, change: { seen: true } };
+    case 'unread':
+      return { setFlags: scope, change: { seen: false } };
+  }
+}
+
 /** What undoes a command: each moved message back to the folder it left, or each flag back. */
 export function undoOf(command: Command, moved: readonly Moved[] = []): Command[] {
   if ('setFlags' in command) {
@@ -78,12 +121,16 @@ export function undoOf(command: Command, moved: readonly Moved[] = []): Command[
   }));
 }
 
-/** An open conversation's messages once a flag or read change reached them. */
+/**
+ * An open conversation's messages once a flag or read change reached them. A message already as
+ * asked stays as it was.
+ */
 export function changeMessages(messages: readonly Message[], command: Command): Message[] {
   if (!('setFlags' in command)) return [...messages];
   const changed = new Set(command.setFlags.map(keyOf));
+  const changes = Object.entries(command.change) as [keyof Flags, boolean][];
   return messages.map((message) =>
-    changed.has(keyOf(message))
+    changed.has(keyOf(message)) && changes.some(([flag, value]) => message.flags[flag] !== value)
       ? { ...message, flags: { ...message.flags, ...command.change } }
       : message,
   );

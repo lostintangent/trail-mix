@@ -33,6 +33,15 @@ export const REREAD = `UPDATE folders SET cursor = NULL, rereading = 1`;
 export const SWEEP_BODIES = `INSERT OR REPLACE INTO body_sweep (one, after)
   SELECT 1, NULL WHERE EXISTS (SELECT 1 FROM accounts)`;
 
+/**
+ * Has every conversation's row made again from the messages the index already holds, as a version
+ * does when a row derives something new from them. Wakes work through the conversations by id, a
+ * batch at a time, from the one `after` names, and lists keep their rows meanwhile. No server is
+ * asked, and a Mailroom that holds no conversation has none to make.
+ */
+export const RESUMMARIZE = `INSERT OR REPLACE INTO resummarize (one, after)
+  SELECT 1, '' WHERE EXISTS (SELECT 1 FROM conversations)`;
+
 /** The member's addresses, as every account names its own, in lower case. */
 const OWN = `SELECT lower(json_extract(account, '$.address')) FROM accounts`;
 
@@ -334,6 +343,34 @@ export const versions: readonly (readonly string[])[] = [
     `CREATE TABLE body_sweep (one INTEGER PRIMARY KEY CHECK (one = 1), after TEXT)`,
     // Releases before `gone_bodies` kept each body after its message left, so the cache sweeps once.
     SWEEP_BODIES,
+  ],
+  [
+    // GitHub bundles. A conversation of GitHub notifications names the bundle its Inbox views list
+    // it in, and so does its Inbox placement, so a list reads the conversations no bundle holds and
+    // the bundles beside them, each newest first, and merges the two.
+    `ALTER TABLE conversations ADD COLUMN bundle TEXT`,
+    `ALTER TABLE placements ADD COLUMN bundle TEXT`,
+    `DROP INDEX conversations_in_inbox`,
+    `CREATE INDEX conversations_in_inbox ON conversations (date DESC, id DESC)
+      WHERE inbox = 1 AND bundle IS NULL`,
+    `CREATE INDEX conversations_in_bundle ON conversations (bundle, date DESC, id DESC)
+      WHERE bundle IS NOT NULL`,
+    `DROP INDEX placements_by_date`,
+    `CREATE INDEX placements_by_date ON placements (account, path, date DESC, conversation DESC)
+      WHERE bundle IS NULL`,
+    // Each bundle's row, in the Inbox it is listed in.
+    `CREATE TABLE bundles (
+      id TEXT PRIMARY KEY,
+      account TEXT NOT NULL,
+      path TEXT NOT NULL,
+      date TEXT NOT NULL,
+      summary TEXT NOT NULL
+    )`,
+    `CREATE INDEX bundles_by_date ON bundles (date DESC, id DESC)`,
+    `CREATE INDEX bundles_in_folder ON bundles (account, path, date DESC, id DESC)`,
+    // How far rows have been made again, in its one row while they are being made.
+    `CREATE TABLE resummarize (one INTEGER PRIMARY KEY CHECK (one = 1), after TEXT NOT NULL)`,
+    RESUMMARIZE,
   ],
 ];
 

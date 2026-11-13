@@ -10,10 +10,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { exportJWK, generateKeyPair, SignJWT } from 'jose';
 import { fromCrossJSON, toJSON, type SerovalNode } from 'seroval';
-import type {
-  ConversationSummary,
-  Message,
-  MessageRef,
+import {
+  isBundle,
+  type ConversationSummary,
+  type Message,
+  type MessageRef,
 } from '../../src/features/mail/core/index.ts';
 import type { Page } from '../../src/features/mailroom/client/contract.ts';
 import { messageUrl, partUrl } from '../../src/features/mailroom/client/urls.ts';
@@ -120,7 +121,9 @@ describe('Two members of one deployment', () => {
   test('the second reaches none of the first’s mail by its refs: not its list, body, source or parts', async () => {
     let rows: ConversationSummary[] = [];
     await until(async () => {
-      rows = (await ask<Page>(ADA, 'conversations', { in: 'inbox' })).items;
+      rows = (await ask<Page>(ADA, 'conversations', { in: 'inbox' })).items.filter(
+        (item): item is ConversationSummary => !isBundle(item),
+      );
       return rows.some(({ hasAttachments }) => hasAttachments);
     }, 60_000);
     const row = rows.find(({ hasAttachments }) => hasAttachments)!;

@@ -8,6 +8,7 @@ import {
   radiusVars,
   spacingVars,
   typeScaleVars,
+  typographyVars,
 } from '@astryxdesign/core/theme/tokens.stylex';
 import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
 import * as stylex from '@stylexjs/stylex';
@@ -33,17 +34,22 @@ import {
 import { Pending, pendingStyles, TextSkeleton } from '../../../app/theme/Pending.tsx';
 import { SenderAvatar } from '../../../app/theme/SenderAvatar.tsx';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
-import type {
-  ConversationId,
-  ConversationSummary,
-  Marks,
-  StampColor,
+import {
+  isBundle,
+  type BundleSummary,
+  type ConversationId,
+  type ConversationSummary,
+  type ListItem,
+  type Marks,
+  type StampColor,
 } from '../../mail/core/index.ts';
 import { avatarUrl } from '../../mailroom/client/index.ts';
 import { peopleOf } from '../core/face.ts';
+import { numberOf } from '../core/github.ts';
 import type { Listed } from '../core/pages.ts';
 import type { SelectBy, Selection } from '../core/selection.ts';
 import { formatListDate } from './dates.ts';
+import { BundleChips } from './github.tsx';
 import { Marked } from './search.tsx';
 
 /** A list that shows no search. */
@@ -63,7 +69,8 @@ const LONG_PRESS_SLOP = 10;
 const SWIPE_SHARE = 0.4;
 
 /**
- * The conversations of a view, newest first, drawn only where the list is scrolled to. The list is
+ * The conversations of a view, newest first, drawn only where the list is scrolled to. In an Inbox
+ * view, a repository's GitHub notifications stand together as one row, its bundle. The list is
  * as long as the view, and a row whose page hasn't arrived stands as a skeleton until it has. Rows
  * arriving or leaving above the top row in sight leave it where it is, so mail that arrives while
  * the list is scrolled down moves nothing, while at the top it shows. Selected conversations lift
@@ -94,8 +101,8 @@ export function ConversationList({
   label: string;
   /** Names the list shown. Another list starts at its top. */
   listKey: string;
-  /** Every conversation in the list, with those whose page hasn't arrived yet empty. */
-  conversations: Listed<ConversationSummary>;
+  /** Every row in the list, with those whose page hasn't arrived yet empty. */
+  conversations: Listed<ListItem>;
   /** What a search matched, marked in each row. The same while the search stays the same. */
   marks?: Marks;
   /** Whether newer rows are on their way, as while a search is typed. */
@@ -166,7 +173,7 @@ export function ConversationList({
   };
   // The top row in sight stays put while rows above it come and go, unless it is the list's first.
   const topRow = useRef<{
-    rows: Listed<ConversationSummary>;
+    rows: Listed<ListItem>;
     list: string;
     id: ConversationId;
     index: number;
@@ -274,21 +281,20 @@ export function ConversationList({
       <RowRuler ref={ruler} />
       <div {...stylex.props(styles.canvas(virtualizer.getTotalSize()))}>
         {drawn.map(({ index, start }) => {
-          const conversation = conversations[index];
-          if (!conversation)
-            return <RowSkeleton key={`pending ${index}`} row={index} top={start} />;
+          const item = conversations[index];
+          if (!item) return <RowSkeleton key={`pending ${index}`} row={index} top={start} />;
           return (
             <Row
-              key={conversation.id}
+              key={item.id}
               id={optionId(index)}
-              conversation={conversation}
+              item={item}
               marks={marks}
-              stamp={stamps?.get(conversation.account)}
+              stamp={stamps?.get(item.account)}
               selves={selves}
               top={start}
               position={index + 1}
               size={conversations.length}
-              isSelected={selected.has(conversation.id)}
+              isSelected={selected.has(item.id)}
               isKeyboardFocused={isKeyboardFocused && selectedIndex === index}
               isPicking={isPicking}
               onSelect={onSelect}
@@ -304,10 +310,13 @@ export function ConversationList({
   );
 }
 
-/** One conversation. Memoized, so moving the selection redraws only the two rows it touches. */
+/**
+ * One conversation, or a bundle. Memoized, so moving the selection redraws only the two rows it
+ * touches.
+ */
 const Row = memo(function Row({
   id,
-  conversation,
+  item,
   marks,
   stamp,
   selves,
@@ -324,7 +333,7 @@ const Row = memo(function Row({
   onAhead,
 }: {
   id: string;
-  conversation: ConversationSummary;
+  item: ListItem;
   marks: Marks;
   stamp: StampColor | undefined;
   selves: ReadonlySet<string>;
@@ -340,16 +349,13 @@ const Row = memo(function Row({
   onSwipe: ((id: ConversationId) => void) | undefined;
   onAhead: ((id: ConversationId, isPressed: boolean) => void) | undefined;
 }) {
-  const { subject, preview, date, unread, flagged, hasAttachments, avatar } = conversation;
-  const { names, face } = peopleOf(conversation, selves);
+  const people = isBundle(item) ? undefined : peopleOf(item, selves);
+  // A bundle leads with GitHub's picture, which its newest conversation names.
+  const name = people ? (people.face ? people.face.name || people.face.email : '') : 'GitHub';
   // A finger that taps the avatar picks the row instead of opening it.
   const pointer = useRef('');
-  const isUnread = unread > 0;
-  const touch = useTouch(
-    () => onLongPress?.(conversation.id),
-    onSwipe && (() => onSwipe(conversation.id)),
-  );
-  const ahead = useAhead((isPressed) => onAhead?.(conversation.id, isPressed));
+  const touch = useTouch(() => onLongPress?.(item.id), onSwipe && (() => onSwipe(item.id)));
+  const ahead = useAhead((isPressed) => onAhead?.(item.id, isPressed));
   const select = (event: MouseEvent) => {
     if (touch.tookClick()) return;
     const by: SelectBy = event.shiftKey
@@ -357,7 +363,7 @@ const Row = memo(function Row({
       : event.metaKey || event.ctrlKey || isPicking
         ? 'toggle'
         : 'only';
-    onSelect(conversation.id, by);
+    onSelect(item.id, by);
   };
   return (
     <div
@@ -386,45 +392,119 @@ const Row = memo(function Row({
         onClick={(event) => {
           if (pointer.current !== 'touch' || !onPick) return;
           event.stopPropagation();
-          if (!touch.tookClick()) onPick(conversation.id);
+          if (!touch.tookClick()) onPick(item.id);
         }}
         {...stylex.props(styles.avatar)}
       >
-        <SenderAvatar
-          name={face ? face.name || face.email : ''}
-          picture={avatar && avatarUrl(avatar)}
-          stamp={stamp}
-        />
+        <SenderAvatar name={name} picture={item.avatar && avatarUrl(item.avatar)} stamp={stamp} />
       </span>
-      <span {...stylex.props(styles.lines)}>
-        <span {...stylex.props(styles.top, styles.line)}>
-          {isUnread && <span {...stylex.props(styles.dot)} />}
-          <span {...stylex.props(styles.sender, isUnread && styles.senderUnread, styles.clip)}>
-            {names === undefined ? (
-              <span {...stylex.props(styles.nobody)}>No recipients</span>
-            ) : (
-              <Marked text={names} marks={marks} />
-            )}
-          </span>
-          {isUnread && <VisuallyHidden>Unread</VisuallyHidden>}
-          {flagged && <Icon icon={Star} size="xsm" label="Flagged" xstyle={styles.flag} />}
-          {hasAttachments && (
-            <Icon icon={Paperclip} size="xsm" label="Has attachments" xstyle={styles.quiet} />
-          )}
-          <time dateTime={date} {...stylex.props(styles.time)}>
-            {formatListDate(date)}
-          </time>
-        </span>
-        <span {...stylex.props(isUnread && styles.subjectUnread, styles.clip, styles.line)}>
-          {subject ? <Marked text={subject} marks={marks} /> : '(no subject)'}
-        </span>
-        <span {...stylex.props(styles.preview, styles.clip, styles.line)}>
-          <Marked text={preview} marks={marks} />
-        </span>
-      </span>
+      {isBundle(item) ? (
+        <BundleLines bundle={item} />
+      ) : (
+        <ConversationLines conversation={item} marks={marks} names={people?.names} />
+      )}
     </div>
   );
 });
+
+/** A conversation's three lines: whom it is with, its subject and its preview. */
+function ConversationLines({
+  conversation,
+  marks,
+  names,
+}: {
+  conversation: ConversationSummary;
+  marks: Marks;
+  names: string | undefined;
+}) {
+  const { subject, preview, date, unread, flagged, hasAttachments } = conversation;
+  const isUnread = unread > 0;
+  return (
+    <span {...stylex.props(styles.lines)}>
+      <span {...stylex.props(styles.top, styles.line)}>
+        {isUnread && <span {...stylex.props(styles.dot)} />}
+        <span {...stylex.props(styles.sender, isUnread && styles.senderUnread, styles.clip)}>
+          {names === undefined ? (
+            <span {...stylex.props(styles.nobody)}>No recipients</span>
+          ) : (
+            <Marked text={names} marks={marks} />
+          )}
+        </span>
+        <RowMarks isUnread={isUnread} flagged={flagged} hasAttachments={hasAttachments} />
+        <time dateTime={date} {...stylex.props(styles.time)}>
+          {formatListDate(date)}
+        </time>
+      </span>
+      <span {...stylex.props(isUnread && styles.subjectUnread, styles.clip, styles.line)}>
+        {subject ? <Marked text={subject} marks={marks} /> : '(no subject)'}
+      </span>
+      <span {...stylex.props(styles.preview, styles.clip, styles.line)}>
+        <Marked text={preview} marks={marks} />
+      </span>
+    </span>
+  );
+}
+
+/**
+ * A bundle's three lines: its repository, its owner in quiet ink, then its newest thread's title
+ * and number, then a chip for each of its first threads.
+ */
+function BundleLines({ bundle }: { bundle: BundleSummary }) {
+  const { repository, newest, date, unread, flagged, chips, threads } = bundle;
+  const isUnread = unread > 0;
+  const slash = repository.indexOf('/') + 1;
+  const number = numberOf(newest);
+  return (
+    <span {...stylex.props(styles.lines)}>
+      <span {...stylex.props(styles.top, styles.line)}>
+        {isUnread && <span {...stylex.props(styles.dot)} />}
+        <span {...stylex.props(styles.sender, isUnread && styles.senderUnread, styles.clip)}>
+          <span {...stylex.props(styles.owner)}>{repository.slice(0, slash)}</span>
+          {repository.slice(slash)}
+        </span>
+        <RowMarks isUnread={isUnread} flagged={flagged} hasAttachments={false} />
+        <time dateTime={date} {...stylex.props(styles.time)}>
+          {formatListDate(date)}
+        </time>
+      </span>
+      <span {...stylex.props(isUnread && styles.subjectUnread, styles.clip, styles.line)}>
+        {newest.title}
+        {number && (
+          <>
+            {' '}
+            <span {...stylex.props(styles.owner, number.isCommit && styles.commit)}>
+              {number.text}
+            </span>
+          </>
+        )}
+      </span>
+      <span {...stylex.props(styles.preview, styles.line, styles.chipLine)}>
+        <BundleChips chips={chips} threads={threads} />
+      </span>
+    </span>
+  );
+}
+
+/** What a row's first line says beside its name: unread, flagged and attached. */
+function RowMarks({
+  isUnread,
+  flagged,
+  hasAttachments,
+}: {
+  isUnread: boolean;
+  flagged: boolean;
+  hasAttachments: boolean;
+}) {
+  return (
+    <>
+      {isUnread && <VisuallyHidden>Unread</VisuallyHidden>}
+      {flagged && <Icon icon={Star} size="xsm" label="Flagged" xstyle={styles.flag} />}
+      {hasAttachments && (
+        <Icon icon={Paperclip} size="xsm" label="Has attachments" xstyle={styles.quiet} />
+      )}
+    </>
+  );
+}
 
 /**
  * A list on its way: rows in the shape of its conversations, each one row's height, as the ruler
@@ -785,6 +865,20 @@ const styles = stylex.create({
   // A draft addressed to nobody yet says so in the row's muted ink.
   nobody: {
     color: tm.textQuiet,
+  },
+  // A bundle's owner, and a thread's number, recede beside the repository and the title.
+  owner: {
+    color: tm.textQuiet,
+    fontWeight: fontWeightVars['--font-weight-normal'],
+  },
+  commit: {
+    fontFamily: typographyVars['--font-family-code'],
+    fontSize: '0.86em',
+  },
+  chipLine: {
+    display: 'flex',
+    alignItems: 'center',
+    minWidth: 0,
   },
 });
 

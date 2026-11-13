@@ -1,20 +1,28 @@
 import {
   applySyncEvent,
+  bundleIdOf,
+  bundleSummaryOf,
   domainOf,
   linkIdsOf,
   searchWords,
+  threadOf,
+  type Address,
+  type BundleId,
+  type BundleSummary,
   type ConversationId,
   type ConversationSummary,
   type Folder,
   type FolderRef,
   type FolderRole,
+  type GitHubThread,
   type Index,
+  type ListItem,
   type Message,
   type MessageRef,
   type SyncEvent,
   type View,
 } from '../../mail/core/index.ts';
-import { MATCHES_LISTED, PAGE_SIZE, type Page } from '../client/contract.ts';
+import { MATCHES_LISTED, PAGE_SIZE, type BundlePage, type Page } from '../client/contract.ts';
 import { senderOf } from '../core/avatars.ts';
 import type { Sql, SqlValue } from './schema.ts';
 
@@ -166,29 +174,41 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
 
   /**
    * Brings a conversation's row and its placements in line with the messages it now holds, and
-   * returns its latest message in each folder it is placed in now.
+   * returns its latest message in each folder it is placed in now, and the bundles it was in and is
+   * in now. It is in its account's bundle for a repository while its Inbox holds only notifications
+   * of one of that repository's threads, and its Inbox placement says so.
    */
   function summarize(
     id: ConversationId,
     roles: Map<string, FolderRole | undefined>,
     mine: ReadonlySet<string>,
-  ): Message[] {
+  ): { placed: Message[]; bundles: BundleId[] } {
+    const bundles = sql
+      .all<{ bundle: string | null }>(`SELECT bundle FROM conversations WHERE id = ?`, id)
+      .flatMap(({ bundle }) => (bundle === null ? [] : [bundle]));
     sql.run(`DELETE FROM placements WHERE conversation = ?`, id);
     const messages = reads.conversation(id);
-    const summary = summaryOf(id, messages, mine);
-    if (!summary) {
+    const row = summaryOf(id, messages, mine);
+    if (!row) {
       sql.run(`DELETE FROM conversations WHERE id = ?`, id);
-      return [];
+      return { placed: [], bundles };
     }
     const roleOf = (message: Message) => roles.get(placeOf(message));
+    const inbox = messages.filter((m) => roleOf(m) === 'inbox');
+    const github = inbox.length > 0 ? threadOf(inbox) : undefined;
+    const summary: ConversationSummary = github ? { ...row, github } : row;
+    const bundle = github ? bundleIdOf(summary.account, github.repository) : null;
+    if (bundle !== null) bundles.push(bundle);
     sql.run(
-      `INSERT OR REPLACE INTO conversations (id, date, summary, inbox, drafts, flagged) VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT OR REPLACE INTO conversations (id, date, summary, inbox, drafts, flagged, bundle)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
       id,
       summary.date,
       JSON.stringify(summary),
-      Number(messages.some((m) => roleOf(m) === 'inbox')),
+      Number(inbox.length > 0),
       Number(messages.some((m) => roleOf(m) === 'drafts')),
       Number(summary.flagged),
+      bundle,
     );
     const latest = new Map<string, Message>();
     for (const message of messages) {
@@ -198,14 +218,128 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
     }
     for (const message of latest.values()) {
       sql.run(
-        `INSERT INTO placements (account, path, conversation, date) VALUES (?, ?, ?, ?)`,
+        `INSERT INTO placements (account, path, conversation, date, bundle) VALUES (?, ?, ?, ?, ?)`,
         message.account,
         message.path,
         id,
         message.date,
+        roleOf(message) === 'inbox' ? bundle : null,
       );
     }
-    return [...latest.values()];
+    return { placed: [...latest.values()], bundles };
+  }
+
+  /**
+   * Brings a bundle's row in line with the conversations it now holds, listed in the Inbox its
+   * newest one is in, and returns the Inbox it was listed in and the one it is listed in now.
+   */
+  function rebundle(id: BundleId): FolderRef[] {
+    const was = sql.all<FolderRef>(`SELECT account, path FROM bundles WHERE id = ?`, id);
+    const threads = sql
+      .all<BundledRow>(
+        `SELECT id, date, flagged,
+           json_extract(summary, '$.account') AS account,
+           json_extract(summary, '$.count') AS count,
+           json_extract(summary, '$.unread') AS unread,
+           json_extract(summary, '$.avatar') AS avatar,
+           json_extract(summary, '$.github') AS github
+         FROM conversations WHERE bundle = ? ORDER BY date DESC, id DESC`,
+        id,
+      )
+      .map((row) => ({
+        account: row.account,
+        date: row.date,
+        count: row.count,
+        unread: row.unread,
+        flagged: row.flagged === 1,
+        ...(row.avatar === null ? {} : { avatar: row.avatar }),
+        github: JSON.parse(row.github) as GitHubThread,
+      }));
+    const summary = bundleSummaryOf(id, threads);
+    const [newest] = sql.all<FolderRef>(
+      `SELECT p.account, p.path FROM conversations c JOIN placements p ON p.conversation = c.id
+       WHERE c.bundle = ? AND p.bundle = c.bundle ORDER BY c.date DESC, c.id DESC LIMIT 1`,
+      id,
+    );
+    if (!summary || !newest) {
+      sql.run(`DELETE FROM bundles WHERE id = ?`, id);
+      return was;
+    }
+    sql.run(
+      `INSERT OR REPLACE INTO bundles (id, account, path, date, summary) VALUES (?, ?, ?, ?, ?)`,
+      id,
+      newest.account,
+      newest.path,
+      summary.date,
+      JSON.stringify(summary),
+    );
+    return [...was, newest];
+  }
+
+  /**
+   * Summarizes the conversations given again, then the bundles they were in and are in now, and
+   * returns the folders whose lists changed: where each was placed and is placed now, or with
+   * `quietly`, only where its row changed.
+   */
+  function settle(
+    ids: Iterable<ConversationId>,
+    roles: Map<string, FolderRole | undefined>,
+    quietly = false,
+  ): FolderRef[] {
+    const changed = new Map<string, FolderRef>();
+    const note = ({ account, path }: FolderRef) =>
+      changed.set(placeOf({ account, path }), { account, path });
+    const touched = new Set<BundleId>();
+    const mine = ownNow();
+    for (const id of ids) {
+      const rowOf = () =>
+        JSON.stringify(
+          sql.all(`SELECT summary, bundle FROM conversations WHERE id = ?`, id)[0] ?? null,
+        );
+      const before = quietly ? rowOf() : undefined;
+      // Where it was placed, and where it is placed now.
+      const was = sql.all<FolderRef>(
+        `SELECT account, path FROM placements WHERE conversation = ?`,
+        id,
+      );
+      const { placed, bundles } = summarize(id, roles, mine);
+      if (quietly && rowOf() === before) continue;
+      bundles.forEach((bundle) => touched.add(bundle));
+      was.forEach(note);
+      placed.forEach(note);
+    }
+    for (const bundle of touched) rebundle(bundle).forEach(note);
+    return [...changed.values()];
+  }
+
+  /**
+   * One page of a list that merges conversations and bundles, each a query of `id` and `date`
+   * taking `params`, newest first: `size` rows from place `at`, and how many both hold.
+   */
+  function merged(
+    conversations: string,
+    bundles: string,
+    params: readonly SqlValue[],
+    at: number,
+    size: number,
+  ): Page {
+    const [{ total } = { total: 0 }] = sql.all<{ total: number }>(
+      `SELECT (SELECT COUNT(*) FROM (${conversations})) + (SELECT COUNT(*) FROM (${bundles})) AS total`,
+      ...params,
+      ...params,
+    );
+    const rows = sql.all<{ summary: string }>(
+      `SELECT coalesce(c.summary, b.summary) AS summary FROM (
+         ${conversations} UNION ALL ${bundles}
+         ORDER BY date DESC, id DESC LIMIT ? OFFSET ?
+       ) p LEFT JOIN conversations c ON c.id = p.id LEFT JOIN bundles b ON b.id = p.id
+       ORDER BY p.date DESC, p.id DESC`,
+      ...params,
+      ...params,
+      size,
+      at,
+    );
+    return { items: rows.map(itemIn), at, total };
   }
 
   /** Whether a folder is being read again, as `REREAD` asks, and its pass hasn't ended. */
@@ -238,18 +372,7 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
             ...unwritten.get(rowid)!,
           );
         }
-        const changed = new Map<string, FolderRef>();
-        const note = ({ account, path }: FolderRef) =>
-          changed.set(placeOf({ account, path }), { account, path });
-        const mine = ownNow();
-        for (const id of touched) {
-          // Where it was placed, and where it is placed now.
-          sql
-            .all<FolderRef>(`SELECT account, path FROM placements WHERE conversation = ?`, id)
-            .forEach(note);
-          summarize(id, roles, mine).forEach(note);
-        }
-        return [...changed.values()];
+        return settle(touched, roles);
       } finally {
         roles = undefined;
         unwritten.clear();
@@ -357,30 +480,30 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
     },
 
     /**
-     * One page of a view, newest first: `size` conversations from its place `at`, with 0 the
-     * newest, and how many the view holds. A folder's page reads its placements alone as far as
-     * `at`, and only the page's own conversations past it.
+     * One page of a view, newest first: `size` rows from its place `at`, with 0 the newest, and how
+     * many the view holds. An Inbox view lists the conversations no bundle holds and the bundles
+     * beside them, merging the two as far as `at` by id alone, and reads only the page's own rows.
      */
     page(view: Exclude<View, { in: 'search' } | { in: 'outbox' }>, at = 0, size = PAGE_SIZE): Page {
       if (view.in === 'folder') {
         const { account, path } = view.folder;
-        const [{ total } = { total: 0 }] = sql.all<{ total: number }>(
-          `SELECT COUNT(*) AS total FROM placements WHERE account = ? AND path = ?`,
-          account,
-          path,
-        );
-        const rows = sql.all<{ summary: string }>(
-          `SELECT c.summary FROM (
-             SELECT conversation, date FROM placements WHERE account = ? AND path = ?
-             ORDER BY date DESC, conversation DESC LIMIT ? OFFSET ?
-           ) p JOIN conversations c ON c.id = p.conversation
-           ORDER BY p.date DESC, p.conversation DESC`,
-          account,
-          path,
-          size,
+        return merged(
+          `SELECT conversation AS id, date FROM placements
+           WHERE account = ? AND path = ? AND bundle IS NULL`,
+          `SELECT id, date FROM bundles WHERE account = ? AND path = ?`,
+          [account, path],
           at,
+          size,
         );
-        return { items: rows.map(summaryIn), at, total };
+      }
+      if (view.in === 'inbox') {
+        return merged(
+          `SELECT id, date FROM conversations WHERE inbox = 1 AND bundle IS NULL`,
+          `SELECT id, date FROM bundles`,
+          [],
+          at,
+          size,
+        );
       }
       const [{ total } = { total: 0 }] = sql.all<{ total: number }>(
         `SELECT COUNT(*) AS total FROM conversations WHERE ${view.in} = 1`,
@@ -395,13 +518,78 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
     },
 
     /**
+     * One page of a bundle's conversations, newest first, with the bundle's row, or nothing of a
+     * bundle that holds none.
+     */
+    bundle(id: BundleId, at = 0, size = PAGE_SIZE): BundlePage {
+      const [held] = sql.all<{ summary: string }>(`SELECT summary FROM bundles WHERE id = ?`, id);
+      if (!held) return { items: [], at, total: 0 };
+      const bundle = JSON.parse(held.summary) as BundleSummary;
+      const rows = sql.all<{ summary: string }>(
+        `SELECT summary FROM conversations WHERE bundle = ?
+         ORDER BY date DESC, id DESC LIMIT ? OFFSET ?`,
+        id,
+        size,
+        at,
+      );
+      return { bundle, items: rows.map(summaryIn), at, total: bundle.threads };
+    },
+
+    /**
+     * The messages a change to a bundle acts on, of those its conversations held by `through`, its
+     * row's date: those in their Inbox, every one, or each conversation's newest.
+     */
+    bundled(id: BundleId, through: string, reach: 'inbox' | 'every' | 'newest'): Message[] {
+      const roles = rolesNow();
+      return sql
+        .all<{ id: string }>(`SELECT id FROM conversations WHERE bundle = ?`, id)
+        .flatMap(({ id: conversation }) => {
+          const held = reads.conversation(conversation).filter((m) => m.date <= through);
+          if (reach === 'inbox') return held.filter((m) => roles.get(placeOf(m)) === 'inbox');
+          if (reach === 'every') return held;
+          const newest = held.reduce<Message | undefined>(
+            (found, m) => (found && found.date >= m.date ? found : m),
+            undefined,
+          );
+          return newest ? [newest] : [];
+        });
+    },
+
+    /**
+     * Makes up to `most` conversations' rows again from the messages the index holds, from where
+     * `RESUMMARIZE` left off, and their bundles' after them. Returns the folders whose lists
+     * changed, and whether rows are left to make. Run it inside a transaction.
+     */
+    resummarize(most: number): { changed: FolderRef[]; done: boolean } {
+      const [cursor] = sql.all<{ after: string }>(`SELECT after FROM resummarize`);
+      if (!cursor) return { changed: [], done: true };
+      const ids = sql
+        .all<{ id: string }>(
+          `SELECT id FROM conversations WHERE id > ? ORDER BY id LIMIT ?`,
+          cursor.after,
+          most,
+        )
+        .map(({ id }) => id);
+      const changed = settle(ids, rolesNow(), true);
+      const last = ids.at(-1);
+      if (ids.length < most || last === undefined) sql.run(`DELETE FROM resummarize`);
+      else sql.run(`UPDATE resummarize SET after = ?`, last);
+      return { changed, done: ids.length < most };
+    },
+
+    /**
      * One page of the conversations with a message whose senders, recipients, subject or preview
      * hold every word of `text`, each word as typed so far, across every account: `size` of them
      * from place `at`, and how many are listed. They come newest first by the newest message that
      * matches, and each row shows that message. A search lists at most its newest `most`, so it
      * reads matches newest first and stops there, and a first letter costs no more than a word.
      */
-    search(text: string, at = 0, size = PAGE_SIZE, most = MATCHES_LISTED): Page {
+    search(
+      text: string,
+      at = 0,
+      size = PAGE_SIZE,
+      most = MATCHES_LISTED,
+    ): Page<ConversationSummary> {
       const match = matchOf(text);
       if (!match) return { items: [], at, total: 0 };
       const newest = new Map<string, number>();
@@ -486,7 +674,15 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
         `DELETE FROM search WHERE rowid IN (SELECT rowid FROM messages WHERE account = ?)`,
         account,
       );
-      for (const table of ['messages', 'links', 'folders', 'placements', 'reread', 'gone_bodies'])
+      for (const table of [
+        'messages',
+        'links',
+        'folders',
+        'placements',
+        'bundles',
+        'reread',
+        'gone_bodies',
+      ])
         sql.run(`DELETE FROM ${table} WHERE account = ?`, account);
       for (const { conversation } of ids)
         sql.run(`DELETE FROM conversations WHERE id = ?`, conversation);
@@ -512,7 +708,12 @@ export function summaryOf(
   const newestFirst = [...messages].sort((a, b) => b.date.localeCompare(a.date));
   const latest = newestFirst[0];
   if (!latest) return undefined;
-  const senders = new Map(newestFirst.map((m) => [m.from.email.toLowerCase(), m.from]));
+  // Each sender as their newest message names them, as GitHub names whoever acted from one address.
+  const senders = new Map<string, Address>();
+  for (const { from } of newestFirst) {
+    const key = from.email.toLowerCase();
+    if (!senders.has(key)) senders.set(key, from);
+  }
   const theirs = newestFirst.find((m) => !mine.has(m.from.email.toLowerCase()));
   const recipients = [...latest.to, ...latest.cc];
   const written = recipients.find(({ email }) => domainOf(email) && !mine.has(email.toLowerCase()));
@@ -548,12 +749,31 @@ export function matchedRow(
 }
 
 /** One page of rows already in order, newest first, as the index pages its own. */
-export function pageAfter(rows: readonly ConversationSummary[], at = 0, size = PAGE_SIZE): Page {
+export function pageAfter(
+  rows: readonly ConversationSummary[],
+  at = 0,
+  size = PAGE_SIZE,
+): Page<ConversationSummary> {
   return { items: rows.slice(at, at + size), at, total: rows.length };
 }
 
 /** A conversation's row, as the index keeps it. */
 const summaryIn = ({ summary }: { summary: string }) => JSON.parse(summary) as ConversationSummary;
+
+/** A conversation's or a bundle's row, as the index keeps it. */
+const itemIn = ({ summary }: { summary: string }) => JSON.parse(summary) as ListItem;
+
+/** What a bundle's row is made from, of each conversation it holds. */
+type BundledRow = {
+  id: string;
+  account: string;
+  date: string;
+  flagged: number;
+  count: number;
+  unread: number;
+  avatar: string | null;
+  github: string;
+};
 
 /**
  * Search text as an FTS5 query: every word must match, each as a prefix, so results follow typing.

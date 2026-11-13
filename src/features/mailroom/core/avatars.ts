@@ -1,9 +1,4 @@
-import {
-  domainOf,
-  type ConversationSummary,
-  type Message,
-  type SyncEvent,
-} from '../../mail/core/index.ts';
+import { domainOf, type Message, type SyncEvent } from '../../mail/core/index.ts';
 
 /**
  * The Avatar cache's rules: which senders may show a picture, where each picture comes from and in
@@ -62,13 +57,15 @@ export function verifiedSenders(events: readonly SyncEvent[]): string[] {
  * one. The index keeps a row's avatar as the address of its newest verified sender other than the
  * member, and a read names it here.
  */
-export function namedRows(
-  rows: readonly ConversationSummary[],
+export function namedRows<Row extends { avatar?: string }>(
+  rows: readonly Row[],
   pictures: ReadonlyMap<string, string>,
-): ConversationSummary[] {
-  return rows.map(({ avatar, ...row }) => {
-    const key = avatar === undefined ? undefined : pictures.get(avatar);
-    return key ? { ...row, avatar: key } : row;
+): Row[] {
+  return rows.map((row) => {
+    const key = row.avatar === undefined ? undefined : pictures.get(row.avatar);
+    if (key) return { ...row, avatar: key };
+    const { avatar: _, ...unnamed } = row;
+    return unnamed as Row;
   });
 }
 
@@ -85,7 +82,7 @@ export function namedMessages(
 
 /** The senders whose pictures a set of rows and messages would name, if the cache holds them. */
 export function avatarCandidates(
-  rows: readonly ConversationSummary[],
+  rows: readonly { avatar?: string }[],
   messages: readonly Message[] = [],
 ): string[] {
   const senders = new Set<string>();

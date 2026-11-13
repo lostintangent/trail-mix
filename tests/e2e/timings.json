@@ -8,6 +8,7 @@
     "tests/e2e/demo.e2e.ts": 21500,
     "tests/e2e/drafts.e2e.ts": 53800,
     "tests/e2e/folders.e2e.ts": 12900,
+    "tests/e2e/github.e2e.ts": 12000,
     "tests/e2e/install.e2e.ts": 32600,
     "tests/e2e/list.e2e.ts": 30100,
     "tests/e2e/members-refused.e2e.ts": 4400,

@@ -121,7 +121,8 @@ test('a pasted image shows as it is pasted, once its draft is saved, and when it
   page.on('request', (request) => {
     if (/^cid:/i.test(request.url())) asked.push(request.url());
   });
-  await page.getByRole('option').nth(3).click();
+  // A conversation of its own, where the third and fourth rows are the demo's GitHub bundles.
+  await page.getByRole('option').nth(1).click();
   await replyButton(page).click();
   const composer = composerNamed(page, 'Reply');
   const text = composer.getByRole('textbox', { name: 'Reply' });

@@ -19,6 +19,9 @@ import { MOVE } from './commands.ts';
  * The reader makes its commands anew for each conversation it opens, though they mostly look the
  * same, so the controls draw from steady commands and render again only where something changed.
  *
+ * Where nothing else is the main action, as on a bundle's island, which has no Reply, Archive is,
+ * named and at the far end.
+ *
  * The controls draw with the first screen, in the reader's bar. Only what their menus open loads
  * apart from it.
  */
@@ -26,10 +29,12 @@ export function TriageActions({
   commands,
   part = 'all',
   isCompact = false,
+  isArchiveMain = false,
 }: {
   commands: readonly Command[];
   part?: 'all' | 'filing' | 'marking';
   isCompact?: boolean;
+  isArchiveMain?: boolean;
 }) {
   const steady = useSteadyCommands(commands);
   const command = (id: string) => steady.find((each) => each.id === id);
@@ -52,13 +57,16 @@ export function TriageActions({
 
   return (
     <>
-      {isFiling && archive && <CommandButton command={archive} />}
+      {isFiling && archive && !isArchiveMain && <CommandButton command={archive} />}
       {isFiling && remove && <CommandButton command={remove} />}
       {isFiling && <Menu label="Move to" icon={MOVE_ICON} items={moves} />}
       {isMarking && flag && !isCompact && (
         <CommandButton command={flag} iconStyle={flag.isChecked && styles.flagged} />
       )}
       {isMarking && <Menu label="More" icon={MORE_ICON} items={more} />}
+      {isFiling && archive && isArchiveMain && (
+        <CommandButton command={archive} primary="Archive" />
+      )}
     </>
   );
 }

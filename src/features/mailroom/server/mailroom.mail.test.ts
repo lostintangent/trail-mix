@@ -5,14 +5,15 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ImapFlow } from 'imapflow';
 import nodemailer from 'nodemailer';
-import type {
-  Account,
-  Body,
-  Folder,
-  Hint,
-  Message,
-  MessageRef,
-  Outgoing,
+import {
+  isBundle,
+  type Account,
+  type Body,
+  type Folder,
+  type Hint,
+  type Message,
+  type MessageRef,
+  type Outgoing,
 } from '../../mail/core/index.ts';
 import { RESTARTED, UNDO_SECONDS } from '../../outbox/core/index.ts';
 import { imap } from '../../providers/index.ts';
@@ -21,6 +22,7 @@ import {
   PAGE_SIZE,
   type AccountSetup,
   type Answered,
+  type BundlePage,
   type Page,
   type ThisDevice,
 } from '../client/contract.ts';
@@ -1247,6 +1249,59 @@ describe('The Mailroom with the demo mailbox', () => {
     );
   }, 30_000);
 
+  test('lists a repository’s GitHub mail as one bundle, a page of threads at a time, which its row marks read and archives', async () => {
+    const gus = member('gus', () => worker);
+    await gus.until(
+      async () => (await gus.call<Account[]>('accounts')).every(({ status }) => status === 'ready'),
+      120_000,
+    );
+    // Personal's repository, where Work holds another's.
+    const inInbox = async () => {
+      for (let at = 0; ;) {
+        const page = await gus.call<Page>('conversations', { in: 'inbox' }, at);
+        const found = page.items.find(
+          (item) => isBundle(item) && item.repository === 'trailmix-demo/toy-box',
+        );
+        if (found && isBundle(found)) return found;
+        at += page.items.length;
+        if (page.items.length === 0 || at >= page.total) return undefined;
+      }
+    };
+    const row = (await inInbox())!;
+
+    // Its threads come as a list's rows do, newest first, a page at a time, as many as its row says.
+    const first = await gus.call<BundlePage>('bundle', row.id);
+    const second = await gus.call<BundlePage>('bundle', row.id, PAGE_SIZE);
+    expect(first.bundle?.threads).toBe(row.threads);
+    expect(first.total).toBe(row.threads);
+    expect(first.items).toHaveLength(PAGE_SIZE);
+    const threads = [...first.items, ...second.items];
+    expect(new Set(threads.map(({ id }) => id)).size).toBe(threads.length);
+    expect(threads.map(({ date }) => date)).toEqual(
+      threads
+        .map(({ date }) => date)
+        .toSorted()
+        .reverse(),
+    );
+    expect(threads.every(({ github }) => github?.repository === row.repository)).toBe(true);
+
+    // Its row reads and archives the mail it showed, and the moves it returns undo the archive.
+    const scope = { bundle: row.id, through: row.date };
+    expect((await gus.call<MessageRef[]>('setFlags', scope, { seen: true })).length).toBe(
+      row.unread,
+    );
+    await gus.until(async () => (await inInbox())?.unread === 0);
+    const moved = await gus.call<{ from: MessageRef; to: MessageRef }[]>('move', scope, 'archive');
+    expect(new Set(moved.map(({ from }) => from.path))).toEqual(new Set(['INBOX']));
+    await gus.until(async () => (await inInbox()) === undefined);
+    await gus.call(
+      'move',
+      moved.map(({ to }) => to),
+      { account: row.account, path: 'INBOX' },
+    );
+    await gus.until(async () => (await inInbox())?.threads === row.threads);
+  }, 180_000);
+
   test('never loads the IMAP provider’s code, however a member uses it', async () => {
     const ivy = member('ivy', () => worker);
     const device = ivy.device();
@@ -1276,7 +1331,8 @@ describe('A visitor’s Mailroom on the public demo', () => {
   let worker: LocalWorker;
   beforeAll(async () => {
     worker = await mailrooms({
-      DEMO_MAILBOX: '100',
+      // As many as the public demo holds, more than the first look reads of Personal's Inbox.
+      DEMO_MAILBOX: '200',
       DEMO_MAILBOX_AT: AT,
       VISITOR_KEY: 'a-demo-key-that-is-at-least-32-characters',
       REST_AFTER_DAYS: '1',
@@ -1288,14 +1344,16 @@ describe('A visitor’s Mailroom on the public demo', () => {
   test('a new visitor’s first look shows their Inbox, with no wait for the alarm to fill it', async () => {
     const flo = member('flo', () => worker);
     const first = await flo.call<Page>('conversations', { in: 'inbox' }, 0);
-    expect(first.items).toHaveLength(PAGE_SIZE);
+    // More rows than a tall screen shows.
+    expect(first.items.length).toBeGreaterThan(PAGE_SIZE / 2);
     await flo.until(async () =>
       (await flo.call<Account[]>('accounts')).every(({ status }) => status === 'ready'),
     );
-    // The page holds what it will once the Mailroom is full, the Work account's newest mail too.
+    // The page holds what it will once the Mailroom is full, the Work account's newest mail too,
+    // and the older mail that lands later fills it out.
     const full = await flo.call<Page>('conversations', { in: 'inbox' }, 0);
-    const ids = (page: Page) => page.items.map(({ id }) => id).sort();
-    expect(ids(first)).toEqual(ids(full));
+    const listed = new Set(full.items.map(({ id }) => id));
+    expect(first.items.filter(({ id }) => !listed.has(id))).toEqual([]);
     expect(new Set(first.items.map(({ account }) => account)).size).toBe(2);
   }, 30_000);
 

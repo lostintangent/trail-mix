@@ -25,7 +25,7 @@ import {
 import type {
   Account,
   ConversationId,
-  ConversationSummary,
+  ListItem,
   Marks,
   StampColor,
   View,
@@ -91,7 +91,7 @@ export function ListPane({
   /** Names the view's list. Another list starts at its top. */
   listKey: string;
   /** The view's whole list, with places not yet fetched empty. Nothing until its first page arrives. */
-  conversations: Listed<ConversationSummary> | undefined;
+  conversations: Listed<ListItem> | undefined;
   /** Whether newer rows are on their way. */
   isUpdating: boolean;
   /** What a search matched, marked in each row. */

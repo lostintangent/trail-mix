@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { conversationIdOf } from './conversations.ts';
-import { bundleIdOf } from './github.ts';
+import { bundleIdOf } from './bundles.ts';
 import type { Place, View } from './model.ts';
 import { addressOf, paramsOf, placeAt, placeOf, readQuery, writeQuery } from './place.ts';
 

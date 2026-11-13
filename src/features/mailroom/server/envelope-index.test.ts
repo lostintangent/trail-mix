@@ -1,14 +1,21 @@
 import { describe, expect, test } from 'bun:test';
 import {
   applySyncEvent,
+  bundleIdOf,
+  isBundle,
   memoryIndex,
+  type BundleSummary,
+  type ConversationSummary,
   type Envelope,
+  type FolderRef,
   type FolderRole,
+  type ListItem,
   type MemoryIndex,
   type SyncEvent,
 } from '../../mail/core/index.ts';
+import type { Page } from '../client/contract.ts';
 import { envelopeIndex, type EnvelopeIndex } from './envelope-index.ts';
-import { upgrade } from './schema.ts';
+import { RESUMMARIZE, upgrade, versions, type Sql, type SqlValue } from './schema.ts';
 import { testSql } from './test-sql.ts';
 
 const FOLDERS: { account: string; path: string; role?: FolderRole }[] = [
@@ -21,8 +28,8 @@ const FOLDERS: { account: string; path: string; role?: FolderRole }[] = [
   { account: 'work', path: 'INBOX', role: 'inbox' },
 ];
 
-function fresh(own: readonly string[] = []): EnvelopeIndex {
-  const store = envelopeIndex(testSql(), () => own);
+function fresh(own: readonly string[] = [], sql: Sql = testSql()): EnvelopeIndex {
+  const store = envelopeIndex(sql, () => own);
   for (const account of ['personal', 'work']) {
     store.listFolders(
       account,
@@ -36,6 +43,8 @@ function fresh(own: readonly string[] = []): EnvelopeIndex {
   }
   return store;
 }
+
+const FLAGS = { seen: false, flagged: false, answered: false, draft: false };
 
 let uid = 1;
 function envelope(id: string, init: Partial<Envelope> = {}): Envelope {
@@ -60,6 +69,35 @@ function envelope(id: string, init: Partial<Envelope> = {}): Envelope {
 }
 const arrive = (...envelopes: Envelope[]): SyncEvent[] =>
   envelopes.map((e) => ({ type: 'message', envelope: e }));
+
+/**
+ * A Mailroom as the release at `version` left it, holding what `from` holds of the tables that
+ * release had, in the columns it had.
+ */
+function heldAsOf(version: number, from: Sql): Sql {
+  const sql = testSql(version);
+  for (const table of ['accounts', 'folders', 'messages', 'links', 'conversations', 'placements']) {
+    const columns = [
+      ...(table === 'messages' ? ['rowid'] : []),
+      ...sql
+        .all<{ name: string }>(`SELECT name FROM pragma_table_info(?)`, table)
+        .map((c) => c.name),
+    ];
+    for (const row of from.all<Record<string, SqlValue>>(
+      `SELECT ${columns.join(', ')} FROM ${table}`,
+    )) {
+      sql.run(
+        `INSERT INTO ${table} (${columns.join(', ')}) VALUES (${columns.map(() => '?').join(', ')})`,
+        ...columns.map((column) => row[column] ?? null),
+      );
+    }
+  }
+  return sql;
+}
+
+/** A list's conversations, of a list that holds no bundle. */
+const conversationsIn = ({ items }: Page) =>
+  items.filter((item): item is ConversationSummary => !isBundle(item));
 
 /** A seeded run of arrivals, flag changes, removals and resets over threads that share ids. */
 function story(seed: number): SyncEvent[] {
@@ -183,6 +221,23 @@ describe('a conversation’s row', () => {
     });
   });
 
+  test('names each sender as their newest message does, as GitHub names whoever acted last', () => {
+    const store = fresh();
+    const asked = envelope('asked', {
+      from: { name: 'Theo Lindqvist', email: 'notifications@github.com' },
+      date: '2026-11-09T09:00:00.000Z',
+    });
+    const answered = envelope('answered', {
+      references: [asked.messageId],
+      from: { name: 'Luca Bianchi', email: 'Notifications@GitHub.com' },
+      date: '2026-11-09T10:00:00.000Z',
+    });
+    store.fold(arrive(answered, asked));
+    expect(store.page({ in: 'inbox' }).items[0]).toMatchObject({
+      senders: [{ name: 'Luca Bianchi', email: 'Notifications@GitHub.com' }],
+    });
+  });
+
   test('names the avatar of its newest sender other than the member, when that message is verified', () => {
     const store = fresh(['Me@TrailMix.test']);
     const news = envelope('news', {
@@ -224,7 +279,7 @@ describe('a conversation’s row', () => {
       date: '2026-11-09T10:00:00.000Z',
     });
     store.fold(arrive(ask, reply));
-    expect(store.page({ in: 'inbox' }).items[0]?.recipients).toEqual([
+    expect(conversationsIn(store.page({ in: 'inbox' }))[0]?.recipients).toEqual([
       { name: 'Ada Park', email: 'ada@example.com' },
       { name: 'Theo Lindqvist', email: 'theo@example.com' },
     ]);
@@ -249,9 +304,9 @@ describe('a conversation’s row', () => {
         sent('to-nobody', []),
       ),
     );
-    const avatars = store
-      .page({ in: 'folder', folder: { account: 'personal', path: 'Sent' } })
-      .items.map(({ subject, avatar }) => [subject, avatar]);
+    const avatars = conversationsIn(
+      store.page({ in: 'folder', folder: { account: 'personal', path: 'Sent' } }),
+    ).map(({ subject, avatar }) => [subject, avatar]);
     expect(Object.fromEntries(avatars)).toEqual({
       'to-rae': 'rae@example.com',
       'to-self-cc-rae': 'rae@example.com',
@@ -277,21 +332,12 @@ describe('a conversation’s row', () => {
   test('learns its recipients, and its first recipient’s picture, as its Mailroom upgrades', () => {
     // A Mailroom as the release before rows named recipients left it, whose rows the current fold
     // wrote, less what that release didn't write.
-    const sql = testSql(16);
-    sql.run(
+    const current = testSql();
+    current.run(
       `INSERT INTO accounts (id, position, account, connection) VALUES ('personal', 0, ?, '{}')`,
       JSON.stringify({ address: 'Me@TrailMix.test' }),
     );
-    const store = envelopeIndex(sql, () => ['Me@TrailMix.test']);
-    store.listFolders(
-      'personal',
-      FOLDERS.filter((f) => f.account === 'personal').map((f) => ({
-        ...f,
-        name: f.path,
-        unread: 0,
-        total: 0,
-      })),
-    );
+    const store = fresh(['Me@TrailMix.test'], current);
     const ask = envelope('ask', { verified: true, date: '2026-11-09T09:00:00.000Z' });
     const me = { email: 'me@trailmix.test' };
     store.fold(
@@ -339,11 +385,12 @@ describe('a conversation’s row', () => {
         }),
       ),
     );
-    const rows = () =>
+    const rows = (sql: Sql) =>
       sql
         .all<{ id: string; summary: string }>(`SELECT id, summary FROM conversations ORDER BY id`)
         .map(({ id, summary }) => [id, JSON.parse(summary) as Record<string, unknown>] as const);
-    const folded = rows();
+    const folded = rows(current);
+    const sql = heldAsOf(16, current);
     for (const [id, row] of folded) {
       const { recipients: _, ...before } = row;
       const isOwn = (row['senders'] as { email: string }[]).every(
@@ -364,7 +411,7 @@ describe('a conversation’s row', () => {
     ]);
 
     upgrade(sql);
-    expect(rows()).toEqual(folded);
+    expect(rows(sql)).toEqual(folded);
   });
 
   test('reads mail indexed before senders were verified as unverified', () => {
@@ -442,13 +489,262 @@ describe('a list', () => {
     const junk = envelope('junk', { path: 'Junk' });
     store.fold(arrive(project, draft, work, junk));
     const subjects = (view: Parameters<EnvelopeIndex['page']>[0]) =>
-      store.page(view).items.map((item) => item.subject);
+      conversationsIn(store.page(view)).map((item) => item.subject);
     expect(subjects({ in: 'folder', folder: { account: 'personal', path: 'Projects' } })).toEqual([
       'project',
     ]);
     expect(subjects({ in: 'inbox' })).toEqual(['work']);
     expect(subjects({ in: 'drafts' })).toEqual(['draft']);
     expect(subjects({ in: 'flagged' })).toEqual(['work']);
+  });
+});
+
+/** A verified notification of a repository's pull request, as GitHub sends one. */
+function notification(repository: string, number: number, init: Partial<Envelope> = {}): Envelope {
+  const [owner, repo] = repository.split('/') as [string, string];
+  return envelope(`${repository}#${number}`, {
+    messageId: `<${repository}/pull/${number}/c${uid}@github.com>`,
+    references: [`<${repository}/pull/${number}@github.com>`],
+    from: { name: 'Luca Bianchi', email: 'notifications@github.com' },
+    to: [{ email: `${repo}@noreply.github.com` }],
+    cc: [{ name: 'Comment', email: 'comment@noreply.github.com' }],
+    subject: `Re: [${repository}] Change ${number} (PR #${number})`,
+    list: { id: `${repo}.${owner}.github.com` },
+    verified: true,
+    ...init,
+  });
+}
+
+const INBOX: FolderRef = { account: 'personal', path: 'INBOX' };
+const at = (hour: number) => `2026-11-09T${String(hour).padStart(2, '0')}:00:00.000Z`;
+
+/** What a list shows, row by row: a conversation's subject, or a bundle's repository and threads. */
+const shown = (items: readonly ListItem[]) =>
+  items.map((item) => (isBundle(item) ? `${item.repository} ×${item.threads}` : item.subject));
+
+describe('a GitHub bundle', () => {
+  test('lists a repository’s notification threads in an Inbox as one row, placed by the newest', () => {
+    const store = fresh();
+    store.fold(
+      arrive(
+        notification('o/r', 1, { date: at(9) }),
+        notification('o/r', 2, { date: at(11) }),
+        notification('o/r', 2, { date: at(12), flags: { ...FLAGS, seen: true } }),
+        notification('o/s', 3, { date: at(8) }),
+        envelope('lunch', { date: at(10) }),
+      ),
+    );
+    for (const view of [{ in: 'inbox' }, { in: 'folder', folder: INBOX }] as const) {
+      const page = store.page(view);
+      expect(shown(page.items)).toEqual(['o/r ×2', 'lunch', 'o/s ×1']);
+      expect(page.total).toBe(3);
+    }
+    const [bundle] = store.page({ in: 'inbox' }).items as [BundleSummary];
+    expect(bundle).toMatchObject({
+      id: bundleIdOf('personal', 'o/r'),
+      date: at(12),
+      threads: 2,
+      count: 3,
+      unread: 2,
+      newest: { kind: 'pull', number: 2, title: 'Change 2' },
+    });
+  });
+
+  test('pages its conversations newest first, with its row', () => {
+    const store = fresh();
+    store.fold(
+      arrive(...Array.from({ length: 7 }, (_, i) => notification('o/r', i + 1, { date: at(i) }))),
+    );
+    const id = bundleIdOf('personal', 'o/r');
+    const seen: number[] = [];
+    for (let place = 0; place < 7; place += 3) {
+      const page = store.bundle(id, place, 3);
+      expect([page.at, page.total, page.bundle?.threads]).toEqual([place, 7, 7]);
+      seen.push(...page.items.map((item) => item.github?.number ?? 0));
+    }
+    expect(seen).toEqual([7, 6, 5, 4, 3, 2, 1]);
+    expect(store.bundle(bundleIdOf('personal', 'o/none'))).toEqual({ items: [], at: 0, total: 0 });
+  });
+
+  test('is each account’s own, in the unified Inbox and in each account’s Inbox', () => {
+    const store = fresh();
+    store.fold(
+      arrive(
+        notification('o/r', 1, { date: at(9) }),
+        notification('o/r', 2, { account: 'work', date: at(10) }),
+      ),
+    );
+    expect(store.page({ in: 'inbox' }).items.map(({ id }) => id)).toEqual([
+      bundleIdOf('work', 'o/r'),
+      bundleIdOf('personal', 'o/r'),
+    ]);
+    expect(
+      store
+        .page({ in: 'folder', folder: { account: 'work', path: 'INBOX' } })
+        .items.map((i) => i.id),
+    ).toEqual([bundleIdOf('work', 'o/r')]);
+  });
+
+  test('lets a conversation go while mail that isn’t its thread’s is in its Inbox, and takes it back after', () => {
+    const store = fresh(['me@trailmix.test']);
+    const thread = notification('o/r', 1, { date: at(9) });
+    store.fold(arrive(thread, notification('o/r', 2, { date: at(10) })));
+    const aside = envelope('a word about it', {
+      references: [...thread.references, thread.messageId],
+      date: at(11),
+    });
+    // The member's own reply, in Sent, keeps it in the bundle.
+    const replied = envelope('replied', {
+      path: 'Sent',
+      from: { email: 'me@trailmix.test' },
+      references: [...thread.references, thread.messageId],
+      date: at(12),
+    });
+    store.fold(arrive(replied));
+    expect(shown(store.page({ in: 'inbox' }).items)).toEqual(['o/r ×2']);
+    store.fold(arrive(aside));
+    // A row speaks with its latest message, the member's reply.
+    expect(shown(store.page({ in: 'inbox' }).items)).toEqual(['replied', 'o/r ×1']);
+    store.fold([{ type: 'gone', ref: aside }]);
+    expect(shown(store.page({ in: 'inbox' }).items)).toEqual(['o/r ×2']);
+  });
+
+  test('lets a conversation go with its last Inbox message, and goes with its last conversation', () => {
+    const store = fresh();
+    const first = notification('o/r', 1, { date: at(9) });
+    const second = notification('o/r', 2, { date: at(10) });
+    store.fold(arrive(first, second));
+    const archived = (message: Envelope): SyncEvent[] => [
+      { type: 'gone', ref: message },
+      ...arrive({ ...message, path: 'Archive', uid: message.uid + 1000 }),
+    ];
+    store.fold(archived(second));
+    expect(shown(store.page({ in: 'inbox' }).items)).toEqual(['o/r ×1']);
+    expect(store.page({ in: 'inbox' }).items[0]?.date).toBe(at(9));
+    store.fold(archived(first));
+    expect(store.page({ in: 'inbox' })).toEqual({ items: [], at: 0, total: 0 });
+    // Out of the Inbox, each is a conversation of its own again.
+    expect(
+      shown(store.page({ in: 'folder', folder: { account: 'personal', path: 'Archive' } }).items),
+    ).toEqual(['Re: [o/r] Change 2 (PR #2)', 'Re: [o/r] Change 1 (PR #1)']);
+  });
+
+  test('pages through conversations and bundles together exactly once, however the dates tie', () => {
+    const store = fresh();
+    const dates = ['2026-11-01', '2026-11-02', '2026-11-02', '2026-11-03', '2026-11-02'];
+    const date = (i: number) => `${dates[i % 5]}T08:00:00.000Z`;
+    store.fold(
+      arrive(
+        ...Array.from({ length: 17 }, (_, i) => envelope(`page-${i}`, { date: date(i) })),
+        ...Array.from({ length: 6 }, (_, i) =>
+          notification(`o/r${i}`, i + 1, { date: date(i + 2) }),
+        ),
+      ),
+    );
+    for (const view of [{ in: 'inbox' }, { in: 'folder', folder: INBOX }] as const) {
+      const seen: string[] = [];
+      for (let place = 0; place < 23; place += 5) {
+        const page = store.page(view, place, 5);
+        expect([page.at, page.total]).toEqual([place, 23]);
+        seen.push(...page.items.map((item) => `${item.date} ${item.id}`));
+      }
+      expect(seen).toHaveLength(23);
+      expect(new Set(seen).size).toBe(23);
+      expect(seen).toEqual([...seen].sort().reverse());
+    }
+  });
+
+  test('folding the same events again changes nothing', () => {
+    const store = fresh();
+    const events = arrive(
+      notification('o/r', 1, { date: at(9) }),
+      notification('o/r', 2, { date: at(10) }),
+      envelope('lunch', { date: at(11) }),
+    );
+    store.fold(events);
+    const id = bundleIdOf('personal', 'o/r');
+    const before = [store.page({ in: 'inbox' }), store.bundle(id)];
+    store.fold(events);
+    expect([store.page({ in: 'inbox' }), store.bundle(id)]).toEqual(before);
+  });
+
+  test('a change to it reaches its Inbox messages, every message, or each thread’s newest, up to its row’s date', () => {
+    const store = fresh();
+    const one = notification('o/r', 1, { date: at(9) });
+    const two = notification('o/r', 1, { date: at(10) });
+    const three = notification('o/r', 2, { date: at(11) });
+    const later = notification('o/r', 2, { date: at(13) });
+    const archived = notification('o/r', 1, { path: 'Archive', date: at(8) });
+    store.fold(arrive(one, two, three, later, archived));
+    const id = bundleIdOf('personal', 'o/r');
+    const subjects = (reach: 'inbox' | 'every' | 'newest') =>
+      store
+        .bundled(id, at(12), reach)
+        .map(({ path, date }) => `${path} ${date.slice(11, 13)}`)
+        .toSorted();
+    expect(subjects('inbox')).toEqual(['INBOX 09', 'INBOX 10', 'INBOX 11']);
+    expect(subjects('every')).toEqual(['Archive 08', 'INBOX 09', 'INBOX 10', 'INBOX 11']);
+    expect(subjects('newest')).toEqual(['INBOX 10', 'INBOX 11']);
+  });
+});
+
+describe('an upgrade that makes rows again', () => {
+  /** Notifications and a conversation, as the release before bundles held them. */
+  function beforeBundles() {
+    const current = testSql();
+    const now = fresh([], current);
+    now.fold(
+      arrive(
+        ...Array.from({ length: 5 }, (_, i) => notification('o/r', i + 1, { date: at(i + 1) })),
+        envelope('lunch', { date: at(9) }),
+      ),
+    );
+    const sql = heldAsOf(versions.length - 1, current);
+    sql.run(`UPDATE conversations SET summary = json_remove(summary, '$.github')`);
+    upgrade(sql);
+    return { sql, store: envelopeIndex(sql, () => []), now };
+  }
+
+  test('gathers the notifications into bundles a batch at a time, and every row stays listed meanwhile', () => {
+    const { store, now } = beforeBundles();
+    expect(shown(store.page({ in: 'inbox' }).items)).toHaveLength(6);
+    const changed: FolderRef[][] = [];
+    for (let batches = 0; ; batches++) {
+      expect(batches).toBeLessThan(4);
+      const { changed: folders, done } = store.resummarize(2);
+      changed.push(folders);
+      const { items } = store.page({ in: 'inbox' });
+      const listed = items.reduce((sum, item) => sum + (isBundle(item) ? item.threads : 1), 0);
+      expect(listed).toBe(6);
+      if (done) break;
+    }
+    expect(changed.flat()).toContainEqual(INBOX);
+    expect(store.page({ in: 'inbox' })).toEqual(now.page({ in: 'inbox' }));
+    const id = bundleIdOf('personal', 'o/r');
+    expect(store.bundle(id)).toEqual(now.bundle(id));
+  });
+
+  test('picks up from where a wake stopped, and once done, changes nothing more', () => {
+    const { sql, store, now } = beforeBundles();
+    store.resummarize(2);
+    // A new instance after an eviction reads the cursor from storage.
+    const woken = envelopeIndex(sql, () => []);
+    while (!woken.resummarize(2).done);
+    expect(woken.page({ in: 'inbox' })).toEqual(now.page({ in: 'inbox' }));
+    expect(woken.resummarize(2)).toEqual({ changed: [], done: true });
+  });
+
+  test('notes no folder of a row it makes as it was', () => {
+    const sql = testSql();
+    const store = fresh([], sql);
+    store.fold(arrive(envelope('lunch'), envelope('dinner', { path: 'Projects' })));
+    // The statement a later version runs, over rows this release already made.
+    sql.run(RESUMMARIZE);
+    expect(store.resummarize(10)).toEqual({ changed: [], done: true });
+  });
+
+  test('a new Mailroom has no rows to make again', () => {
+    expect(testSql().all(`SELECT * FROM resummarize`)).toEqual([]);
   });
 });
 
@@ -558,7 +854,7 @@ describe('search', () => {
       ['Budget review', 'The budget for next year.', '2026-10-01T08:00:00.000Z', 2],
     ]);
     // The rest of the row is still the conversation's.
-    expect(rows[1]!.senders).toEqual(store.page({ in: 'inbox' }).items[0]!.senders);
+    expect(rows[1]!.senders).toEqual(conversationsIn(store.page({ in: 'inbox' }))[0]!.senders);
   });
 
   test('pages through every matching conversation exactly once, by its newest match', () => {

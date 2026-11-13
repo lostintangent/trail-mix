@@ -10,7 +10,8 @@ import { mailIsIn } from '../mailIsIn.ts';
 /**
  * The workbench's budgets, as AGENTS.md sets them: a cold load to the first Inbox rows, the
  * JavaScript that load needs, scrolling a 50,000-message folder, moving through it by key, and
- * archiving the conversation open in the reader, and search showing its matches as it is typed.
+ * through a bundle's threads, archiving the conversation open in the reader, and search showing its
+ * matches as it is typed.
  * Each runs on the built app with a 50,000-message demo mailbox, at the CPU of the phone in
  * `phone.ts`.
  */
@@ -122,27 +123,54 @@ export const workbench: BenchArea = {
       await firstRows(desk);
       const moves: number[] = [];
       const keySlowest: Slow[] = [];
-      let latency: InputLatency | undefined;
       for (let round = 1; round <= ROUNDS; round++) {
         if (round > 1) {
           await desk.reload();
           await firstRows(desk);
         }
         const timing = await inputLatency(desk);
-        latency = timing;
         // The moves start from the first conversation, open, read and settled, so the read mark that
         // opening it sends lands before the moves are timed.
         await desk.getByRole('option').first().click();
         await deskWatch.steady();
+        await desk.locator('[role="listbox"]').focus();
         const keys = await deskWatch.during(`Moving by key, round ${round}`, () =>
-          keyMoves(desk, timing),
+          keyMoves(desk, timing, DOWN, REPEATS),
         );
         moves.push(...keys.latencies);
         keySlowest.push(...(await timing.slowest('keydown', keys.timestamps)));
       }
       const keyMove = percentile(moves, 0.95);
-      const archive = percentile(await archives(desk, deskWatch, latency!), 0.95);
-      const archiveSlowest = await latency!.slowestOf('click');
+
+      // J steps through a bundle's threads from its first, past the page the bundle opened with.
+      const steps: number[] = [];
+      const threadSlowest: Slow[] = [];
+      for (let round = 1; round <= ROUNDS; round++) {
+        // From the Inbox's top, since a reload would keep the place the last round left.
+        await desk.goto(preview.url);
+        await firstRows(desk);
+        const timing = await inputLatency(desk);
+        await openFirstThread(desk);
+        await deskWatch.steady();
+        const keys = await deskWatch.during(`Moving through a bundle by key, round ${round}`, () =>
+          keyMoves(desk, timing, J, THREAD_REPEATS),
+        );
+        const place = await desk.getByRole('toolbar', { name: 'Conversation' }).textContent();
+        if (!place?.includes(`${THREAD_REPEATS + 1} of `)) {
+          throw new Error(
+            `Holding J ${THREAD_REPEATS} times from the first thread reached ${place}.`,
+          );
+        }
+        steps.push(...keys.latencies);
+        threadSlowest.push(...(await timing.slowest('keydown', keys.timestamps)));
+      }
+      const threadMove = percentile(steps, 0.95);
+
+      await desk.goto(preview.url);
+      await firstRows(desk);
+      const latency = await inputLatency(desk);
+      const archive = percentile(await archives(desk, deskWatch, latency), 0.95);
+      const archiveSlowest = await latency.slowestOf('click');
       await desktop.close();
 
       return [
@@ -155,6 +183,13 @@ export const workbench: BenchArea = {
           'ms',
         ),
         measured('Moving through the list by key, p95', keyMove, BUDGET.keyMove, 'ms', keySlowest),
+        measured(
+          "Moving through a bundle's threads by key, p95",
+          threadMove,
+          BUDGET.keyMove,
+          'ms',
+          threadSlowest,
+        ),
         measured('Archiving, p95', archive, BUDGET.archive, 'ms', archiveSlowest),
         measured(
           'Search showing matches as it is typed, p95',
@@ -297,17 +332,41 @@ const KEY_REPEAT_MS = 33;
 const REPEATS = 40;
 
 /**
- * The latency of each Down key while one is held, 40 repeats at a keyboard's pace, from each key's
+ * How many times J repeats through a bundle's threads: past the 50 its first page holds, so the next
+ * page has to be there before J reaches it.
+ */
+const THREAD_REPEATS = 80;
+
+/** The keys held: Down in the list, and J, which steps through the threads of a bundle. */
+type Key = { key: string; code: string; windowsVirtualKeyCode: number };
+const DOWN: Key = { key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 };
+const J: Key = { key: 'j', code: 'KeyJ', windowsVirtualKeyCode: 74 };
+
+/** Opens the demo's GitHub bundle and its newest thread, and waits until the reader shows it. */
+async function openFirstThread(page: Page): Promise<void> {
+  await page.getByRole('option').filter({ hasText: 'toy-box' }).first().click();
+  const title = page.getByRole('region', { name: 'Reader' }).locator('article button').first();
+  // The sheet's title carries the thread's number, which the reader's heading leaves out.
+  const named = (await title.textContent())!.replace(/\s*#\d+$/, '');
+  await title.click();
+  await page.getByRole('toolbar', { name: 'Conversation' }).getByText('1 of ').waitFor();
+  await page.getByRole('heading', { name: named, level: 1 }).waitFor();
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+}
+
+/**
+ * The latency of each key while one is held, repeating at a keyboard's pace, from each key's
  * timestamp to the next frame painted. Each key carries the timestamp a keyboard would give it, so
  * a slow frame shows as latency here, and never as a pause the reader would take for a rest. It
- * fails unless the keys reached the list a repeat apart and the reader opened only the first and
+ * fails unless the keys reached the page a repeat apart and the reader opened only the first and
  * the last conversation, since anything else measured something other than a held key.
  */
 async function keyMoves(
   page: Page,
   latency: InputLatency,
+  key: Key,
+  repeats: number,
 ): Promise<{ latencies: number[]; timestamps: number[] }> {
-  await page.locator('[role="listbox"]').focus();
   await page.evaluate(() => {
     const seen = { keys: [] as number[], opened: [] as string[] };
     (window as unknown as { seen: typeof seen }).seen = seen;
@@ -319,10 +378,9 @@ async function keyMoves(
     }).observe(reader, { subtree: true, childList: true, characterData: true });
   });
   const keys = await page.context().newCDPSession(page);
-  const key = { key: 'ArrowDown', code: 'ArrowDown', windowsVirtualKeyCode: 40 };
   const start = Date.now() / 1000;
   const sent: Promise<unknown>[] = [];
-  for (let repeat = 0; repeat < REPEATS; repeat++) {
+  for (let repeat = 0; repeat < repeats; repeat++) {
     // Each key goes when its timestamp says, by the clock, so the sending never drifts behind them.
     const timestamp = start + (repeat * KEY_REPEAT_MS) / 1000;
     await new Promise((done) => setTimeout(done, Math.max(0, timestamp * 1000 - Date.now())));
@@ -340,8 +398,8 @@ async function keyMoves(
   );
   const gaps = seen.keys.slice(1).map((at, index) => at - seen.keys[index]!);
   const gap = percentile(gaps, 0.5);
-  if (seen.keys.length !== REPEATS || Math.abs(gap - KEY_REPEAT_MS) > 5) {
-    throw new Error(`The list saw ${seen.keys.length} keys, a median ${gap.toFixed(1)} ms apart.`);
+  if (seen.keys.length !== repeats || Math.abs(gap - KEY_REPEAT_MS) > 5) {
+    throw new Error(`The page saw ${seen.keys.length} keys, a median ${gap.toFixed(1)} ms apart.`);
   }
   // Before the keys, the first conversation was open. The first key rests and opens the next, and
   // the last opens once the keys stop. A conversation between them means a key was taken for a rest.
@@ -355,13 +413,20 @@ async function keyMoves(
 /**
  * The latency of each click on Archive at the head of the list, from the click to the next frame
  * painted. Each archive opens the next conversation, which is archived next once the reader shows it
- * and the last one's hints and read mark have landed.
+ * and the last one's hints and read mark have landed. They start below the GitHub bundle, so each
+ * archives one conversation and never a bundle's thousands.
  */
 async function archives(page: Page, watching: Watch, latency: InputLatency): Promise<number[]> {
   const archive = page
     .getByRole('toolbar', { name: 'Conversation' })
     .getByRole('button', { name: 'Archive' });
-  await page.getByRole('option').nth(2).click();
+  // Archiving starts below the demo's GitHub bundles, so each press archives one conversation.
+  const rows = await page.getByRole('option').allTextContents();
+  const bundles = rows.findLastIndex((row) => row.includes('trailmix-demo/'));
+  await page
+    .getByRole('option')
+    .nth(Math.max(2, bundles + 1))
+    .click();
   const times: number[] = [];
   for (let press = 0; press < ARCHIVES; press++) {
     await archive.waitFor();

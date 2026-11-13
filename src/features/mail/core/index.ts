@@ -9,11 +9,12 @@ export {
   bundleIdOf,
   bundlePartsOf,
   bundleSummaryOf,
+  isAsking,
   isBundle,
   repositoryAddressOf,
   threadAddressOf,
-  threadOf,
-} from './github.ts';
+} from './bundles.ts';
+export { isReasonOf, threadOf } from './github.ts';
 export {
   addressOf,
   paramsOf,

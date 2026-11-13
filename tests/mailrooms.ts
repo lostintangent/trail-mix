@@ -1,14 +1,16 @@
 // The Mailroom on the local Workers runtime, as tests reach it: a worker with its own storage, and
 // each member's Mailroom called as a browser calls it.
 import { join } from 'node:path';
-import type {
-  ConversationSummary,
-  Folder,
-  Hint,
-  Message,
-  View,
+import {
+  isBundle,
+  type BundleId,
+  type ConversationSummary,
+  type Folder,
+  type Hint,
+  type Message,
+  type View,
 } from '../src/features/mail/core/index.ts';
-import { sendable, type Page } from '../src/features/mailroom/client/contract.ts';
+import { sendable, type BundlePage, type Page } from '../src/features/mailroom/client/contract.ts';
 import { caFile } from './mail-server/server.ts';
 import { startWorker, type LocalWorker } from './workerd.ts';
 
@@ -49,11 +51,23 @@ export function member(name: string, worker: () => LocalWorker) {
     return result.value as T;
   };
 
-  /** Every row of a view, following its pages. */
+  /** Every conversation of a view, following its pages, with a bundle's in its place. */
   async function page(view: View): Promise<ConversationSummary[]> {
     const rows: ConversationSummary[] = [];
+    for (let at = 0; ;) {
+      const page: Page = await call<Page>('conversations', view, at);
+      for (const item of page.items)
+        rows.push(...(isBundle(item) ? await bundled(item.id) : [item]));
+      at += page.items.length;
+      if (page.items.length === 0 || at >= page.total) return rows;
+    }
+  }
+
+  /** Every conversation of a bundle, following its pages. */
+  async function bundled(id: BundleId): Promise<ConversationSummary[]> {
+    const rows: ConversationSummary[] = [];
     for (;;) {
-      const page: Page = await call<Page>('conversations', view, rows.length);
+      const page = await call<BundlePage>('bundle', id, rows.length);
       rows.push(...page.items);
       if (page.items.length === 0 || rows.length >= page.total) return rows;
     }

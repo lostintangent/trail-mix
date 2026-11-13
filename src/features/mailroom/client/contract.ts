@@ -3,12 +3,15 @@ import type {
   AccountId,
   Address,
   Body,
+  BundleId,
+  BundleSummary,
   ConversationId,
   ConversationSummary,
   Flags,
   Folder,
   FolderRef,
   FolderRole,
+  ListItem,
   Message,
   MessageRef,
   Outgoing,
@@ -34,6 +37,8 @@ export interface Queries {
    * so any stretch of it can be asked for. A search's list holds the conversations that match.
    */
   conversations(view: View, at?: number): Promise<Page>;
+  /** A stretch of a bundle's conversations, as `conversations` gives a view's. */
+  bundle(id: BundleId, at?: number): Promise<BundlePage>;
   conversation(id: ConversationId): Promise<Message[]>;
   body(ref: MessageRef): Promise<Body>;
   outbox(): Promise<Outgoing[]>;
@@ -81,10 +86,18 @@ export interface Commands {
   unsubscribe(ref: MessageRef): Promise<Unsubscribed>;
   /** This member's accounts, index, cache and credentials. */
   eraseEverything(): Promise<void>;
-  setFlags(refs: MessageRef[], change: Partial<Flags>): Promise<void>;
-  /** Archive and delete are moves to a role. Undo moves each `to` back to its `from` folder. */
+  /**
+   * Returns the messages it changed: those given, or of a bundle, those whose flags it changed. Of
+   * a bundle, marking read and unflagging take every message, and marking unread and flagging take
+   * each conversation's newest.
+   */
+  setFlags(messages: MessageRef[] | BundleScope, change: Partial<Flags>): Promise<MessageRef[]>;
+  /**
+   * Archive and delete are moves to a role, and of a bundle, they move its conversations' Inbox
+   * messages. Undo moves each `to` back to its `from` folder.
+   */
   move(
-    refs: MessageRef[],
+    messages: MessageRef[] | BundleScope,
     to: FolderRef | FolderRole,
   ): Promise<{ from: MessageRef; to: MessageRef }[]>;
   saveDraft(draft: DraftInput, replaces?: MessageRef): Promise<MessageRef>;
@@ -124,10 +137,19 @@ export interface Commands {
 export type Unsubscribed = { taken: true } | { taken: false; reason: string };
 
 /**
- * One page of a list, newest first: its conversations, the place of its first, with 0 the newest,
- * and how many conversations the whole list holds.
+ * One page of a list, newest first: its rows, the place of its first, with 0 the newest, and how
+ * many rows the whole list holds. A row is a conversation, or in an Inbox view, a bundle.
  */
-export type Page = { items: ConversationSummary[]; at: number; total: number };
+export type Page<Item extends ListItem = ListItem> = { items: Item[]; at: number; total: number };
+
+/**
+ * A bundle's messages as its row showed them: those dated no later than its row's date, so mail
+ * that came after the member looked is left alone.
+ */
+export type BundleScope = { bundle: BundleId; through: string };
+
+/** One page of a bundle's conversations, with the bundle's row while it holds any. */
+export type BundlePage = Page<ConversationSummary> & { bundle?: BundleSummary };
 
 /** How many conversations a page holds, but the list's last. A browser asks for pages from places this far apart. */
 export const PAGE_SIZE = 50;
@@ -277,6 +299,7 @@ export const QUERIES = [
   'accounts',
   'folders',
   'conversations',
+  'bundle',
   'conversation',
   'body',
   'outbox',

@@ -16,19 +16,25 @@ import {
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { Toasts } from '../../../shared/toasts.tsx';
 import {
+  bundlePartsOf,
+  isBundle,
   marksOf,
+  repositoryAddressOf,
   sameRef,
+  threadAddressOf,
   type Account,
   type AccountId,
+  type BundleId,
   type ConversationId,
-  type ConversationSummary,
   type Folder,
+  type ListItem,
   type Message,
   type MessageRef,
   type Place,
   type View,
 } from '../../mail/core/index.ts';
 import {
+  bundleQuery,
   conversationQuery,
   conversationsQuery,
   MATCHES_LISTED,
@@ -51,11 +57,15 @@ import { ListPane } from './ListPane.tsx';
 import { PanelEdge } from './PanelEdge.tsx';
 import { PANELS } from './panels.ts';
 import { useReadMark } from './useReadMark.ts';
-import { ReaderPane, type Acting, type ActionsPlace } from './ReaderPane.tsx';
+import { ReaderPane, type Acting, type ActionsPlace, type ReaderSheet } from './ReaderPane.tsx';
 import { ReaderPlace } from './ReaderPlace.tsx';
 import {
   askAhead,
+  BundleReader,
+  BundleSkeleton,
+  ConversationUnopened,
   lightPaperCommand,
+  preloadBundleReader,
   setLightPaper,
   sourceCommand,
   SourceDialog,
@@ -63,6 +73,7 @@ import {
 } from '../../reader/index.ts';
 import {
   ConversationListSkeleton,
+  gitHubCommand,
   isSameSelection,
   NOTHING_SELECTED,
   rowChange,
@@ -72,6 +83,7 @@ import {
   select,
   TriageActions,
   triageCommands,
+  useBundle,
   useTriage,
   type Action,
   placesOf,
@@ -106,6 +118,12 @@ import { newestOf, useComposing } from './useComposing.ts';
 
 /** No commands from outside the workbench. */
 const noCommands = (): readonly Command[] => [];
+
+/**
+ * How many threads on each side of the one open are fetched, so a held J or K finds the next page
+ * there before it reaches it.
+ */
+const THREADS_AHEAD = 10;
 
 import { useReach, type Reach } from '../../offline/index.ts';
 import {
@@ -209,7 +227,7 @@ export function Workbench({
   folders: readonly Folder[];
   counts: ViewCounts;
   /** The view's whole list, with places not yet fetched empty. Nothing until its first page arrives. */
-  conversations: Listed<ConversationSummary> | undefined;
+  conversations: Listed<ListItem> | undefined;
   /** Whether the view's rows are on their way. */
   isFetching: boolean;
   /** Says which rows the list shows, so the pages they lie on are fetched. */
@@ -223,8 +241,8 @@ export function Workbench({
 }) {
   const queryClient = useQueryClient();
   const { view } = place;
-  // The conversation the address opens is the one selected, from the first render.
-  const [selection, setSelection] = useState<Selection>(() => openOnly(place.open));
+  // The conversation or bundle the address opens is the one selected, from the first render.
+  const [selection, setSelection] = useState<Selection>(() => openOnly(place.bundle ?? place.open));
   const [isPicking, setPicking] = useState(false);
   // Picking ends with the last conversation picked.
   useEffect(() => {
@@ -233,6 +251,32 @@ export function Workbench({
   // One conversation selected is the one open in the reader. Several wait for an action together.
   const selected = selection.ids.length === 1 ? selection.ids[0] : undefined;
   const isMany = selection.ids.length > 1;
+  // A bundle selected lies open in the reader, and one of its threads may lie open in its place,
+  // until the selection moves on from the bundle.
+  const bundleOpen = selected !== undefined && bundlePartsOf(selected) ? selected : undefined;
+  const [threadIn, setThreadIn] = useState(() =>
+    place.bundle !== undefined && place.open !== undefined
+      ? { bundle: place.bundle, open: place.open }
+      : undefined,
+  );
+  if (threadIn !== undefined && threadIn.bundle !== bundleOpen) setThreadIn(undefined);
+  const thread = threadIn?.bundle === bundleOpen ? threadIn?.open : undefined;
+  // The conversation the reader shows: the one selected, or the thread open in the bundle selected.
+  const opened = bundleOpen === undefined ? selected : thread;
+  const inBundle = useBundle(bundleOpen);
+  const threadAt = thread === undefined ? -1 : (inBundle.places.get(thread) ?? -1);
+  const threadRow = inBundle.threads?.[threadAt];
+  // While a thread is open, the threads beside it are fetched at once, so J and K step on past its
+  // page without waiting.
+  const showThreads = inBundle.show;
+  useEffect(() => {
+    if (threadAt >= 0) {
+      showThreads(threadAt - THREADS_AHEAD, threadAt + THREADS_AHEAD, threadAt, true);
+    }
+  }, [showThreads, threadAt]);
+  // The thread last open in the bundle, which the bundle shows in sight when the member returns.
+  const [cameFrom, setCameFrom] = useState(threadIn);
+  if (thread !== undefined && cameFrom?.open !== thread) setCameFrom(threadIn);
   const stamps = useMemo(() => new Map(accounts.map(({ id, stamp }) => [id, stamp])), [accounts]);
   // A row's avatar is its newest sender other than the member, by any of their addresses.
   const selves = useMemo(
@@ -242,7 +286,9 @@ export function Workbench({
   // Stamps mark rows only in a list that mixes accounts.
   const mixesAccounts = view.in !== 'folder' && accounts.length > 1;
   // On a phone, an address with a conversation opens on the reader, with no slide to it.
-  const [phonePane, setPhonePane] = useState<Pane>(() => (place.open ? 'reader' : 'list'));
+  const [phonePane, setPhonePane] = useState<Pane>(() =>
+    place.open !== undefined || place.bundle !== undefined ? 'reader' : 'list',
+  );
   const [sidebar, setSidebar] = usePanel(PANELS.sidebar);
   const [list, setList] = usePanel(PANELS.list);
   const [isResizing, setIsResizing] = useState(false);
@@ -250,7 +296,9 @@ export function Workbench({
   // The view that opens at its newest conversation once its list is known, as one does that arrives
   // naming none.
   const [opening, setOpening] = useState(() =>
-    place.open === undefined && opensNewest(view, isPhone) ? view : undefined,
+    place.open === undefined && place.bundle === undefined && opensNewest(view, isPhone)
+      ? view
+      : undefined,
   );
   const sidebarId = useId();
   const listId = useId();
@@ -266,16 +314,25 @@ export function Workbench({
   const { move, onViewChange, chooseView, written, pushed } = useAddress({
     place,
     onPlaceChange,
-    selected,
+    bundle: bundleOpen,
+    open: opened,
     isMany,
-    // The conversation a place names is the one selected, and a view that names none opens at its
-    // newest.
-    arrive: ({ view, open }) => {
-      setSelection(openOnly(open));
-      setPhonePane(open ? 'reader' : 'list');
-      setOpening(open === undefined && opensNewest(view, isPhone) ? view : undefined);
+    // The conversation or bundle a place names is the one selected, with the thread it names open
+    // in the bundle, and a view that names none opens at its newest.
+    arrive: ({ view, bundle, open }) => {
+      setSelection(openOnly(bundle ?? open));
+      setThreadIn(bundle !== undefined && open !== undefined ? { bundle, open } : undefined);
+      setPhonePane(bundle !== undefined || open !== undefined ? 'reader' : 'list');
+      setOpening(
+        bundle === undefined && open === undefined && opensNewest(view, isPhone) ? view : undefined,
+      );
     },
+    // A thread gone from its bundle leaves the bundle open.
     close: () => {
+      if (bundleOpen !== undefined) {
+        setThreadIn(undefined);
+        return;
+      }
       setSelection(NOTHING_SELECTED);
       setPhonePane('list');
     },
@@ -291,7 +348,7 @@ export function Workbench({
   // Drafts on their way can't be written on until their send is undone. Each lies at the end of its
   // conversation as a reply on its way instead, until the server's copy takes its place.
   const { data: outgoing } = useQuery(outboxQuery);
-  const composing = useComposing(selected, leaving.drafts);
+  const composing = useComposing(opened, leaving.drafts);
   const { compose } = composing;
   // A new message is from the account the view holds, or else the first.
   const writeFrom = scope ?? accounts[0];
@@ -311,7 +368,7 @@ export function Workbench({
   // The conversation leaving the list, and where it was, until the selection has moved on from it.
   // Meanwhile it stays picked, and the moves either side of it and the reader's place count from
   // where it was, so the commands and what shows them don't change in the frame that shows it gone.
-  const [vacating, setVacating] = useState<{ row: ConversationSummary; at: number }>();
+  const [vacating, setVacating] = useState<{ row: ListItem; at: number }>();
   // Where each fetched conversation lies, so finding one never reads the whole list.
   const places = useMemo(
     () => (conversations ? placesOf(conversations) : NO_PLACES),
@@ -362,10 +419,25 @@ export function Workbench({
       setPhonePane(before.phonePane);
     };
   }, []);
-  const triageShown = (action: Action, id: ConversationId) => {
+  const triageShown = (action: Action, id: ConversationId): void => {
+    if (bundleOpen !== undefined && id !== bundleOpen) return triageThread(action, id, bundleOpen);
     if (rowChange(action, view) !== 'gone') return triage(action, [id]);
     const onRefused = backIfRefused(giveWay(id));
     triage(action, [id], { onRefused });
+  };
+  /**
+   * A thread of the bundle open, triaged in the bundle's list. One that leaves it gives way to the
+   * thread below it, or above it at the end, and on a phone to the bundle. The bundle's last thread
+   * takes the bundle with it, as triaging its row does.
+   */
+  const triageThread = (action: Action, id: ConversationId, bundle: BundleId) => {
+    if (rowChange(action, view) !== 'gone') return triage(action, [id], { in: bundle });
+    const threads = inBundle.threads ?? [];
+    if (threads.length <= 1) return triageShown(action, bundle);
+    const at = inBundle.places.get(id) ?? -1;
+    const next = threads[at + 1] ?? threads[at - 1];
+    setThreadIn(next && !isPhone ? { bundle, open: next.id } : undefined);
+    triage(action, [id], { in: bundle, onRefused: () => setThreadIn({ bundle, open: id }) });
   };
   /**
    * Where a conversation sits in the list, or, while it leaves, where it was: the row that took its
@@ -392,11 +464,19 @@ export function Workbench({
   // unread, since the mark couldn't land and nobody asked for it.
   const reach = useReach();
   const markRead = (id: ConversationId) => {
-    if (reach === 'online' && rowOf(id)?.unread) {
-      triage({ do: 'read' }, [id], { quietly: true });
+    if (reach !== 'online') return;
+    const row = rowOf(id);
+    if (row !== undefined) {
+      if (!isBundle(row) && row.unread) triage({ do: 'read' }, [id], { quietly: true });
+      return;
+    }
+    // A thread is read in its bundle's list.
+    const inThreads = inBundle.threads?.[inBundle.places.get(id) ?? -1];
+    if (bundleOpen !== undefined && inThreads?.unread) {
+      triage({ do: 'read' }, [id], { quietly: true, in: bundleOpen });
     }
   };
-  const readMark = useReadMark({ selected, markRead });
+  const readMark = useReadMark({ selected: opened, markRead });
   // The reader's actions stay the same while the selection moves, so a held key doesn't redraw them.
   const latestTriageShown = useRef(triageShown);
   useLayoutEffect(() => {
@@ -436,12 +516,17 @@ export function Workbench({
     },
     [folders, replyIn, isPhone],
   );
-  // The reader's place renders again only as the list or the conversation shown changes.
+  // The reader's place renders again only as the list or the conversation shown changes. A thread's
+  // place is in its bundle.
+  const threadsCount = inBundle.bundle?.threads ?? 0;
   const readerPlace = useCallback(
-    (shown: ConversationId) => (
-      <ReaderPlace at={placeOf(shown).at + 1} of={conversations?.length ?? 0} />
-    ),
-    [placeOf, conversations],
+    (shown: ConversationId) =>
+      shown === thread ? (
+        <ReaderPlace at={threadAt + 1} of={threadsCount} />
+      ) : (
+        <ReaderPlace at={placeOf(shown).at + 1} of={conversations?.length ?? 0} />
+      ),
+    [placeOf, conversations, thread, threadAt, threadsCount],
   );
   // A message's source shows over everything, whichever message it is.
   const [source, setSource] = useState<Message>();
@@ -485,7 +570,8 @@ export function Workbench({
     setSelection((current) =>
       current.ids.length > 0 ? current : { ids: [newest.id], anchor: newest.id },
     );
-    openedByView(newest.id);
+    // Opening a bundle reads nothing.
+    if (!isBundle(newest)) openedByView(newest.id);
   }, [opening, view, selected, compose, page, conversations, openedByView]);
   // Folders are named in place in the sidebar, so naming one brings it into view.
   const revealSidebar = useCallback(() => {
@@ -525,9 +611,15 @@ export function Workbench({
   useLayoutEffect(() => {
     latestPlace.current = place;
   });
+  // On a phone, opening a conversation pushes the address, so Back slides from it to its list.
+  const isPhoneNow = useRef(isPhone);
+  useLayoutEffect(() => {
+    isPhoneNow.current = isPhone;
+  });
   const backToList = useCallback(() => {
-    const { view, open } = latestPlace.current;
-    if (open !== undefined && pushed.current === open) {
+    const { view, bundle, open } = latestPlace.current;
+    const at = open ?? bundle;
+    if (at !== undefined && pushed.current === at) {
       pushed.current = undefined;
       onBack();
       return;
@@ -535,8 +627,33 @@ export function Workbench({
     written.current = undefined;
     setSelection(NOTHING_SELECTED);
     setPhonePane('list');
-    if (open !== undefined) move({ view }, 'replace');
+    if (at !== undefined) move({ view }, 'replace');
   }, [onBack, move, pushed, written]);
+  // A thread opens in its bundle's place in the reader. On a phone that pushes the address, so Back
+  // returns to the bundle, and a step to the next thread takes the place of the one open. Otherwise
+  // the selection writes it, as a conversation's does.
+  const openThread = useCallback(
+    (id: ConversationId) => {
+      if (bundleOpen === undefined) return;
+      setThreadIn({ bundle: bundleOpen, open: id });
+      if (!isPhoneNow.current) return;
+      const { view, open } = latestPlace.current;
+      written.current = id;
+      if (open === undefined || pushed.current === open) pushed.current = id;
+      move({ view, bundle: bundleOpen, open: id }, open === undefined ? 'push' : 'replace');
+    },
+    [bundleOpen, move, pushed, written],
+  );
+  const closeThread = useCallback(() => {
+    const { bundle, open } = latestPlace.current;
+    if (open !== undefined && pushed.current === open) {
+      // The bundle was pushed too when the list opened it, so Back from it returns to the list.
+      pushed.current = bundle;
+      onBack();
+      return;
+    }
+    setThreadIn(undefined);
+  }, [onBack, pushed]);
   // A demo visitor's Mailroom keeps its accounts, erases itself, and says so.
   const isVisitor = useQuery(thisDeviceQuery).data?.visitor === true;
   const accountsCommands = useMemo(
@@ -578,28 +695,25 @@ export function Workbench({
     if (view.in === 'folder' && view.folder.account === account.id) onViewChange({ in: 'inbox' });
   };
   // The list's order, read only by a pick that adds to the selection or extends it.
-  const order = useRef<Listed<ConversationSummary>>([]);
+  const order = useRef<Listed<ListItem>>([]);
   useLayoutEffect(() => {
     order.current = conversations ?? [];
   }, [conversations]);
-  // On a phone, opening a conversation pushes the address, so Back slides from it to its list.
-  const isPhoneNow = useRef(isPhone);
-  useLayoutEffect(() => {
-    isPhoneNow.current = isPhone;
-  });
   const pick = useCallback(
     (id: ConversationId, by: SelectBy) => {
       setPage(undefined);
       setOpening(undefined);
+      // Picking a bundle's row again shows the bundle, not the thread open in it.
+      setThreadIn(undefined);
       setSelection((current) => select(current, id, by, by === 'only' ? [] : idsIn(order.current)));
       if (by !== 'only') return;
       setPhonePane('reader');
       openedByMember(id);
-      const { view, open } = latestPlace.current;
-      if (isPhoneNow.current && open !== id) {
+      const { view, bundle, open } = latestPlace.current;
+      if (isPhoneNow.current && (bundle ?? open) !== id) {
         written.current = id;
         pushed.current = id;
-        move({ view, open: id }, 'push');
+        move(bundlePartsOf(id) ? { view, bundle: id } : { view, open: id }, 'push');
       }
     },
     [move, pushed, written, openedByMember],
@@ -625,28 +739,41 @@ export function Workbench({
     [triage, backIfRefused],
   );
   // A conversation about to be opened is asked for before the click lands.
+  // A bundle's threads are asked for, and the reader that shows them loaded.
   const ahead = useCallback(
-    (id: ConversationId, isPressed: boolean) => askAhead(queryClient, id, { body: isPressed }),
+    (id: ConversationId, isPressed: boolean) => {
+      if (bundlePartsOf(id) === undefined) return askAhead(queryClient, id, { body: isPressed });
+      void queryClient.prefetchQuery(bundleQuery(id));
+      void preloadBundleReader();
+    },
     [queryClient],
   );
   // The list's row shows at once while the rest of the conversation is on its way, and stays
-  // while the conversation leaves the list.
+  // while the conversation leaves the list. A thread's is its bundle's.
   const shownRowOf = useCallback(
-    (id: ConversationId) => rowOf(id) ?? (vacating?.row.id === id ? vacating.row : undefined),
-    [rowOf, vacating],
+    (id: ConversationId) => {
+      const row =
+        rowOf(id) ??
+        (vacating?.row.id === id ? vacating.row : undefined) ??
+        inBundle.threads?.[inBundle.places.get(id) ?? -1];
+      return row && !isBundle(row) ? row : undefined;
+    },
+    [rowOf, vacating, inBundle.threads, inBundle.places],
   );
   const stopPicking = () => {
     setPicking(false);
     setSelection(NOTHING_SELECTED);
   };
+  // A thread open stands for the selection, so what acts on it acts on the thread.
   const pickedRows = useMemo(() => {
+    if (threadRow !== undefined) return [threadRow];
     const rows = selection.ids
       .flatMap((id) => rowOf(id) ?? [])
       .toSorted((a, b) => (places.get(a.id) ?? 0) - (places.get(b.id) ?? 0));
     return vacating && selection.ids.includes(vacating.row.id) && !rows.includes(vacating.row)
       ? [...rows, vacating.row]
       : rows;
-  }, [rowOf, places, selection.ids, vacating]);
+  }, [rowOf, places, selection.ids, vacating, threadRow]);
   // What's selected, as commands: the selection's own while several are picked, else the open one's.
   const selectedCommands =
     pickedRows.length === 0
@@ -662,7 +789,7 @@ export function Workbench({
               ? undefined
               : isMany || isPicking || selected === undefined
                 ? triageSelection(action)
-                : triageShown(action, selected),
+                : triageShown(action, thread ?? selected),
         });
   const selectionActions = (place: 'bar' | 'island') => (
     <TriageActions commands={selectedCommands} isCompact={place === 'island'} />
@@ -674,27 +801,27 @@ export function Workbench({
   const send = useSend();
   const sender = useRef<Sender['current']>(undefined);
   const [isSendable, setSendable] = useState(false);
-  const shownNow = useRef(selected);
+  const shownNow = useRef(opened);
   useLayoutEffect(() => {
-    shownNow.current = selected;
+    shownNow.current = opened;
   });
   // A reply is on its way at the end of its conversation in the frame its composer closes, as is a
   // draft opened in its own, and leaves it again if the Mailroom refuses it or Undo takes it back. A
   // new message has no conversation until the Outbox names one.
   const sendWritten = (draft: MessageRef, at: string | undefined, writing: Writing) => {
-    const from = { conversation: selected, isDocked: compose !== undefined && isDocked(compose) };
+    const from = { conversation: opened, isDocked: compose !== undefined && isDocked(compose) };
     // A draft opened from its conversation gives way to the next conversation, as one archived
     // does, when its send leaves nothing to show: a draft alone there, or a Drafts list the
     // conversation leaves.
     // The draft sent is the one opened, under whatever ref its last save gave it.
-    if (compose?.as === 'draft' && compose.draft.conversation === selected) {
-      const opened = compose.draft;
+    if (compose?.as === 'draft' && compose.draft.conversation === opened) {
+      const edited = compose.draft;
       const others = compose.conversation.filter(
-        (message) => message.flags.draft && !sameRef(message, opened),
+        (message) => message.flags.draft && !sameRef(message, edited),
       );
       const isLeft =
         !from.isDocked || (isDraftsView(view, folders) && leavesDrafts(leaving.all, others));
-      if (isLeft) giveWay(selected);
+      if (isLeft) giveWay(edited.conversation);
     }
     const pressedAt = Date.now();
     leaving.pressed(draft, {
@@ -733,11 +860,16 @@ export function Workbench({
     const row = conversations?.[at];
     return row && (() => pick(row.id, 'only'));
   };
+  // While a thread is open, the moves step through its bundle's threads instead.
+  const stepToThread = (at: number) => {
+    const row = inBundle.threads?.[at];
+    return row && (() => openThread(row.id));
+  };
   // In the dark theme, light paper for the conversation open, which a search may have left the list.
   // It reads the conversation as the reader fetched it, and never asks itself, so a held key that
   // passes rows asks for nothing the reader wouldn't.
   const isDark = useDarkTheme();
-  const reading = isDark ? selected : undefined;
+  const reading = isDark ? opened : undefined;
   const { data: read } = useQuery({ ...conversationQuery(reading ?? ''), enabled: false });
 
   // The registry is made anew each render, as the selection moves, but its commands keep their
@@ -746,32 +878,124 @@ export function Workbench({
   // palette act on that conversation or move the list from under it. Keys typed straight after
   // New message, before its fields are drawn, then do nothing.
   const isBehindComposer = compose !== undefined && (isPhone || !isDocked(compose));
-  const isOpenInView = selected !== undefined && !isMany && !isBehindComposer;
+  const isOpenInView = opened !== undefined && !isMany && !isBehindComposer;
   // A send on its way says where it stands on its line in its conversation while that's on screen,
   // and in a toast while the member is elsewhere.
   const shown =
-    (!isPhone || phonePane === 'reader') && page === undefined && isOpenInView
-      ? selected
-      : undefined;
+    (!isPhone || phonePane === 'reader') && page === undefined && isOpenInView ? opened : undefined;
   useLeavingToasts(leaving.all, shown);
+  // What GitHub shows of what's open: the thread, or the bundle's repository.
+  const openRow = threadRow ?? (selected === undefined ? undefined : rowOf(selected));
+  const gitHubAddress =
+    openRow === undefined || isMany
+      ? undefined
+      : isBundle(openRow)
+        ? repositoryAddressOf(openRow.repository)
+        : openRow.github && threadAddressOf(openRow.github);
+
+  // A bundle gone from the server, as one emptied on another device, closes as a conversation gone
+  // from it does.
+  const isBundleGone =
+    bundleOpen !== undefined &&
+    !inBundle.isPending &&
+    !inBundle.isError &&
+    inBundle.bundle === undefined;
+  useEffect(() => {
+    if (!isBundleGone) return;
+    setSelection(NOTHING_SELECTED);
+    setPhonePane('list');
+  }, [isBundleGone]);
+  // A bundle open with no thread lies on the reader's sheet, its threads in place of messages, with
+  // its row's actions where a conversation's are. A thread open in it names it above, as the way back.
+  const bundleRow = bundleOpen === undefined ? undefined : rowOf(bundleOpen);
+  const repository =
+    inBundle.bundle?.repository ?? (bundleRow && isBundle(bundleRow) ? bundleRow.repository : '');
+  const bundleAccount = bundleOpen && bundlePartsOf(bundleOpen)?.account;
+  const bundleInbox = folders.find(
+    (folder) => folder.account === bundleAccount && folder.role === 'inbox',
+  );
+  const bundleSheet: ReaderSheet | undefined =
+    bundleOpen === undefined || thread !== undefined
+      ? undefined
+      : {
+          id: bundleOpen,
+          label: 'Repository',
+          content: (scroller) =>
+            inBundle.bundle && inBundle.threads ? (
+              <Suspense fallback={<BundleSkeleton repository={repository} />}>
+                <BundleReader
+                  bundle={inBundle.bundle}
+                  threads={inBundle.threads}
+                  account={accounts.find(({ id }) => id === bundleAccount)}
+                  folder={bundleInbox ? folderName(bundleInbox) : 'Inbox'}
+                  scroller={scroller}
+                  onOpen={openThread}
+                  onShown={inBundle.show}
+                  from={
+                    cameFrom?.bundle === bundleOpen ? inBundle.places.get(cameFrom.open) : undefined
+                  }
+                />
+              </Suspense>
+            ) : inBundle.isError ? (
+              <ConversationUnopened
+                subject={repository}
+                isOffline={reach !== 'online'}
+                onTryAgain={inBundle.refetch}
+              />
+            ) : (
+              <BundleSkeleton repository={repository || undefined} />
+            ),
+          bar: isPhone ? undefined : (
+            <>
+              <TriageActions commands={selectedCommands} />
+              <ReaderPlace at={placeOf(bundleOpen).at + 1} of={conversations?.length ?? 0} />
+            </>
+          ),
+          top: isPhone ? <TriageActions commands={selectedCommands} part="marking" /> : undefined,
+          island: isPhone ? (
+            <TriageActions commands={selectedCommands} part="filing" isArchiveMain />
+          ) : undefined,
+        };
+  const backToBundle =
+    bundleOpen !== undefined && thread !== undefined && repository !== ''
+      ? {
+          label: repository,
+          short: repository.slice(repository.indexOf('/') + 1),
+          go: closeThread,
+        }
+      : undefined;
   const commands = useSteadyCommands([
     ...(isBehindComposer ? [] : selectedCommands),
     ...workbenchCommands({
-      next: isBehindComposer ? undefined : stepTo(anchor.after),
-      previous: !isBehindComposer && anchor.at > 0 ? stepTo(anchor.at - 1) : undefined,
+      next: isBehindComposer
+        ? undefined
+        : thread !== undefined
+          ? stepToThread(threadAt + 1)
+          : stepTo(anchor.after),
+      previous: isBehindComposer
+        ? undefined
+        : thread !== undefined
+          ? threadAt > 0
+            ? stepToThread(threadAt - 1)
+            : undefined
+          : anchor.at > 0
+            ? stepTo(anchor.at - 1)
+            : undefined,
       back: page
         ? closePage
         : composing.compose
           ? closeComposer
-          : isPhone
-            ? phonePane === 'list'
-              ? undefined
-              : phonePane === 'reader'
-                ? backToList
-                : () => setPhonePane('list')
-            : isMany
-              ? stopPicking
-              : undefined,
+          : thread !== undefined
+            ? closeThread
+            : isPhone
+              ? phonePane === 'list'
+                ? undefined
+                : phonePane === 'reader'
+                  ? backToList
+                  : () => setPhonePane('list')
+              : isMany
+                ? stopPicking
+                : undefined,
       // While a send can still be taken back, Undo takes it back first.
       undo: outbox.undoSend ?? (canUndo ? undoLast : undefined),
       focusSearch,
@@ -788,11 +1012,12 @@ export function Workbench({
       write,
       reply: isOpenInView ? (all) => void composing.reply(all) : undefined,
     }),
+    gitHubCommand(isBehindComposer ? undefined : gitHubAddress),
     sourceCommand(
       isOpenInView
         ? () =>
             void queryClient
-              .ensureQueryData(conversationQuery(selected))
+              .ensureQueryData(conversationQuery(opened))
               .then((conversation) => setSource(newestOf(conversation)))
         : undefined,
     ),
@@ -1000,10 +1225,16 @@ export function Workbench({
                 </SelectionPane>
               ) : (
                 <ReaderPane
-                  selected={selected}
+                  selected={opened}
                   accounts={accounts}
                   folders={folders}
-                  upcoming={neighbors(conversations, places, selected)}
+                  upcoming={
+                    thread === undefined
+                      ? neighbors(conversations, places, selected)
+                      : idsIn([inBundle.threads?.[threadAt + 1], inBundle.threads?.[threadAt - 1]])
+                  }
+                  sheet={bundleSheet}
+                  backTo={backToBundle}
                   onShown={readMark.onShown}
                   actions={readerActions}
                   place={readerPlace}
@@ -1099,40 +1330,43 @@ const openOnly = (open: ConversationId | undefined): Selection =>
  * returns to it, except while a search is typed, which replaces it at each key. The selection
  * replaces it, so moving by key adds no history. A place the workbench didn't move to arrives from
  * outside, as a load, a link, Back and Forward bring one, and the workbench follows it. A place
- * whose conversation has gone opens its view with nothing selected.
+ * whose conversation has gone opens its view with nothing selected, or its bundle with no thread.
  */
 function useAddress({
   place,
   onPlaceChange,
-  selected,
+  bundle,
+  open,
   isMany,
   arrive,
   close,
 }: {
   place: Place;
   onPlaceChange: (place: Place, history: 'push' | 'replace') => void;
-  /** The one conversation selected, if one is. */
-  selected: ConversationId | undefined;
+  /** The bundle selected, if one is. */
+  bundle: BundleId | undefined;
+  /** The one conversation open, selected or a thread of the bundle selected, if one is. */
+  open: ConversationId | undefined;
   /** Whether several are, which the address leaves out. */
   isMany: boolean;
   /** Follows a place that arrived from outside. */
   arrive: (place: Place) => void;
-  /** Selects nothing, as a conversation gone from the server leaves nothing open. */
+  /** Closes the conversation open, as one gone from the server leaves nothing open. */
   close: () => void;
 }) {
-  const { view, open } = place;
+  const { view } = place;
   // The place this workbench last moved to, so one it didn't is known to have arrived.
   const moved = useRef(place);
   // What the selection last wrote, and what was last pushed, so the selection doesn't write back
   // a place it already holds.
-  const written = useRef(open);
+  const written = useRef(place.open ?? place.bundle);
   const pushed = useRef<ConversationId>(undefined);
   // The conversation a place opened from outside, until the member moves on. It's looked up, since
   // it may have gone since the address was written.
-  const [arrived, setArrived] = useState(open);
-  const latest = useRef({ view, selected, arrive, close });
+  const [arrived, setArrived] = useState(place.open);
+  const latest = useRef({ view, bundle, open, arrive, close });
   useLayoutEffect(() => {
-    latest.current = { view, selected, arrive, close };
+    latest.current = { view, bundle, open, arrive, close };
   });
   const move = useCallback(
     (next: Place, history: 'push' | 'replace') => {
@@ -1145,20 +1379,21 @@ function useAddress({
   useEffect(() => {
     if (place === moved.current) return;
     moved.current = place;
-    written.current = place.open;
+    written.current = place.open ?? place.bundle;
     setArrived(place.open);
     latest.current.arrive(place);
   }, [place]);
 
   // Only a change of selection moves the place, not the place moving under a selection that hasn't
   // followed it yet.
+  const at = open ?? bundle;
   useEffect(() => {
-    if (isMany || selected === written.current) return;
-    written.current = selected;
+    if (isMany || at === written.current) return;
+    written.current = at;
     setArrived(undefined);
-    const { view } = latest.current;
-    move(selected === undefined ? { view } : { view, open: selected }, 'replace');
-  }, [isMany, selected, move]);
+    const { view, bundle, open } = latest.current;
+    move(placeIn(view, bundle, open), 'replace');
+  }, [isMany, at, move]);
 
   const { data: shown } = useQuery({
     ...conversationQuery(arrived ?? ''),
@@ -1168,20 +1403,18 @@ function useAddress({
     if (arrived === undefined || shown === undefined || shown.length > 0) return;
     setArrived(undefined);
     // The member may have moved on already, as archiving it does.
-    if (latest.current.selected !== arrived) return;
-    written.current = undefined;
+    const { view, bundle, open } = latest.current;
+    if (open !== arrived) return;
+    written.current = bundle;
     latest.current.close();
-    move({ view: latest.current.view }, 'replace');
+    move(placeIn(view, bundle, undefined), 'replace');
   }, [arrived, shown, move]);
 
   // The view changes under the open conversation, as a search typed or a folder renamed changes it.
   const onViewChange = useCallback(
     (next: View) => {
-      const { view, selected } = latest.current;
-      move(
-        selected === undefined ? { view: next } : { view: next, open: selected },
-        historyFrom(view),
-      );
+      const { view, bundle, open } = latest.current;
+      move(placeIn(next, bundle, open), historyFrom(view));
     },
     [move],
   );
@@ -1196,6 +1429,17 @@ function useAddress({
   );
   return { move, onViewChange, chooseView, written, pushed };
 }
+
+/** The place of a view, with the bundle and the conversation open in it, if any. */
+const placeIn = (
+  view: View,
+  bundle: BundleId | undefined,
+  open: ConversationId | undefined,
+): Place => ({
+  view,
+  ...(bundle === undefined ? {} : { bundle }),
+  ...(open === undefined ? {} : { open }),
+});
 
 /** A step to a new view is pushed, so Back returns, except from a search, which it takes the place of. */
 const historyFrom = (view: View) => (view.in === 'search' ? 'replace' : 'push');
@@ -1237,19 +1481,21 @@ function useSearch(view: View, onViewChange: (view: View) => void) {
  * above the selected one, or the first ones while nothing is selected.
  */
 function neighbors(
-  conversations: Listed<ConversationSummary> | undefined,
+  conversations: Listed<ListItem> | undefined,
   places: ReadonlyMap<ConversationId, number>,
   selected: ConversationId | undefined,
 ): ConversationId[] {
   if (!conversations) return [];
-  if (selected === undefined) return idsIn(conversations.slice(0, 2));
-  const at = places.get(selected);
-  if (at === undefined) return [];
-  return idsIn([conversations[at + 1], conversations[at - 1]]);
+  const at = selected === undefined ? undefined : places.get(selected);
+  if (selected !== undefined && at === undefined) return [];
+  const near =
+    at === undefined ? conversations.slice(0, 2) : [conversations[at + 1], conversations[at - 1]];
+  // A bundle is no conversation to prepare.
+  return idsIn(near).filter((id) => bundlePartsOf(id) === undefined);
 }
 
-/** The ids of a list's fetched conversations, in its order. */
-function idsIn(rows: Listed<ConversationSummary>): ConversationId[] {
+/** The ids of a list's fetched rows, in its order. */
+function idsIn(rows: Listed<ListItem>): ConversationId[] {
   return rows.flatMap((row) => (row ? [row.id] : []));
 }
 

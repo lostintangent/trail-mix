@@ -23,7 +23,7 @@
     "theme": "bun --bun astryx theme build src/app/theme/trail-mix.ts --out src/app/theme/built/trail-mix.css",
     "icons": "bun src/app/icons.ts",
     "bench": "bun tests/bench/run.ts",
-    "e2e": "bun test ./tests/e2e/previews.e2e.ts ./tests/e2e/workbench.e2e.ts ./tests/e2e/list.e2e.ts ./tests/e2e/install.e2e.ts ./tests/e2e/notifications.e2e.ts ./tests/e2e/calls.e2e.ts ./tests/e2e/triage.e2e.ts ./tests/e2e/composer.e2e.ts ./tests/e2e/reply.e2e.ts ./tests/e2e/outbox.e2e.ts ./tests/e2e/drafts.e2e.ts ./tests/e2e/folders.e2e.ts ./tests/e2e/sidebar.e2e.ts ./tests/e2e/address.e2e.ts ./tests/e2e/reader.e2e.ts ./tests/e2e/accounts.e2e.ts ./tests/e2e/members.e2e.ts ./tests/e2e/members-refused.e2e.ts ./tests/e2e/private.e2e.ts ./tests/e2e/demo.e2e.ts"
+    "e2e": "bun test ./tests/e2e/previews.e2e.ts ./tests/e2e/workbench.e2e.ts ./tests/e2e/list.e2e.ts ./tests/e2e/install.e2e.ts ./tests/e2e/notifications.e2e.ts ./tests/e2e/calls.e2e.ts ./tests/e2e/triage.e2e.ts ./tests/e2e/composer.e2e.ts ./tests/e2e/reply.e2e.ts ./tests/e2e/outbox.e2e.ts ./tests/e2e/drafts.e2e.ts ./tests/e2e/folders.e2e.ts ./tests/e2e/sidebar.e2e.ts ./tests/e2e/address.e2e.ts ./tests/e2e/github.e2e.ts ./tests/e2e/reader.e2e.ts ./tests/e2e/accounts.e2e.ts ./tests/e2e/members.e2e.ts ./tests/e2e/members-refused.e2e.ts ./tests/e2e/private.e2e.ts ./tests/e2e/demo.e2e.ts"
   },
   "dependencies": {
     "@astryxdesign/core": "0.7.11",

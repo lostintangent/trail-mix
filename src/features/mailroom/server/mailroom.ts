@@ -13,6 +13,7 @@ import {
   type Account,
   type AccountId,
   type Body,
+  type BundleId,
   type ConversationId,
   type Envelope,
   type Flags,
@@ -73,6 +74,8 @@ import {
   QUERIES,
   type AccountSetup,
   type Answered,
+  type BundlePage,
+  type BundleScope,
   type Call,
   type CommandName,
   type DraftUpload,
@@ -217,6 +220,8 @@ const AVATAR_LOOKUPS = { domains: 6, senders: 16 };
 const BODIES_LET_GO = { wake: 10_000, delete: 1_000 };
 /** Where the id that names what an installed app keeps is stored. */
 const CACHE_KEY = 'cache';
+/** The most conversations one wake makes rows of again, as an upgrade asks. */
+const RESUMMARIZED = 1_000;
 
 /**
  * The Mailroom: one Durable Object per member, and the only writer of anything Trail Mix stores
@@ -371,6 +376,18 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       this.found = await this.searchServers(checked.text);
     }
     return this.named(pageAfter(this.found.rows, place));
+  }
+
+  bundle(id: BundleId, at?: number): Promise<BundlePage> {
+    const page = this.store.bundle(input.bundleOf(id), input.placeOf(at));
+    const pictures = this.pictures(
+      avatarCandidates([...page.items, ...(page.bundle ? [page.bundle] : [])]),
+    );
+    return Promise.resolve({
+      ...page,
+      items: namedRows(page.items, pictures),
+      ...(page.bundle ? { bundle: namedRows([page.bundle], pictures)[0] } : {}),
+    });
   }
 
   conversation(id: ConversationId): Promise<Message[]> {
@@ -624,8 +641,22 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     }
   }
 
-  async setFlags(refs: MessageRef[], change: Partial<Flags>): Promise<void> {
+  async setFlags(
+    messages: MessageRef[] | BundleScope,
+    change: Partial<Flags>,
+  ): Promise<MessageRef[]> {
     const checked = input.flagsOf(change);
+    const refs = this.refsIn(messages, (scope) =>
+      this.store
+        .bundled(
+          scope.bundle,
+          scope.through,
+          checked.seen === false || checked.flagged === true ? 'newest' : 'every',
+        )
+        .filter(({ flags }) =>
+          Object.entries(checked).some(([flag, on]) => flags[flag as keyof Flags] !== on),
+        ),
+    );
     for (const [account, held] of this.byAccount(refs)) {
       await (await this.provider(account)).setFlags(held, checked);
       await this.owe(() => {
@@ -633,10 +664,14 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
           this.queue.folder({ account, path });
       });
     }
+    return refs;
   }
 
-  async move(refs: MessageRef[], to: FolderRef | FolderRole): Promise<Moved[]> {
+  async move(messages: MessageRef[] | BundleScope, to: FolderRef | FolderRole): Promise<Moved[]> {
     const destination = input.destinationOf(to);
+    const refs = this.refsIn(messages, (scope) =>
+      this.store.bundled(scope.bundle, scope.through, 'inbox'),
+    );
     const moved: Moved[] = [];
     for (const [account, held] of this.byAccount(refs)) {
       const path =
@@ -971,17 +1006,30 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       return false;
     });
     const isOwingAvatars = await this.lookUpAvatars();
+    const isResummarizing = this.resummarize();
     const sendAt = this.sending.nextWake() ?? poll;
     if (
       this.queue.owing() ||
       isOwingBodies ||
       isSweeping ||
       isOwingAvatars ||
+      isResummarizing ||
       sendAt <= Date.now()
     ) {
       await this.ctx.storage.setAlarm(Date.now());
     } else await this.ctx.storage.setAlarm(Math.min(poll, sendAt, this.signInWake() ?? poll));
     return landed;
+  }
+
+  /**
+   * Makes a share of the index's rows again from the messages it holds, as an upgrade that changes
+   * only what a row derives asks, and hints the folders whose lists changed. Returns whether more
+   * remains.
+   */
+  private resummarize(): boolean {
+    const { changed, done } = this.sql.transaction(() => this.store.resummarize(RESUMMARIZED));
+    for (const folder of changed) this.hint({ changed: 'conversations', folder });
+    return !done;
   }
 
   /**
@@ -1053,7 +1101,8 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   /**
    * A new demo Mailroom's first steps, which land before it answers anything: each account's
    * folders, then each Inbox's newest batch, which sync lands ahead of any other folder's. The
-   * unified Inbox's first page then holds the conversations it will once the Mailroom is full.
+   * unified Inbox's first page then holds conversations it will once the Mailroom is full, and
+   * the older mail that lands later fills it out.
    */
   private async firstLook(): Promise<void> {
     this.checkAll();
@@ -1691,6 +1740,21 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   }
 
   // The member's own accounts and folders
+
+  /** The messages a command names: those given, or those of a bundle that `bundled` picks. */
+  private refsIn(
+    messages: MessageRef[] | BundleScope,
+    bundled: (scope: BundleScope) => readonly MessageRef[],
+  ): MessageRef[] {
+    const checked = input.messagesOf(messages);
+    if (Array.isArray(checked)) return checked;
+    return bundled(checked).map(({ account, path, uidValidity, uid }) => ({
+      account,
+      path,
+      uidValidity,
+      uid,
+    }));
+  }
 
   private byAccount(refs: MessageRef[]) {
     const groups = new Map<AccountId, MessageRef[]>();

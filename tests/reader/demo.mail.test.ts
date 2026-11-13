@@ -4,14 +4,15 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import type { Browser } from 'playwright';
-import type {
-  Account,
-  Body,
-  ConversationSummary,
-  Message,
-  MessageRef,
+import {
+  isBundle,
+  type Account,
+  type Body,
+  type ConversationSummary,
+  type Message,
+  type MessageRef,
 } from '../../src/features/mail/core/index.ts';
-import type { Page } from '../../src/features/mailroom/client/index.ts';
+import type { BundlePage, Page } from '../../src/features/mailroom/client/index.ts';
 import { messageUrl, partUrl } from '../../src/features/mailroom/client/urls.ts';
 import { startWorker, type LocalWorker } from '../workerd.ts';
 import { BROWSERS, launch, serveHarness, type Harness } from './browsers.ts';
@@ -35,8 +36,16 @@ beforeAll(async () => {
   harness = await serveHarness();
   await until(async () => (await call<Account[]>('accounts')).every((a) => a.status === 'ready'));
   const { items } = await call<Page>('conversations', { in: 'inbox' });
+  // A bundle's conversations stand in its place.
+  const conversations = (
+    await Promise.all(
+      items.map(async (item) =>
+        isBundle(item) ? (await call<BundlePage>('bundle', item.id)).items : [item],
+      ),
+    )
+  ).flat();
   const newest = await Promise.all(
-    items.slice(0, NEWEST).map(async ({ id }: ConversationSummary) => {
+    conversations.slice(0, NEWEST).map(async ({ id }: ConversationSummary) => {
       const thread = await call<Message[]>('conversation', id);
       return thread.toSorted((a, b) => a.date.localeCompare(b.date)).at(-1)!;
     }),

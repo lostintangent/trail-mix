@@ -1,5 +1,10 @@
 import { expect, test } from 'bun:test';
-import type { Envelope, SyncEvent } from '../../mail/core/index.ts';
+import {
+  isBundle,
+  type ConversationSummary,
+  type Envelope,
+  type SyncEvent,
+} from '../../mail/core/index.ts';
 import { envelopeIndex } from './envelope-index.ts';
 import type { Sql } from './schema.ts';
 import { FOUND_LIMIT, foundOf, opened } from './search.ts';
@@ -104,6 +109,8 @@ test('a conversation the index holds opens as the index has it when nothing outs
   const found = foundOf('tickets', [held], store);
   expect(found.outside).toEqual([]);
   expect(found.rows).toEqual(
-    store.page({ in: 'inbox' }).items.filter((r) => r.subject === 'Tickets'),
+    store
+      .page({ in: 'inbox' })
+      .items.filter((r): r is ConversationSummary => !isBundle(r) && r.subject === 'Tickets'),
   );
 });

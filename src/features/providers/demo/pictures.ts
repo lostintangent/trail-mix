@@ -5,7 +5,7 @@ export const KERNEL_MARK = 'M20 18v28M20 32l16-14M24 30l14 16';
 
 /**
  * The demo mailbox's pictures, which it brings with it rather than looking any up: its brands'
- * logos, as their BIMI records would name them, one brand's site icon, and two people's photos, as
+ * logos, as their BIMI records would name them, two sites' icons, and two people's photos, as
  * Gravatar would keep them. Its mail from these brands and people counts as verified, as a real
  * server would find it. Each is drawn from shapes alone: no text, script or outside reference.
  */
@@ -29,6 +29,10 @@ export const DEMO_PICTURES: {
     ),
   },
   icons: {
+    // A code host's icon, which its notifications show: a branch on a dark disc.
+    'github.com': svg(
+      '<circle cx="32" cy="32" r="30" fill="#1f2328"/><path d="M25 18v28M39 26c0 9-14 7-14 16" stroke="#fff" stroke-width="4" stroke-linecap="round" fill="none"/><circle cx="25" cy="18" r="5" fill="#fff"/><circle cx="25" cy="46" r="5" fill="#fff"/><circle cx="39" cy="22" r="5" fill="#fff"/>',
+    ),
     // A site's icon, drawn on nothing, as most are.
     'fieldnote.example.com': svg(
       '<path d="M16 46c0-18 11-29 32-29 0 21-11 31-29 31" fill="#2f6b4f"/><path d="M19 45l17-17" stroke="#d8efe2" stroke-width="3" stroke-linecap="round"/>',

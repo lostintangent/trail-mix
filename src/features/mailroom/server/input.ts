@@ -1,16 +1,24 @@
-import type {
-  Account,
-  AccountId,
-  Address,
-  ConversationId,
-  Flags,
-  FolderRef,
-  FolderRole,
-  MessageRef,
-  View,
+import {
+  bundlePartsOf,
+  type Account,
+  type AccountId,
+  type Address,
+  type BundleId,
+  type ConversationId,
+  type Flags,
+  type FolderRef,
+  type FolderRole,
+  type MessageRef,
+  type View,
 } from '../../mail/core/index.ts';
 import type { Endpoint } from '../../providers/index.ts';
-import type { AccountSetup, DraftUpload, FileBytes, SignInSetup } from '../client/contract.ts';
+import type {
+  AccountSetup,
+  BundleScope,
+  DraftUpload,
+  FileBytes,
+  SignInSetup,
+} from '../client/contract.ts';
 import { STAMPS } from './accounts.ts';
 
 /**
@@ -95,6 +103,20 @@ export function conversationOf(value: unknown): ConversationId {
     throw new TypeError('That isn’t a conversation.');
   }
   return value;
+}
+
+export function bundleOf(value: unknown): BundleId {
+  if (typeof value !== 'string' || value.length > 1000 || !bundlePartsOf(value)) {
+    throw new TypeError('That isn’t a bundle.');
+  }
+  return value;
+}
+
+/** Messages as the browser names them: each by its ref, or a bundle's as its row showed them. */
+export function messagesOf(value: unknown): MessageRef[] | BundleScope {
+  if (Array.isArray(value)) return refsOf(value);
+  const { bundle, through } = record(value, 'a list of messages');
+  return { bundle: bundleOf(bundle), through: instantOf(through) };
 }
 
 /** A time to send at: an ISO 8601 instant with its offset, read as UTC. */

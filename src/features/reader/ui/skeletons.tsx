@@ -2,8 +2,9 @@ import { Skeleton } from '@astryxdesign/core/Skeleton';
 import { typeScaleVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { Pending, TextSkeleton } from '../../../app/theme/Pending.tsx';
+import { tm } from '../../../app/theme/tokens.stylex.ts';
 import { bareSubject } from '../core/subject.ts';
-import { sheetStyles, threadStyles } from './layout.ts';
+import { issueStyles, sheetStyles, threadStyles } from './layout.ts';
 
 /**
  * A conversation on its way, in the shapes it arrives in: its subject and the line under it, an
@@ -57,6 +58,55 @@ export function ReaderSkeleton({ subject }: { subject?: string }) {
   );
 }
 
+/**
+ * A bundle on its way: its repository, which the list already has, the line under it, and a few of
+ * its threads' sheets.
+ */
+export function BundleSkeleton({ repository }: { repository?: string }) {
+  return (
+    <div {...stylex.props(threadStyles.thread)}>
+      <h1 {...stylex.props(threadStyles.subject)}>{repository ?? <TextSkeleton width="40%" />}</h1>
+      <Pending label="Opening the repository" xstyle={threadStyles.stack} holdsPlace={false}>
+        <div {...stylex.props(threadStyles.meta)}>
+          <span>
+            <TextSkeleton width="16em" index={1} />
+          </span>
+        </div>
+        {[0, 1, 2].map((sheet) => (
+          <ThreadSkeleton key={sheet} place={sheet} />
+        ))}
+      </Pending>
+    </div>
+  );
+}
+
+/**
+ * A thread of a bundle on its way, as a sheet in its shape, its title as long as the place it
+ * stands in gives it.
+ */
+export function ThreadSkeleton({ place }: { place: number }) {
+  return (
+    <div {...stylex.props(issueStyles.sheet)}>
+      <Skeleton width="18px" height="18px" radius="rounded" index={place + 2} />
+      <div {...stylex.props(issueStyles.head, issueStyles.title)}>
+        <TextSkeleton
+          width={ISSUE_WIDTHS[place % ISSUE_WIDTHS.length] ?? '62%'}
+          index={place + 2}
+        />
+      </div>
+      <div {...stylex.props(issueStyles.under, issueStyles.facts, styles.facts)}>
+        <Skeleton width="30%" height="100%" radius="rounded" index={place + 3} />
+      </div>
+      <div {...stylex.props(issueStyles.under, issueStyles.act)}>
+        <TextSkeleton width="80%" index={place + 3} />
+      </div>
+    </div>
+  );
+}
+
+/** A thread title's width on each of a bundle's skeleton sheets, in turn. */
+const ISSUE_WIDTHS = ['62%', '48%', '70%'];
+
 /** A message's body on its way, as lines of text on its sheet. */
 export function BodySkeleton() {
   return (
@@ -89,6 +139,11 @@ const styles = stylex.create({
   },
   grow: {
     flexGrow: 1,
+  },
+  // What GitHub said of a thread, a line of chips as tall as one.
+  facts: {
+    display: 'flex',
+    height: tm.chipHeight,
   },
   // A body is set in the reader's type, as a message's frame sets it.
   body: {

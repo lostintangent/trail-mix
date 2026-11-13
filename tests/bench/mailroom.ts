@@ -1,10 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type {
-  Account,
-  ConversationSummary,
-  Hint,
-  View,
+import {
+  isBundle,
+  type Account,
+  type ConversationSummary,
+  type Hint,
+  type View,
 } from '../../src/features/mail/core/index.ts';
 import { PAGE_SIZE, type Page } from '../../src/features/mailroom/client/contract.ts';
 import { caFile, ports, running, start, stop } from '../mail-server/server.ts';
@@ -214,7 +215,10 @@ async function readTimes(url: string) {
 async function longThread(url: string): Promise<ConversationSummary> {
   for (let at = 0, pages = 0; pages < 100; pages++) {
     const page = await call<Page>(url, 'conversations', INBOX, at);
-    const found = page.items.find(({ subject }) => subject.endsWith(LONG_THREAD_SUBJECT));
+    const found = page.items.find(
+      (item): item is ConversationSummary =>
+        !isBundle(item) && item.subject.endsWith(LONG_THREAD_SUBJECT),
+    );
     if (found) return found;
     at += page.items.length;
     if (page.items.length === 0 || at >= page.total) break;

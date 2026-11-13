@@ -1,6 +1,14 @@
 import { queryOptions } from '@tanstack/react-query';
 import { asksAgain } from '../../../shared/query-client.ts';
-import type { ConversationId, FolderRef, Hint, MessageRef, View } from '../../mail/core/index.ts';
+import {
+  bundlePartsOf,
+  type BundleId,
+  type ConversationId,
+  type FolderRef,
+  type Hint,
+  type MessageRef,
+  type View,
+} from '../../mail/core/index.ts';
 import { mailroom, type Unanswered } from './rpc.ts';
 
 /** What each query's snapshot is cached under. */
@@ -19,6 +27,9 @@ export const keys = {
   // A view's list, under which each of its pages is kept by the place it starts at.
   conversations: (view: View) => ['conversations', view] as const,
   page: (view: View, at: number) => ['conversations', view, at] as const,
+  // A bundle's threads, under which each of its pages is kept by the place it starts at.
+  bundle: (id: BundleId) => ['bundle', id] as const,
+  bundlePage: (id: BundleId, at: number) => ['bundle', id, at] as const,
   conversation: (id: ConversationId) => ['conversation', id] as const,
   body: (ref: MessageRef) => ['body', ref] as const,
 } as const;
@@ -33,15 +44,18 @@ export type Key =
   | typeof keys.outbox
   | ReturnType<typeof keys.conversations>
   | ReturnType<typeof keys.page>
+  | ReturnType<typeof keys.bundle>
+  | ReturnType<typeof keys.bundlePage>
   | ReturnType<typeof keys.conversation>
   | ReturnType<typeof keys.body>;
 
 /**
  * Whether a hint leaves a snapshot out of date. A change to a folder's mail changes its counts and
  * its list, every view across accounts, which may hold its mail, any open conversation, which the
- * hint can't name, and the Outbox, which names the conversation each draft on its way is in. A
- * sender's picture that came, changed or went changes the lists and conversations that name it. A body never
- * changes for its message, so no hint but an erase touches one.
+ * hint can't name, and the Outbox, which names the conversation each draft on its way is in, and
+ * its account's bundles, which lie in its Inbox. A sender's picture that came, changed or went
+ * changes the lists and conversations that name it. A body never changes for its message, so no
+ * hint but an erase touches one.
  */
 export function isStale(key: Key, hint: Hint): boolean {
   switch (hint.changed) {
@@ -52,7 +66,7 @@ export function isStale(key: Key, hint: Hint): boolean {
     case 'outbox':
       return key[0] === 'outbox';
     case 'avatars':
-      return key[0] === 'conversations' || key[0] === 'conversation';
+      return key[0] === 'conversations' || key[0] === 'bundle' || key[0] === 'conversation';
     case 'everything':
       return true;
     case 'conversations':
@@ -60,6 +74,7 @@ export function isStale(key: Key, hint: Hint): boolean {
         key[0] === 'folders' ||
         key[0] === 'conversation' ||
         key[0] === 'outbox' ||
+        (key[0] === 'bundle' && bundlePartsOf(key[1])?.account === hint.folder.account) ||
         (key[0] === 'conversations' &&
           (key[1].in !== 'folder' || isSameFolder(key[1].folder, hint.folder)))
       );
@@ -126,6 +141,10 @@ export const conversationsQuery = (view: View, at = 0) =>
     queryKey: keys.page(view, at),
     queryFn: () => mailroom.conversations(view, at),
   });
+
+/** A page of a bundle's threads, newest first, from the place `at`, with the bundle's row. */
+export const bundleQuery = (id: BundleId, at = 0) =>
+  queryOptions({ queryKey: keys.bundlePage(id, at), queryFn: () => mailroom.bundle(id, at) });
 
 export const conversationQuery = (id: ConversationId) =>
   queryOptions({ queryKey: keys.conversation(id), queryFn: () => mailroom.conversation(id) });

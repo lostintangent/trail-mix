@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { Folder, FolderRole, Message } from '../../mail/core/index.ts';
-import { folderOf } from './folder.ts';
+import { folderOf, receivedIn } from './folder.ts';
 
 const folder = (account: string, path: string, role?: FolderRole): Folder => ({
   account,
@@ -78,4 +78,10 @@ test('a message in a folder that isn’t listed is passed over, and alone it lie
   expect(named([message('INBOX', 1), message('Gone', 2)])).toBe('INBOX');
   expect(named([message('Gone', 1)])).toBeUndefined();
   expect(named([])).toBeUndefined();
+});
+
+test('what reached the member leaves out what they sent and are writing, wherever it was filed', () => {
+  const reached = [message('INBOX', 1), message('Archive', 2), message('Unlisted', 3)];
+  const written = [message('Sent', 4), message('Drafts', 5)];
+  expect(receivedIn([...reached, ...written], folders)).toEqual(reached);
 });

@@ -1,15 +1,5 @@
-import type {
-  AccountId,
-  BundleChip,
-  BundleId,
-  BundleSummary,
-  ConversationSummary,
-  Envelope,
-  GitHubKind,
-  GitHubReason,
-  GitHubThread,
-  ListItem,
-} from './model.ts';
+import { COMMIT, isAsking, isRepository, NUMBER } from './bundles.ts';
+import type { Address, Envelope, GitHubKind, GitHubReason, GitHubThread } from './model.ts';
 
 /**
  * GitHub's notifications, read from the headers GitHub sends. A notification is verified mail from
@@ -17,9 +7,9 @@ import type {
  * mail is about, such as `<owner/repo/pull/12@github.com>`, and whose List-Id names the same
  * repository. The Cc GitHub adds says why it came, and the subject and preview say what happened.
  *
- * A conversation is a thread when every message in its Inbox is a notification of one thread, and
- * its account's Inbox views gather the threads of one repository into its bundle. Anything that
- * doesn't read so, one spoofed message included, leaves the conversation as it would be anyway.
+ * A conversation is a thread when every message in its Inbox is a notification of one thread, which
+ * `bundles.ts` gathers by repository. Anything that doesn't read so, one spoofed message included,
+ * leaves the conversation as it would be anyway.
  */
 
 const SENDER = 'notifications@github.com';
@@ -39,22 +29,6 @@ const REASONS: ReadonlySet<string> = new Set<GitHubReason>([
   'team_mention',
   'your_activity',
 ]);
-
-/** Reasons that ask something of the member, which a thread's row ranks first while it's unread. */
-const ASKING: ReadonlySet<GitHubReason> = new Set([
-  'review_requested',
-  'mention',
-  'team_mention',
-  'assign',
-  'security_alert',
-]);
-
-/** How many chips a bundle's row carries. A row has room for fewer, and folds the rest into +N. */
-export const BUNDLE_CHIPS = 12;
-
-// Within a safe integer, as run ids, at eleven digits, already reach past ten.
-const NUMBER = /^[1-9]\d{0,14}$/;
-const COMMIT = /^[\da-f]{7,40}$/;
 
 /** What one notification says. Notifications of one thread share their `thread`. */
 type Notice = Omit<GitHubThread, 'reasons' | 'state'> & {
@@ -89,7 +63,7 @@ export function threadOf(inbox: readonly Envelope[]): GitHubThread | undefined {
     title,
     ...(event === 'merged' || event === 'closed' ? { state: event } : {}),
     ...(outcome ? { outcome } : {}),
-    reasons: reasons.toSorted((a, b) => Number(ASKING.has(b)) - Number(ASKING.has(a))),
+    reasons: reasons.toSorted((a, b) => Number(isAsking(b)) - Number(isAsking(a))),
   };
 }
 
@@ -106,9 +80,7 @@ function noticeOf(envelope: Envelope): Notice | undefined {
   const subject = subjectOf(envelope.subject, about.repository);
   const run = about.kind === 'run' ? runOf(subject) : undefined;
   const title = run ? run.title : subject.replace(NUMBERED_SUFFIX, '');
-  const reason = envelope.cc
-    .map(({ email }) => /^([a-z_]+)@noreply\.github\.com$/i.exec(email)?.[1]?.toLowerCase())
-    .find((name): name is GitHubReason => name !== undefined && REASONS.has(name));
+  const reason = envelope.cc.map(reasonOf).find((name) => name !== undefined);
   const event = about.number !== undefined ? eventOf(envelope.preview, about.number) : undefined;
   const outcome = run ? run.outcome : checksOf(envelope.preview);
   return {
@@ -120,6 +92,20 @@ function noticeOf(envelope: Envelope): Notice | undefined {
     ...(event ? { event } : {}),
     ...(outcome ? { outcome } : {}),
   };
+}
+
+/** The reason an address of GitHub's Cc gives, as `review_requested@noreply.github.com` does. */
+function reasonOf({ email }: Address): GitHubReason | undefined {
+  const name = /^([a-z_]+)@noreply\.github\.com$/i.exec(email)?.[1]?.toLowerCase();
+  return name !== undefined && REASONS.has(name) ? (name as GitHubReason) : undefined;
+}
+
+/**
+ * Whether an address of a notification's Cc says why GitHub sent it, rather than naming someone
+ * it went to, which a message's recipients leave out.
+ */
+export function isReasonOf(envelope: Envelope, address: Address): boolean {
+  return reasonOf(address) !== undefined && noticeOf(envelope) !== undefined;
 }
 
 /**
@@ -210,113 +196,4 @@ function checksOf(preview: string): Notice['outcome'] {
   if (/^All checks have passed\b/i.test(text)) return 'passed';
   if (/^(?:Some checks were not successful|All checks have failed)\b/i.test(text)) return 'failed';
   return undefined;
-}
-
-// Bundles
-
-/** The bundle an account's threads in one repository gather into. */
-export function bundleIdOf(account: AccountId, repository: string): BundleId {
-  return [account, repository.toLowerCase()].map(encodeURIComponent).join(':');
-}
-
-/** The account and repository a bundle id names, or nothing when it is not one. */
-export function bundlePartsOf(
-  id: BundleId,
-): { account: AccountId; repository: string } | undefined {
-  const parts = id.split(':');
-  if (parts.length !== 2) return undefined;
-  const [account, repository] = parts.map(decodeURIComponent) as [string, string];
-  return account !== '' && isRepository(repository) ? { account, repository } : undefined;
-}
-
-export const isBundle = (item: ListItem): item is BundleSummary => 'kind' in item;
-
-/** Whether a thread's chip asks something of the member: unread, and asked to act or a failure. */
-export const asks = (chip: BundleChip): boolean =>
-  chip.unread &&
-  ((chip.reason !== undefined && ASKING.has(chip.reason)) || chip.outcome === 'failed');
-
-/**
- * A bundle's row, from its conversations newest first, each with its thread. Its chips are the
- * unread threads that ask something of the member, then the rest, at most `BUNDLE_CHIPS`.
- */
-export function bundleSummaryOf(
-  id: BundleId,
-  conversations: readonly (ConversationSummary & { github: GitHubThread })[],
-): BundleSummary | undefined {
-  const [newest] = conversations;
-  if (!newest) return undefined;
-  const { repository, reasons: _, ...thread } = newest.github;
-  const chips = conversations.map(({ github, unread }): BundleChip => ({
-    kind: github.kind,
-    ...(github.state ? { state: github.state } : {}),
-    ...(github.outcome ? { outcome: github.outcome } : {}),
-    ...(github.reasons[0] ? { reason: github.reasons[0] } : {}),
-    unread: unread > 0,
-  }));
-  const asking = chips.filter(asks);
-  return {
-    kind: 'bundle',
-    id,
-    account: newest.account,
-    repository,
-    date: newest.date,
-    newest: thread,
-    threads: conversations.length,
-    count: conversations.reduce((sum, { count }) => sum + count, 0),
-    unread: conversations.reduce((sum, { unread }) => sum + unread, 0),
-    flagged: conversations.some(({ flagged }) => flagged),
-    chips: [...asking, ...chips.filter((chip) => !asks(chip))].slice(0, BUNDLE_CHIPS),
-    ...(newest.avatar ? { avatar: newest.avatar } : {}),
-  };
-}
-
-// Links
-
-/** A repository's address on github.com. */
-export function repositoryAddressOf(repository: string): string | undefined {
-  return isRepository(repository) ? `https://github.com/${repository}` : undefined;
-}
-
-/**
- * Whether `owner/repo` meets GitHub's rules for a user's or organization's name and a repository's,
- * whose characters are all safe in a URL's path as they are.
- */
-function isRepository(repository: string): boolean {
-  const [owner = '', repo = '', ...rest] = repository.split('/');
-  return (
-    rest.length === 0 &&
-    /^[a-z\d][a-z\d-]{0,38}$/i.test(owner) &&
-    /^[\w.-]{1,100}$/.test(repo) &&
-    repo !== '.' &&
-    repo !== '..'
-  );
-}
-
-/**
- * A thread's address on github.com, built from its repository and number alone, never from a link
- * in its mail. A run its mail names only by check suite opens at its commit, or else the
- * repository's runs.
- */
-export function threadAddressOf(
-  thread: Pick<GitHubThread, 'repository' | 'kind' | 'number' | 'commit'>,
-): string | undefined {
-  const repository = repositoryAddressOf(thread.repository);
-  if (!repository) return undefined;
-  const number =
-    thread.number !== undefined && NUMBER.test(String(thread.number)) ? thread.number : undefined;
-  switch (thread.kind) {
-    case 'pull':
-      return number === undefined ? undefined : `${repository}/pull/${number}`;
-    case 'issue':
-      return number === undefined ? undefined : `${repository}/issues/${number}`;
-    case 'discussion':
-      return number === undefined ? undefined : `${repository}/discussions/${number}`;
-    case 'run':
-      if (number !== undefined) return `${repository}/actions/runs/${number}`;
-      if (thread.commit !== undefined && COMMIT.test(thread.commit)) {
-        return `${repository}/commit/${thread.commit}`;
-      }
-      return `${repository}/actions`;
-  }
 }

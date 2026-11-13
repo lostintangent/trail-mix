@@ -4,12 +4,13 @@ import {
   useQuery,
   useQueryClient,
   type QueryClient,
+  type UseQueryOptions,
 } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import type { ConversationId, ConversationSummary, View } from '../../mail/core/index.ts';
-import { conversationsQuery, keys, PAGE_SIZE, type Page } from '../../mailroom/client/index.ts';
+import type { ConversationId, ListItem, View } from '../../mail/core/index.ts';
+import { conversationsQuery, PAGE_SIZE, type Page } from '../../mailroom/client/index.ts';
 import { listOf, pagesCovering, type Listed } from '../core/pages.ts';
-import { useTriagedList } from './overlays.ts';
+import { listKeyOf, useTriagedList, type ListOf } from './overlays.ts';
 
 /**
  * How long the list rests on rows of pages it hasn't asked for before it asks, so a scrollbar's
@@ -21,63 +22,103 @@ const SETTLE_MS = 100;
 const FIRST_PAGE: readonly number[] = [0];
 
 /**
- * A view's conversations as the member should see them, at the list's true length from its first
- * page on, and how the list says which rows it shows, so the pages they lie on are fetched. Each
- * page is a snapshot of its own, kept by its place, so a hint refetches only the first page, which
- * says how long the list is, and the pages on screen. Pages fetched earlier, now out of sight, still
- * show where they lie, as a selected row scrolled far away does. While a search is typed, its
- * results so far stay until the next arrive, so the list doesn't blink between keystrokes.
+ * A view's rows as the member should see them, at the list's true length from its first
+ * page on, and how the list says which rows it shows, so the pages they lie on are fetched. While a
+ * search is typed, its results so far stay until the next arrive, so the list doesn't blink between
+ * keystrokes.
  */
 export function useConversations(
   view: View,
   { enabled = true }: { enabled?: boolean } = {},
 ): {
-  conversations: Listed<ConversationSummary> | undefined;
+  conversations: Listed<ListItem> | undefined;
   /** Whether a page the list shows is on its way. */
   isFetching: boolean;
   /** Says which rows the list shows: from `first` to `last`, and the one at `selected`, if any. */
-  show: (first: number, last: number, selected: number) => void;
+  show: Show;
 } {
-  const queryClient = useQueryClient();
-  const list = hashKey(keys.conversations(view));
   const first = useQuery({
     ...conversationsQuery(view),
     enabled,
     placeholderData: (previous, previousQuery) =>
       view.in === 'search' && previousQuery?.queryKey[1].in === 'search' ? previous : undefined,
   });
-  const [wanted, setWanted] = useState({ list, pages: FIRST_PAGE });
-  const pages = wanted.list === list ? wanted.pages : FIRST_PAGE;
-  const rest = useQueries({
-    queries: pages.flatMap((at) =>
-      at === 0 ? [] : [{ ...conversationsQuery(view, at), enabled }],
-    ),
-  });
-  const fetched = useFetchedList(queryClient, view);
   const placeholder = first.isPlaceholderData ? first.data : undefined;
   const placeheld = useMemo(
     () => placeholder && listOf([{ ...placeholder, fetchedAt: 0 }]),
     [placeholder],
   );
+  const { rows, isFetching, show } = usePages(view, {
+    pageAt: (at) => conversationsQuery(view, at),
+    isFirstFetching: first.isFetching,
+    placeheld,
+    enabled,
+  });
+  return { conversations: useTriagedList(view, rows), isFetching, show };
+}
+
+/**
+ * Says which rows a list shows: from `first` to `last`, and the one at `selected`, if any. Their
+ * pages are fetched once the list rests on them, so a scroll asks only for where it stops, or at
+ * once when they lie `ahead` of a step, as the threads beside the one open do, so a held key finds
+ * the next page there before it reaches it.
+ */
+export type Show = (first: number, last: number, selected: number, ahead?: boolean) => void;
+
+/**
+ * A list's rows at its true length from its first page on: a view's, or a bundle's threads. Each
+ * page is a snapshot of its own, kept by its place, so a hint refetches only the first page, which
+ * says how long the list is, and the pages on screen. Pages fetched earlier, now out of sight, still
+ * show where they lie, as a selected row scrolled far away does. The first page is the caller's to
+ * ask for, since it carries what the list says of itself, and `show` asks for the rest.
+ */
+export function usePages<
+  Fetched extends Page,
+  Key extends readonly unknown[],
+  Row extends ListItem = Fetched['items'][number],
+>(
+  list: ListOf,
+  {
+    pageAt,
+    isFirstFetching,
+    placeheld,
+    enabled,
+  }: {
+    /** How to ask for the page that starts at a place. */
+    pageAt: (at: number) => UseQueryOptions<Fetched, Error, Fetched, Key>;
+    isFirstFetching: boolean;
+    /** What shows while the first page is on its way, as a search's earlier results do. */
+    placeheld?: Listed<Row> | undefined;
+    enabled: boolean;
+  },
+): { rows: Listed<Row> | undefined; isFetching: boolean; show: Show } {
+  const queryClient = useQueryClient();
+  const key = hashKey(listKeyOf(list));
+  const [wanted, setWanted] = useState({ key, pages: FIRST_PAGE });
+  const pages = wanted.key === key ? wanted.pages : FIRST_PAGE;
+  const isRestFetching = useQueries({
+    queries: pages.flatMap((at) => (at === 0 ? [] : [{ ...pageAt(at), enabled }])),
+    combine: (results) => results.some(({ isFetching }) => isFetching),
+  });
+  const fetched = useFetchedList<Row>(queryClient, list);
   // Pages on screen refetched for a hint land a moment apart, and mail that arrived between them
   // moves every row, so until all of them have landed, the list stays as it was. Then it moves once,
   // and the list can keep its top row in sight where it was.
-  const isFetching = first.isFetching || rest.some(({ isFetching }) => isFetching);
+  const isFetching = isFirstFetching || isRestFetching;
   const latest = placeheld ?? fetched;
-  const shown = useRef<{ list: string; rows: Listed<ConversationSummary> }>(undefined);
-  const held =
-    isFetching && latest && shown.current?.list === list ? shown.current.rows : undefined;
+  const shown = useRef<{ key: string; rows: Listed<Row> }>(undefined);
+  const held = isFetching && latest && shown.current?.key === key ? shown.current.rows : undefined;
   const rows = held ?? latest;
   useEffect(() => {
-    if (rows) shown.current = { list, rows };
+    if (rows) shown.current = { key, rows };
   });
 
   // The list says which rows it shows as it scrolls, and once it rests, its new pages are fetched.
   const total = rows?.length ?? 0;
   const settling = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(settling.current), []);
-  const show = useCallback(
-    (from: number, to: number, selected: number) => {
+  const show = useCallback<Show>(
+    (from, to, selected, ahead = false) => {
       const next = pagesCovering(
         [
           [from, to],
@@ -88,56 +129,53 @@ export function useConversations(
       );
       clearTimeout(settling.current);
       if (next.length === pages.length && next.every((at, index) => at === pages[index])) return;
-      settling.current = setTimeout(() => setWanted({ list, pages: next }), SETTLE_MS);
+      const want = () => setWanted({ key, pages: next });
+      if (ahead) want();
+      else settling.current = setTimeout(want, SETTLE_MS);
     },
-    [list, total, pages],
+    [key, total, pages],
   );
-
-  return {
-    conversations: useTriagedList(view, rows),
-    isFetching,
-    show,
-  };
+  return { rows, isFetching, show };
 }
 
 /**
- * A view's list as the pages of it the browser holds show it, fetched lately or a while ago. Only
- * the view's own pages count, not those of a view whose key holds more, as a full-text search's
- * does a plain one's.
+ * A list as the pages of it the browser holds show it, fetched lately or a while ago. Only the
+ * list's own pages count, not those of a view whose key holds more, as a full-text search's does a
+ * plain one's.
  */
-export function fetchedList(
+export function fetchedList<Row extends ListItem = ListItem>(
   queryClient: QueryClient,
-  view: View,
-): Listed<ConversationSummary> | undefined {
-  const list = hashKey(keys.conversations(view));
+  list: ListOf,
+): Listed<Row> | undefined {
+  const key = hashKey(listKeyOf(list));
   return listOf(
     queryClient
       .getQueryCache()
-      .findAll({ queryKey: keys.conversations(view) })
+      .findAll({ queryKey: listKeyOf(list) })
       .flatMap(({ queryKey, state: { data, dataUpdatedAt } }) =>
-        data && listOfKey(queryKey) === list
-          ? [{ ...(data as Page), fetchedAt: dataUpdatedAt }]
+        data && listOfKey(queryKey) === key
+          ? [{ ...(data as Page<Row>), fetchedAt: dataUpdatedAt }]
           : [],
       ),
   );
 }
 
 /**
- * Some conversations' rows among the pages of a view the browser holds, each as the freshest page
+ * Some conversations' rows among the pages of a list the browser holds, each as the freshest page
  * holding it shows it, found without laying out the whole list.
  */
 export function fetchedRows(
   queryClient: QueryClient,
-  view: View,
+  list: ListOf,
   ids: readonly ConversationId[],
-): ConversationSummary[] {
-  const list = hashKey(keys.conversations(view));
+): ListItem[] {
+  const key = hashKey(listKeyOf(list));
   const wanted = new Set(ids);
-  const found = new Map<ConversationId, { row: ConversationSummary; fetchedAt: number }>();
+  const found = new Map<ConversationId, { row: ListItem; fetchedAt: number }>();
   for (const { queryKey, state } of queryClient
     .getQueryCache()
-    .findAll({ queryKey: keys.conversations(view) })) {
-    if (!state.data || listOfKey(queryKey) !== list) continue;
+    .findAll({ queryKey: listKeyOf(list) })) {
+    if (!state.data || listOfKey(queryKey) !== key) continue;
     for (const row of (state.data as Page).items) {
       const seen = found.get(row.id);
       if (wanted.has(row.id) && (!seen || seen.fetchedAt < state.dataUpdatedAt)) {
@@ -148,30 +186,33 @@ export function fetchedRows(
   return [...found.values()].map(({ row }) => row);
 }
 
-/** A view's list as `fetchedList` makes it, made anew as a page of it arrives or leaves the cache. */
-function useFetchedList(
+/** A list as `fetchedList` makes it, made anew as a page of it arrives or leaves the cache. */
+function useFetchedList<Row extends ListItem>(
   queryClient: QueryClient,
-  view: View,
-): Listed<ConversationSummary> | undefined {
-  const list = hashKey(keys.conversations(view));
-  const made = useRef<{ list: string; rows: Listed<ConversationSummary> | undefined }>(undefined);
+  list: ListOf,
+): Listed<Row> | undefined {
+  const key = hashKey(listKeyOf(list));
+  const made = useRef<{ key: string; rows: Listed<Row> | undefined }>(undefined);
   const subscribe = useCallback(
     (changed: () => void) =>
       queryClient.getQueryCache().subscribe((event) => {
         const isChange =
           event.type === 'removed' || (event.type === 'updated' && event.action.type === 'success');
-        if (!isChange || listOfKey(event.query.queryKey as readonly unknown[]) !== list) return;
+        if (!isChange || listOfKey(event.query.queryKey as readonly unknown[]) !== key) return;
         made.current = undefined;
         changed();
       }),
-    [queryClient, list],
+    [queryClient, key],
   );
   return useSyncExternalStore(subscribe, () => {
-    if (made.current?.list !== list) made.current = { list, rows: fetchedList(queryClient, view) };
+    if (made.current?.key !== key)
+      made.current = { key, rows: fetchedList<Row>(queryClient, list) };
     return made.current.rows;
   });
 }
 
-/** The list a page's key names, as `keys.conversations` hashes it, or nothing for another key. */
+/** The list a page's key names, as `listKeyOf` hashes it, or nothing for another key. */
 const listOfKey = (queryKey: readonly unknown[]) =>
-  queryKey[0] === 'conversations' ? hashKey(queryKey.slice(0, 2)) : undefined;
+  queryKey[0] === 'conversations' || queryKey[0] === 'bundle'
+    ? hashKey(queryKey.slice(0, 2))
+    : undefined;

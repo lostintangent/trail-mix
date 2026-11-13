@@ -1,22 +1,27 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ConversationId, ConversationSummary, Folder, View } from '../../mail/core/index.ts';
+import type { BundleId, ConversationId, Folder, ListItem, View } from '../../mail/core/index.ts';
 import { overlaid, rowChange, type Action } from '../core/triage.ts';
 import { afterFirstScreen } from '../../../shared/afterFirstScreen.ts';
 import { afterPaint } from '../../../shared/afterPaint.ts';
 import { reasonOf } from '../../../shared/reasons.ts';
 import { toast } from '../../../shared/toasts.tsx';
-import { overlaysOf } from './overlays.ts';
+import { overlaysOf, type ListOf } from './overlays.ts';
 import { fetchedRows } from './useConversations.ts';
 
-/** Triages some of a view's conversations, by default saying so with a way to undo it. */
+/**
+ * Triages some of a view's rows, conversations or bundles, by default saying so with a way to undo
+ * it.
+ */
 export type Triage = (
   action: Action,
-  conversations: readonly ConversationId[],
+  rows: readonly ConversationId[],
   options?: {
     quietly?: boolean;
     /** Once the server has refused it and the rows are back as they were. */
     onRefused?: () => void;
+    /** The bundle whose conversations they are, when they lie in its list rather than the view's. */
+    in?: BundleId;
   },
 ) => void;
 
@@ -61,14 +66,16 @@ export function useTriage(
   useEffect(() => afterFirstScreen(() => void loadCarrying()), []);
 
   const triage = useCallback<Triage>(
-    (action, ids, { quietly = false, onRefused } = {}) => {
+    (action, ids, { quietly = false, onRefused, in: bundle } = {}) => {
       const overlays = overlaysOf(queryClient);
-      const listed = overlaid(fetchedRows(queryClient, view, ids), overlays.on(view));
+      const list: ListOf = bundle ?? view;
+      const fetched = fetchedRows(queryClient, list, ids);
+      const listed = overlaid<ListItem>(fetched, overlays.on(list));
       const earlierRows = listed.filter(
-        (row): row is ConversationSummary => row !== undefined && ids.includes(row.id),
+        (row): row is ListItem => row !== undefined && ids.includes(row.id),
       );
       const change = rowChange(action, view);
-      const laid = change && overlays.lay(view, { ids: new Set(ids), change });
+      const laid = change && overlays.lay(list, { ids: new Set(ids), change });
 
       void (async () => {
         // The rows show the change in this frame. Telling the Mailroom waits until it has painted.
@@ -78,6 +85,7 @@ export function useTriage(
           await carryOut({
             queryClient,
             view,
+            list,
             folders,
             action,
             ids,

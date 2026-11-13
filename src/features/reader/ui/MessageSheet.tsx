@@ -18,7 +18,7 @@ import { useMemo, useState } from 'react';
 import { SenderAvatar } from '../../../app/theme/SenderAvatar.tsx';
 import { tm } from '../../../app/theme/tokens.stylex.ts';
 import { CommandButton, type Command } from '../../commands/index.ts';
-import type { Account, Address, Message } from '../../mail/core/index.ts';
+import { isReasonOf, type Account, type Address, type Message } from '../../mail/core/index.ts';
 import {
   accountsQuery,
   bodyQuery,
@@ -259,7 +259,9 @@ export function displayName({ name, email }: Address): string {
 }
 
 function recipients(message: Message, account: Account): string {
-  const everyone = [...message.to, ...message.cc];
+  const everyone = [...message.to, ...message.cc].filter(
+    (address) => !isReasonOf(message, address),
+  );
   const mine = account.address.toLowerCase();
   const names = everyone.map((address) =>
     address.email.toLowerCase() === mine ? 'you' : displayName(address),

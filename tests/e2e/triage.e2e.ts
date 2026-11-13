@@ -284,9 +284,11 @@ test('archiving shows at once, reaches another open browser, and Undo brings it 
 
 test('the frame that shows a conversation archived from the reader bar keeps its place, its moves and its actions', async () => {
   const page = await inbox();
-  await at(page, 3).click();
+  // The second row, since the third and fourth are the demo's GitHub bundles, whose bar is the
+  // repository's.
+  await at(page, 2).click();
   const archived = await shownSubject(page);
-  const third = await textAt(page, 3);
+  const second = await textAt(page, 2);
   await bar(page).getByRole('button', { name: 'Archive' }).waitFor();
   // Every state of the reader's place and the bar's buttons, as each change to them lands, from
   // the click until the reader shows the next conversation. Until a row is selected again, it is
@@ -338,7 +340,7 @@ test('the frame that shows a conversation archived from the reader bar keeps its
   expect(shownGone.length).toBeGreaterThan(0);
   for (const { title, place, previous, archive } of shownGone) {
     expect(title).toBe(archived);
-    expect(place).toMatch(/^3 of /);
+    expect(place).toMatch(/^2 of /);
     expect(previous).toBe(true);
     expect(archive).toBe(true);
   }
@@ -346,11 +348,11 @@ test('the frame that shows a conversation archived from the reader bar keeps its
   // The other tests here share the member's mail.
   await undoButton(page).click();
   await page.waitForFunction(
-    (third) =>
+    (second) =>
       document
-        .querySelector('[role="option"][aria-posinset="3"]')
-        ?.textContent?.replace('Unread', '') === third,
-    third,
+        .querySelector('[role="option"][aria-posinset="2"]')
+        ?.textContent?.replace('Unread', '') === second,
+    second,
   );
 }, 30_000);
 
@@ -504,8 +506,11 @@ test('keys run the registry’s commands: from the list, inside a message, and ?
     .getByRole('button', { name: /^Toy Box/ })
     .click();
   await options.first().click();
-  const framed = options.filter({ hasText: await shownSubject(here) });
+  await shownSubject(here);
   await framesShown(here, 1);
+  // Its heading is its GitHub thread's title, which the thread's earlier numbers share, so its row
+  // is known by all the row says.
+  const framed = options.filter({ hasText: (await textAt(here, 1)) ?? '' });
   await reader(here).locator('iframe').last().contentFrame().locator('body').click();
   await here.keyboard.press('e');
   await framed.waitFor({ state: 'detached', timeout: 1_000 });

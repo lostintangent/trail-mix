@@ -28,6 +28,7 @@ import {
 } from '../features/mail/core/index.ts';
 import {
   accountsQuery,
+  bundleQuery,
   conversationQuery,
   conversationsQuery,
   foldersQuery,
@@ -61,11 +62,12 @@ export const Route = createFileRoute('/')({
   loaderDeps: ({ search }) => search,
   staleTime: Infinity,
   loader: ({ context: { queryClient }, deps }) => {
-    const { view, open } = placeOf(deps);
+    const { view, bundle, open } = placeOf(deps);
     void queryClient.prefetchQuery(accountsQuery);
     void queryClient.prefetchQuery(foldersQuery);
     void queryClient.prefetchQuery(outboxQuery);
     if (view.in !== 'outbox') void queryClient.prefetchQuery(conversationsQuery(view));
+    if (bundle !== undefined) void queryClient.prefetchQuery(bundleQuery(bundle));
     if (open !== undefined) void queryClient.prefetchQuery(conversationQuery(open));
   },
   component: App,
@@ -280,8 +282,8 @@ function Desk({
  * it, as a search typed or a key's move does. The place changes at once, so the search field shows
  * each key as it lands, and the address follows: a push at once, and a replace once the place has
  * rested, so typing and moving by key don't write the address at every step. The place follows the
- * address when the member moves through its history, keeping its view while only the open
- * conversation changes, so what shows the view alone doesn't render again.
+ * address when the member moves through its history, keeping its view while only the bundle or the
+ * conversation open in it changes, so what shows the view alone doesn't render again.
  */
 function usePlace() {
   const router = useRouter();
@@ -310,11 +312,11 @@ function usePlace() {
         // A place still resting belonged to the entry the member has left.
         clearTimeout(resting.current?.timer);
         resting.current = undefined;
-        const { view, open } = placeAt(location.href);
-        setPlace((current) => {
-          const kept = isSameView(view, current.view) ? current.view : view;
-          return open === undefined ? { view: kept } : { view: kept, open };
-        });
+        const { view, ...opened } = placeAt(location.href);
+        setPlace((current) => ({
+          view: isSameView(view, current.view) ? current.view : view,
+          ...opened,
+        }));
       }),
     [router],
   );

@@ -1,7 +1,7 @@
 /**
  * What the installed app keeps of what it has seen, so it opens to it with no network: the
- * snapshots of accounts, folders, the Outbox, the lists it showed, the conversations it opened
- * and their bodies. Never a sign-in, never anything only an operator sees.
+ * snapshots of accounts, folders, the Outbox, the lists it showed, the bundles and conversations
+ * it opened, and their bodies. Never a sign-in, never anything only an operator sees.
  */
 
 const KEPT_KINDS: ReadonlySet<unknown> = new Set([
@@ -9,18 +9,20 @@ const KEPT_KINDS: ReadonlySet<unknown> = new Set([
   'folders',
   'outbox',
   'conversations',
+  'bundle',
   'conversation',
   'body',
 ]);
 
 /**
- * Whether a snapshot is kept, by its query key. Sign-ins sit under accounts, and aren't. A list is
- * kept by its first page, which is what opens first and says how long the list is.
+ * Whether a snapshot is kept, by its query key. Sign-ins sit under accounts, and aren't. A list, and
+ * a bundle's threads, are kept by their first page, which is what opens first and says how long
+ * the whole is.
  */
 export function isKept(queryKey: readonly unknown[]): boolean {
   const [kind] = queryKey;
   if (kind === 'accounts') return queryKey.length === 1;
-  if (kind === 'conversations') return queryKey[2] === 0;
+  if (kind === 'conversations' || kind === 'bundle') return queryKey[2] === 0;
   return KEPT_KINDS.has(kind);
 }
 

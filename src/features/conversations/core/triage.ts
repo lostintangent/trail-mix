@@ -2,6 +2,7 @@ import type {
   ConversationId,
   ConversationSummary,
   FolderRef,
+  ListItem,
   View,
 } from '../../mail/core/index.ts';
 import type { Listed } from './pages.ts';
@@ -43,14 +44,22 @@ export function rowChange(action: Action, view: View): RowChange | undefined {
   }
 }
 
-/** A list's rows after some of its conversations changed. Places not yet fetched stay as they are. */
+/**
+ * A list's rows after some of its conversations changed. Places not yet fetched stay as they are. A
+ * bundle marked read or unread marks every thread its chips stand for.
+ */
 export function changeRows<Row extends { id: ConversationId }>(
   rows: Listed<Row>,
   ids: ReadonlySet<ConversationId>,
   change: RowChange,
 ): (Row | undefined)[] {
   if (change === 'gone') return rows.filter((row) => !row || !ids.has(row.id));
-  return rows.map((row) => (row && ids.has(row.id) ? { ...row, ...change } : row));
+  const { unread } = change;
+  const marked = (row: Row): Row =>
+    unread !== undefined && 'chips' in row && Array.isArray(row.chips)
+      ? { ...row, chips: row.chips.map((chip: object) => ({ ...chip, unread: unread > 0 })) }
+      : row;
+  return rows.map((row) => (row && ids.has(row.id) ? marked({ ...row, ...change }) : row));
 }
 
 /**
@@ -84,7 +93,7 @@ const listOrder = (
  * back by an Undo. A browser lays it over each snapshot until a snapshot already shows it, since a
  * snapshot fetched before the Mailroom folded the change would otherwise undo it on screen.
  */
-export type Overlay<Row extends ListRow = ConversationSummary> =
+export type Overlay<Row extends ListRow = ListItem> =
   { ids: ReadonlySet<ConversationId>; change: RowChange } | { returning: readonly Row[] };
 
 type ListRow = { id: ConversationId; date: string } & Pick<

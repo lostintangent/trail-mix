@@ -1,5 +1,14 @@
 import { expect, test } from 'bun:test';
-import { accountChangeOf, draftOf, flagsOf, refOf, setupOf, signInOf, viewOf } from './input.ts';
+import {
+  accountChangeOf,
+  draftOf,
+  flagsOf,
+  messagesOf,
+  refOf,
+  setupOf,
+  signInOf,
+  viewOf,
+} from './input.ts';
 
 // What a browser sends reaches the Mailroom only through these checks.
 
@@ -20,6 +29,21 @@ test('a view is one of the shapes a list shows, and a search carries its text', 
   expect(() => viewOf({ in: 'everything' })).toThrow(TypeError);
   expect(() => viewOf({ in: 'folder', folder: { account: 'a' } })).toThrow(TypeError);
   expect(() => viewOf('inbox')).toThrow(TypeError);
+});
+
+test('a command’s messages are refs, or a bundle’s through the instant its row showed', () => {
+  const ref = { account: 'a', path: 'INBOX', uidValidity: 7, uid: 42 };
+  expect(messagesOf([{ ...ref, member: 'eve@example.com' }])).toEqual([ref]);
+  const bundle = 'a:trailmix-demo%2Ftoy-box';
+  expect(messagesOf({ bundle, through: '2026-11-09T13:00:00+01:00', all: true })).toEqual({
+    bundle,
+    through: '2026-11-09T12:00:00.000Z',
+  });
+  for (const named of ['a::%3Cx%40github.com%3E', 'a:toy-box', ':owner%2Frepo', 'a:%E0%A4%A']) {
+    expect(() => messagesOf({ bundle: named, through: '2026-11-09T12:00:00Z' })).toThrow(TypeError);
+  }
+  expect(() => messagesOf({ bundle, through: 'yesterday' })).toThrow(TypeError);
+  expect(() => messagesOf({ bundle })).toThrow(TypeError);
 });
 
 test('a flag change names only the four flags, each on or off', () => {

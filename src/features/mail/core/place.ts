@@ -1,5 +1,5 @@
 import { partsOf } from './conversations.ts';
-import { bundlePartsOf } from './github.ts';
+import { bundlePartsOf } from './bundles.ts';
 import type { AccountId, Place, View } from './model.ts';
 
 /**

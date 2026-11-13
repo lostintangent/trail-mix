@@ -28,25 +28,29 @@ test('no two seeded messages share a Message-ID', () => {
   }
 });
 
-test('each pull request has its own number and its own thread, and newer ones are higher', () => {
-  const roots = new Map<string, Set<string>>();
-  const numbers = new Map<number, Set<string>>();
-  const firsts: number[] = [];
-  for (const message of mailbox('personal')) {
-    const { subject, references } = message.content();
-    const number = /\(PR #(\d+)\)$/.exec(subject)?.[1];
-    if (number === undefined) continue;
-    const [root] = references;
-    const title = subject.replace(/^Re: /, '');
-    roots.set(root!, (roots.get(root!) ?? new Set()).add(title));
-    numbers.set(Number(number), (numbers.get(Number(number)) ?? new Set()).add(root!));
-    if (!subject.startsWith('Re: ')) firsts.push(Number(number));
+test('each pull request and issue has its own number and its own thread, and newer ones are higher', () => {
+  // Each account's GitHub mail is about a repository of its own, which numbers its threads alone.
+  for (const kind of ['personal', 'work'] as const) {
+    const roots = new Map<string, Set<string>>();
+    const numbers = new Map<number, Set<string>>();
+    const firsts: number[] = [];
+    for (const message of mailbox(kind)) {
+      const { subject, references } = message.content();
+      const number = /\((?:PR|Issue) #(\d+)\)$/.exec(subject)?.[1];
+      if (number === undefined) continue;
+      const [root] = references;
+      const title = subject.replace(/^Re: /, '');
+      roots.set(root!, (roots.get(root!) ?? new Set()).add(title));
+      numbers.set(Number(number), (numbers.get(Number(number)) ?? new Set()).add(root!));
+      if (!subject.startsWith('Re: ')) firsts.push(Number(number));
+    }
+    expect(firsts.length).toBeGreaterThan(100);
+    expect([...roots.values()].filter((titles) => titles.size > 1)).toEqual([]);
+    expect([...numbers.entries()].filter(([, held]) => held.size > 1)).toEqual([]);
+    expect(Math.min(...numbers.keys())).toBeGreaterThan(0);
+    // Newest first, every thread's number is lower than the one before it.
+    expect(firsts.every((number, at) => at === 0 || number < firsts[at - 1]!)).toBe(true);
   }
-  expect([...roots.values()].filter((titles) => titles.size > 1)).toEqual([]);
-  expect([...numbers.entries()].filter(([, held]) => held.size > 1)).toEqual([]);
-  expect(Math.min(...numbers.keys())).toBeGreaterThan(0);
-  // Newest first, every pull request's number is lower than the one before it.
-  expect(firsts.every((number, at) => at === 0 || number < firsts[at - 1]!)).toBe(true);
 });
 
 test('no two rows of the public demo share a subject and how their preview opens', () => {

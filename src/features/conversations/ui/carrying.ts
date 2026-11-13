@@ -1,25 +1,31 @@
 import type { QueryClient } from '@tanstack/react-query';
 import { folderName } from '../../folders/index.ts';
-import type {
-  ConversationId,
-  ConversationSummary,
-  Folder,
-  Message,
-  View,
+import {
+  bundlePartsOf,
+  isBundle,
+  type BundleSummary,
+  type ConversationId,
+  type Folder,
+  type ListItem,
+  type Message,
+  type View,
 } from '../../mail/core/index.ts';
 import { bodyQuery, conversationQuery, mailroom } from '../../mailroom/client/index.ts';
 import { reasonOf } from '../../../shared/reasons.ts';
 import { toast } from '../../../shared/toasts.tsx';
 import {
+  bundleCommandFor,
   changeMessages,
   commandFor,
   followMoves,
   undoOf,
+  type BundleCommand,
   type Command,
   type Moved,
 } from '../core/carrying.ts';
 import type { Action } from '../core/triage.ts';
-import type { Laid, Overlays } from './overlays.ts';
+import type { Laid, ListOf, Overlays } from './overlays.ts';
+import { fetchedList } from './useConversations.ts';
 
 /**
  * Carrying out a triage, once the rows have shown it: the Mailroom told, the open conversation
@@ -30,7 +36,10 @@ import type { Laid, Overlays } from './overlays.ts';
 /** A triage the rows already show, and what carrying it out needs. */
 export type Triaged = {
   queryClient: QueryClient;
+  /** The view the rows were triaged in, which says what a move takes out. */
   view: View;
+  /** The list the rows lie in: the view's, or a bundle's in it. */
+  list: ListOf;
   folders: readonly Folder[];
   action: Action;
   ids: readonly ConversationId[];
@@ -39,7 +48,7 @@ export type Triaged = {
   /** What the rows show of it, until the Mailroom's own list does. */
   laid: Laid | undefined;
   /** The rows as they were, which Undo puts back. */
-  earlierRows: readonly ConversationSummary[];
+  earlierRows: readonly ListItem[];
   /** The key that undoes the last triage: offered this one's Undo, or spent by the toast's. */
   undoKey: { offer: (undo: () => void) => void; spend: (undo: () => void) => void };
   /** Once the server has refused it and the rows are back as they were. */
@@ -49,6 +58,7 @@ export type Triaged = {
 export async function carryOut({
   queryClient,
   view,
+  list,
   folders,
   action,
   ids,
@@ -59,6 +69,14 @@ export async function carryOut({
   undoKey,
   onRefused,
 }: Triaged): Promise<void> {
+  // A bundle's row is carried out by the Mailroom, as far as the row showed it, and its
+  // conversations, as far as this browser holds them, follow what it reports.
+  const bundles = earlierRows.filter(isBundle);
+  const conversationIds = ids.filter((id) => bundlePartsOf(id) === undefined);
+  const followed = [
+    ...conversationIds,
+    ...bundles.flatMap((bundle) => threadsOf(queryClient, bundle)),
+  ];
   const earlierMessages = new Map<ConversationId, Message[]>();
   const restoreMessages = () => {
     for (const [id, messages] of earlierMessages) {
@@ -67,17 +85,24 @@ export async function carryOut({
   };
   const refused = (error: unknown, doing: string) => {
     void toast({ type: 'error', body: `Couldn't ${doing}. ${reasonOf(error)}` });
-    for (const id of ids) {
+    for (const id of followed) {
       void queryClient.invalidateQueries({ queryKey: conversationQuery(id).queryKey });
     }
   };
-  const undo = async (command: Command, moved: readonly Moved[]) => {
+  const carry = async (command: Command | BundleCommand) => {
+    const carried = await send(command);
+    follow(queryClient, followed, carried);
+    return carried;
+  };
+  const undo = async (done: readonly Carried[]) => {
     if (laid) overlays.lift(laid);
-    const back = overlays.lay(view, { returning: earlierRows });
+    const back = overlays.lay(list, { returning: earlierRows });
     // The refs from before a move are retired, so a move back waits for the refs it gives.
-    if ('setFlags' in command) restoreMessages();
+    if (done.some(({ command }) => 'setFlags' in command)) restoreMessages();
     try {
-      for (const step of undoOf(command, moved)) follow(queryClient, ids, await send(step));
+      for (const { command, moved } of done) {
+        for (const step of undoOf(command, moved)) await carry(step);
+      }
       overlays.settle(back);
     } catch (error) {
       overlays.lift(back);
@@ -87,34 +112,42 @@ export async function carryOut({
 
   try {
     const conversations = await Promise.all(
-      ids.map((id) => queryClient.ensureQueryData(conversationQuery(id))),
+      conversationIds.map((id) => queryClient.ensureQueryData(conversationQuery(id))),
     );
-    const command = commandFor(action, view, conversations, folders);
-    if (!command) {
+    const command =
+      conversations.length > 0 ? commandFor(action, view, conversations, folders) : undefined;
+    const commands = [
+      ...(command ? [command] : []),
+      ...bundles.flatMap((bundle) => bundleCommandFor(action, bundle, folders) ?? []),
+    ];
+    if (commands.length === 0) {
       if (laid) overlays.lift(laid);
       return;
     }
-    for (const [at, id] of ids.entries()) {
-      const messages = conversations[at] ?? [];
-      earlierMessages.set(id, messages);
-      queryClient.setQueryData(conversationQuery(id).queryKey, changeMessages(messages, command));
+    if (command) {
+      for (const [at, id] of conversationIds.entries()) {
+        const messages = conversations[at] ?? [];
+        earlierMessages.set(id, messages);
+        queryClient.setQueryData(conversationQuery(id).queryKey, changeMessages(messages, command));
+      }
     }
-    const moved = await send(command);
-    follow(queryClient, ids, moved);
+    const done: Carried[] = [];
+    for (const each of commands) done.push(await carry(each));
     if (laid) overlays.settle(laid);
     if (quietly) return;
     // The toast's Undo spends the key's undo too, so neither undoes it twice.
     const undoThis = () => {
       undoKey.spend(undoFromKey);
-      void undo(command, moved);
+      void undo(done);
     };
+    const count = conversationIds.length + bundles.reduce((sum, { threads }) => sum + threads, 0);
     const dismissing = toast({
-      body: said(action, ids.length, folders),
+      body: said(action, count, folders),
       action: { label: 'Undo', onAction: undoThis },
     });
     const undoFromKey = () => {
       void dismissing.then((dismiss) => dismiss());
-      void undo(command, moved);
+      void undo(done);
     };
     undoKey.offer(undoFromKey);
   } catch (error) {
@@ -125,16 +158,30 @@ export async function carryOut({
   }
 }
 
+/** A command the Mailroom carried out, by the messages it changed, and where each moved one went. */
+type Carried = { command: Command; moved: Moved[] };
+
+/** The conversations of a bundle this browser holds. */
+const threadsOf = (queryClient: QueryClient, bundle: BundleSummary): ConversationId[] =>
+  fetchedList(queryClient, bundle.id)?.flatMap((row) => (row ? [row.id] : [])) ?? [];
+
 /**
- * Gives some conversations' snapshots the refs their messages moved to, so nothing asks for a
- * message by a ref its move retired. A body is the same wherever its message is, so one already
- * fetched is kept under the new ref too.
+ * Gives some conversations' snapshots what a command did to them: the flags it changed, and the refs
+ * their messages moved to, so nothing asks for a message by a ref its move retired. A body is the
+ * same wherever its message is, so one already fetched is kept under the new ref too.
  */
-function follow(queryClient: QueryClient, ids: readonly ConversationId[], moved: readonly Moved[]) {
+function follow(
+  queryClient: QueryClient,
+  ids: readonly ConversationId[],
+  { command, moved }: Carried,
+) {
   for (const id of ids) {
     const { queryKey } = conversationQuery(id);
     const messages = queryClient.getQueryData(queryKey);
-    const followed = messages && followMoves(messages, moved);
+    if (!messages) continue;
+    const changed = changeMessages(messages, command);
+    const isChanged = changed.some((message, at) => message !== messages[at]);
+    const followed = followMoves(changed, moved) ?? (isChanged ? changed : undefined);
     if (followed) queryClient.setQueryData(queryKey, followed);
   }
   for (const { from, to } of moved) {
@@ -143,11 +190,17 @@ function follow(queryClient: QueryClient, ids: readonly ConversationId[], moved:
   }
 }
 
-/** Asks the Mailroom to carry out a command, and says where each moved message went. */
-async function send(command: Command): Promise<Moved[]> {
-  if ('move' in command) return mailroom.move(command.move, command.to);
-  await mailroom.setFlags(command.setFlags, command.change);
-  return [];
+/**
+ * Asks the Mailroom to carry out a command, and says what it changed: the messages given, or those
+ * of a bundle it found, and where each moved one went.
+ */
+async function send(command: Command | BundleCommand): Promise<Carried> {
+  if ('move' in command) {
+    const moved = await mailroom.move(command.move, command.to);
+    return { command: { move: moved.map(({ from }) => from), to: command.to }, moved };
+  }
+  const changed = await mailroom.setFlags(command.setFlags, command.change);
+  return { command: { setFlags: changed, change: command.change }, moved: [] };
 }
 
 /** What a toast says once the server has an action: "Archived", or "Moved 3 conversations to Receipts". */
