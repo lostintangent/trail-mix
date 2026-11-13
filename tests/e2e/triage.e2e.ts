@@ -675,7 +675,7 @@ test('folders are created, renamed and deleted, and a move to one deleted elsewh
   await folderRow(there, 'Trips').waitFor({ timeout: ELSEWHERE_MS });
 
   await folderRow(here, 'Trips').click();
-  await here.getByRole('button', { name: 'More for Trips' }).click();
+  await here.getByRole('button', { name: 'Folder', exact: true }).click();
   await here.getByRole('menuitem', { name: 'Rename Trips' }).click();
   await here.getByLabel('New name for Trips').fill('Journeys');
   await here.keyboard.press('Enter');
@@ -691,7 +691,7 @@ test('folders are created, renamed and deleted, and a move to one deleted elsewh
   const [moving, below] = [await textAt(here, 1), await textAt(here, 2)];
 
   await folderRow(there, 'Journeys').click();
-  await there.getByRole('button', { name: 'More for Journeys' }).click();
+  await there.getByRole('button', { name: 'Folder', exact: true }).click();
   await there.getByRole('menuitem', { name: 'Delete Journeys' }).click();
   await there.getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click();
   await folderRow(there, 'Journeys').waitFor({ state: 'detached', timeout: ELSEWHERE_MS });

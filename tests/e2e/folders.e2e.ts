@@ -98,9 +98,9 @@ test('folders are made, nested and renamed in place, and show before the server 
   await page.keyboard.press('Enter');
   await folderRow(page, 'Japan').waitFor();
 
-  // Renamed in place, from the folder's menu in the sidebar. The view follows it, and Japan goes along.
+  // Renamed in place, from the list's folder menu. The view follows it, and Japan goes along.
   release = await holdCommands(page);
-  await page.getByRole('button', { name: 'More for Trips' }).click();
+  await page.getByRole('button', { name: 'Folder', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Rename Trips' }).click();
   const renaming = page.getByRole('textbox', { name: 'New name for Trips' });
   await expect(renaming.inputValue()).resolves.toBe('Trips');
@@ -121,8 +121,8 @@ test('folders are made, nested and renamed in place, and show before the server 
 test('a delete asks first with what goes, comes back with the server’s reason, then goes', async () => {
   const page = await open({ ...DESKTOP, colorScheme: 'dark' });
   await folderRow(page, 'Projects').click();
-  // The folder's sidebar menu gathers what can be done to it.
-  await page.getByRole('button', { name: 'More for Projects' }).click();
+  // The list's folder menu gathers what can be done to the folder in view.
+  await page.getByRole('button', { name: 'Folder', exact: true }).click();
   const items = page.getByRole('menuitem');
   await items.first().waitFor();
   await expect(items.allTextContents()).resolves.toEqual([
@@ -155,7 +155,7 @@ test('a delete asks first with what goes, comes back with the server’s reason,
   await page.getByRole('heading', { name: 'Projects', level: 2 }).waitFor();
   await readable(page, 'desktop-dark-refused');
 
-  await page.getByRole('button', { name: 'More for Projects' }).click();
+  await page.getByRole('button', { name: 'Folder', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Delete Projects' }).click();
   await page.getByRole('alertdialog').getByRole('button', { name: 'Delete' }).click();
   await page.getByRole('heading', { name: 'Inbox', level: 2 }).waitFor();
@@ -173,11 +173,10 @@ test('on a phone, folder controls are 44 pixels, and a folder is named in the si
   await page.getByRole('button', { name: 'Folders', exact: true }).click();
   const more = page.getByRole('button', { name: 'More for Work' });
   await folderRow(page, 'Archive').click();
-  await page.getByRole('button', { name: 'Folders', exact: true }).click();
-  const folderMenu = personal(page).getByRole('button', { name: 'More for Archive' });
+  const folderMenu = page.getByRole('button', { name: 'Folder', exact: true });
   await folderMenu.waitFor();
 
-  // From the sidebar's folder menu, the sidebar stays in view with the field.
+  // From the list's folder menu, the sidebar comes into view with the field.
   await folderMenu.click();
   await page.getByRole('menuitem', { name: 'New folder in Archive' }).click();
   const field = page.getByRole('textbox', { name: 'Name of the new folder in Archive' });

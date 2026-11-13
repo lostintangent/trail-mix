@@ -113,6 +113,7 @@ import {
   Sidebar,
   UNIFIED_VIEWS,
   DeleteQuestion,
+  FolderMenu,
   useFolderEditing,
   viewCommands,
   viewIcon,
@@ -967,6 +968,13 @@ export function Workbench({
                     {searchAndCommands && <CommandButton command={searchAndCommands} />}
                     {newMessage && <CommandButton command={newMessage} primary="Write" />}
                   </>
+                }
+                actions={
+                  view.in === 'folder' && (
+                    <Suspense>
+                      <FolderMenu commands={folderEditing.commands} />
+                    </Suspense>
+                  )
                 }
               />
               <PanelEdge

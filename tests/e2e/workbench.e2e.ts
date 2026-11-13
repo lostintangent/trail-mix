@@ -999,6 +999,34 @@ test('the list header only names its view, and the reader bar holds triage and p
   await context.close();
 }, 30_000);
 
+test('a folder view keeps its own menu beside the title while the sidebar is folded', async () => {
+  const { context, page, problems } = await open(SIZES.desktop);
+  const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
+  await page
+    .getByRole('region', { name: 'Personal' })
+    .getByRole('button', { name: /^Projects/ })
+    .click();
+  await page.getByRole('heading', { name: 'Projects', level: 2 }).waitFor();
+
+  await page.keyboard.press('ControlOrMeta+b');
+  await sidebar.getByRole('button', { name: 'Unfold the sidebar' }).waitFor();
+  await atRest(page);
+
+  const list = page.locator('section[aria-labelledby]').first();
+  const folderMenu = list.getByRole('toolbar', { name: 'Projects' });
+  await folderMenu.getByRole('button', { name: 'Folder' }).click();
+  await expect(page.getByRole('menuitem').allTextContents()).resolves.toEqual([
+    'New folder in Projects',
+    'Rename Projects',
+    'Delete Projects',
+  ]);
+  await page.keyboard.press('Escape');
+  await page.screenshot({ path: join(SHOTS, 't75-folder-menu-folded.png') });
+  expect({ unreadable: await unreadableText(page) }).toEqual({ unreadable: [] });
+  expect(problems).toEqual([]);
+  await context.close();
+}, 30_000);
+
 test('reader triage sits at the left of its bar, with place at the right, in both themes and panes', async () => {
   const screenshot = async (page: Page, name: string) => {
     await page.screenshot({ path: join(SHOTS, `${name}.png`) });

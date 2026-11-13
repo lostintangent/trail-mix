@@ -67,6 +67,7 @@ export function ListPane({
   onExpand,
   onShowFolders,
   island,
+  actions,
 }: {
   id: string;
   /** The view's icon, the one the sidebar shows for it. */
@@ -116,6 +117,8 @@ export function ListPane({
   onShowFolders: () => void;
   /** On a phone, what the island holds after the way to the folders: search, then Write. */
   island?: ReactNode;
+  /** What can be done to the folder in view, beside its title. */
+  actions?: ReactNode;
 }) {
   const titleId = useId();
   if (isCollapsed) {
@@ -167,6 +170,11 @@ export function ListPane({
             'All accounts'
           )}
         </span>
+        {actions && (
+          <span role="toolbar" aria-label={title} {...stylex.props(styles.actions)}>
+            {actions}
+          </span>
+        )}
       </header>
       {below && <div {...stylex.props(styles.below)}>{below}</div>}
       <div {...stylex.props(styles.sheet, !list && conversations?.length === 0 && styles.empty)}>
@@ -303,6 +311,12 @@ const styles = stylex.create({
     flexShrink: 0,
     alignSelf: 'center',
     color: colorVars['--color-text-secondary'],
+  },
+  // The folder's own menu, beside its title.
+  actions: {
+    display: 'flex',
+    alignSelf: 'center',
+    marginBlock: `calc(-1 * ${spacingVars['--spacing-2']})`,
   },
   below: {
     flexShrink: 0,
