@@ -31,32 +31,6 @@ export function chipFactOf(chip: BundleChip): Fact {
 }
 
 /**
- * Everything a thread's sheet says of it, in the row's order: the reasons that ask something of the
- * member and a failure first, then the other reasons, how its run or checks ended, and whether it
- * was merged or closed. CI activity says no more than the outcome beside it, so it gives way to it.
- * Only an unread thread asks.
- */
-export function factsOf(thread: GitHubThread, isUnread: boolean): Fact[] {
-  const { kind, reasons, outcome, state } = thread;
-  const said = reasons.filter((reason) => reason !== 'ci_activity' || outcome === undefined);
-  const reason = (each: GitHubReason): Fact => ({
-    label: REASONS[each],
-    asks: isUnread && isAsking(each),
-  });
-  const ended = (failed: boolean): Fact[] =>
-    outcome !== undefined && (outcome === 'failed') === failed
-      ? [{ label: endedAs(kind, outcome), asks: isUnread && failed }]
-      : [];
-  return [
-    ...said.filter(isAsking).map(reason),
-    ...ended(true),
-    ...said.filter((each) => !isAsking(each)).map(reason),
-    ...ended(false),
-    ...(state === undefined ? [] : [{ label: STATES[state], asks: false }]),
-  ];
-}
-
-/**
  * How a thread is numbered beside its title: a run by its commit, set in monospace, and anything
  * else by its number. A run's own id means nothing to a reader, so it is left out.
  */
@@ -71,7 +45,7 @@ export function numberOf({
 }
 
 /** How a run, or the checks on a pull request, ended. */
-const endedAs = (kind: GitHubKind, outcome: NonNullable<GitHubThread['outcome']>) =>
+export const endedAs = (kind: GitHubKind, outcome: NonNullable<GitHubThread['outcome']>) =>
   `${kind === 'run' ? 'Run' : 'Checks'} ${outcome}`;
 
 /** What each kind of thread is called. */
@@ -83,7 +57,7 @@ export const KINDS: Record<GitHubKind, string> = {
 };
 
 /** Why GitHub wrote, as its documentation names each reason. */
-const REASONS: Record<GitHubReason, string> = {
+export const REASONS: Record<GitHubReason, string> = {
   assign: 'Assigned',
   author: 'Author',
   ci_activity: 'CI activity',
@@ -99,7 +73,8 @@ const REASONS: Record<GitHubReason, string> = {
   your_activity: 'Your activity',
 };
 
-const STATES: Record<NonNullable<GitHubThread['state']>, string> = {
+/** What became of a pull request or an issue. */
+export const STATES: Record<NonNullable<GitHubThread['state']>, string> = {
   merged: 'Merged',
   closed: 'Closed',
 };

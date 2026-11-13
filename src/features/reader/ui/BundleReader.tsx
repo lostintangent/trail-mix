@@ -32,6 +32,7 @@ import {
   type ConversationSummary,
 } from '../../mail/core/index.ts';
 import { issueStyles, threadStyles } from './layout.ts';
+import { metaStyles } from './meta.ts';
 import { ThreadSkeleton } from './skeletons.tsx';
 
 export type BundleReaderProps = {
@@ -145,9 +146,9 @@ function Head({
         <span {...stylex.props(styles.quiet)}>{repository.slice(0, slash)}</span>
         {repository.slice(slash)}
       </h1>
-      <p {...stylex.props(threadStyles.meta, threadStyles.metaWrapping)}>
+      <p {...stylex.props(threadStyles.meta, metaStyles.wrapping)}>
         {account && (
-          <span aria-hidden {...stylex.props(threadStyles.stamp, stampStyles[account.stamp])} />
+          <span aria-hidden {...stylex.props(metaStyles.stamp, stampStyles[account.stamp])} />
         )}
         <span>
           {[
@@ -163,10 +164,10 @@ function Head({
             href={address}
             target="_blank"
             rel="noopener noreferrer"
-            {...stylex.props(threadStyles.link)}
+            {...stylex.props(metaStyles.link)}
           >
             {repository.slice(slash)} on GitHub
-            <Icon icon={ExternalLink} size="xsm" xstyle={threadStyles.linkIcon} />
+            <Icon icon={ExternalLink} size="xsm" xstyle={metaStyles.linkIcon} />
           </a>
         )}
       </p>
@@ -192,7 +193,7 @@ function ThreadSheet({
   const newest = senders[0];
   return (
     <article {...stylex.props(issueStyles.sheet, styles.sheet)}>
-      {github ? <Icon icon={kindIconOf(github)} xstyle={issueStyles.kind} /> : <span />}
+      {github ? <Icon icon={kindIconOf(github)} xstyle={styles.kind} /> : <span />}
       <div {...stylex.props(issueStyles.head, styles.head)}>
         <button
           type="button"
@@ -230,7 +231,7 @@ function ThreadSheet({
           href={address}
           target="_blank"
           rel="noopener noreferrer"
-          xstyle={[issueStyles.open, styles.open]}
+          xstyle={styles.open}
         />
       )}
     </article>
@@ -243,6 +244,12 @@ const styles = stylex.create({
   quiet: {
     color: tm.textQuiet,
     fontWeight: fontWeightVars['--font-weight-normal'],
+  },
+  kind: {
+    width: '18px',
+    height: '18px',
+    marginTop: '3px',
+    color: colorVars['--color-text-secondary'],
   },
   // A hovered sheet takes the list's hover shade over its paper.
   sheet: {
@@ -338,8 +345,11 @@ const styles = stylex.create({
     color: colorVars['--color-text-primary'],
     fontWeight: fontWeightVars['--font-weight-medium'],
   },
-  // Above the title's reach, so the arrow opens GitHub, not the thread.
+  // In the third column of the title's line, above the title's reach, so the arrow opens GitHub, not
+  // the thread.
   open: {
+    gridColumn: '3',
+    gridRow: '1',
     position: 'relative',
     zIndex: 1,
     alignSelf: 'start',

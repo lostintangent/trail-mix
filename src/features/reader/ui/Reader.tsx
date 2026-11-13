@@ -36,6 +36,7 @@ import { folderOf, receivedIn } from '../core/folder.ts';
 import { REST_MS } from '../core/rest.ts';
 import { bareSubject } from '../core/subject.ts';
 import { threadStyles } from './layout.ts';
+import { metaStyles } from './meta.ts';
 import { MessageKeys } from './MessageFrame.tsx';
 import { displayName, MessageSheet, when } from './MessageSheet.tsx';
 import { refKey, refOf } from './refs.ts';
@@ -170,8 +171,8 @@ const Conversation = memo(function Conversation({
   return (
     <div {...stylex.props(threadStyles.thread)}>
       <h1 {...stylex.props(threadStyles.subject)}>{github?.title ?? subjectOf(messages)}</h1>
-      <p {...stylex.props(threadStyles.meta, address !== undefined && threadStyles.metaWrapping)}>
-        <span aria-hidden {...stylex.props(threadStyles.stamp, stampStyles[account.stamp])} />
+      <p {...stylex.props(threadStyles.meta, address !== undefined && metaStyles.wrapping)}>
+        <span aria-hidden {...stylex.props(metaStyles.stamp, stampStyles[account.stamp])} />
         <span>
           {[account.name, ...(folder ? [folderName(folder)] : []), size].join(' · ')}
           {address && ' · '}
@@ -357,14 +358,9 @@ function idle(): Promise<void> {
 /** Where a GitHub thread lives on github.com, named by its number, or by its kind when it has none. */
 function OnGitHub({ thread, address }: { thread: GitHubThread; address: string }) {
   return (
-    <a
-      href={address}
-      target="_blank"
-      rel="noopener noreferrer"
-      {...stylex.props(threadStyles.link)}
-    >
+    <a href={address} target="_blank" rel="noopener noreferrer" {...stylex.props(metaStyles.link)}>
       {numberOf(thread)?.text ?? (thread.kind === 'run' ? 'Run' : 'Thread')} on GitHub
-      <Icon icon={ExternalLink} size="xsm" xstyle={threadStyles.linkIcon} />
+      <Icon icon={ExternalLink} size="xsm" xstyle={metaStyles.linkIcon} />
     </a>
   );
 }

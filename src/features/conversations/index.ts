@@ -17,4 +17,5 @@ export { gitHubCommand, MOVE, triageCommands } from './ui/commands.ts';
 export { useBundle } from './ui/useBundle.ts';
 export { Chip, kindIconOf } from './ui/github.tsx';
 export { formatListDate } from './ui/dates.ts';
-export { factsOf, numberOf, type Fact } from './core/github.ts';
+export { numberOf, type Fact } from './core/github.ts';
+export { factsOf } from './core/threadFacts.ts';
