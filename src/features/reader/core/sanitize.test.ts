@@ -16,6 +16,7 @@ const look: FrameLook = {
 const mail = (html: string): SafeMail => ({
   html,
   blockedImages: false,
+  trackers: 0,
   paper: 'theme',
   quote: false,
   inlineParts: [],

@@ -10,6 +10,7 @@ import {
 } from './colors.ts';
 import { rewriteCssResources } from './css.ts';
 import { isAttribution, isForward, quoteMarker, type QuoteMarker } from './quotes.ts';
+import { isTrackingAddress, unseenImages } from './trackers.ts';
 
 /**
  * Hostile mail, made safe to show: message HTML in, and out comes the document its frame shows.
@@ -20,6 +21,7 @@ import { isAttribution, isForward, quoteMarker, type QuoteMarker } from './quote
  * - Images load only from the message's own parts (`cid:`), from `data:`, or, once the member
  *   allows the sender, through the Worker's proxy. That covers `src`, `srcset`, `background` and
  *   every `url()` and image function in CSS, which the browser's own CSS parser normalizes first.
+ * - Tracking pixels never load, as `trackers.ts` describes, and are counted.
  * - Links open in a new tab, with no opener and no referrer, and only to http, mail and phone.
  * - A quote that ends the message is marked so the frame can fold it.
  * - The colors the message sets are rewritten to read on the dark theme's paper as well, and its
@@ -43,6 +45,8 @@ export type SafeMail = {
   html: string;
   /** Remote images were left out, because the sender is not allowed yet. */
   blockedImages: boolean;
+  /** How many tracking pixels were left out, whether or not the sender is allowed. */
+  trackers: number;
   /**
    * The paper it sits on: the theme's, or light paper in both themes for mail whose colors can't be
    * darkened. A member may choose light paper for a sender's mail besides.
@@ -61,10 +65,19 @@ export function sanitizeMail(html: string, images: Images, dark: DarkPaper): Saf
   const colors = mailColors(dark);
   const mail = {
     blockedImages: false,
+    // Their addresses, so a pixel the message repeats counts once.
+    trackers: new Set<string>(),
     quote: false,
     inlineParts: new Set<string>(),
     sources: new Set<string>(),
   };
+  // The message's style sheets as it wrote them, for what decides whether an image is ever seen.
+  const written = new WeakMap<Element, string>();
+  const unseen = unseenImages((document) =>
+    [...document.querySelectorAll('style')].map(
+      (style) => written.get(style) ?? style.textContent ?? '',
+    ),
+  );
   // Elements that follow an Outlook-style marker, to be marked when the walk reaches them.
   const folding = new WeakSet<Node>();
 
@@ -80,6 +93,10 @@ export function sanitizeMail(html: string, images: Images, dark: DarkPaper): Saf
       // The frame's policy allows every `data:` image, so these need no source of their own.
       return /^data:image\//i.test(url.href) ? url.href : null;
     } else if (url.protocol === 'http:' || url.protocol === 'https:') {
+      if (isTrackingAddress(url)) {
+        mail.trackers.add(url.href);
+        return null;
+      }
       source = images.remote?.(url.href);
       if (!source) mail.blockedImages = true;
     }
@@ -112,6 +129,15 @@ export function sanitizeMail(html: string, images: Images, dark: DarkPaper): Saf
   });
 
   purify.addHook('uponSanitizeElement', (node, data) => {
+    // A tracking pixel goes whole, so nothing holds its place.
+    if (data.tagName === 'img' && node instanceof HTMLElement) {
+      const address = remoteAddress(node);
+      if (address && (isTrackingAddress(address) || unseen(node))) {
+        mail.trackers.add(address.href);
+        node.remove();
+      }
+      return;
+    }
     // A meta never stays, but the scheme it declares does.
     if (data.tagName === 'meta' && node instanceof Element) {
       const name = node.getAttribute('name')?.toLowerCase();
@@ -120,6 +146,7 @@ export function sanitizeMail(html: string, images: Images, dark: DarkPaper): Saf
       }
     }
     if (data.tagName !== 'style') return;
+    written.set(node as Element, node.textContent ?? '');
     const sheet = new window.CSSStyleSheet();
     sheet.replaceSync(node.textContent ?? '');
     colors.scan(sheet.cssRules);
@@ -230,6 +257,7 @@ export function sanitizeMail(html: string, images: Images, dark: DarkPaper): Saf
   return {
     html: markup,
     blockedImages: mail.blockedImages,
+    trackers: mail.trackers.size,
     paper: colors.paper(),
     quote: mail.quote,
     inlineParts: [...mail.inlineParts],
@@ -474,6 +502,19 @@ function linkTarget(raw: string): string | null {
 }
 
 const LINK_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:']);
+
+/** Where an image would load from a server, by its `src` or else its `srcset`, if it would. */
+function remoteAddress(image: Element): URL | null {
+  const remote = (url: URL | null) =>
+    url?.protocol === 'http:' || url?.protocol === 'https:' ? url : null;
+  return (
+    remote(parseUrl(image.getAttribute('src') ?? '')) ??
+    parseSrcset(image.getAttribute('srcset') ?? '')
+      .map(({ url }) => remote(parseUrl(url)))
+      .find((url) => url !== null) ??
+    null
+  );
+}
 
 /** A URL as a browser reads it. Mail has no base, so a relative URL is no URL. */
 function parseUrl(raw: string): URL | null {

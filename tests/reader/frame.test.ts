@@ -23,11 +23,18 @@ let harness: Harness;
 let canary: Canary;
 let hostile: { name: string; html: string }[];
 let real: { name: string; html: string }[];
+let trackers: { name: string; html: string; keep: string[]; track: string[] }[];
 
 beforeAll(async () => {
   canary = serveCanary();
   harness = await serveHarness();
-  [hostile, real] = await Promise.all([corpus('hostile', canary), corpus('real', canary)]);
+  let pixels;
+  [hostile, real, pixels] = await Promise.all([
+    corpus('hostile', canary),
+    corpus('real', canary),
+    corpus('trackers', canary),
+  ]);
+  trackers = pixels.map((mail) => ({ ...mail, ...addresses(mail.html) }));
 }, 60_000);
 
 afterAll(() => {
@@ -212,7 +219,7 @@ for (const type of BROWSERS) {
         await page.close();
       });
 
-      test('holds back a sender’s images in their places, drawn quietly, until they’re allowed', async () => {
+      test('holds back a sender’s images in their places, drawn quietly, until they’re allowed, and drops a pixel', async () => {
         const page = await browser.newPage({ viewport: { width: 800, height: 600 } });
         const remote = (name: string) => `${canary.origin}/held/${name}.png`;
         const html = [
@@ -241,17 +248,10 @@ for (const type of BROWSERS) {
           { alt: 'wide', size: '300x100', drawn: true, held: true },
           { alt: 'tall', size: '120x40', drawn: true, held: true },
           { alt: 'an icon', size: '20x20', drawn: true, held: true },
-          { alt: '', size: '1x1', drawn: true, held: true },
         ]);
         expect(canary.hits).toEqual([]);
         await show(page, [{ html, images: 'allowed' }]);
-        expect((await images()).map(({ held }) => held)).toEqual([
-          false,
-          false,
-          false,
-          false,
-          false,
-        ]);
+        expect((await images()).map(({ held }) => held)).toEqual([false, false, false, false]);
         await page.close();
       });
 
@@ -314,7 +314,62 @@ for (const type of BROWSERS) {
         });
       }
     });
+
+    describe('tracking pixels', () => {
+      const shown = (images: Shown['images']) => trackers.map(({ html }) => ({ html, images }));
+      let allowed: Observation;
+      let blocked: Observation;
+      beforeAll(async () => {
+        allowed = await observe(browser, shown('allowed'));
+        blocked = await observe(browser, shown('blocked'));
+      }, 30_000);
+
+      test('load nothing, while every other image loads once its sender is allowed', () => {
+        expect(allowed.canary).toEqual([]);
+        expect(allowed.elsewhere).toEqual([]);
+        expect([...new Set(allowed.proxied)].sort()).toEqual(
+          trackers.flatMap(({ keep }) => keep).sort(),
+        );
+      });
+
+      test('are counted once each, whether or not images are allowed', () => {
+        const counts = trackers.map(({ track }) => track.length);
+        expect(allowed.results.map((result) => result.trackers)).toEqual(counts);
+        expect(blocked.results.map((result) => result.trackers)).toEqual(counts);
+      });
+
+      test('leave nothing to say is hidden when they were a message’s only remote images', () => {
+        expect(blocked.proxied).toEqual([]);
+        expect(blocked.canary).toEqual([]);
+        expect(
+          Object.fromEntries(
+            trackers.map(({ name }, i) => [name, blocked.results[i]?.blockedImages]),
+          ),
+        ).toEqual({
+          'hidden.html': true,
+          'only-pixels.html': false,
+          'services.html': true,
+          'sized.html': true,
+        });
+      });
+    });
   });
+}
+
+/**
+ * The remote addresses a message of the trackers corpus names, apart, as the corpus marks them:
+ * each with "keep" in it must load once images are allowed, and every other is a tracker.
+ */
+function addresses(html: string): { keep: string[]; track: string[] } {
+  const urls = new Set(
+    (html.match(/https?:\/\/[^\s"'()<>]+/g) ?? []).map(
+      (url) => new URL(url.replaceAll('&amp;', '&')).href,
+    ),
+  );
+  return {
+    keep: [...urls].filter((url) => url.includes('keep')),
+    track: [...urls].filter((url) => !url.includes('keep')),
+  };
 }
 
 /** Hostile mail's one part, so a `cid:` can lead a list of candidates the sanitizer keeps. */

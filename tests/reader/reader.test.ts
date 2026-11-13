@@ -259,6 +259,20 @@ for (const type of BROWSERS) {
         await page.close();
       });
 
+      test('says quietly how many trackers a message held, with its images hidden or shown', async () => {
+        await open('newsletter');
+        const held = page.getByRole('status').filter({ hasText: 'are hidden' });
+        expect(await held.textContent()).toContain('are hidden. 1 tracker blocked.');
+        await page.getByRole('button', { name: 'Show', exact: true }).click();
+        await framesFitted(page);
+        expect(await held.count()).toBe(0);
+        expect(await page.getByText('1 tracker blocked', { exact: true }).isVisible()).toBe(true);
+        await page.close();
+        await open('lunch');
+        expect(await page.getByText(/tracker/).count()).toBe(0);
+        await page.close();
+      });
+
       test('fetches the newest body of each conversation that may open next', async () => {
         harness.calls.length = 0;
         await open('lunch', ['trailhead']);

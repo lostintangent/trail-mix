@@ -168,7 +168,7 @@ export async function launch(type: BrowserType) {
 }
 
 /** Every corpus file in a folder, with the canary standing in for each remote host. */
-export async function corpus(folder: 'hostile' | 'real', canary: Canary) {
+export async function corpus(folder: 'hostile' | 'real' | 'trackers', canary: Canary) {
   const files: { name: string; html: string }[] = [];
   for await (const name of new Bun.Glob('*.html').scan(join(import.meta.dir, 'corpus', folder))) {
     const html = await Bun.file(join(import.meta.dir, 'corpus', folder, name)).text();

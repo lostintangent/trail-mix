@@ -84,8 +84,9 @@ window.show = (mails) => {
   );
   showing = { mails, safe, at: Date.now() };
   render();
-  return safe.map(({ blockedImages, paper, quote, inlineParts }) => ({
+  return safe.map(({ blockedImages, trackers, paper, quote, inlineParts }) => ({
     blockedImages,
+    trackers,
     paper,
     quote,
     inlineParts,
@@ -195,6 +196,7 @@ function unsanitized(html: string): SafeMail {
   return {
     html,
     blockedImages: false,
+    trackers: 0,
     paper: 'theme',
     quote: false,
     inlineParts: [],

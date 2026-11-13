@@ -12,7 +12,7 @@ import {
   typographyVars,
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { Ellipsis, FileText, ImageIcon, ImageOff, Sun } from 'lucide-react';
+import { Ellipsis, FileText, ImageIcon, ImageOff, ShieldCheck, Sun } from 'lucide-react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { SenderAvatar } from '../../../app/theme/SenderAvatar.tsx';
@@ -67,6 +67,9 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
     [body],
   );
   const hasQuote = Boolean(mail?.quote || text?.quote);
+  const trackers = mail?.trackers
+    ? `${mail.trackers} ${mail.trackers === 1 ? 'tracker' : 'trackers'} blocked`
+    : undefined;
   const inline = new Set(mail?.inlineParts);
   const attachments = (body?.attachments ?? []).filter(
     ({ contentId }) => !contentId || !inline.has(contentId),
@@ -137,9 +140,17 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
 
       {mail?.blockedImages && (
         <div role="status" {...stylex.props(styles.images)}>
-          <Icon icon={ImageOff} size="sm" color="secondary" />
           <span {...stylex.props(styles.imagesText)}>
-            Images from {displayName(message.from)} are hidden.
+            <Icon icon={ImageOff} size="sm" color="secondary" />
+            <span>
+              Images from {displayName(message.from)} are hidden.
+              {trackers && (
+                <>
+                  {' '}
+                  <span {...stylex.props(styles.whole)}>{trackers}.</span>
+                </>
+              )}
+            </span>
           </span>
           <span {...stylex.props(styles.imagesActions)}>
             <Button label="Show" variant="ghost" size="sm" onClick={() => setShowOnce(true)} />
@@ -155,6 +166,12 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
             />
           </span>
         </div>
+      )}
+      {!mail?.blockedImages && trackers && (
+        <p {...stylex.props(styles.trackers)}>
+          <Icon icon={ShieldCheck} size="sm" color="secondary" />
+          {trackers}
+        </p>
       )}
 
       {mail ? (
@@ -306,8 +323,26 @@ const styles = stylex.create({
     color: colorVars['--color-text-secondary'],
     fontSize: typeScaleVars['--text-supporting-size'],
   },
+  // The icon stays beside the words as they wrap, and the choices wrap under them.
   imagesText: {
+    display: 'flex',
+    alignItems: 'center',
     flexGrow: 1,
+    gap: spacingVars['--spacing-1'],
+  },
+  // The count of trackers wraps as one phrase.
+  whole: {
+    whiteSpace: 'nowrap',
+  },
+  // Lined up with the words of the note on images, without its box.
+  trackers: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: spacingVars['--spacing-1'],
+    margin: 0,
+    paddingInline: spacingVars['--spacing-2'],
+    color: colorVars['--color-text-secondary'],
+    fontSize: typeScaleVars['--text-supporting-size'],
   },
   // The two choices wrap as one, so they stay together on a narrow sheet.
   imagesActions: {
