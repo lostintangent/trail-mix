@@ -1,15 +1,17 @@
 import { expect, test } from 'bun:test';
 import type { Message, Outgoing } from '../../mail/core/index.ts';
 import {
-  draftsAway,
+  draftsLeaving,
   expire,
   forget,
   GONE_MS,
+  isAway,
   leavingIn,
   nextExpiry,
   observe,
   press,
   standingOfLeaving,
+  toastFor,
 } from './leaving.ts';
 import { begin, filed, schedule, submitted } from './outbox.ts';
 import { closesAt } from './standing.ts';
@@ -51,7 +53,7 @@ test('a reply pressed is on its way at once, at the end of its conversation, as 
     { leaving: pressed[0]!, preview: 'Thursday works. See you there.' },
   ]);
   expect(standingOfLeaving(pressed[0]!, at(1))).toEqual({ is: 'counting', seconds: 9 });
-  expect(draftsAway(pressed)).toEqual([draft]);
+  expect(draftsLeaving(pressed)).toEqual([draft]);
   expect(leavingIn(pressed, 'another-thread', [parent])).toEqual([]);
 });
 
@@ -63,7 +65,7 @@ test('a reply pressed for later waits for its time', () => {
 test('a press the Mailroom refused is forgotten, and its draft is a draft again', () => {
   const refused = forget(pressed, draft);
   expect(leavingIn(refused, thread, [parent, indexed])).toEqual([]);
-  expect(draftsAway(refused)).toEqual([]);
+  expect(draftsLeaving(refused)).toEqual([]);
 });
 
 test('a snapshot older than a press leaves it on its way', () => {
@@ -76,7 +78,7 @@ test('a send asked for elsewhere is on its way in the conversation the Outbox na
     { leaving: all[0]!, preview: 'Thursday works. See you there.' },
   ]);
   expect(standingOfLeaving(all[0]!, at(1))).toEqual({ is: 'counting', seconds: 9 });
-  expect(draftsAway(all)).toEqual([draft]);
+  expect(draftsLeaving(all)).toEqual([draft]);
 });
 
 test('a reply that went keeps its place until its copy comes, which takes it in one snapshot', () => {
@@ -102,15 +104,19 @@ test('a reply undone is forgotten with the snapshot that shows it gone, and its 
   let all = observe(pressed, [outgoing()], at(1), closesFor);
   all = observe(all, [], at(4), closesFor);
   expect(all).toEqual([]);
-  expect(draftsAway(all)).toEqual([]);
+  expect(draftsLeaving(all)).toEqual([]);
 });
 
-test('a failed send leaves its conversation for the Outbox, and giving it up forgets it', () => {
+test('a failed send stays at the end of its conversation saying why, back in Drafts, until given up', () => {
   const refused = { error: '554 refused', passing: false };
   const failed = submitted(begin(outgoing()), refused, iso(11));
   let all = observe(pressed, [failed], at(11), closesFor);
-  expect(leavingIn(all, thread, [parent, indexed])).toEqual([]);
-  expect(draftsAway(all)).toEqual([]);
+  expect(leavingIn(all, thread, [parent, indexed])).toEqual([
+    { leaving: all[0]!, preview: 'Thursday works. See you there.' },
+  ]);
+  expect(standingOfLeaving(all[0]!, at(11))).toEqual({ is: 'failed', error: '554 refused' });
+  expect(draftsLeaving(all)).toEqual([draft]);
+  expect(isAway(all[0]!)).toBe(false);
   all = observe(all, [], at(20), closesFor);
   expect(all).toEqual([]);
 });
@@ -143,6 +149,40 @@ test('replies on their way lie soonest to go first, and a new message waits for 
   expect(leavingIn(fresh, thread, [parent])).toEqual([]);
   const named = observe(fresh, [outgoing()], at(1), closesFor);
   expect(leavingIn(named, thread, [parent])).toHaveLength(1);
+});
+
+test('a reply’s toast is put away on its conversation, which says it all, and shows elsewhere', () => {
+  const counting = pressed[0]!;
+  expect(toastFor(counting, thread, true, at(1))).toBe('put away');
+  expect(toastFor(counting, thread, false, at(1))).toBe('put away');
+  expect(toastFor(counting, 'another-thread', false, at(1))).toBe('show');
+  expect(toastFor(counting, undefined, false, at(1))).toBe('show');
+  const sending = observe(pressed, [begin(outgoing())], at(10.5), closesFor)[0]!;
+  expect(toastFor(sending, undefined, false, at(10.5))).toBe('show');
+});
+
+test('leaving a send’s conversation once it has stopped moving brings no toast', () => {
+  const accepted = submitted(begin(outgoing()), 'sent', iso(11));
+  const sent = observe(pressed, [accepted], at(11), closesFor)[0]!;
+  expect(toastFor(sent, undefined, false, at(11))).toBe('stay');
+  const failed = submitted(begin(outgoing()), { error: '554 refused', passing: false }, iso(11));
+  expect(
+    toastFor(observe(pressed, [failed], at(11), closesFor)[0]!, undefined, false, at(11)),
+  ).toBe('stay');
+  const later = press([], { ...pressedWith(), at: iso(3600) })[0]!;
+  expect(toastFor(later, undefined, false, at(1))).toBe('stay');
+});
+
+test('a send first seen away from its conversation shows its toast, as a new message’s does', () => {
+  const fresh = observe(
+    press([], { ...pressedWith(), pressedIn: undefined }),
+    [outgoing()],
+    at(1),
+    closesFor,
+  );
+  expect(toastFor(fresh[0]!, 'another-thread', true, at(1))).toBe('show');
+  const later = press([], { ...pressedWith(), at: iso(3600) })[0]!;
+  expect(toastFor(later, 'another-thread', true, at(1))).toBe('show');
 });
 
 function pressedWith(): Parameters<typeof press>[1] {

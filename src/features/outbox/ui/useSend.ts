@@ -12,9 +12,9 @@ export type Send = (draft: MessageRef, options?: SendOptions) => Promise<Outgoin
 export const loadSending = () => import('./sending.tsx');
 
 /**
- * Send from the browser. Once the Mailroom has the send, the Outbox shows it, and a toast follows
- * it: a countdown with Undo through the undo window, or the time it goes, then what came of it. If
- * the Mailroom refuses, a toast says why.
+ * Send from the browser. Once the Mailroom has the send, the Outbox shows it, and this device
+ * follows it: a countdown with Undo through the undo window, or the time it goes, then what came of
+ * it. If the Mailroom refuses, a toast says why.
  */
 export function useSend(): Send {
   const queryClient = useQueryClient();

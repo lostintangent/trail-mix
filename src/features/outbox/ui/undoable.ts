@@ -1,22 +1,26 @@
 import { useSyncExternalStore } from 'react';
 
 /**
- * The send this device can still take back, offered by the toast counting it down, so Undo in the
- * registry and its key reach it. The latest send offered wins.
+ * The send this device can still take back, offered by whatever counts it down on screen, its line
+ * in its conversation or its toast, so Undo in the registry and its key reach it. The latest send
+ * offered wins, and withdrawing an offer leaves every other standing.
  */
 export type Undoable = { id: string; takeBack: () => void };
 
-let current: Undoable | undefined;
+let offers: readonly Undoable[] = [];
 const listeners = new Set<() => void>();
 
-export function offerUndo(undoable: Undoable) {
-  current = undoable;
-  for (const listener of listeners) listener();
+/** Offers a send to Undo, until the returned function withdraws this offer alone. */
+export function offerUndo(undoable: Undoable): () => void {
+  offers = [...offers, undoable];
+  tell();
+  return () => {
+    offers = offers.filter((offer) => offer !== undoable);
+    tell();
+  };
 }
 
-export function withdrawUndo(id: string) {
-  if (current?.id !== id) return;
-  current = undefined;
+function tell() {
   for (const listener of listeners) listener();
 }
 
@@ -25,4 +29,6 @@ const subscribe = (listener: () => void) => {
   return () => listeners.delete(listener);
 };
 
-export const useUndoable = () => useSyncExternalStore(subscribe, () => current);
+const latest = () => offers.at(-1);
+
+export const useUndoable = () => useSyncExternalStore(subscribe, latest);

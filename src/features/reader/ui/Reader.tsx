@@ -5,6 +5,8 @@ import {
   radiusVars,
   spacingVars,
 } from '@astryxdesign/core/theme/tokens.stylex';
+import { Button } from '@astryxdesign/core/Button';
+import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
 import * as stylex from '@stylexjs/stylex';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { memo, useDeferredValue, useEffect, useEffectEvent, useRef, useState } from 'react';
@@ -23,13 +25,12 @@ import type {
 import { accountsQuery, bodyQuery, conversationQuery } from '../../mailroom/client/index.ts';
 import {
   Airmail,
-  formatAhead,
+  isLeaving,
   isOnItsWay,
   leavingIn,
-  useLeavingStanding,
+  useLeavingLine,
   type Leaving,
   type Shown,
-  type Standing,
 } from '../../outbox/index.ts';
 import { folderOf } from '../core/folder.ts';
 import { REST_MS } from '../core/rest.ts';
@@ -218,12 +219,14 @@ const Conversation = memo(function Conversation({
 });
 
 /**
- * A reply on its way, folded where its copy will lie, under airmail while it leaves. One this device
- * has just sent comes into view, so the member sees it leave: on a phone, clear of the island and
- * the toast below it.
+ * A reply on its way, folded where its copy will lie, under airmail while it leaves. While the
+ * member is here it says all there is to say of the send, in place of a toast: its countdown with
+ * Undo, when it goes, that it's sending or went, or why it didn't with the way to the Outbox. One
+ * this device has just sent comes into view, so the member sees it leave: on a phone, clear of the
+ * island below it.
  */
 function OnItsWay({ shown: { leaving, preview } }: { shown: Shown }) {
-  const standing = useLeavingStanding(leaving);
+  const { standing, said, reason, action, told } = useLeavingLine(leaving);
   const row = useRef<HTMLDivElement>(null);
   const isPhone = useMediaQuery(media.phone);
   const isStill = useMediaQuery(media.reducedMotion);
@@ -240,26 +243,24 @@ function OnItsWay({ shown: { leaving, preview } }: { shown: Shown }) {
   }, [isJustSent]);
   return (
     <div ref={row} {...stylex.props(threadStyles.folded, styles.onItsWay)}>
-      <Airmail isRunning={isOnItsWay(standing)} xstyle={styles.airmail} />
+      {isLeaving(standing) && <Airmail isRunning={isOnItsWay(standing)} xstyle={styles.airmail} />}
       <strong {...stylex.props(styles.foldedFrom)}>You</strong>
-      <span {...stylex.props(styles.foldedPreview)}>{preview}</span>
-      <span>{saidOf(standing)}</span>
+      <span {...stylex.props(styles.foldedPreview, styles.leavingPreview)}>{preview}</span>
+      <span {...stylex.props(styles.said)}>{said}</span>
+      {action && (
+        <Button
+          label={action.label}
+          variant="ghost"
+          size="sm"
+          isLoading={action.isBusy}
+          onClick={action.run}
+          xstyle={styles.action}
+        />
+      )}
+      {reason && <span {...stylex.props(styles.reason)}>{reason}</span>}
+      <VisuallyHidden role="status">{told}</VisuallyHidden>
     </div>
   );
-}
-
-/** Where a reply on its way stands, in the place its copy's time will take. */
-function saidOf(standing: Standing): string {
-  switch (standing.is) {
-    case 'scheduled':
-      return formatAhead(standing.at);
-    case 'retrying':
-      return 'Not sent yet';
-    case 'sent':
-      return 'Sent';
-    default:
-      return 'Sending…';
-  }
 }
 
 const counted = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
@@ -364,6 +365,7 @@ const styles = stylex.create({
   // Nothing to open yet, so it neither lifts nor points.
   onItsWay: {
     position: 'relative',
+    flexWrap: 'wrap',
     overflow: 'hidden',
     backgroundColor: 'transparent',
     color: tm.textQuiet,
@@ -373,6 +375,27 @@ const styles = stylex.create({
     position: 'absolute',
     insetInline: 0,
     top: 0,
+  },
+  // The line breaks only before the reason, so the preview gives way to what follows it.
+  leavingPreview: {
+    flexBasis: 0,
+  },
+  said: {
+    flexShrink: 0,
+    fontVariantNumeric: 'tabular-nums',
+  },
+  // Undo, or the way to the Outbox, ends the line, as a button does a toast.
+  action: {
+    flexShrink: 0,
+    marginInlineEnd: `calc(-1 * ${spacingVars['--spacing-2']})`,
+    fontWeight: fontWeightVars['--font-weight-semibold'],
+  },
+  // Why it hasn't gone takes a line of its own beneath, wrapping as long as it runs.
+  reason: {
+    flexBasis: '100%',
+    paddingBottom: spacingVars['--spacing-2'],
+    color: colorVars['--color-text-secondary'],
+    whiteSpace: 'normal',
   },
   foldedFrom: {
     color: colorVars['--color-text-secondary'],

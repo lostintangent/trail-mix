@@ -28,7 +28,7 @@ import {
   type Standing,
 } from '../core/standing.ts';
 import { Airmail } from './Airmail.tsx';
-import { closesFor } from './closings.ts';
+import { closesFor } from './asked.ts';
 import { outboxActions, type OutboxActions } from './sending.tsx';
 
 /**

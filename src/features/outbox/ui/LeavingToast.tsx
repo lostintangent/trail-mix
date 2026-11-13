@@ -12,29 +12,22 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, CircleAlert, Clock, Send, Undo2, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react';
 import { useCommands } from '../../commands/index.ts';
-import { reasonOf } from '../../../shared/reasons.ts';
-import type { MessageRef, Outgoing } from '../../mail/core/index.ts';
-import {
-  conversationQuery,
-  foldersQuery,
-  mailroom,
-  outboxQuery,
-} from '../../mailroom/client/index.ts';
+import { conversationQuery, foldersQuery, outboxQuery } from '../../mailroom/client/index.ts';
 import { formatAhead } from '../core/later.ts';
 import {
   briefly,
   follow,
-  followed,
   isLeaving,
   isOnItsWay,
   isUndoable,
-  isUnderWay as isUnderWayAt,
   standingOfFollowed,
+  type Followed,
   type Standing,
 } from '../core/standing.ts';
 import { media } from '../../../app/theme/tokens.stylex.ts';
 import { Airmail } from './Airmail.tsx';
-import { offerUndo, withdrawUndo } from './undoable.ts';
+import { takeBack as takeBackSend } from './asked.ts';
+import { offerUndo } from './undoable.ts';
 
 /** How long a toast stays once there is nothing left to do in it. */
 const LINGER_MS: Partial<Record<Standing['is'], number>> = {
@@ -44,40 +37,36 @@ const LINGER_MS: Partial<Record<Standing['is'], number>> = {
 };
 /** How long a toast waits for a sign that a send gone from the Outbox went, before it gives up. */
 const GONE_MS = 30_000;
-/** How often the toast asks again while a send is under way, in case a hint is lost. */
+/** How often the toast asks for the conversation while it waits for the send's copy in Sent. */
 const CHECK_MS = 2_000;
 /** How often the countdown looks at the clock, so each second turns over on time. */
 const TICK_MS = 250;
 
 /**
- * The toast that follows a send from the device that asked for it. Through the undo window it counts
- * down with Undo, and for a send later it says when. Then it says what the Mailroom has shown: that
- * it's sending, that it went, or why it didn't, with the way to the Outbox. Airmail lies along its
- * top while the message is leaving, and runs while it's on its way.
+ * The toast that follows a send from the device that asked for it, while the member is away from
+ * its conversation. Through the undo window it counts down with Undo, and for a send later it says
+ * when. Then it says what the Mailroom has shown: that it's sending, that it went, or why it
+ * didn't, with the way to the Outbox. Airmail lies along its top while the message is leaving, and
+ * runs while it's on its way. It starts from what the device has seen of the send so far.
  */
 export default function LeavingToast({
-  outgoing,
+  seen: seenFirst,
   closes,
   dismiss,
-  onUndone,
 }: {
-  outgoing: Outgoing;
+  seen: Followed;
   /** When the undo window closes on this device's clock. */
   closes: number;
   dismiss: () => void;
-  onUndone: ((draft: MessageRef) => void) | undefined;
 }) {
   const queryClient = useQueryClient();
-  const [seen, setSeen] = useState(() => followed(outgoing));
+  const outgoing = seenFirst.last;
+  const [seen, setSeen] = useState(seenFirst);
   const [undo, setUndo] = useState<'idle' | 'asking' | 'done' | { refused: string }>('idle');
   const [now, setNow] = useState(Date.now);
 
-  // While it's under way, it asks after the send, in case a hint is lost.
-  const isUnderWay = isUnderWayAt(seen, closes, now);
-  const { data: outbox, dataUpdatedAt } = useQuery({
-    ...outboxQuery,
-    refetchInterval: isUnderWay && seen.goneAt === undefined ? CHECK_MS : false,
-  });
+  // The workbench asks after a send under way, in case a hint is lost, and the toast follows.
+  const { data: outbox, dataUpdatedAt } = useQuery(outboxQuery);
   useEffect(() => {
     if (outbox)
       setSeen((was) =>
@@ -127,21 +116,8 @@ export default function LeavingToast({
 
   const takeBack = async () => {
     setUndo('asking');
-    try {
-      const draft = await mailroom.cancelSend(outgoing.id);
-      queryClient.setQueryData(outboxQuery.queryKey, (held) =>
-        held?.filter(({ id }) => id !== outgoing.id),
-      );
-      setUndo('done');
-      onUndone?.(draft);
-    } catch (error) {
-      // An Undo that reached the Mailroom after the window closed was too late, whatever the send
-      // has come to since. Anything else says the Mailroom's reason.
-      setUndo({
-        refused: Date.now() >= closes ? 'Too late to undo.' : `Couldn’t undo. ${reasonOf(error)}`,
-      });
-      void queryClient.invalidateQueries({ queryKey: outboxQuery.queryKey });
-    }
+    const refused = await takeBackSend(queryClient, outgoing);
+    setUndo(refused === undefined ? 'done' : { refused });
   };
 
   // While it counts, Undo in the registry, and its key, take this send back too.
@@ -152,8 +128,7 @@ export default function LeavingToast({
   const canTakeBack = isUndoable(standing) && undo === 'idle';
   useEffect(() => {
     if (!canTakeBack) return;
-    offerUndo({ id: outgoing.id, takeBack: () => void latestTakeBack.current() });
-    return () => withdrawUndo(outgoing.id);
+    return offerUndo({ id: outgoing.id, takeBack: () => void latestTakeBack.current() });
   }, [canTakeBack, outgoing.id]);
   const goToOutbox = useCommands().find(({ id }) => id === 'go.outbox');
 
@@ -211,7 +186,7 @@ export default function LeavingToast({
 }
 
 /** What the toast says, and the icon beside it, for where the send stands. */
-function said(standing: Standing, who: string): { icon: LucideIcon; text: string } {
+export function said(standing: Standing, who: string): { icon: LucideIcon; text: string } {
   switch (standing.is) {
     case 'counting':
       return { icon: Send, text: `Sending to ${who} in ${standing.seconds}s` };

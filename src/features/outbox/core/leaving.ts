@@ -9,6 +9,7 @@ import {
   closesAfterPress,
   follow,
   followed,
+  isOnItsWay,
   standingOfFollowed,
   standingOfWait,
   type Followed,
@@ -19,9 +20,9 @@ import {
  * The sends a device follows to the ends of their conversations, where each lies as a reply on its
  * way until the server's copy takes its place. A send this device asked for is followed from the
  * press, before the Mailroom has it, and one asked for elsewhere from the first snapshot of the
- * Outbox that holds it. Each is followed through the Outbox's snapshots as the toast follows a
- * send, so one gone from the Outbox keeps its place if it went, and leaves at once if it was undone
- * or given up. Its draft stays out of the conversation all the while.
+ * Outbox that holds it. Each is followed through the Outbox's snapshots, so one gone from the
+ * Outbox keeps its place if it went, and leaves at once if it was undone or given up. One that
+ * failed stays, saying why. Its draft stays out of the conversation all the while.
  */
 export type Leaving = {
   draft: MessageRef;
@@ -115,13 +116,16 @@ export function nextExpiry(all: readonly Leaving[]): number | undefined {
 }
 
 /**
- * The drafts on their way, which their conversations leave out: every send followed but one the
- * Outbox holds as failed, whose draft waits there for the member.
+ * The drafts of the sends followed, which their conversations leave out, since each lies at the end
+ * of its conversation as its send instead: on its way, or saying why it didn't go.
  */
-export const draftsAway = (all: readonly Leaving[]): MessageRef[] =>
-  all.filter(isAway).map(({ draft }) => draft);
+export const draftsLeaving = (all: readonly Leaving[]): MessageRef[] =>
+  all.map(({ draft }) => draft);
 
-/** Whether a send is away from its draft: on its way, or gone, but not failed and back. */
+/**
+ * Whether a send is away from its draft, which Drafts leaves out: on its way, or gone, but not
+ * failed and back.
+ */
 export const isAway = ({ seen }: Leaving) =>
   seen?.goneAt !== undefined || seen?.last.state !== 'failed';
 
@@ -130,9 +134,9 @@ export const conversationOf = (leaving: Leaving): ConversationId | undefined =>
   leaving.pressedIn ?? leaving.seen?.last.conversation;
 
 /**
- * The replies on their way at the end of a conversation, given its messages, soonest to go first.
- * One gives way to its copy once the conversation holds a message by its Message-ID that is not a
- * draft, in the same snapshot that shows the copy.
+ * The replies on their way at the end of a conversation, and those that didn't go, given its
+ * messages, soonest to go first. One gives way to its copy once the conversation holds a message by
+ * its Message-ID that is not a draft, in the same snapshot that shows the copy.
  */
 export function leavingIn(
   all: readonly Leaving[],
@@ -140,7 +144,6 @@ export function leavingIn(
   messages: readonly Message[],
 ): Shown[] {
   return all
-    .filter(isAway)
     .flatMap((leaving): Shown[] => {
       const draft = messages.find((message) => sameRef(message, leaving.draft));
       if (conversationOf(leaving) !== conversation) return [];
@@ -158,6 +161,22 @@ export type Shown = { leaving: Leaving; preview: string };
 
 /** Whether a reply gone from the Outbox waits for its copy, which its conversation should fetch. */
 export const isAwaitingCopy = ({ leaving }: Shown) => leaving.seen?.goneAt !== undefined;
+
+/**
+ * What a send's toast does as the member moves. While they're on the send's conversation, its line
+ * there says everything, so the toast is put away. Elsewhere it shows when this device first sees
+ * the send, as a new message's does, and when they leave the conversation while the send is on its
+ * way. Otherwise it stays as it is: shown, it follows the send to its end.
+ */
+export function toastFor(
+  leaving: Leaving,
+  shown: ConversationId | undefined,
+  isFirstSight: boolean,
+  now: number,
+): 'show' | 'put away' | 'stay' {
+  if (shown !== undefined && conversationOf(leaving) === shown) return 'put away';
+  return isFirstSight || isOnItsWay(standingOfLeaving(leaving, now)) ? 'show' : 'stay';
+}
 
 /** Where a send followed to its conversation stands at `now`. */
 export function standingOfLeaving({ seen, closes }: Leaving, now: number): Standing {

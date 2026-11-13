@@ -1,14 +1,21 @@
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { Account, ConversationId, Message, MessageRef } from '../../mail/core/index.ts';
+import {
+  sameRef,
+  type Account,
+  type ConversationId,
+  type Message,
+  type MessageRef,
+} from '../../mail/core/index.ts';
 import { conversationQuery } from '../../mailroom/client/index.ts';
 import type { Compose, Writing } from '../../composer/ui/index.ts';
 
 /**
  * What the member is writing, if anything, and how writing starts and ends. A composer belongs to
  * the conversation open when it started, and opening another conversation closes it, which saves
- * what it holds. The drafts it has saved stay out of the reader: the one being written while the
- * composer is open, and every one a later save replaced, which the server has dropped.
+ * what it holds. The drafts it has saved stay out of the reader: every draft that comes to its
+ * conversation while the composer is open, which a hint can bring before the save that made it has
+ * answered, and every one a later save replaced, which the server has dropped.
  */
 export function useComposing(selected: ConversationId | undefined, leaving: readonly MessageRef[]) {
   const queryClient = useQueryClient();
@@ -18,6 +25,8 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
     compose: Compose;
     in: ConversationId | undefined;
     session: number;
+    /** The drafts its conversation held as it started, which the reader goes on showing. */
+    before: readonly MessageRef[];
   }>();
   const [editing, setEditing] = useState<MessageRef>();
   const [replaced, setReplaced] = useState<readonly MessageRef[]>([]);
@@ -25,12 +34,20 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
   useLayoutEffect(() => {
     selectedNow.current = selected;
   });
-  const start = useCallback((next: Compose | undefined) => {
-    setStarted(
-      (was) => next && { compose: next, in: selectedNow.current, session: (was?.session ?? 0) + 1 },
-    );
-    setEditing(next?.as === 'draft' || next?.as === 'resumed' ? next.draft : undefined);
-  }, []);
+  const start = useCallback(
+    (next: Compose | undefined) => {
+      const opened = selectedNow.current;
+      const before = (
+        (opened !== undefined && queryClient.getQueryData(conversationQuery(opened).queryKey)) ||
+        []
+      ).filter(({ flags }) => flags.draft);
+      setStarted(
+        (was) => next && { compose: next, in: opened, session: (was?.session ?? 0) + 1, before },
+      );
+      setEditing(next?.as === 'draft' || next?.as === 'resumed' ? next.draft : undefined);
+    },
+    [queryClient],
+  );
   // Opening another conversation closes the composer at once, and then forgets it, so coming back
   // doesn't open it again from where it began.
   const compose = started?.in === selected ? started?.compose : undefined;
@@ -83,10 +100,22 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
     },
     [],
   );
+  // The conversation as the reader has it, without asking for it.
+  const { data: held } = useQuery({ ...conversationQuery(started?.in ?? ''), enabled: false });
+  const written = useMemo(
+    () =>
+      compose && started
+        ? (held ?? []).filter(
+            (message) =>
+              message.flags.draft && !started.before.some((draft) => sameRef(draft, message)),
+          )
+        : [],
+    [compose, started, held],
+  );
   // Drafts on their way stay out too, since they can't be written on until their send is undone.
   const hidden = useMemo(
-    () => [...replaced, ...leaving, ...(editing && compose ? [editing] : [])],
-    [editing, compose, replaced, leaving],
+    () => [...replaced, ...leaving, ...written, ...(editing && compose ? [editing] : [])],
+    [editing, compose, replaced, leaving, written],
   );
 
   return {

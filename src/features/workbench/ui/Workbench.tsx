@@ -43,6 +43,7 @@ import {
   SendActions,
   useSendCommands,
   type LeavingSends,
+  useLeavingToasts,
   useOutboxCommands,
   useSend,
 } from '../../outbox/index.ts';
@@ -747,6 +748,13 @@ export function Workbench({
   // New message, before its fields are drawn, then do nothing.
   const isBehindComposer = compose !== undefined && (isPhone || !isDocked(compose));
   const isOpenInView = selected !== undefined && !isMany && !isBehindComposer;
+  // A send on its way says where it stands on its line in its conversation while that's on screen,
+  // and in a toast while the member is elsewhere.
+  const shown =
+    (!isPhone || phonePane === 'reader') && page === undefined && isOpenInView
+      ? selected
+      : undefined;
+  useLeavingToasts(leaving.all, shown);
   const commands = useSteadyCommands([
     ...(isBehindComposer ? [] : selectedCommands),
     ...workbenchCommands({

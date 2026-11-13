@@ -28,10 +28,11 @@ export default function ToastHost({
 function Shows({ onReady }: Ready) {
   const showToast = useToast();
   const show = useCallback<Show>(
-    ({ body, type, action, render }) => {
+    ({ body, type, action, render, onHide }) => {
       const dismiss = showToast({
         body,
         type,
+        ...(onHide && { onHide: () => onHide() }),
         ...(render && { renderContent: ({ dismiss }) => render(dismiss), isAutoHide: false }),
         endContent: action && (
           <Button

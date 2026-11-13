@@ -209,12 +209,33 @@ test('⌘↵ sends what was written, and Undo brings the composer back as it was
   await page.keyboard.press('ControlOrMeta+Enter');
   await reply.waitFor({ state: 'detached' });
 
-  const notifications = page.getByRole('region', { name: 'Notifications' });
-  await notifications.getByText(/^Sending to \w+ in \d+s$/).waitFor();
-  await notifications.getByRole('button', { name: 'Undo' }).click();
+  // The reply counts down on its line at the end of its conversation, where it was written.
+  const line = reader(page).locator('div:has(> [data-airmail])', { hasText: 'On my way.' });
+  await line.getByText(/^Sending in \d+s$/).waitFor();
+  await line.getByRole('button', { name: 'Undo' }).click();
   await expect(
     reply.getByRole('textbox', { name: 'Reply' }).textContent({ timeout: 10_000 }),
   ).resolves.toBe('On my way.');
+}, 60_000);
+
+test('a new message sent counts down in a toast, since it has no conversation on screen', async () => {
+  const page = await inbox();
+  await page.keyboard.press('c');
+  const composer = composerNamed(page, 'New message');
+  await composer.getByRole('textbox', { name: 'To' }).fill('sam@trailmix.test');
+  await composer.getByRole('textbox', { name: 'Subject' }).fill('Trailhead at eight');
+  await composer.getByRole('textbox', { name: 'Message' }).click();
+  await page.keyboard.type('Bring the map.');
+  await saved(page).waitFor({ timeout: 10_000 });
+  await page.keyboard.press('ControlOrMeta+Enter');
+  await composer.waitFor({ state: 'detached' });
+
+  const notifications = page.getByRole('region', { name: 'Notifications' });
+  await notifications.getByText(/^Sending to \S+ in \d+s$/).waitFor();
+  await notifications.getByRole('button', { name: 'Undo' }).click();
+  await expect(
+    composer.getByRole('textbox', { name: 'Message' }).textContent({ timeout: 10_000 }),
+  ).resolves.toBe('Bring the map.');
 }, 60_000);
 
 test('Link turns the selected words into a link, adding https to an address typed without it', async () => {

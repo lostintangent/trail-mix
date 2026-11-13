@@ -22,6 +22,8 @@ export type Toast = {
    * `body` is still what's announced. Such a toast stays until it calls `dismiss`.
    */
   render?: (dismiss: () => void) => ReactNode;
+  /** Called once the toast has gone, however it went: dismissed, or swiped away. */
+  onHide?: () => void;
 };
 
 export type Show = (toast: Toast) => ToastDismissFn;

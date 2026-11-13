@@ -4,11 +4,15 @@ import { reasonOf } from '../../../shared/reasons.ts';
 import { toast } from '../../../shared/toasts.tsx';
 import type { MessageRef, Outgoing } from '../../mail/core/index.ts';
 import { mailroom, outboxQuery } from '../../mailroom/client/index.ts';
-import { formatAhead } from '../core/later.ts';
-import { UNDO_SECONDS } from '../core/outbox.ts';
-import { briefly, closesAfterPress, closesAt } from '../core/standing.ts';
-import { rememberClosing } from './closings.ts';
-import LeavingToast from './LeavingToast.tsx';
+import {
+  briefly,
+  closesAfterPress,
+  closesAt,
+  standingOfFollowed,
+  type Followed,
+} from '../core/standing.ts';
+import { rememberAsked } from './asked.ts';
+import LeavingToast, { said } from './LeavingToast.tsx';
 
 /**
  * What the browser does with the Outbox, loaded when it's first wanted rather than with the first
@@ -25,12 +29,10 @@ export type SendOptions = {
   pressedAt?: number;
 };
 
-/** The toasts following sends, by send, so a send asked for again replaces its toast. */
-const following = new Map<string, () => void>();
-
 /**
- * Schedules a saved draft. Once the Mailroom has the send, the Outbox shows it, and a toast follows
- * it: a countdown with Undo through the undo window, or the time it goes, then what came of it.
+ * Schedules a saved draft. Once the Mailroom has the send, the Outbox shows it, and this device
+ * follows it as one it asked for: on its line in its conversation, and in a toast while the member
+ * is elsewhere.
  */
 export async function sendDraft(
   queryClient: QueryClient,
@@ -46,37 +48,70 @@ export async function sendDraft(
     return undefined;
   }
   const isLater = at !== undefined && Date.parse(at) > closesAfterPress(pressed);
-  const closes = isLater ? closesAt(outgoing) : closesAfterPress(pressed);
-  rememberClosing(outgoing.id, closes);
+  rememberAsked(outgoing.id, {
+    closes: isLater ? closesAt(outgoing) : closesAfterPress(pressed),
+    ...(onUndone && { onUndone }),
+  });
   // A snapshot asked for before the Mailroom had the send would take it out of the Outbox again.
   await queryClient.cancelQueries({ queryKey: outboxQuery.queryKey });
   queryClient.setQueryData(outboxQuery.queryKey, (held = []) => [
     ...held.filter(({ id }) => id !== outgoing.id),
     outgoing,
   ]);
+  return outgoing;
+}
 
-  following.get(outgoing.id)?.();
-  const who = briefly(outgoing.to);
-  const dismiss = await toast({
-    body: isLater
-      ? `Sending to ${who} ${formatAhead(outgoing.sendAt)}`
-      : `Sending to ${who} in ${UNDO_SECONDS} seconds`,
+/**
+ * The toasts following sends this device asked for, by send. One put away, as the member comes to
+ * the send's conversation, can show again. One that ended, once it had nothing more to say or the
+ * member dismissed it, never does.
+ */
+const toasts = new Map<string, { isShown: boolean; hasEnded: boolean; dismiss?: () => void }>();
+
+/**
+ * Shows the toast that follows a send, as it stands now: a countdown with Undo through the undo
+ * window, or the time it goes, then what came of it. A send whose toast shows already, or ended,
+ * shows nothing more.
+ */
+export function showLeavingToast(seen: Followed, closes: number) {
+  const { id } = seen.last;
+  const was = toasts.get(id);
+  if (was?.isShown || was?.hasEnded) return;
+  const following: { isShown: boolean; hasEnded: boolean; dismiss?: () => void } = {
+    isShown: true,
+    hasEnded: false,
+  };
+  toasts.set(id, following);
+  const standing = standingOfFollowed(seen, closes, Date.now(), false);
+  const who = briefly(seen.last.to);
+  void toast({
+    body:
+      standing.is === 'counting'
+        ? `Sending to ${who} in ${standing.seconds} seconds`
+        : said(standing, who).text,
     render: (dismiss) => (
       <Suspense>
-        <LeavingToast
-          outgoing={outgoing}
-          closes={closes}
-          dismiss={() => {
-            following.delete(outgoing.id);
-            dismiss();
-          }}
-          onUndone={onUndone}
-        />
+        <LeavingToast seen={seen} closes={closes} dismiss={dismiss} />
       </Suspense>
     ),
+    // However it goes but put away, it has ended.
+    onHide: () => {
+      if (!following.isShown) return;
+      following.isShown = false;
+      following.hasEnded = true;
+    },
+  }).then((dismiss) => {
+    if (following.isShown) following.dismiss = dismiss;
+    else if (!following.hasEnded) dismiss();
   });
-  following.set(outgoing.id, dismiss);
-  return outgoing;
+}
+
+/** Puts a send's toast away, as its line in the conversation on screen says it all. */
+export function putAwayLeavingToast(id: string) {
+  const following = toasts.get(id);
+  if (!following?.isShown) return;
+  following.isShown = false;
+  following.dismiss?.();
 }
 
 /** Undo, Retry and Edit for a send the Outbox holds. Edit takes the send back, so its draft opens. */

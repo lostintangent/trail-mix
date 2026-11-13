@@ -1,7 +1,8 @@
 // Replying without waiting: the composer opens under its conversation at once, however slowly the
 // server answers, says what it's saving in a place of its own, and a sent reply takes its place at
-// the end of its conversation while it leaves. Each at a desktop's size and a phone's, as a member
-// of their own, in both themes.
+// the end of its conversation while it leaves, saying there all there is to say of its send, with no
+// toast while the member stays. Each at a desktop's size and a phone's, as a member of their own, in
+// both themes.
 import { afterEach, describe, expect } from 'bun:test';
 import { join } from 'node:path';
 import type { BrowserContextOptions, Page, Route } from 'playwright';
@@ -201,6 +202,51 @@ for (const [size, options] of Object.entries(SIZES)) {
       expect({ saves, drafts: await drafts.count() }).toEqual({ saves: 0, drafts: before });
     }, 60_000);
 
+    test('a reply’s draft never shows above its composer, though the hint brings it before its save answers', async () => {
+      const page = await inbox(size === 'desktop' ? 'light' : 'dark');
+      await open(page);
+      await composerLoaded(page);
+      const text = 'Held saves stay out of sight.';
+      // Each save answers two seconds late, so the conversation refetched on its hint comes first.
+      let answers = 0;
+      let early = 0;
+      await page.route('**/_serverFn/**', async (route: Route) => {
+        const request = route.request();
+        if (request.method() !== 'POST' || !request.postData()?.includes('saveDraft')) {
+          return route.fallback();
+        }
+        const response = await route.fetch();
+        await new Promise((done) => setTimeout(done, 2_000));
+        await route.fulfill({ response });
+        answers++;
+      });
+      page.on('response', async (response) => {
+        const asked = decodeURIComponent(response.url());
+        if (!asked.includes('{"t":1,"s":"conversation"}') || answers > 0) return;
+        if ((await response.text().catch(() => '')).includes(text)) early++;
+      });
+      await watch(page, text);
+      await page.keyboard.press('r');
+      const reply = composer(page);
+      await reply.getByRole('textbox', { name: 'Reply' }).waitFor();
+      await page.keyboard.type(text);
+      const saved = reply.getByRole('status').filter({ hasText: 'Saved to Drafts' });
+      await saved.waitFor({ timeout: 10_000 });
+      await page.keyboard.type(' Even the second.');
+      await until(() => Promise.resolve(answers >= 2), 15_000);
+      await painted(page);
+      expect(early).toBeGreaterThan(0);
+      const frames = await shown(page);
+      expect(frames.filter(({ drafts }) => drafts > 0)).toEqual([]);
+      expect(frames.at(-1)).toEqual({
+        composer: true,
+        leaving: 0,
+        running: 0,
+        copies: 0,
+        drafts: 0,
+      });
+    }, 60_000);
+
     /** Writes a reply to the conversation open in `page`, and sends it. */
     async function sendReply(page: Page, text: string) {
       await page.keyboard.press('r');
@@ -230,6 +276,8 @@ for (const [size, options] of Object.entries(SIZES)) {
       ).toEqual([]);
       expect(sent.at(-1)).toMatchObject({ leaving: 0, copies: 1 });
       expect(await copy.locator('time').count()).toBe(1);
+      // Its line said it all, from the press until the copy took its place.
+      expect(await toasted(page)).toEqual([]);
     }, 90_000);
 
     test('Undo brings the composer back as it was, and takes the reply from its conversation', async () => {
@@ -251,6 +299,67 @@ for (const [size, options] of Object.entries(SIZES)) {
       expect(sent.slice(back)).toEqual([
         { composer: true, leaving: 0, running: 0, copies: 0, drafts: 0 },
       ]);
+      expect(await toasted(page)).toEqual([]);
+    }, 60_000);
+
+    test('leaving a reply as it counts down brings its toast, coming back puts it away, and Z undoes it', async () => {
+      const page = await inbox(size === 'desktop' ? 'dark' : 'light');
+      await open(page);
+      const text = 'Leaving for a moment.';
+      await sendReply(page, text);
+      const line = reader(page).locator('div:has(> [data-airmail])', { hasText: text });
+      await line.getByText(/^Sending in \d+s$/).waitFor({ timeout: 2_000 });
+      const sending = page.locator('.astryx-toast').filter({ hasText: /^Sending to \w+ in \d+s/ });
+      // Away from the conversation, the toast counts down where the line stood.
+      if (size === 'phone') await page.keyboard.press('Escape');
+      else
+        await page
+          .getByRole('option')
+          .filter({ hasNotText: 'Workers migration plan' })
+          .first()
+          .click();
+      await sending.waitFor({ timeout: 3_000 });
+      await sending.getByRole('button', { name: 'Undo', exact: true }).waitFor();
+      expect(await sending.evaluate(onPaper)).toBe(true);
+      await page.screenshot({ path: join(SHOTS, `reply-${size}-left.png`) });
+      // Back on it, the toast goes, and the line takes up the countdown.
+      await open(page);
+      await sending.waitFor({ state: 'detached', timeout: 3_000 });
+      await line.getByText(/^Sending in \d+s$/).waitFor();
+      await page.keyboard.press('z');
+      const editor = composer(page).getByRole('textbox', { name: 'Reply' });
+      await editor.waitFor({ timeout: 5_000 });
+      expect(await editor.innerText()).toBe(text);
+      await line.waitFor({ state: 'detached' });
+    }, 60_000);
+
+    test('a reply the server refuses says why on its line, with the way to the Outbox', async () => {
+      const page = await inbox(size === 'desktop' ? 'light' : 'dark');
+      await open(page);
+      await noteToasts(page);
+      await page.keyboard.press('r');
+      const reply = composer(page);
+      // The demo's server turns away the first try of each message to unreachable.example.
+      await reply.getByRole('textbox', { name: 'To' }).fill('rae@unreachable.example');
+      await reply.getByRole('textbox', { name: 'Reply' }).click();
+      const text = 'This one won’t get through.';
+      await page.keyboard.type(text);
+      await reply.getByRole('status').filter({ hasText: 'Saved to Drafts' }).waitFor();
+      await page.keyboard.press('ControlOrMeta+Enter');
+      const line = reader(page)
+        .locator('div', { hasText: text })
+        .filter({ hasText: 'Couldn’t send' })
+        .last();
+      await line.waitFor({ timeout: 30_000 });
+      await line.getByText(/^The mail server refused it: 554/).waitFor();
+      expect(await line.locator('[data-airmail]').count()).toBe(0);
+      await readable(page, size, `${size === 'desktop' ? 'light' : 'dark'}-refused`);
+      expect(await toasted(page)).toEqual([]);
+      await line.getByRole('button', { name: 'Open Outbox' }).click();
+      await page
+        .getByRole('listitem')
+        .filter({ hasText: /unreachable\.example can’t be reached right now/ })
+        .waitFor();
     }, 60_000);
 
     test('airmail runs while a reply leaves, and stands still, still drawn, when motion is reduced', async () => {
@@ -261,7 +370,6 @@ for (const [size, options] of Object.entries(SIZES)) {
         await sendReply(page, text);
         const bands = page.locator('[data-airmail] > *');
         await reader(page).locator('div:has(> [data-airmail])', { hasText: text }).waitFor();
-        await page.locator('.astryx-toast [data-airmail]').waitFor();
         const drawn = await bands.evaluateAll((all) =>
           all.map((band) => ({
             isRunning: band.getAnimations().length > 0,
@@ -270,7 +378,7 @@ for (const [size, options] of Object.entries(SIZES)) {
               getComputedStyle(band).forcedColorAdjust === 'none',
           })),
         );
-        expect(drawn.length).toBeGreaterThanOrEqual(2);
+        expect(drawn.length).toBeGreaterThanOrEqual(1);
         expect(drawn).toEqual(
           drawn.map(() => ({ isRunning: motion === 'no-preference', isDrawn: true })),
         );
@@ -285,8 +393,8 @@ for (const [size, options] of Object.entries(SIZES)) {
 }
 
 /**
- * Waits for a reply just sent to lie at the end of its conversation under running airmail, with its
- * toast on paper, and checks both read.
+ * Waits for a reply just sent to lie at the end of its conversation under running airmail, counting
+ * down with its Undo in reach, and checks it reads.
  */
 async function sentShows(page: Page, text: string, screen: string) {
   const onItsWay = page
@@ -294,14 +402,18 @@ async function sentShows(page: Page, text: string, screen: string) {
     .locator('div:has(> [data-airmail])', { hasText: text });
   await onItsWay.waitFor({ timeout: 2000 });
   expect(await onItsWay.locator('[data-airmail]').getAttribute('data-airmail')).toBe('running');
-  const toastCard = page.locator('.astryx-toast').first();
-  await toastCard.waitFor();
-  // The member sees it leave: on screen, and clear of the toast.
-  await until(async () => {
-    const [line, toast] = await Promise.all([onItsWay.boundingBox(), toastCard.boundingBox()]);
-    return !!line && !!toast && line.y >= 0 && line.y + line.height <= toast.y;
-  }, 2000);
-  expect(await toastCard.evaluate(onPaper)).toBe(true);
+  await onItsWay.getByText(/^Sending in \d+s$/).waitFor();
+  const undo = onItsWay.getByRole('button', { name: 'Undo', exact: true });
+  // The member sees it leave, and Undo is theirs to press: on screen, and under nothing.
+  await until(
+    () =>
+      undo.evaluate((button) => {
+        const { top, bottom, left, width, height } = button.getBoundingClientRect();
+        const hit = document.elementFromPoint(left + width / 2, top + height / 2);
+        return top >= 0 && bottom <= innerHeight && !!hit && button.contains(hit);
+      }),
+    2000,
+  );
   await readable(page, sizeOf(page), screen);
 }
 
@@ -322,6 +434,7 @@ type Frame = {
  * draft. A frame like the one before isn't noted again.
  */
 async function watch(page: Page, text: string) {
+  await noteToasts(page);
   await page.evaluate((text) => {
     const frames: Frame[] = [];
     (window as unknown as { frames_: Frame[] }).frames_ = frames;
@@ -347,6 +460,22 @@ async function watch(page: Page, text: string) {
 
 const shown = (page: Page) =>
   page.evaluate(() => (window as unknown as { frames_: Frame[] }).frames_);
+
+/** Notes from now on what every toast that shows says. */
+const noteToasts = (page: Page) =>
+  page.evaluate(() => {
+    const said = new Set<string>();
+    (window as unknown as { toasts_: Set<string> }).toasts_ = said;
+    const look = () => {
+      for (const toast of document.querySelectorAll('.astryx-toast')) said.add(toast.textContent);
+      requestAnimationFrame(look);
+    };
+    requestAnimationFrame(look);
+  });
+
+/** What every toast said since `noteToasts`. */
+const toasted = (page: Page) =>
+  page.evaluate(() => [...(window as unknown as { toasts_: Set<string> }).toasts_]);
 
 /** The frames from the one that closed the composer on Send. */
 function afterSend(frames: Frame[]): Frame[] {
