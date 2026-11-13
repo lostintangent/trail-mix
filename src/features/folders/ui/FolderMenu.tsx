@@ -9,8 +9,8 @@ const IDS = ['folder.create', 'folder.rename', 'folder.delete'];
 
 /**
  * What can be done to the folder in view, at the list header's end even when the sidebar is
- * folded: a new folder inside it,
- * renaming it, and deleting it, each drawn from its command and left out when it can't run.
+ * folded: a new folder inside it, renaming it, and deleting it, each drawn from its command and
+ * left out when it can't run.
  */
 export function FolderMenu({ commands }: { commands: readonly Command[] }) {
   const items = menuItems(IDS.flatMap((id) => commands.find((command) => command.id === id) ?? []));
