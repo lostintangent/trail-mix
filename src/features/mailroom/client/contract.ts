@@ -48,6 +48,13 @@ export interface Queries {
   signInPresets(): Promise<SignInPreset[]>;
   /** What this device keeps, and whether the device at `endpoint` is notified. */
   thisDevice(endpoint?: string): Promise<ThisDevice>;
+  /**
+   * Whom an address field completes what was typed to: up to `PEOPLE_LISTED` people the index
+   * holds, other than the member, with a word of their name or address starting with each word
+   * typed. Those the member wrote to come first, then those who only wrote to them, each by how
+   * often and then how lately. Typing no letter or digit completes to nobody.
+   */
+  people(typed: string): Promise<Address[]>;
 }
 
 /**
@@ -156,6 +163,9 @@ export const PAGE_SIZE = 50;
 
 /** The most conversations a search as it is typed lists: its newest that match. */
 export const MATCHES_LISTED = 1_000;
+
+/** The most people an address field completes what was typed to. */
+export const PEOPLE_LISTED = 8;
 
 /**
  * What connecting an account takes: nothing for the demo mailbox, and a password for an IMAP host.
@@ -306,6 +316,7 @@ export const QUERIES = [
   'signIns',
   'signInPresets',
   'thisDevice',
+  'people',
 ] as const satisfies readonly (keyof Queries)[];
 
 export const COMMANDS = [

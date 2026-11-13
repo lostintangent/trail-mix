@@ -15,7 +15,7 @@ import {
 } from '../../mail/core/index.ts';
 import type { Page } from '../client/contract.ts';
 import { envelopeIndex, type EnvelopeIndex } from './envelope-index.ts';
-import { RESUMMARIZE, upgrade, versions, type Sql, type SqlValue } from './schema.ts';
+import { RESUMMARIZE, upgrade, type Sql, type SqlValue } from './schema.ts';
 import { testSql } from './test-sql.ts';
 
 const FOLDERS: { account: string; path: string; role?: FolderRole }[] = [
@@ -699,7 +699,7 @@ describe('an upgrade that makes rows again', () => {
         envelope('lunch', { date: at(9) }),
       ),
     );
-    const sql = heldAsOf(versions.length - 1, current);
+    const sql = heldAsOf(19, current);
     sql.run(`UPDATE conversations SET summary = json_remove(summary, '$.github')`);
     upgrade(sql);
     return { sql, store: envelopeIndex(sql, () => []), now };
@@ -974,5 +974,285 @@ describe('search', () => {
       .map(({ block }) => new TextDecoder('latin1').decode(block))
       .join('');
     expect(blocks.toLowerCase()).not.toContain('zanzibar');
+  });
+});
+
+describe('the people an address completes to', () => {
+  const ME = 'me@trailmix.test';
+  const hour = (n: number) => new Date(Date.UTC(2026, 10, 9, n)).toISOString();
+  const from = (name: string, email: string, init: Partial<Envelope> = {}) =>
+    envelope(`${email}-${uid}`, { from: { name, email }, ...init });
+  const sent = (to: string[], init: Partial<Envelope> = {}) =>
+    envelope(`sent-${uid}`, {
+      path: 'Sent',
+      from: { email: ME },
+      to: to.map((email) => ({ email })),
+      ...init,
+    });
+  const completed = (store: EnvelopeIndex, typed: string) =>
+    store.people(typed).map(({ email }) => email);
+  const fill = (store: EnvelopeIndex) => {
+    for (let batches = 0; store.fillPeople(2); batches++) expect(batches).toBeLessThan(100);
+  };
+
+  test('ranks those the member wrote to first, then those who wrote to them, by how often and then how lately', () => {
+    const store = fresh([ME]);
+    store.fold(
+      arrive(
+        from('Ada Park', 'ada@example.com', { date: hour(1) }),
+        from('Ada Park', 'ada@example.com', { date: hour(2) }),
+        from('Ada Park', 'ada@example.com', { date: hour(3) }),
+        from('Bo Lin', 'bo@example.com', { date: hour(4) }),
+        from('Cy Moss', 'cy@example.com', { date: hour(5) }),
+        sent(['rae@example.com'], { date: hour(1) }),
+        sent(['theo@example.com', 'ada@example.com'], { date: hour(2) }),
+        sent(['theo@example.com'], { date: hour(3) }),
+      ),
+    );
+    expect(completed(store, 'example')).toEqual([
+      'theo@example.com',
+      'ada@example.com',
+      'rae@example.com',
+      'cy@example.com',
+      'bo@example.com',
+    ]);
+    expect(store.people('example', 2)).toEqual([
+      { email: 'theo@example.com' },
+      { name: 'Ada Park', email: 'ada@example.com' },
+    ]);
+  });
+
+  test('names someone by the newest name they gave themselves, else the newest the member wrote to them by', () => {
+    const store = fresh([ME]);
+    const toThem = (name: string, email: string, date: string) =>
+      sent([], { to: [{ name, email }], date });
+    store.fold(
+      arrive(
+        from('Ada Park', 'ada@example.com', { date: hour(1) }),
+        from('Ada P.', 'ada@example.com', { date: hour(3) }),
+        from('', 'ada@example.com', { date: hour(4) }),
+        toThem('Ada at school', 'ada@example.com', hour(5)),
+        toThem('Rae', 'rae@example.com', hour(1)),
+        toThem('Rae Chen', 'rae@example.com', hour(2)),
+      ),
+    );
+    expect(store.people('example')).toEqual([
+      { name: 'Rae Chen', email: 'rae@example.com' },
+      { name: 'Ada P.', email: 'ada@example.com' },
+    ]);
+  });
+
+  test('matches the start of a word of a name or an address for every word typed, ignoring case and accents', () => {
+    const store = fresh([ME]);
+    store.fold(
+      arrive(
+        from('Zoë Ångström', 'zoe.a@example.org'),
+        from('Zola Kim', 'zk@example.net'),
+        from('Me Again', ME),
+      ),
+    );
+    expect(completed(store, 'zo')).toEqual(['zk@example.net', 'zoe.a@example.org']);
+    expect(completed(store, 'ZOE')).toEqual(['zoe.a@example.org']);
+    expect(completed(store, 'zo ang')).toEqual(['zoe.a@example.org']);
+    expect(completed(store, 'zoe.a@ex')).toEqual(['zoe.a@example.org']);
+    expect(completed(store, 'kim zo')).toEqual(['zk@example.net']);
+    expect(completed(store, 'oe')).toEqual([]);
+    expect(completed(store, 'me')).toEqual([]);
+    expect(completed(store, ' @ ')).toEqual([]);
+  });
+
+  test('counts each message once, however many folders hold it and however often it folds', () => {
+    const store = fresh([ME]);
+    // Theo was written to twice, and Rae once, more lately, in a message Sent and Archive both hold.
+    const toRae = sent(['rae@example.com'], { messageId: '<rae@trailmix.test>', date: hour(9) });
+    const events = arrive(
+      sent(['theo@example.com'], { date: hour(1) }),
+      sent(['theo@example.com'], { date: hour(2) }),
+      toRae,
+      { ...toRae, path: 'Archive', uid: uid++ },
+    );
+    store.fold(events);
+    store.fold(events);
+    store.fold(arrive({ ...toRae, flags: { ...FLAGS, seen: true } }));
+    expect(completed(store, 'example')).toEqual(['theo@example.com', 'rae@example.com']);
+  });
+
+  test('a message read again notes whom it names now', () => {
+    const store = fresh([ME]);
+    const ada = from('Ada', 'ada@example.com');
+    store.fold(arrive(ada));
+    store.fold(arrive({ ...ada, from: { name: 'Ada Park', email: 'ada@example.com' } }));
+    expect(store.people('ada')).toEqual([{ name: 'Ada Park', email: 'ada@example.com' }]);
+    store.fold(arrive({ ...ada, list: { id: 'parents.example.com' } }));
+    expect(store.people('ada')).toEqual([]);
+  });
+
+  test('lets go of mail as it goes, moves to Junk, or goes unreported by a pass that reads its folder again', () => {
+    const store = fresh([ME]);
+    const ada = from('Ada Park', 'ada@example.com');
+    const bo = from('Bo Lin', 'bo@example.com');
+    const cy = from('Cy Moss', 'cy@example.com');
+    const kept = from('Cy Moss', 'cy@example.com', { path: 'Archive' });
+    store.fold(arrive(ada, bo, cy, kept));
+
+    store.fold([{ type: 'gone', ref: ada }]);
+    store.fold([{ type: 'gone', ref: bo }, ...arrive({ ...bo, path: 'Junk', uid: uid++ })]);
+    // A pass over the Inbox that reports nothing, as sync folds one.
+    store.noteReread('personal', 'INBOX', [], true);
+    store.fold(
+      store.endReread('personal', 'INBOX').map((ref): SyncEvent => ({ type: 'gone', ref })),
+    );
+
+    expect(completed(store, 'example')).toEqual(['cy@example.com']);
+    store.fold([{ type: 'gone', ref: kept }]);
+    expect(completed(store, 'example')).toEqual([]);
+  });
+
+  test('a folder that becomes Junk takes its mail out once the people are filled again', () => {
+    const store = fresh([ME]);
+    store.fold(arrive(from('Ada Park', 'ada@example.com', { path: 'Projects' })));
+    expect(completed(store, 'ada')).toEqual(['ada@example.com']);
+    store.listFolders(
+      'personal',
+      [
+        ...FOLDERS.filter((f) => f.account === 'personal' && f.path !== 'Projects'),
+        { account: 'personal', path: 'Projects', role: 'junk' as const },
+      ].map((f) => ({ ...f, name: f.path, unread: 0, total: 0 })),
+    );
+    fill(store);
+    expect(completed(store, 'ada')).toEqual([]);
+  });
+
+  test('forgets an account’s people and its own address with it, leaving no word of them on disk', () => {
+    const sql = testSql();
+    const own = [ME, 'me@work.example'];
+    const store = fresh(own, sql);
+    store.fold(
+      arrive(
+        from('Zanzibar Quill', 'zq@example.com', { account: 'work' }),
+        from('Ada Park', 'ada@example.com'),
+      ),
+    );
+    // The account's address leaves the member's own as the account is removed.
+    own.pop();
+    store.forget('work');
+    expect(completed(store, 'example')).toEqual(['ada@example.com']);
+    const blocks = sql
+      .all<{ block: Uint8Array }>(`SELECT block FROM people_search_data`)
+      .map(({ block }) => new TextDecoder('latin1').decode(block))
+      .join('');
+    expect(blocks.toLowerCase()).not.toContain('zanzibar');
+    const held = sql
+      .all<{ name: string }>(`SELECT name FROM sqlite_master WHERE type = 'table'`)
+      .map(({ name }) => JSON.stringify(sql.all(`SELECT * FROM "${name}"`)))
+      .join('');
+    expect(held).not.toMatch(/zanzibar|zq@|work\.example/i);
+  });
+
+  test('an upgrade notes the mail held a batch at a time, picking up where a wake stopped', () => {
+    const current = testSql();
+    const now = fresh([ME], current);
+    const theo = sent(['theo@example.com'], { date: hour(2) });
+    now.fold(
+      arrive(
+        ...Array.from({ length: 5 }, (_, i) =>
+          from('Ada Park', 'ada@example.com', { date: hour(i) }),
+        ),
+        theo,
+        sent(['rae@example.com'], { date: hour(3) }),
+        from('Bo Lin', 'bo@example.com', { date: hour(9) }),
+      ),
+    );
+    const sql = heldAsOf(20, current);
+    upgrade(sql);
+    const store = envelopeIndex(sql, () => [ME]);
+    expect(completed(store, 'example')).toEqual([]);
+    expect(store.fillPeople(3)).toBe(true);
+    // Mail that folds meanwhile, again or anew, is noted once.
+    store.fold(arrive(theo));
+    // A new instance after an eviction reads the cursor from storage.
+    fill(envelopeIndex(sql, () => [ME]));
+    expect(store.people('example')).toEqual(now.people('example'));
+    expect(store.fillPeople(3)).toBe(false);
+  });
+
+  test('a new Mailroom notes mail as it folds it, and owes no fill', () => {
+    const store = fresh([ME]);
+    store.fold(arrive(from('Ada Park', 'ada@example.com')));
+    expect(store.fillPeople(1)).toBe(false);
+    expect(completed(store, 'ada')).toEqual(['ada@example.com']);
+  });
+
+  test('an address that becomes the member’s notes every message again as theirs', () => {
+    const own = [ME];
+    const store = fresh(own);
+    // The member wrote from an address Trail Mix didn't know was theirs yet.
+    store.fold(arrive(sent(['rae@example.com'], { from: { email: 'me@work.test' } })));
+    expect(completed(store, 'example')).toEqual([]);
+    expect(completed(store, 'work')).toEqual(['me@work.test']);
+    own.push('me@work.test');
+    expect(completed(store, 'work')).toEqual([]);
+    fill(store);
+    expect(completed(store, 'example')).toEqual(['rae@example.com']);
+  });
+
+  test('the people the fold keeps are those a fill from the same mail counts, for any run of events', () => {
+    const people = ['ada@example.com', 'bo@example.com', 'cy@example.org', 'noreply@example.com'];
+    for (let seed = 1; seed <= 30; seed++) {
+      let state = seed;
+      const random = () => (state = (state * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
+      const pick = <T>(items: readonly T[]) => items[Math.floor(random() * items.length)]!;
+      const held: Envelope[] = [];
+      const events: SyncEvent[] = [];
+      for (let i = 0; i < 80; i++) {
+        const roll = random();
+        const folder = pick(FOLDERS);
+        if (roll < 0.55 || held.length === 0) {
+          const isMine = random() < 0.4;
+          const message = envelope(`p${seed}-${i}`, {
+            account: folder.account,
+            path: folder.path,
+            // Some messages are copies of one another, as Sent and Archive hold.
+            messageId: `<p${seed}-${Math.floor(random() * 40)}@example.com>`,
+            from: isMine
+              ? { email: ME }
+              : { name: random() < 0.5 ? 'Someone' : '', email: pick(people) },
+            to: isMine ? [{ email: pick(people) }, { email: pick(people) }] : [{ email: ME }],
+            date: new Date(Date.UTC(2026, 10, 1) + Math.floor(random() * 1e9)).toISOString(),
+            ...(random() < 0.1 ? { list: { id: 'list.example.com' } } : {}),
+          });
+          held.push(message);
+          events.push(...arrive(message));
+        } else if (roll < 0.7) {
+          events.push(...arrive(pick(held)));
+        } else if (roll < 0.95) {
+          const message = held.splice(Math.floor(random() * held.length), 1)[0]!;
+          events.push({ type: 'gone', ref: message });
+        } else {
+          events.push({ type: 'reset', folder: { account: folder.account, path: folder.path } });
+          for (let j = held.length - 1; j >= 0; j--) {
+            if (held[j]!.account === folder.account && held[j]!.path === folder.path) {
+              held.splice(j, 1);
+            }
+          }
+        }
+      }
+      const sql = testSql();
+      const store = fresh([ME], sql);
+      for (let i = 0; i < events.length; i += 1 + (seed % 5)) {
+        store.fold(events.slice(i, i + 1 + (seed % 5)));
+      }
+      const folded = sql.all(
+        `SELECT address, name, wrote, heard, latest FROM people ORDER BY address`,
+      );
+      const completions = store.people('example');
+      for (const table of ['correspondence', 'people', 'people_search', 'people_fill'])
+        sql.run(`DELETE FROM ${table}`);
+      fill(store);
+      expect(
+        sql.all(`SELECT address, name, wrote, heard, latest FROM people ORDER BY address`),
+      ).toEqual(folded);
+      expect(store.people('example')).toEqual(completions);
+    }
   });
 });

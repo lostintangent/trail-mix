@@ -105,6 +105,11 @@ export function conversationOf(value: unknown): ConversationId {
   return value;
 }
 
+/** What was typed in an address field, which may be nothing yet. */
+export function typedOf(value: unknown): string {
+  return textOf(value, 'What was typed', 1000, true);
+}
+
 export function bundleOf(value: unknown): BundleId {
   if (typeof value !== 'string' || value.length > 1000 || !bundlePartsOf(value)) {
     throw new TypeError('That isn’t a bundle.');

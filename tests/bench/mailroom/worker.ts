@@ -7,7 +7,7 @@ export { default } from '../../../src/features/mailroom/server/test-worker.ts';
 export class BenchMailroom extends TestMailroom {
   /** Asks a query `times` times in a row, and says how long each answer took, in milliseconds. */
   async timed(
-    name: 'conversations' | 'conversation',
+    name: 'conversations' | 'conversation' | 'people',
     args: unknown[],
     times: number,
   ): Promise<number[]> {

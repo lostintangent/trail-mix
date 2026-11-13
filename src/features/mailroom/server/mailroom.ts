@@ -12,6 +12,7 @@ import {
   writeMime,
   type Account,
   type AccountId,
+  type Address,
   type Body,
   type BundleId,
   type ConversationId,
@@ -222,6 +223,8 @@ const BODIES_LET_GO = { wake: 10_000, delete: 1_000 };
 const CACHE_KEY = 'cache';
 /** The most conversations one wake makes rows of again, as an upgrade asks. */
 const RESUMMARIZED = 1_000;
+/** The most messages one wake notes the people of, as an upgrade or a change of who counts asks. */
+const PEOPLE_FILLED = 2_000;
 
 /**
  * The Mailroom: one Durable Object per member, and the only writer of anything Trail Mix stores
@@ -376,6 +379,10 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       this.found = await this.searchServers(checked.text);
     }
     return this.named(pageAfter(this.found.rows, place));
+  }
+
+  people(typed: string): Promise<Address[]> {
+    return Promise.resolve(this.store.people(input.typedOf(typed)));
   }
 
   bundle(id: BundleId, at?: number): Promise<BundlePage> {
@@ -1007,6 +1014,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     });
     const isOwingAvatars = await this.lookUpAvatars();
     const isResummarizing = this.resummarize();
+    const isFillingPeople = this.sql.transaction(() => this.store.fillPeople(PEOPLE_FILLED));
     const sendAt = this.sending.nextWake() ?? poll;
     if (
       this.queue.owing() ||
@@ -1014,6 +1022,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       isSweeping ||
       isOwingAvatars ||
       isResummarizing ||
+      isFillingPeople ||
       sendAt <= Date.now()
     ) {
       await this.ctx.storage.setAlarm(Date.now());

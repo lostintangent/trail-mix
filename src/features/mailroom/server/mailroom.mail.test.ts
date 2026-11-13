@@ -983,11 +983,11 @@ describe('The Mailroom', () => {
     );
     expect(bodies).toEqual([]);
     // Only the schema's version, when the member last opened the Mailroom, who is still here, and
-    // the search table's own bookkeeping remain, with no word of mail.
+    // the search tables' own bookkeeping remain, with no word of mail.
     expect(
       Object.entries(tables).filter(
         ([name, rows]) =>
-          name !== 'schema' && name !== 'opened' && !name.startsWith('search_') && rows.length,
+          name !== 'schema' && name !== 'opened' && !/^(people_)?search_/.test(name) && rows.length,
       ),
     ).toEqual([]);
     expect(JSON.stringify(tables).toLowerCase()).not.toMatch(/garden|tickets|lunch|alice|bob/);
@@ -1025,7 +1025,7 @@ describe('The Mailroom', () => {
     expect(bodies).toEqual([]);
     expect(
       Object.entries(tables).filter(
-        ([name, rows]) => name !== 'schema' && !name.startsWith('search_') && rows.length,
+        ([name, rows]) => name !== 'schema' && !/^(people_)?search_/.test(name) && rows.length,
       ),
     ).toEqual([]);
     expect(JSON.stringify(tables)).not.toContain(alice.password);
@@ -1067,7 +1067,7 @@ describe('The Mailroom with the demo mailbox', () => {
     expect(bodies).toEqual([]);
     expect(
       Object.entries(tables).filter(
-        ([name, rows]) => name !== 'schema' && !name.startsWith('search_') && rows.length,
+        ([name, rows]) => name !== 'schema' && !/^(people_)?search_/.test(name) && rows.length,
       ),
     ).toEqual([]);
   }, 60_000);
@@ -1166,7 +1166,7 @@ describe('The Mailroom with the demo mailbox', () => {
     expect(bodies).toEqual([]);
     expect(
       Object.entries(tables).filter(
-        ([name, rows]) => name !== 'schema' && !name.startsWith('search_') && rows.length,
+        ([name, rows]) => name !== 'schema' && !/^(people_)?search_/.test(name) && rows.length,
       ),
     ).toEqual([]);
   }, 60_000);

@@ -32,6 +32,7 @@ export const keys = {
   bundlePage: (id: BundleId, at: number) => ['bundle', id, at] as const,
   conversation: (id: ConversationId) => ['conversation', id] as const,
   body: (ref: MessageRef) => ['body', ref] as const,
+  people: (typed: string) => ['people', typed] as const,
 } as const;
 
 export type Key =
@@ -47,20 +48,22 @@ export type Key =
   | ReturnType<typeof keys.bundle>
   | ReturnType<typeof keys.bundlePage>
   | ReturnType<typeof keys.conversation>
-  | ReturnType<typeof keys.body>;
+  | ReturnType<typeof keys.body>
+  | ReturnType<typeof keys.people>;
 
 /**
  * Whether a hint leaves a snapshot out of date. A change to a folder's mail changes its counts and
  * its list, every view across accounts, which may hold its mail, any open conversation, which the
  * hint can't name, and the Outbox, which names the conversation each draft on its way is in, and
  * its account's bundles, which lie in its Inbox. A sender's picture that came, changed or went
- * changes the lists and conversations that name it. A body never changes for its message, so no
- * hint but an erase touches one.
+ * changes the lists and conversations that name it. Whom an address field completes to follows the
+ * mail, and the member's addresses, which are their accounts'. A body never changes for its
+ * message, so no hint but an erase touches one.
  */
 export function isStale(key: Key, hint: Hint): boolean {
   switch (hint.changed) {
     case 'accounts':
-      return key[0] === 'accounts';
+      return key[0] === 'accounts' || key[0] === 'people';
     case 'folders':
       return key[0] === 'folders';
     case 'outbox':
@@ -73,6 +76,7 @@ export function isStale(key: Key, hint: Hint): boolean {
       return (
         key[0] === 'folders' ||
         key[0] === 'conversation' ||
+        key[0] === 'people' ||
         key[0] === 'outbox' ||
         (key[0] === 'bundle' && bundlePartsOf(key[1])?.account === hint.folder.account) ||
         (key[0] === 'conversations' &&
@@ -151,3 +155,7 @@ export const conversationQuery = (id: ConversationId) =>
 
 export const bodyQuery = (ref: MessageRef) =>
   queryOptions({ queryKey: keys.body(ref), queryFn: () => mailroom.body(ref) });
+
+/** Whom an address field completes `typed` to, best first. */
+export const peopleQuery = (typed: string) =>
+  queryOptions({ queryKey: keys.people(typed), queryFn: () => mailroom.people(typed) });

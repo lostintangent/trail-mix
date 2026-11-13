@@ -22,7 +22,7 @@ import {
 /**
  * The Mailroom's budgets, as AGENTS.md sets them: the first sync of a 50,000-message folder from the
  * test mail server, with no batch over a second of CPU, and then a page of the unified Inbox, a
- * 50-message conversation and search as it is typed, read from that index.
+ * 50-message conversation, search as it is typed and an address completion, read from that index.
  *
  * The sync is the real one, on workerd, provider, fold and SQLite included. A device is open while
  * it runs, and the Mailroom hints that device once for each Inbox batch it folds. The CPU workerd
@@ -36,6 +36,7 @@ const BUDGET = {
   pageAnywhere: 10,
   conversation: 10,
   search: 100,
+  people: 10,
 };
 
 /**
@@ -50,6 +51,19 @@ const TYPED = ['mina okafor', 'kernel weekly', 'are'].flatMap((text) =>
 
 /** How many times each typed search is asked. */
 const SEARCHES = 10;
+
+/**
+ * What a member types into an address field, a keystroke at a time: every first letter, which
+ * matches the most people, and a name and an address as they are typed out.
+ */
+const ADDRESSED = [
+  ...'abcdefghijklmnopqrstuvwxyz',
+  ...['theo lindqvist', 'priya@example'].flatMap((text) =>
+    Array.from({ length: text.length }, (_, i) => text.slice(0, i + 1)).filter(
+      (t) => !t.endsWith(' '),
+    ),
+  ),
+];
 
 /** How many times each read is asked, for its 95th percentile. */
 const READS = 200;
@@ -94,6 +108,7 @@ export const mailroom: BenchArea = {
         ),
         measured('A 50-message conversation, p95', reads.conversation, BUDGET.conversation),
         measured('Search as it is typed, p95', reads.search, BUDGET.search),
+        measured('An address completion as it is typed, p95', reads.people, BUDGET.people),
       ];
     } finally {
       worker?.stop();
@@ -173,7 +188,7 @@ function tenths(batches: readonly number[]): number[] {
   });
 }
 
-/** Times the two reads where the Mailroom runs them, once the index holds the whole Inbox. */
+/** Times the reads where the Mailroom runs them, once the index holds the whole Inbox. */
 async function readTimes(url: string) {
   const thread = await longThread(url);
   const messages = await call<unknown[]>(url, 'conversation', thread.id);
@@ -202,7 +217,12 @@ async function readTimes(url: string) {
       ...(await call<number[]>(url, 'timed', 'conversations', [{ in: 'search', text }], SEARCHES)),
     );
   }
+  const people: number[] = [];
+  for (const typed of ADDRESSED) {
+    people.push(...(await call<number[]>(url, 'timed', 'people', [typed], SEARCHES)));
+  }
   return {
+    people: percentile(people, 0.95),
     page: percentile(page, 0.95),
     inboxLast,
     folderLast,

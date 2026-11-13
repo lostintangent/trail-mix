@@ -11,6 +11,7 @@ import {
   type BundleSummary,
   type ConversationId,
   type ConversationSummary,
+  type Envelope,
   type Folder,
   type FolderRef,
   type FolderRole,
@@ -24,6 +25,7 @@ import {
 } from '../../mail/core/index.ts';
 import { MATCHES_LISTED, PAGE_SIZE, type BundlePage, type Page } from '../client/contract.ts';
 import { senderOf } from '../core/avatars.ts';
+import { isNotedAlike, peopleIn } from './people.ts';
 import type { Sql, SqlValue } from './schema.ts';
 
 /**
@@ -42,10 +44,11 @@ const SECOND = 2 ** 20;
 
 /**
  * `own` gives the member's addresses, so a conversation's row can name the picture of its newest
- * sender other than the member.
+ * sender other than the member, and the people it holds leave the member out.
  */
 export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => []) {
   const ownNow = () => new Set(own().map((address) => address.toLowerCase()));
+  const people = peopleIn(sql);
   /** Folder roles by folder, read once for each fold, since nothing in a fold changes them. */
   let roles: Map<string, FolderRole | undefined> | undefined;
   const rolesNow = () =>
@@ -102,10 +105,16 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
   /**
    * Writes one change: its removals, then its messages. A message already held changes in place,
    * its flags or its conversation, or what it says when it is read again, so its links stand and
-   * its search row changes only with its words. A new one arrives with them. Returns the
-   * conversations it touched.
+   * its search row changes only with its words. A new one arrives with them. Each notes whom it
+   * puts the member, whose addresses are `mine`, in touch with. Adds the conversations it touched
+   * to `touched`, and the people to `met`.
    */
-  function write(change: ReturnType<typeof applySyncEvent>, touched: Set<ConversationId>) {
+  function write(
+    change: ReturnType<typeof applySyncEvent>,
+    mine: ReadonlySet<string>,
+    touched: Set<ConversationId>,
+    met: Set<string>,
+  ) {
     const held = (ref: MessageRef) =>
       sql.all<{ rowid: number; conversation: string; message: string }>(
         `SELECT rowid, conversation, message FROM messages WHERE ${BY_REF}`,
@@ -118,6 +127,7 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
       if (!unwritten.delete(gone.rowid)) sql.run(`DELETE FROM search WHERE rowid = ?`, gone.rowid);
       sql.run(`DELETE FROM messages WHERE rowid = ?`, gone.rowid);
       sql.run(`DELETE FROM links WHERE ${BY_REF}`, ...keyOf(ref));
+      people.drop(ref, met);
       oweBody(ref);
     }
     for (const message of change.put) {
@@ -132,9 +142,11 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
           JSON.stringify(envelope),
           before.rowid,
         );
+        const was = JSON.parse(before.message) as Envelope;
+        // Most changes are to flags, which note nobody anew.
+        if (!isNotedAlike(was, message)) people.note(message, reads.role(message), mine, met);
         const words = searchRowOf(message);
-        const was = searchRowOf({ ...(JSON.parse(before.message) as Message), conversation });
-        if (words.join('\n') !== was.join('\n')) {
+        if (words.join('\n') !== searchRowOf({ ...was, conversation }).join('\n')) {
           if (!unwritten.has(before.rowid)) {
             sql.run(`DELETE FROM search WHERE rowid = ?`, before.rowid);
           }
@@ -159,6 +171,7 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
         JSON.stringify(envelope),
       );
       unwritten.set(inserted!.rowid, searchRowOf(message));
+      people.note(message, reads.role(message), mine, met, true);
       for (const id of linkIdsOf(message)) {
         sql.run(
           `INSERT OR IGNORE INTO links (account, id, path, uid_validity, uid) VALUES (?, ?, ?, ?, ?)`,
@@ -363,8 +376,12 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
     fold(events: readonly SyncEvent[]): FolderRef[] {
       roles = rolesNow();
       try {
+        const mine = ownNow();
+        people.owed(mine);
         const touched = new Set<ConversationId>();
-        for (const event of events) write(applySyncEvent(reads, event), touched);
+        const met = new Set<string>();
+        for (const event of events) write(applySyncEvent(reads, event), mine, touched, met);
+        people.recount(met);
         for (const rowid of [...unwritten.keys()].sort((a, b) => a - b)) {
           sql.run(
             `INSERT INTO search (rowid, senders, recipients, subject, preview) VALUES (?, ?, ?, ?, ?)`,
@@ -397,10 +414,19 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
      */
     listFolders(account: string, folders: readonly Folder[]): string[] {
       const listed = new Set(folders.map((folder) => folder.path));
-      const gone = sql
-        .all<{ path: string }>(`SELECT path FROM folders WHERE account = ?`, account)
-        .map((row) => row.path)
-        .filter((path) => !listed.has(path));
+      const held = new Map(
+        sql
+          .all<{ path: string; role: string | null }>(
+            `SELECT path, role FROM folders WHERE account = ?`,
+            account,
+          )
+          .map(({ path, role }) => [path, role ?? undefined]),
+      );
+      const gone = [...held.keys()].filter((path) => !listed.has(path));
+      // A folder's role decides whether its mail counts for the people the index holds.
+      if (folders.some(({ path, role }) => held.has(path) && held.get(path) !== role)) {
+        people.refill();
+      }
       for (const folder of folders) {
         sql.run(
           `INSERT INTO folders (account, path, folder, role) VALUES (?, ?, ?, ?)
@@ -613,6 +639,41 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
       return { items, at, total: newest.size };
     },
 
+    /**
+     * Whom an address field completes `typed` to: up to `most` of the people the index holds, other
+     * than the member, as `Queries.people` ranks them.
+     */
+    people(typed: string, most?: number): Address[] {
+      const match = matchOf(typed);
+      return match ? people.complete(match, ownNow(), most) : [];
+    },
+
+    /**
+     * Notes whom up to `most` of the messages owed a note put the member in touch with, from where
+     * the fill left off, and recounts them. Returns whether messages are left to note. Run it inside
+     * a transaction.
+     */
+    fillPeople(most: number): boolean {
+      const mine = ownNow();
+      const after = people.owed(mine);
+      if (after === undefined) return false;
+      const rows = sql.all<Row & { rowid: number }>(
+        `SELECT rowid, ${COLUMNS} FROM messages WHERE rowid > ? ORDER BY rowid LIMIT ?`,
+        after,
+        most,
+      );
+      const roles = rolesNow();
+      const met = new Set<string>();
+      for (const row of rows) {
+        const message = messageOf(row);
+        people.note(message, roles.get(placeOf(message)), mine, met);
+      }
+      people.recount(met);
+      const isMore = rows.length === most;
+      people.filled(isMore ? rows.at(-1)!.rowid : undefined);
+      return isMore;
+    },
+
     conversation: (id: ConversationId): Message[] =>
       [...reads.conversation(id)].sort((a, b) => a.date.localeCompare(b.date)),
 
@@ -670,6 +731,7 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
         `SELECT DISTINCT conversation FROM messages WHERE account = ?`,
         account,
       );
+      people.forget(account);
       sql.run(
         `DELETE FROM search WHERE rowid IN (SELECT rowid FROM messages WHERE account = ?)`,
         account,
@@ -688,6 +750,7 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
         sql.run(`DELETE FROM conversations WHERE id = ?`, conversation);
       // A deleted search row stays readable in the table's segments until they merge, so they merge now.
       sql.run(`INSERT INTO search (search) VALUES ('optimize')`);
+      sql.run(`INSERT INTO people_search (people_search) VALUES ('optimize')`);
     },
   };
 }

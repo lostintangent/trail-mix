@@ -14,7 +14,7 @@ export type {
   ThisDevice,
   Unsubscribed,
 } from './contract.ts';
-export { MATCHES_LISTED, PAGE_SIZE } from './contract.ts';
+export { MATCHES_LISTED, PAGE_SIZE, PEOPLE_LISTED } from './contract.ts';
 export { whatFailed } from './failed.ts';
 export { useHints, useIsCaughtUp } from './hints.ts';
 export {
@@ -27,6 +27,7 @@ export {
   keys,
   notifiedQuery,
   outboxQuery,
+  peopleQuery,
   signInPresetsQuery,
   signInsQuery,
   thisDeviceQuery,

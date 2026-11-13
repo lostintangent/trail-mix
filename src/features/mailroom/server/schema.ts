@@ -372,6 +372,42 @@ export const versions: readonly (readonly string[])[] = [
     `CREATE TABLE resummarize (one INTEGER PRIMARY KEY CHECK (one = 1), after TEXT NOT NULL)`,
     RESUMMARIZE,
   ],
+  [
+    // The people the composer completes addresses from. What each message notes of whom it puts
+    // the member in touch with: whether the member wrote to them, the name it gives them, its date
+    // and its Message-ID, by which each message counts once however many folders hold it.
+    `CREATE TABLE correspondence (
+      account TEXT NOT NULL,
+      path TEXT NOT NULL,
+      uid_validity INTEGER NOT NULL,
+      uid INTEGER NOT NULL,
+      address TEXT NOT NULL,
+      wrote INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      date TEXT NOT NULL,
+      message TEXT NOT NULL,
+      PRIMARY KEY (account, path, uid_validity, uid, address)
+    ) WITHOUT ROWID`,
+    `CREATE INDEX correspondence_by_message ON correspondence (address, wrote, message)`,
+    `CREATE INDEX correspondence_by_date ON correspondence (address, wrote, date DESC, name)`,
+    // Each person, counted from what the messages note, and their name and address for search.
+    `CREATE TABLE people (
+      id INTEGER PRIMARY KEY,
+      address TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      wrote INTEGER NOT NULL,
+      heard INTEGER NOT NULL,
+      latest TEXT NOT NULL
+    )`,
+    `CREATE VIRTUAL TABLE people_search USING fts5(
+      name, address,
+      tokenize = 'unicode61 remove_diacritics 2',
+      prefix = '1'
+    )`,
+    // How far the messages held have been noted, for the member's addresses as `mine` names them:
+    // the last rowid noted, or none once all are. Without its row, every message is owed a note.
+    `CREATE TABLE people_fill (one INTEGER PRIMARY KEY CHECK (one = 1), mine TEXT NOT NULL, after INTEGER)`,
+  ],
 ];
 
 /**
