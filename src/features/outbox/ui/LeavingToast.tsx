@@ -16,6 +16,7 @@ import { tooltipOf, UNDO_COMMAND, useCommands } from '../../commands/index.ts';
 import type { Address } from '../../mail/core/index.ts';
 import { conversationQuery, foldersQuery, outboxQuery } from '../../mailroom/client/index.ts';
 import { formatAhead } from '../core/later.ts';
+import { GONE_MS } from '../core/leaving.ts';
 import {
   briefly,
   follow,
@@ -42,8 +43,6 @@ const LINGER_MS: Partial<Record<Standing['is'], number>> = {
   sent: 4_000,
   undone: 4_000,
 };
-/** How long a toast waits for a sign that a send gone from the Outbox went, before it gives up. */
-const GONE_MS = 30_000;
 /** How often the toast asks for the conversation while it waits for the send's copy in Sent. */
 const CHECK_MS = 2_000;
 /** How often the countdown looks at the clock, so each second turns over on time. */
