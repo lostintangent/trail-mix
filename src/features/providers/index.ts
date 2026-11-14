@@ -11,7 +11,7 @@ export {
   type DemoMailbox,
   type DemoServer,
 } from './demo/provider.ts';
-export type { ImapAccount, Network } from './imap/provider.ts';
+export type { ImapAccount, ImapPart, Network } from './imap/provider.ts';
 
 /**
  * The IMAP and SMTP provider, loaded when a Mailroom first reaches a mail server. Its mail

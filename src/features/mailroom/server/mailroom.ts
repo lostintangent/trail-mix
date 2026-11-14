@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { DurableObject } from 'cloudflare:workers';
 import { connect } from 'cloudflare:sockets';
 import PostalMime, { type Address as PostalAddress } from 'postal-mime';
@@ -60,6 +61,7 @@ import {
   type DemoServer,
   type DeviceSignIn,
   type ImapAccount,
+  type ImapPart,
   type MailProvider,
   type Moved,
   type Network,
@@ -354,8 +356,17 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     this.isRunning = true;
     const started = Date.now();
     const methods = this as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
-    const value = await methods[name]!(...args);
-    return { value, reached, ran: Date.now() - started, cold };
+    const spent = new Map<ImapPart, number>();
+    const value = await spending.run(spent, () => methods[name]!(...args));
+    const ran = Date.now() - started;
+    const parts = IMAP_PARTS.filter((part) => spent.has(part));
+    return {
+      value,
+      reached,
+      ran,
+      cold,
+      spent: parts.map((part) => ({ name: part, ms: spent.get(part)! })),
+    };
   }
 
   // Queries
@@ -1799,6 +1810,13 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 /** What a browser may ask, and nothing else the Mailroom answers to. */
 const CALLABLE: ReadonlySet<string> = new Set([...QUERIES, ...COMMANDS]);
 
+/**
+ * Where the time of the browser's call running now went on its mail servers, by part. Calls
+ * interleave at each wait, so each keeps its own, and the wake's work, which no call runs, none.
+ */
+const spending = new AsyncLocalStorage<Map<ImapPart, number>>();
+const IMAP_PARTS: readonly ImapPart[] = ['connect', 'imap', 'folder'];
+
 /** The IMAP provider for an account, over workerd's sockets. */
 function imapOver(
   { code, network }: ImapCode,
@@ -1888,6 +1906,10 @@ function loadImapCode(): Promise<ImapCode> {
             options && { ...options, allowHalfOpen: options.allowHalfOpen ?? false },
           ),
         ),
+        spent: (part, ms) => {
+          const spent = spending.getStore();
+          spent?.set(part, (spent.get(part) ?? 0) + ms);
+        },
       },
     }),
     (error: unknown) => {

@@ -19,7 +19,7 @@ function reaching(...answers: unknown[]) {
         const answer = answers[turn];
         return answer instanceof Error
           ? Promise.reject(answer)
-          : Promise.resolve({ value: answer, reached: 1, ran: 0, cold: false });
+          : Promise.resolve({ value: answer, reached: 1, ran: 0, spent: [], cold: false });
       },
     } as unknown as Mailroom;
   };

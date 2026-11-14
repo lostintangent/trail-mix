@@ -89,7 +89,7 @@ function mailrooms() {
           did.push([name, JSON.stringify(call)]);
           return JSON.stringify(call.args[0]) === '["gone"]'
             ? Promise.reject(new Error('That message is no longer in this mailbox.'))
-            : Promise.resolve({ value: undefined, reached: 0, ran: 0, cold: false });
+            : Promise.resolve({ value: undefined, reached: 0, ran: 0, spent: [], cold: false });
         },
       } as unknown as Mailroom & MessageBytes & AvatarBytes;
     },

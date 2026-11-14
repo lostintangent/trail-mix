@@ -281,6 +281,11 @@ export type Answered = {
   reached: number;
   /** From the Mailroom starting the call to its answer. */
   ran: number;
+  /**
+   * How much of `ran` went to the call's mail server: `connect` waiting for the connection, `imap`
+   * on it after that, and `folder` the part of `imap` that waited to have a folder selected.
+   */
+  spent: Timed[];
   /** Whether the Mailroom started for this call, rather than already running. */
   cold: boolean;
 };

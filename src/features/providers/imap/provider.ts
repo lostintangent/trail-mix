@@ -69,12 +69,21 @@ export type ImapAccount = {
  * `cloudflare:sockets`, whose STARTTLS works there. Elsewhere Node's sockets serve, and `ca` adds
  * a certificate authority to trust, such as the test mail server's. `patience` stands in for
  * `SMTP_PATIENCE_MS` and `IMAP_PATIENCE_MS`, so a test of a host gone quiet need not wait as long.
+ * `spent` hears where the time of each use of the IMAP connection went.
  */
 export type Network = {
   imapTransport?: ImapTransport;
   ca?: string | Uint8Array;
   patience?: number;
+  spent?: (part: ImapPart, ms: number) => void;
 };
+
+/**
+ * A part of one use of the IMAP connection: `connect` waits for it to be open and signed in,
+ * `imap` is the time on it after that, and `folder` is the part of `imap` spent waiting to have a
+ * folder selected, behind whatever else holds the connection's folder.
+ */
+export type ImapPart = 'connect' | 'imap' | 'folder';
 
 /**
  * How long a send waits on an SMTP host that has gone quiet: to connect, for its greeting, and for
@@ -145,11 +154,16 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
    */
   async function connected<T>(use: (connection: ImapFlow) => Promise<T>): Promise<T> {
     for (let attempt = 1; ; attempt++) {
+      const asked = Date.now();
       const connection = await session();
+      const opened = Date.now();
+      network.spent?.('connect', opened - asked);
       try {
         return await use(connection);
       } catch (error) {
         if (attempt > 1 || connection.usable) throw error;
+      } finally {
+        network.spent?.('imap', Date.now() - opened);
       }
     }
   }
@@ -160,7 +174,9 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
     use: (connection: ImapFlow, mailbox: MailboxObject) => Promise<T>,
   ) {
     return connected(async (connection) => {
+      const asked = Date.now();
       const lock = await connection.getMailboxLock(path);
+      network.spent?.('folder', Date.now() - asked);
       try {
         const mailbox = connection.mailbox;
         if (!mailbox) throw new Error(`${path} could not be selected`);

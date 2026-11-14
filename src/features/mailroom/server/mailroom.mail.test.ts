@@ -86,7 +86,7 @@ describe('The Mailroom', () => {
     // Fay's Mailroom has never run, and her first call starts it.
     expect(await answer('accounts')).toMatchObject({ value: [], cold: true });
     const again = await answer('accounts');
-    expect(again).toMatchObject({ value: [], cold: false });
+    expect(again).toMatchObject({ value: [], cold: false, spent: [] });
     expect(again.reached).toBeGreaterThanOrEqual(0);
     expect(again.ran).toBeGreaterThanOrEqual(0);
     await fay.call('restart').catch(() => {});
@@ -185,6 +185,22 @@ describe('The Mailroom', () => {
     expect(inbox[0]).toMatchObject({ count: 2, unread: 1 });
     const thread = await ada.call<Message[]>('conversation', inbox[0]!.id);
     expect(thread.map((message) => message.path)).toEqual(['Sent', 'INBOX']);
+  });
+
+  test('says how much of a call’s time went to its mail server, and how much of that to the folder', async () => {
+    const [tickets] = await ada.call<Message[]>(
+      'conversation',
+      (await ada.page({ in: 'inbox' }))[1]!.id,
+    );
+    const open = () =>
+      ada.call<Answered>('answer', { name: 'body', args: [refOf(tickets!)] }, Date.now());
+    const fetched = await open();
+    expect(fetched.spent.map(({ name }) => name)).toEqual(['connect', 'imap', 'folder']);
+    const [connect, imap, folder] = fetched.spent.map(({ ms }) => ms!);
+    expect(folder).toBeLessThanOrEqual(imap!);
+    expect(connect! + imap!).toBeLessThanOrEqual(fetched.ran);
+    // Kept from then on, the body costs its server nothing, and says so by saying nothing.
+    expect((await open()).spent).toEqual([]);
   });
 
   test('tells every open device about new mail within five seconds, and nothing else', async () => {

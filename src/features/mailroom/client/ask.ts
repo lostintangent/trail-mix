@@ -62,21 +62,22 @@ function isPassing(error: unknown): boolean {
 
 /**
  * Asks once, and notes for the response's Server-Timing how long the Mailroom took as the Worker
- * saw it, and how much of that was reaching it, running there and coming back, and whether it had
- * to start first. Coming back counts an answer the Mailroom holds until what it wrote is safely
- * stored, as Cloudflare holds every answer a Durable Object sends. Names and times only, never
- * what a call carried.
+ * saw it, and how much of that was reaching it, running there and coming back, how much of its run
+ * went to its mail server, and whether it had to start first. Coming back counts an answer the
+ * Mailroom holds until what it wrote is safely stored, as Cloudflare holds every answer a Durable
+ * Object sends. Names and times only, never what a call carried.
  */
 async function once(mailroom: Mailroom, call: Call<QueryName | CommandName>, timing: Timed[]) {
   const sent = Date.now();
   const at = performance.now();
   const noted = timing.length;
   try {
-    const { value, reached, ran, cold } = await mailroom.answer(call, sent);
+    const { value, reached, ran, spent, cold } = await mailroom.answer(call, sent);
     const took = performance.now() - at;
     timing.push(
       { name: 'reached', ms: Math.max(0, reached) },
       { name: 'ran', ms: ran },
+      ...spent,
       { name: 'returned', ms: Math.max(0, took - Math.max(0, reached) - ran) },
       ...(cold ? [{ name: 'cold', note: 'The Mailroom started for this call' }] : []),
     );
