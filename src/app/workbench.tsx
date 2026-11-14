@@ -180,14 +180,10 @@ function useLoaded(load: () => Promise<unknown>, isWanted: boolean) {
   const [state, setState] = useState<'loading' | 'loaded' | 'failed'>('loading');
   useEffect(() => {
     if (!isWanted) return;
-    let isCurrent = true;
     load().then(
-      () => isCurrent && setState('loaded'),
-      () => isCurrent && setState('failed'),
+      () => setState('loaded'),
+      () => setState('failed'),
     );
-    return () => {
-      isCurrent = false;
-    };
   }, [load, isWanted]);
   return state;
 }
