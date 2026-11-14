@@ -9,7 +9,7 @@ import { PANELS } from '../../src/features/workbench/ui/panels.ts';
 import { VISITOR_SECONDS } from '../../src/server/access.ts';
 import { BUILDS, serverFunctionIds } from './preview.ts';
 import { RESULTS, SIZES, suite } from './suite.ts';
-import { mailIsIn } from '../mailIsIn.ts';
+import { shownSubject } from './helpers.ts';
 
 /**
  * The public demo as visitors meet it: the demo build on workerd, as deployed, with no sign-in.
@@ -42,44 +42,35 @@ const mailrooms = () =>
 
 /** A new visitor's browser, at the demo's Inbox once it has filled. */
 async function visitor(): Promise<Page> {
-  const context = await app.context(SIZES.desktop);
   // What the first look said while the new Mailroom filled, from before the app's first script.
-  await context.addInitScript(() => {
-    const said = new Set<string>();
-    Object.assign(window, { said });
-    new MutationObserver(() => {
-      const text = document.body?.innerText ?? '';
-      if (text.includes('No mail yet')) said.add('No mail yet');
-      const isSettled = document.querySelector('nav[aria-label="Mailboxes"][aria-busy="false"]');
-      if (isSettled && !document.querySelector('[role="option"]')) {
-        said.add('Settled, with no mail');
-      }
-    }).observe(document, {
-      childList: true,
-      subtree: true,
-      characterData: true,
-      attributeFilter: ['aria-busy'],
-    });
+  const page = await app.open(SIZES.desktop, {
+    before: (page) =>
+      page.addInitScript(() => {
+        const said = new Set<string>();
+        Object.assign(window, { said });
+        new MutationObserver(() => {
+          const text = document.body?.innerText ?? '';
+          if (text.includes('No mail yet')) said.add('No mail yet');
+          const isSettled = document.querySelector(
+            'nav[aria-label="Mailboxes"][aria-busy="false"]',
+          );
+          if (isSettled && !document.querySelector('[role="option"]')) {
+            said.add('Settled, with no mail');
+          }
+        }).observe(document, {
+          childList: true,
+          subtree: true,
+          characterData: true,
+          attributeFilter: ['aria-busy'],
+        });
+      }),
   });
-  const page = await context.newPage();
-  await page.goto(app.url);
-  await mailIsIn(page);
   await page.getByRole('option').first().waitFor();
   // Mail on its way stands as skeletons, and the sidebar stays busy, until it's in.
   expect(await page.evaluate(() => [...(window as unknown as { said: Set<string> }).said])).toEqual(
     [],
   );
   return page;
-}
-
-/** The subject of the conversation the reader shows, once the list's selection is it. */
-async function shownSubject(page: Page): Promise<string> {
-  const shown = await page.waitForFunction(() => {
-    const title = document.querySelector('section[aria-label="Reader"] h1')?.textContent;
-    const selected = document.querySelector('[role="option"][aria-selected="true"]');
-    return title && selected?.textContent?.includes(title) ? title : undefined;
-  });
-  return (await shown.jsonValue()) as string;
 }
 
 /** The visitor cookie a browser holds. */

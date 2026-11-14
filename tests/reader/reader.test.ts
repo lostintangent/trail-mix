@@ -11,6 +11,7 @@ import {
   type Harness,
 } from './browsers.ts';
 import { bodyKey, newsletter as newsletterFixture } from './harness/fixtures.ts';
+import { until } from '../until.ts';
 
 /**
  * The reader around the frame, on fixture conversations in real browsers, at a desktop's width and
@@ -307,12 +308,6 @@ function mailroom({ name, args }: Call): unknown {
 /** Whether the newsletter's logo has loaded, which it may only through the proxy. */
 const proxiedLogo = () =>
   harness.proxied.some((url) => new URL(url).pathname === '/newsletter/logo.png');
-
-async function until(condition: () => boolean, timeout = 2_000) {
-  for (const start = Date.now(); !condition() && Date.now() - start < timeout;) {
-    await Bun.sleep(20);
-  }
-}
 
 async function framesFitted(page: Page) {
   // The open messages follow the subject in a render of their own, so wait for them to be there.

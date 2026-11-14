@@ -3,9 +3,9 @@ import { join } from 'node:path';
 import { chromium, webkit, type Locator, type Page, type Route } from 'playwright';
 import { SAVE_AFTER_MS, SAVE_AT_LEAST_EVERY_MS } from '../../src/features/composer/core/session.ts';
 import { unusable } from './usable.ts';
+import { goTo, reader } from './helpers.ts';
 import { RESULTS, SIZES, suite } from './suite.ts';
 import { atRest } from '../atRest.ts';
-import { mailIsIn } from '../mailIsIn.ts';
 
 /**
  * Writing, end to end: the built app on workerd with a member's demo mail. What the member writes
@@ -25,15 +25,6 @@ const app = suite({ vars: { DEV_MEMBER: MEMBER }, engine: ENGINE });
 // A test that fails leaves a screenshot of each page and what it showed, for CI to keep.
 const { test } = app;
 
-/** A browser on the unified Inbox, once the Mailroom has filled it. */
-async function inbox(): Promise<Page> {
-  const page = await (await app.context(SIZE)).newPage();
-  await page.goto(app.url);
-  await mailIsIn(page);
-  return page;
-}
-
-const reader = (page: Page) => page.getByRole('region', { name: 'Reader' });
 const saved = (page: Page) => page.getByRole('status').filter({ hasText: 'Saved to Drafts' });
 
 /** The composer by its name, whether it lies on the page or rises as a phone's sheet. */
@@ -54,22 +45,8 @@ async function leave(page: Page, composer: Locator) {
   await composer.waitFor({ state: 'detached' });
 }
 
-/** Goes to the unified Drafts, through the folders on a phone. */
-async function goToDrafts(page: Page) {
-  if (IS_PHONE) {
-    // A pane off a phone's screen is inert, so only the reader's own Back is in view.
-    const back = page.getByRole('button', { name: 'Back' });
-    if (await back.evaluate((button) => !button.closest('[inert]'))) await back.click();
-    await page.getByRole('button', { name: 'Folders', exact: true }).click();
-  }
-  await page
-    .getByRole('button', { name: /^Drafts/ })
-    .first()
-    .click();
-}
-
 test('a reply is saved as it is written, opens again with its words and files, and discards', async () => {
-  const page = await inbox();
+  const page = await app.open(SIZE);
   await page.getByRole('option').first().click();
   await replyButton(page).click();
   const composer = composerNamed(page, 'Reply');
@@ -134,7 +111,7 @@ test('a reply is saved as it is written, opens again with its words and files, a
 }, 60_000);
 
 test('a pasted image shows as it is pasted, once its draft is saved, and when it opens again', async () => {
-  const page = await inbox();
+  const page = await app.open(SIZE);
   // The page itself never asks for a `cid:` address, which only the draft can answer.
   const asked: string[] = [];
   page.on('request', (request) => {
@@ -176,7 +153,7 @@ test('a pasted image shows as it is pasted, once its draft is saved, and when it
 }, 60_000);
 
 test('pasted HTML brings no remote image, which never loads, even as the composer closes', async () => {
-  const page = await inbox();
+  const page = await app.open(SIZE);
   const tracked: string[] = [];
   page.on('request', (request) => {
     if (request.url().includes('tracker.example')) tracked.push(request.url());
@@ -229,7 +206,7 @@ async function shown(image: Locator, from: 'blob:' | '/messages/') {
 }
 
 test('Undo of a send that carried changes brings back its files, which save and show from the draft it filed', async () => {
-  const page = await inbox();
+  const page = await app.open(SIZE);
   await page.getByRole('option').first().click();
   await replyButton(page).click();
   const reply = composerNamed(page, 'Reply');
@@ -286,7 +263,7 @@ test('Undo of a send that carried changes brings back its files, which save and 
 }, 90_000);
 
 test('a new message sent counts down in a toast, since it has no conversation on screen', async () => {
-  const page = await inbox();
+  const page = await app.open(SIZE);
   await page.keyboard.press('c');
   const composer = composerNamed(page, 'New message');
   await composer.getByRole('combobox', { name: 'To' }).fill('sam@trailmix.test');
@@ -306,7 +283,7 @@ test('a new message sent counts down in a toast, since it has no conversation on
 }, 60_000);
 
 test('To completes from the people in the mail, by keys on a desktop and by a tap on a phone', async () => {
-  const page = await inbox();
+  const page = await app.open(SIZE);
   await page.keyboard.press('c');
   const composer = composerNamed(page, 'New message');
   const to = composer.getByRole('combobox', { name: 'To' });
@@ -357,7 +334,7 @@ test('To completes from the people in the mail, by keys on a desktop and by a ta
 }, 60_000);
 
 test('Link turns the selected words into a link, adding https to an address typed without it', async () => {
-  const page = await inbox();
+  const page = await app.open(SIZE);
   await page.keyboard.press('c');
   const composer = composerNamed(page, 'New message');
   await composer.getByRole('textbox', { name: 'Message' }).click();
@@ -380,13 +357,13 @@ test('Link turns the selected words into a link, adding https to an address type
 }, 60_000);
 
 test('a draft another client wrote as HTML opens with its words, and closed untouched stays as it was', async () => {
-  const page = await inbox();
+  const page = await app.open(SIZE);
   // Every command this browser sends, by name, to find any that could change the draft.
   const sent: string[] = [];
   page.on('request', (request) => {
     if (request.method() === 'POST') sent.push(request.postData() ?? '');
   });
-  await goToDrafts(page);
+  await goTo(page, 'Drafts');
   await page.getByRole('option').filter({ hasText: 'Offsite agenda' }).click();
   const line = reader(page).getByRole('button', { name: /^Draft/ });
   await line.click();
@@ -413,7 +390,7 @@ test('a draft another client wrote as HTML opens with its words, and closed unto
 // A phone's sheet lies over everything and leaves by its Close.
 if (!IS_PHONE) {
   test('a desktop leaves a reply for another conversation, and a new message for another view or by Escape, keeping each', async () => {
-    const page = await inbox();
+    const page = await app.open(SIZE);
     const row = (subject: string) => page.getByRole('option').filter({ hasText: subject });
     await row('Design review notes').click();
     await replyButton(page).click();
@@ -452,14 +429,14 @@ if (!IS_PHONE) {
       await leaveIt();
       await written.waitFor({ state: 'detached' });
     }
-    await goToDrafts(page);
+    await goTo(page, 'Drafts');
     await row(forView).waitFor({ timeout: 10_000 });
     await row(forEscape).waitFor({ timeout: 10_000 });
   }, 60_000);
 }
 
 test('a tab closed mid-sentence keeps all but the last few seconds of what was written', async () => {
-  const page = await inbox();
+  const page = await app.open(SIZE);
   const subject = `Mid-sentence ${Date.now()}`;
   await page.keyboard.press('c');
   const composer = composerNamed(page, 'New message');
@@ -481,8 +458,8 @@ test('a tab closed mid-sentence keeps all but the last few seconds of what was w
   await page.context().setOffline(true);
   await page.close();
 
-  const again = await inbox();
-  await goToDrafts(again);
+  const again = await app.open(SIZE);
+  await goTo(again, 'Drafts');
   await again.getByRole('option').filter({ hasText: subject }).click();
   await reader(again)
     .getByRole('button', { name: /^Draft/ })
@@ -498,7 +475,7 @@ test('a tab closed mid-sentence keeps all but the last few seconds of what was w
 }, 60_000);
 
 test('a save whose answer was lost is asked again under its id, and Drafts keeps one copy with every word', async () => {
-  const page = await inbox();
+  const page = await app.open(SIZE);
   const subject = `Unanswered ${Date.now()}`;
   // The Mailroom files the first save, and its answer is lost on the way back.
   const lost = Promise.withResolvers<void>();
@@ -521,7 +498,7 @@ test('a save whose answer was lost is asked again under its id, and Drafts keeps
   await saved(page).waitFor({ timeout: 15_000 });
   await leave(page, composer);
 
-  await goToDrafts(page);
+  await goTo(page, 'Drafts');
   const rows = page.getByRole('option').filter({ hasText: subject });
   await rows.first().click();
   const drafts = reader(page).getByRole('button', { name: /^Draft/ });

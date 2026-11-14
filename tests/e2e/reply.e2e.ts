@@ -7,8 +7,9 @@ import { describe, expect } from 'bun:test';
 import { join } from 'node:path';
 import type { BrowserContextOptions, Page, Route } from 'playwright';
 import { expectUsable } from './usable.ts';
+import { hold, painted, reader, slow } from './helpers.ts';
 import { RESULTS, SIZES, suite } from './suite.ts';
-import { mailIsIn } from '../mailIsIn.ts';
+import { until } from '../until.ts';
 
 /** How long a slow server takes to send a message's body. */
 const SLOW_MS = 3000;
@@ -37,22 +38,6 @@ async function slowBodies(
   });
 }
 
-/**
- * Has the server send each conversation only after `SLOW_MS`, as when a host files its copy in Sent
- * late, so the Outbox lets a send go before the index shows its copy.
- */
-async function slowIndex(page: Page) {
-  await page.route('**/_serverFn/**', async (route: Route) => {
-    const asked = decodeURIComponent(route.request().url());
-    if (route.request().method() !== 'GET' || !asked.includes('{"t":1,"s":"conversation"}')) {
-      return route.fallback();
-    }
-    const response = await route.fetch();
-    await new Promise((resolve) => setTimeout(resolve, SLOW_MS));
-    await route.fulfill({ response });
-  });
-}
-
 for (const [size, options] of Object.entries(SIZES)) {
   describe(`Replying at a ${size}’s size`, () => {
     const app = suite({ vars: { DEV_MEMBER: `reply-${size}-${Date.now()}@trailmix.test` } });
@@ -62,19 +47,12 @@ for (const [size, options] of Object.entries(SIZES)) {
      * The Inbox, which opens at its newest and prepares the conversations beside it. What `before`
      * sets up, such as a slow server, is in place before the page asks for anything.
      */
-    async function inbox(
+    const inbox = (
       colorScheme: 'light' | 'dark',
       more: BrowserContextOptions = {},
-      before: (page: Page) => Promise<void> = async () => {},
-    ) {
-      const page = await (await app.context({ ...options, colorScheme, ...more })).newPage();
-      await before(page);
-      await page.goto(app.url);
-      await mailIsIn(page);
-      return page;
-    }
+      before?: (page: Page) => unknown,
+    ) => app.open({ ...options, colorScheme, ...more }, { before });
 
-    const reader = (page: Page) => page.getByRole('region', { name: 'Reader' });
     const composer = (page: Page) => page.locator('section[aria-label="Reply"]');
 
     /** Opens a conversation of several messages, and waits until it shows. */
@@ -147,13 +125,9 @@ for (const [size, options] of Object.entries(SIZES)) {
 
     test('keys pressed while a reply’s code loads wait for it, and what they type is the reply’s', async () => {
       // The composer's code comes only once the test lets it, past any worker that keeps it.
-      let letCome = () => {};
-      const comes = new Promise<void>((resolve) => (letCome = resolve));
+      let code!: Awaited<ReturnType<typeof hold>>;
       const page = await inbox('light', { serviceWorkers: 'block' }, async (page) => {
-        await page.route('**/assets/Composer-*.js', async (route) => {
-          await comes;
-          await route.fallback();
-        });
+        code = await hold(page, /\/assets\/Composer-[^/]*\.js$/);
       });
       await open(page);
       const saved = page.waitForRequest(
@@ -175,7 +149,7 @@ for (const [size, options] of Object.entries(SIZES)) {
       expect(await page.getByRole('listbox', { name: 'Commands' }).count()).toBe(0);
       expect(await composer(page).getByRole('textbox', { name: 'Reply' }).count()).toBe(0);
 
-      letCome();
+      await code.release();
       const editor = composer(page).getByRole('textbox', { name: 'Reply' });
       // The editor takes what was typed once it is made, a task after it shows.
       await until(async () => (await editor.innerText()).trim() !== '', 5000);
@@ -198,13 +172,9 @@ for (const [size, options] of Object.entries(SIZES)) {
     test('a reply shows with Send in its place from its first frame, however late Send’s code comes', async () => {
       // What Send draws comes only once the test lets it, past any worker that keeps it, while the
       // composer's own code is in.
-      let letCome = () => {};
-      const comes = new Promise<void>((resolve) => (letCome = resolve));
+      let code!: Awaited<ReturnType<typeof hold>>;
       const page = await inbox('dark', { serviceWorkers: 'block' }, async (page) => {
-        await page.route('**/assets/sendCommands-*.js', async (route) => {
-          await comes;
-          await route.fallback();
-        });
+        code = await hold(page, /\/assets\/sendCommands-[^/]*\.js$/);
       });
       await open(page);
       await codeLoaded(page, ['Composer-']);
@@ -235,7 +205,7 @@ for (const [size, options] of Object.entries(SIZES)) {
       await page.locator('section[aria-label="Reply"], section[aria-label="Message"]').waitFor();
       await page.keyboard.type('Count me in.');
       await painted(page);
-      letCome();
+      await code.release();
       const reply = composer(page);
       await reply.getByRole('button', { name: 'Send', exact: true }).waitFor();
       const editor = reply.getByRole('textbox', { name: 'Reply' });
@@ -296,7 +266,7 @@ for (const [size, options] of Object.entries(SIZES)) {
       await saved.waitFor({ timeout: 10_000 });
       await expectUsable(page, `reply-${size}-dark-saved`);
       await page.keyboard.type(' See you Thursday.');
-      await until(() => Promise.resolve(saves >= 2), 10_000);
+      await until(() => saves >= 2, 10_000);
       await saved.waitFor({ timeout: 10_000 });
       await painted(page);
       expect(await page.evaluate(() => (window as unknown as { moved: string[] }).moved)).toEqual(
@@ -328,21 +298,11 @@ for (const [size, options] of Object.entries(SIZES)) {
       await composerLoaded(page);
       const text = 'Held saves stay out of sight.';
       // Each save answers two seconds late, so the conversation refetched on its hint comes first.
-      let answers = 0;
+      const saves = await slow(page, 'saveDraft', 2_000);
       let early = 0;
-      await page.route('**/_serverFn/**', async (route: Route) => {
-        const request = route.request();
-        if (request.method() !== 'POST' || !request.postData()?.includes('saveDraft')) {
-          return route.fallback();
-        }
-        const response = await route.fetch();
-        await new Promise((done) => setTimeout(done, 2_000));
-        await route.fulfill({ response });
-        answers++;
-      });
       page.on('response', async (response) => {
         const asked = decodeURIComponent(response.url());
-        if (!asked.includes('{"t":1,"s":"conversation"}') || answers > 0) return;
+        if (!asked.includes('{"t":1,"s":"conversation"}') || saves.answered > 0) return;
         if ((await response.text().catch(() => '')).includes(text)) early++;
       });
       await watch(page, text);
@@ -353,7 +313,7 @@ for (const [size, options] of Object.entries(SIZES)) {
       const saved = reply.getByRole('status').filter({ hasText: 'Saved to Drafts' });
       await saved.waitFor({ timeout: 10_000 });
       await page.keyboard.type(' Even the second.');
-      await until(() => Promise.resolve(answers >= 2), 15_000);
+      await until(() => saves.answered >= 2, 15_000);
       await painted(page);
       expect(early).toBeGreaterThan(0);
       const frames = await shown(page);
@@ -374,20 +334,10 @@ for (const [size, options] of Object.entries(SIZES)) {
       const drafts = reader(page).getByRole('button', { name: /^Draft/ });
       const before = await drafts.count();
       // Each save answers two seconds late, and nothing asks the Mailroom to send.
-      let asked = 0;
-      let answered = 0;
+      const saves = await slow(page, 'saveDraft', 2_000);
       let sends = 0;
-      await page.route('**/_serverFn/**', async (route: Route) => {
-        const request = route.request();
+      page.on('request', (request) => {
         if (request.postData()?.includes('"send"')) sends++;
-        if (request.method() !== 'POST' || !request.postData()?.includes('saveDraft')) {
-          return route.fallback();
-        }
-        asked++;
-        const response = await route.fetch();
-        await new Promise((done) => setTimeout(done, 2_000));
-        await route.fulfill({ response });
-        answered++;
       });
       const text = 'Sent while a save was on its way, every word.';
       await watch(page, text);
@@ -396,19 +346,19 @@ for (const [size, options] of Object.entries(SIZES)) {
       await reply.getByRole('textbox', { name: 'Reply' }).waitFor();
       await page.keyboard.type('Sent while a save was on its way,');
       // The rest is typed while the first save is on its way, and sent straight after.
-      await until(() => Promise.resolve(asked > 0), 10_000);
+      await until(() => saves.asked > 0, 10_000);
       await page.keyboard.type(' every word.');
       await page.keyboard.press('ControlOrMeta+Enter');
       await reply.waitFor({ state: 'detached', timeout: 1_000 });
       const line = reader(page).locator('div:has(> [data-airmail])', { hasText: text });
       await line.getByText(/^Sending in \d+s$/).waitFor({ timeout: 1_000 });
-      expect(answered).toBe(0);
+      expect(saves.answered).toBe(0);
       await line.getByRole('button', { name: 'Undo', exact: true }).click();
       const editor = composer(page).getByRole('textbox', { name: 'Reply' });
       await editor.waitFor({ timeout: 2_000 });
       expect(await editor.innerText()).toBe(text);
       // Once every save has answered, leaving it keeps one draft, which says it all.
-      await until(() => Promise.resolve(answered === asked), 15_000);
+      await until(() => saves.answered === saves.asked, 15_000);
       await page.keyboard.press('Escape');
       await composer(page).waitFor({ state: 'detached' });
       await drafts.filter({ hasText: text }).waitFor({ timeout: 10_000 });
@@ -443,7 +393,9 @@ for (const [size, options] of Object.entries(SIZES)) {
     test('a reply sent lies at the end of its conversation at once, and becomes the server’s copy when the index has it', async () => {
       const page = await inbox('light');
       await open(page);
-      await slowIndex(page);
+      // Each conversation comes late, as when a host files its copy in Sent late, so the Outbox
+      // lets a send go before the index shows its copy.
+      await slow(page, 'conversation', SLOW_MS);
       const text = 'Thursday works for the cutover.';
       await watch(page, text);
       await sendReply(page, text);
@@ -580,9 +532,7 @@ for (const [size, options] of Object.entries(SIZES)) {
  * down with its Undo in reach, and checks it reads.
  */
 async function sentShows(page: Page, text: string, screen: string) {
-  const onItsWay = page
-    .getByRole('region', { name: 'Reader' })
-    .locator('div:has(> [data-airmail])', { hasText: text });
+  const onItsWay = reader(page).locator('div:has(> [data-airmail])', { hasText: text });
   await onItsWay.waitFor({ timeout: 2000 });
   expect(await onItsWay.locator('[data-airmail]').getAttribute('data-airmail')).toBe('running');
   await onItsWay.getByText(/^Sending in \d+s$/).waitFor();
@@ -712,22 +662,4 @@ async function codeLoaded(page: Page, chunks: string[]) {
     );
   }, chunks);
   await painted(page);
-}
-
-/** Waits for two more frames to paint, and for what they report to be delivered. */
-const painted = (page: Page) =>
-  page.evaluate(
-    () =>
-      new Promise((done) =>
-        requestAnimationFrame(() => requestAnimationFrame(() => setTimeout(done, 0))),
-      ),
-  );
-
-/** Waits until a check holds, or fails once `ms` have passed without it. */
-async function until(check: () => Promise<boolean>, ms: number) {
-  const by = Date.now() + ms;
-  while (!(await check())) {
-    if (Date.now() > by) throw new Error(`Still not so after ${ms} ms.`);
-    await new Promise((done) => setTimeout(done, 25));
-  }
 }

@@ -1,11 +1,12 @@
 import { expect } from 'bun:test';
 import { join } from 'node:path';
-import type { BrowserContextOptions, Locator, Page, Request, Route } from 'playwright';
+import type { Locator, Page, Request } from 'playwright';
 import { REST_MS } from '../../src/features/reader/core/rest.ts';
 import { bareSubject } from '../../src/features/reader/core/subject.ts';
 import { expectUsable } from './usable.ts';
+import { bodiesShown, goTo, hold, reader, slow } from './helpers.ts';
 import { RESULTS, SIZES, suite } from './suite.ts';
-import { mailIsIn } from '../mailIsIn.ts';
+import { until } from '../until.ts';
 
 /**
  * The reader around a conversation, end to end on the demo mailbox: the folder it lies in, a reply
@@ -13,22 +14,10 @@ import { mailIsIn } from '../mailIsIn.ts';
  * the filing in the island.
  */
 
-const app = suite({ vars: { DEV_MEMBER: `reader-${Date.now()}@trailmix.test` } });
+const app = suite({ vars: { DEV_MEMBER: `reader-${Date.now()}@trailmix.test` }, scale: 2 });
 // A test that fails leaves a screenshot of each page and what it showed, for CI to keep.
-const { test } = app;
+const { test, open } = app;
 
-async function open(
-  options: BrowserContextOptions,
-  beforeLoad?: (page: Page) => unknown,
-): Promise<Page> {
-  const page = await (await app.context({ deviceScaleFactor: 2, ...options })).newPage();
-  await beforeLoad?.(page);
-  await page.goto(app.url);
-  await mailIsIn(page);
-  return page;
-}
-
-const reader = (page: Page) => page.getByRole('region', { name: 'Reader' });
 const row = (page: Page, subject: string) =>
   page.getByRole('option').filter({ hasText: subject }).first();
 /** Waits for the line under the subject, the account, the folder and how many messages, to say this. */
@@ -97,7 +86,7 @@ test('each message answers and shows the source of its own, and the palette the 
   // Only the newest message's Reply teaches R, the key that answers it. The earlier message's body
   // arrives after it opens and moves the newest down, which takes a Reply out from under a pointer
   // that reached it first, so the pointer waits for every body and goes to Reply again if it must.
-  await bodies(page);
+  await bodiesShown(page);
   const tooltip = async (article: typeof earlier) => {
     const reply = article.getByRole('button', { name: 'Reply', exact: true });
     const shown = page.getByRole('tooltip').filter({ hasText: /^Reply/ });
@@ -143,29 +132,22 @@ test('each message answers and shows the source of its own, and the palette the 
 }, 30_000);
 
 /** Holds the tooltips' code from a page, which asks for it once its first screen has settled. */
-async function holdTooltips(page: Page) {
-  const code = /\/assets\/Tooltip-[^/]+\.js$/;
-  let release = () => {};
-  const held = new Promise<void>((resolve) => (release = resolve));
-  await page.route(code, async (route) => {
-    await held;
-    await route.continue();
-  });
-  return { asked: page.waitForRequest(code), release: () => release() };
-}
+const holdTooltips = (page: Page) => hold(page, /\/assets\/Tooltip-[^/]+\.js$/);
 
 test('a button drawn before the tooltips’ code gains its tooltip as it arrives, under a resting pointer or key but never a press or tap', async () => {
   let tooltips!: Awaited<ReturnType<typeof holdTooltips>>;
-  const page = await open(SIZES.desktop, async (page) => (tooltips = await holdTooltips(page)));
+  const page = await open(SIZES.desktop, {
+    before: async (page) => (tooltips = await holdTooltips(page)),
+  });
   const more = reader(page).getByRole('button', { name: 'More for this message' }).last();
   const tooltip = page.getByRole('tooltip').filter({ hasText: /^More$/ });
 
   // A pointer resting on it as the code arrives opens its tooltip, which describes it from then on.
   await more.hover();
-  await tooltips.asked;
+  await tooltips.requested;
   expect(await page.getByRole('tooltip').count()).toBe(0);
   expect(await more.getAttribute('aria-describedby')).toBeNull();
-  tooltips.release();
+  await tooltips.release();
   await tooltip.waitFor({ timeout: 2_000 });
   const about = await more.and(page.locator('[aria-describedby]')).getAttribute('aria-describedby');
   await expect(page.locator(`[id="${about}"]`).textContent()).resolves.toBe('More');
@@ -193,11 +175,13 @@ test('a button drawn before the tooltips’ code gains its tooltip as it arrives
     [SIZES.desktop, (button: Locator) => button.click()],
     [SIZES.phone, (button: Locator) => button.tap()],
   ] as const) {
-    const pressed = await open(options, async (page) => (tooltips = await holdTooltips(page)));
+    const pressed = await open(options, {
+      before: async (page) => (tooltips = await holdTooltips(page)),
+    });
     const unread = pressed.getByRole('button', { name: 'Unread only' });
     await press(unread);
-    await tooltips.asked;
-    tooltips.release();
+    await tooltips.requested;
+    await tooltips.release();
     await unread.and(pressed.locator('[aria-describedby]')).waitFor();
     expect(await pressed.getByRole('tooltip').count()).toBe(0);
   }
@@ -302,11 +286,11 @@ test('verified list mail offers to unsubscribe in one click, and says whether th
   const mail = sheet.locator('iframe');
   const mailTop = async () => (await mail.boundingBox())?.y;
   const before = await mailTop();
-  const release = await holdCommands(page);
+  const commands = await hold(page, (request) => request.method() === 'POST');
   await offer.click();
   await said('Unsubscribing…');
   expect(await mailTop()).toBe(before);
-  await release();
+  await commands.release();
   await said('Unsubscribed');
   expect(await mailTop()).toBe(before);
   await expectUsable(page, 'reader-desktop-light-unsubscribed');
@@ -369,21 +353,6 @@ async function offered(page: Page, { run = false } = {}): Promise<boolean> {
     await page.keyboard.press('Backspace');
   }
   return isOffered;
-}
-
-/** Holds every command this page sends until released, so what shows before is its own doing. */
-async function holdCommands(page: Page): Promise<() => Promise<void>> {
-  let release!: () => void;
-  const released = new Promise<void>((resolve) => (release = resolve));
-  const hold = async (route: Route) => {
-    if (route.request().method() === 'POST') await released;
-    await route.continue().catch(() => {});
-  };
-  await page.route('**/_serverFn/**', hold);
-  return async () => {
-    release();
-    await page.unroute('**/_serverFn/**', hold);
-  };
 }
 
 for (const colorScheme of ['light', 'dark'] as const) {
@@ -548,13 +517,10 @@ for (const [size, options] of Object.entries({ desktop: SIZES.desktop, phone: SI
   for (const colorScheme of ['light', 'dark'] as const) {
     test(`mail on its way shows skeletons where it will lie, and mail that comes quickly shows none, ${size} ${colorScheme}`, async () => {
       // The composer's code is held from the start, before anything could load it ahead.
-      let releaseComposer!: () => void;
-      const composerCode = new Promise<void>((resolve) => (releaseComposer = resolve));
-      const page = await open({ ...options, colorScheme }, (page) =>
-        page.route(/\/assets\/Composer-/, async (route) => {
-          await composerCode;
-          await route.continue().catch(() => {});
-        }),
+      let composerCode!: Awaited<ReturnType<typeof hold>>;
+      const page = await open(
+        { ...options, colorScheme },
+        { before: async (page) => (composerCode = await hold(page, /\/assets\/Composer-/)) },
       );
       const shot = (screen: string) =>
         page.screenshot({ path: join(RESULTS, `skeleton-${screen}-${size}-${colorScheme}.png`) });
@@ -563,7 +529,7 @@ for (const [size, options] of Object.entries({ desktop: SIZES.desktop, phone: SI
       await page.keyboard.press('c');
       await shown(page, 'section[aria-label="Message"] [role="status"][aria-busy="true"]');
       await shot('composer');
-      releaseComposer();
+      await composerCode.release();
       await page.locator('section[aria-label="New message"]').waitFor();
       await page.keyboard.press('Escape');
       await page.locator('section[aria-label="New message"]').waitFor({ state: 'detached' });
@@ -571,29 +537,29 @@ for (const [size, options] of Object.entries({ desktop: SIZES.desktop, phone: SI
 
       // Mail that answers within the skeletons' delay, if not at once: a conversation, an older
       // message, another view.
-      const quick = await slowed(page, QUICK_MS);
+      const quick = await slow(page, isQuery, QUICK_MS);
       await openRow(page, 'Q4 planning');
-      await bodies(page);
+      await bodiesShown(page);
       await unfold(page);
-      await bodies(page);
-      await goTo(page, 'Sent');
+      await bodiesShown(page);
+      await goTo(page, 'Sent', 'Personal');
       await page.getByRole('option').first().waitFor();
-      await quick();
+      await quick.restore();
       expect({ quick: await skeletonsSeen(page) }).toEqual({ quick: 0 });
 
       // A view not yet loaded shows rows that the first page lands on exactly.
-      const list = await holding(page, 'conversations');
-      await goTo(page, 'Archive');
+      const list = await hold(page, 'conversations');
+      await goTo(page, 'Archive', 'Personal');
       const rows = await shown(page, '[role="status"][aria-busy="true"] > div');
       await shot('list');
-      await list();
+      await list.release();
       await page.getByRole('option').first().waitFor();
       const first = await boxOf(page, '[role="option"]');
       expect(first).toEqual(rows);
 
       // A conversation opened while the Mailroom is slow shows its subject in the click's own
       // frame, its sheets as skeletons, and never the empty reader. Its subject stays put.
-      const slow = await slowed(page, SLOW_MS);
+      const slowly = await slow(page, isQuery, SLOW_MS);
       const target = page.getByRole('option').nth(4);
       const listed = await target.evaluate((row) => row.lastElementChild?.children[1]?.textContent);
       await watchOpening(page);
@@ -606,12 +572,12 @@ for (const [size, options] of Object.entries({ desktop: SIZES.desktop, phone: SI
         .getByRole('article')
         .first()
         .waitFor({ timeout: SLOW_MS * 3 });
-      await slow();
+      await slowly.restore();
       expect((await openingSeen(page)).empty).toBe(false);
       expect(await boxOf(page, 'section[aria-label="Reader"] h1')).toEqual(opening.subjectBox);
 
       // An older message's body on its way shows lines on its sheet, and the sheet holds still.
-      const body = await holding(page, 'body');
+      const body = await hold(page, 'body');
       await openRow(page, 'Workers migration plan');
       await unfold(page);
       const sheet = 'section[aria-label="Reader"] article:first-of-type header';
@@ -625,14 +591,14 @@ for (const [size, options] of Object.entries({ desktop: SIZES.desktop, phone: SI
           .evaluateAll((buttons) => buttons.map((button) => button.getAttribute('aria-label')));
       const waiting = await controls();
       await shot('body');
-      await body();
-      await bodies(page);
+      await body.release();
+      await bodiesShown(page);
       expect(await boxOf(page, sheet)).toEqual(header);
       expect(await controls()).toEqual(waiting);
 
       // A draft opened while its words are on their way shows the composer's sheet with lines.
-      const words = await holding(page, 'body');
-      await goTo(page, 'Drafts');
+      const words = await hold(page, 'body');
+      await goTo(page, 'Drafts', 'Personal');
       await page.getByRole('option').first().click();
       await reader(page)
         .getByRole('button', { name: /^Draft/ })
@@ -640,7 +606,7 @@ for (const [size, options] of Object.entries({ desktop: SIZES.desktop, phone: SI
       await shown(page, 'section[aria-label="Message"] [role="status"][aria-busy="true"]');
       await shot('draft');
       expect(await page.getByText('Opening…').count()).toBe(0);
-      await words();
+      await words.release();
       await page
         .getByRole('button', { name: 'Send', exact: true })
         .filter({ visible: true })
@@ -651,11 +617,14 @@ for (const [size, options] of Object.entries({ desktop: SIZES.desktop, phone: SI
 
 test('an older message’s body is asked for as the pointer rests on its line or it takes the focus', async () => {
   let asksAlone!: () => Promise<void>;
-  const page = await open({ ...SIZES.desktop, colorScheme: 'light' }, (page) => {
-    asksAlone = askingAlone(page);
-  });
+  const page = await open(
+    { ...SIZES.desktop, colorScheme: 'light' },
+    {
+      before: (page) => (asksAlone = askingAlone(page)),
+    },
+  );
   await openRow(page, 'Workers migration plan');
-  await bodies(page);
+  await bodiesShown(page);
   // The conversations either side are prepared while the browser is idle, which this waits out.
   await asksAlone();
   const asked: string[] = [];
@@ -676,19 +645,22 @@ test('an older message’s body is asked for as the pointer rests on its line or
 
   // One that rests there asks for its body, and focus asks at once.
   await first.hover();
-  await waitUntil(() => asked.length === 1);
+  await until(() => asked.length === 1);
   await second.focus();
-  await waitUntil(() => asked.length === 2);
+  await until(() => asked.length === 2);
 }, 30_000);
 
 // The dark theme offers light paper for the conversation open, which must ask for nothing itself.
 test('a held key in the dark theme asks for no conversation it passes', async () => {
   let asksAlone!: () => Promise<void>;
-  const page = await open({ ...SIZES.desktop, colorScheme: 'dark' }, (page) => {
-    asksAlone = askingAlone(page);
-  });
+  const page = await open(
+    { ...SIZES.desktop, colorScheme: 'dark' },
+    {
+      before: (page) => (asksAlone = askingAlone(page)),
+    },
+  );
   await page.getByRole('option').first().click();
-  await bodies(page);
+  await bodiesShown(page);
   // The conversations either side are prepared while the browser is idle, which this waits out.
   await asksAlone();
   const asked = new Set<string>();
@@ -707,12 +679,15 @@ test('a held key in the dark theme asks for no conversation it passes', async ()
 
 test('a conversation is asked for as the pointer rests on its row, and its newest body as the row is pressed', async () => {
   let asksAlone!: () => Promise<void>;
-  const page = await open({ ...SIZES.desktop, colorScheme: 'light' }, (page) => {
-    asksAlone = askingAlone(page);
-  });
+  const page = await open(
+    { ...SIZES.desktop, colorScheme: 'light' },
+    {
+      before: (page) => (asksAlone = askingAlone(page)),
+    },
+  );
   // The newest conversation opens, and those either side are prepared while the browser is idle,
   // which this waits out.
-  await bodies(page);
+  await bodiesShown(page);
   await asksAlone();
   const asked: string[] = [];
   page.on('request', (request) => {
@@ -731,10 +706,10 @@ test('a conversation is asked for as the pointer rests on its row, and its newes
 
   // One that rests asks for the conversation, and a press for its newest body, before the click.
   await target.hover();
-  await waitUntil(() => asked.includes('conversation'));
+  await until(() => asked.includes('conversation'));
   expect(asked).not.toContain('body');
   await page.mouse.down();
-  await waitUntil(() => asked.includes('body'));
+  await until(() => asked.includes('body'));
   await page.mouse.up();
 }, 30_000);
 
@@ -799,31 +774,8 @@ async function openingSeen(page: Page) {
 /** Under the skeletons' delay, `tm.skeletonDelay`, yet long enough for several frames. */
 const QUICK_MS = 150;
 
-/** Answers every query `ms` late, until the returned function puts things back. */
-async function slowed(page: Page, ms: number): Promise<() => Promise<void>> {
-  const slow = async (route: Route) => {
-    if (route.request().method() === 'GET') await new Promise((resolve) => setTimeout(resolve, ms));
-    await route.continue().catch(() => {});
-  };
-  await page.route('**/_serverFn/**', slow);
-  return () => page.unroute('**/_serverFn/**', slow);
-}
-
-/** Holds every query of this name until released, as a slow Mailroom would. */
-async function holding(page: Page, name: string): Promise<() => Promise<void>> {
-  let release!: () => void;
-  const released = new Promise<void>((resolve) => (release = resolve));
-  const named = encodeURIComponent(`"${name}"`);
-  const hold = async (route: Route) => {
-    if (route.request().url().includes(named)) await released;
-    await route.continue().catch(() => {});
-  };
-  await page.route('**/_serverFn/**', hold);
-  return async () => {
-    release();
-    await page.unroute('**/_serverFn/**', hold);
-  };
-}
+/** Every ask of the Mailroom that changes nothing. */
+const isQuery = (request: Request) => request.method() === 'GET';
 
 /**
  * Notes, every frame from now on, how visible any skeleton is, so a test can tell whether one ever
@@ -880,42 +832,6 @@ async function unfold(page: Page) {
     .click();
 }
 
-/** Waits until every open message shows its body. */
-async function bodies(page: Page) {
-  await page.waitForFunction(() => {
-    const sheets = [...document.querySelectorAll('section[aria-label="Reader"] article')];
-    return (
-      sheets.length > 0 &&
-      sheets.every(
-        (sheet) =>
-          !sheet.querySelector('[aria-busy="true"]') &&
-          [...sheet.querySelectorAll('iframe')].every(
-            (frame) => frame.style.visibility === 'visible',
-          ),
-      )
-    );
-  });
-}
-
-/** Goes to a view: one of the unified ones, or one of Personal's folders. On a phone, by its folders. */
-async function goTo(page: Page, view: 'Inbox' | 'Sent' | 'Archive' | 'Drafts') {
-  const back = reader(page).getByRole('button', { name: 'Back', exact: true });
-  if (await reachable(back)) await back.click();
-  const button =
-    view === 'Inbox'
-      ? page.getByRole('button', { name: /^Inbox/ }).first()
-      : folder(page, 'Personal', view);
-  if (!(await reachable(button))) {
-    await page.getByRole('button', { name: 'Folders', exact: true }).click();
-  }
-  await button.click();
-}
-
-/** Whether a control is on screen and can be used. A pane off a phone's screen is inert. */
-async function reachable(control: Locator): Promise<boolean> {
-  return (await control.isVisible()) && control.evaluate((element) => !element.closest('[inert]'));
-}
-
 /**
  * Follows what a page asks for from its first request, and gives a wait for it to stop asking on its
  * own, as it does while idle for the conversations either side of the one open: until nothing is on
@@ -953,11 +869,3 @@ function askingAlone(page: Page): () => Promise<void> {
 const PAST_A_REST_MS = REST_MS + 250;
 /** The pace of a held key, quicker than a rest. */
 const HELD_KEY_MS = 30;
-
-/** Polls until `isTrue` holds, for a second at most. */
-async function waitUntil(isTrue: () => boolean) {
-  for (const started = Date.now(); !isTrue();) {
-    if (Date.now() - started > 1_000) throw new Error('It never came true');
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  }
-}

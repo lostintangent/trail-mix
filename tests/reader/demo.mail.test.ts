@@ -15,6 +15,7 @@ import {
 import type { BundlePage, Page } from '../../src/features/mailroom/client/index.ts';
 import { messageUrl, partUrl } from '../../src/features/mailroom/client/urls.ts';
 import { startWorker, type LocalWorker } from '../workerd.ts';
+import { until } from '../until.ts';
 import { BROWSERS, launch, serveHarness, type Harness } from './browsers.ts';
 
 /** The newest conversations of the demo's unified Inbox, which hold every kind of mail it has. */
@@ -34,7 +35,10 @@ beforeAll(async () => {
     vars: { CREDENTIALS_KEY: 'a-test-key-that-is-at-least-32-characters', DEMO_MAILBOX: '200' },
   });
   harness = await serveHarness();
-  await until(async () => (await call<Account[]>('accounts')).every((a) => a.status === 'ready'));
+  await until(
+    async () => (await call<Account[]>('accounts')).every((a) => a.status === 'ready'),
+    60_000,
+  );
   const { items } = await call<Page>('conversations', { in: 'inbox' });
   // A bundle's conversations stand in its place.
   const conversations = (
@@ -152,10 +156,3 @@ const refOf = ({ account, path, uidValidity, uid }: MessageRef): MessageRef => (
   uidValidity,
   uid,
 });
-
-async function until(condition: () => Promise<boolean>, timeout = 60_000) {
-  for (const start = Date.now(); !(await condition());) {
-    if (Date.now() - start > timeout) throw new Error('Timed out waiting for the Mailroom.');
-    await Bun.sleep(100);
-  }
-}

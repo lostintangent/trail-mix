@@ -10,6 +10,7 @@ import {
   type Page,
 } from 'playwright';
 import { classesOf } from '../../src/shared/build/astryxStyles.ts';
+import { mailIsIn } from '../mailIsIn.ts';
 import { BUILDS, startPreview, type Build, type Preview } from './preview.ts';
 
 /** The built app and a browser, shared by one suite's tests. */
@@ -20,6 +21,18 @@ export type Suite = {
   readonly state: string;
   /** A new context, as a fresh browser profile is, which closes after the test. */
   context: (options?: BrowserContextOptions) => Promise<BrowserContext>;
+  /**
+   * A page of the app at `path` in a new context, once `ready` says so, by default once its mail
+   * is in. `before` runs before the page asks for anything, as a route that holds it must.
+   */
+  open: (
+    options?: BrowserContextOptions,
+    how?: {
+      path?: string;
+      before?: (page: Page) => unknown;
+      ready?: (page: Page) => Promise<unknown>;
+    },
+  ) => Promise<Page>;
   /**
    * A test whose failure leaves evidence in `test-results/`, which CI keeps: a screenshot of each
    * page still open, what a screen reader hears on it, and the end of the app's log.
@@ -52,6 +65,7 @@ export function suite({
   env = {},
   engine = chromium,
   build = BUILDS.app,
+  scale = 1,
 }: {
   vars?: Record<string, string>;
   /** Added to the app's environment, as `startPreview` takes it. */
@@ -59,6 +73,8 @@ export function suite({
   engine?: BrowserType;
   /** Which build to serve, as `startPreview` takes it. */
   build?: Build;
+  /** The device scale factor of every context, for screenshots as sharp as a laptop's screen. */
+  scale?: number;
 } = {}): Suite {
   let preview: Preview | undefined;
   let launched: Promise<Browser> | undefined;
@@ -162,34 +178,47 @@ export function suite({
     };
   }
 
+  async function context(given?: BrowserContextOptions) {
+    const options = { deviceScaleFactor: scale, ...given };
+    // A browser ended with a timed-out test can still look connected for a moment.
+    const browser = await launched?.catch(() => undefined);
+    const context = await (browser?.isConnected() ? browser : await launch())
+      .newContext(options)
+      .catch(async () => (await launch()).newContext(options));
+    opened.push(context);
+    context.on('page', () => (isPageOpened = true));
+    // A test's init scripts also run in each new page's about:blank, which refuses them storage.
+    context.on('weberror', (error) => {
+      const url = error.page()?.url() ?? '';
+      if (preview && url.startsWith(preview.url)) thrown.push(`${url}: ${error.error().message}`);
+    });
+    await context.exposeBinding(LANDED, (_, names: string[]) => {
+      isReported = true;
+      for (const name of names) landed.add(name);
+    });
+    await context.addInitScript(await reportingClasses, LANDED);
+    return context;
+  }
+
+  const started = () => {
+    if (!preview) throw new Error('The app starts before the suite’s first test.');
+    return preview;
+  };
+
   return {
     get url() {
-      if (!preview) throw new Error('The app starts before the suite’s first test.');
-      return preview.url;
+      return started().url;
     },
     get state() {
-      if (!preview) throw new Error('The app starts before the suite’s first test.');
-      return preview.state;
+      return started().state;
     },
-    async context(options) {
-      // A browser ended with a timed-out test can still look connected for a moment.
-      const browser = await launched?.catch(() => undefined);
-      const context = await (browser?.isConnected() ? browser : await launch())
-        .newContext(options)
-        .catch(async () => (await launch()).newContext(options));
-      opened.push(context);
-      context.on('page', () => (isPageOpened = true));
-      // A test's init scripts also run in each new page's about:blank, which refuses them storage.
-      context.on('weberror', (error) => {
-        const url = error.page()?.url() ?? '';
-        if (preview && url.startsWith(preview.url)) thrown.push(`${url}: ${error.error().message}`);
-      });
-      await context.exposeBinding(LANDED, (_, names: string[]) => {
-        isReported = true;
-        for (const name of names) landed.add(name);
-      });
-      await context.addInitScript(await reportingClasses, LANDED);
-      return context;
+    context,
+    async open(options, { path = '/', before, ready = mailIsIn } = {}) {
+      const page = await (await context(options)).newPage();
+      await before?.(page);
+      await page.goto(new URL(path, started().url).href);
+      await ready(page);
+      return page;
     },
     witnessed,
     test: (name, steps, timeout) => test(name, witnessed(name, steps), timeout),

@@ -12,6 +12,7 @@ import {
   type Canary,
   type Harness,
 } from './browsers.ts';
+import { until } from '../until.ts';
 
 /**
  * Mail on the theme's paper, in both themes and on light paper, in real browsers. Each kind of
@@ -511,12 +512,6 @@ async function papersOf(page: Page): Promise<Rgb[]> {
     });
   });
   return drawn.map((color) => seenOf(color).rgb);
-}
-
-async function until(condition: () => boolean, timeout = 2_000) {
-  for (const start = Date.now(); !condition() && Date.now() - start < timeout;) {
-    await Bun.sleep(20);
-  }
 }
 
 /** Whether a condition the page shows comes true within two seconds. */
