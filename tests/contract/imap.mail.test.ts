@@ -308,10 +308,10 @@ describe('The IMAP provider, signed in with a token', () => {
     try {
       expect((await provider.folders()).length).toBeGreaterThan(0);
       expect(asked).toHaveLength(1);
-      // The token runs out, and the server ends the session. The next command signs in again.
+      // The token runs out, and the server ends the session. The next commands sign in again, once.
       await Bun.sleep(2_500);
       await kick(alice.email);
-      expect((await provider.folders()).length).toBeGreaterThan(0);
+      await Promise.all([provider.folders(), provider.folders()]);
       expect(asked).toHaveLength(2);
 
       const raw = message({ id: 'token', subject: 'token', from: alice.email, to: alice.email });

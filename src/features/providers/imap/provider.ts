@@ -137,11 +137,16 @@ export function imapProvider(account: ImapAccount, network: Network): MailProvid
     );
   }
 
-  /** The one connection commands share. It reconnects when the last one has dropped. */
+  /**
+   * The one connection commands share. It reconnects when the last one has dropped, once for every
+   * command that found it gone, since a second connection would never be logged out.
+   */
   async function session(): Promise<ImapFlow> {
+    const shared = client;
+    const current = await shared?.catch(() => undefined);
     if (closed) throw new Error('This provider is closed.');
-    const current = client && (await client.catch(() => undefined));
     if (current?.usable) return current;
+    if (client && client !== shared) return client;
     client = (async () => {
       const connection = await open();
       await connection.connect();
