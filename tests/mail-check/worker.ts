@@ -1,22 +1,22 @@
-// The check Worker. A Durable Object runs the mail checks the Mailroom depends on, on the Workers
-// runtime, against one account. The secret arrives in the request body and lives only for that
-// request: nothing here stores, logs or returns it, and no mail content leaves the object.
+// The check Worker. A Durable Object asks one account, on the Workers runtime and through the IMAP
+// and SMTP provider the Mailroom uses, what a Mailroom asks: its folders, its newest message, a
+// send to itself as the Outbox sends, and news of new mail while it watches the Inbox. The secret
+// arrives in the request body and lives only for that request: nothing here stores, logs or returns
+// it, and no mail content leaves the object.
 import { connect } from 'cloudflare:sockets';
-import { ImapFlow, createSocketsTransport } from 'imapflow';
-import { connect as tcp } from 'node:net';
-import { connect as tls } from 'node:tls';
-import nodemailer from 'nodemailer';
-import type { SMTPTransportGetSocket } from 'nodemailer/lib/smtp-transport';
-
-export type Endpoint = { host: string; port: number; secure: boolean };
+import { createSocketsTransport } from 'imapflow';
+import type { Endpoint, MailProvider } from '../../src/features/providers/index.ts';
+import { imapProvider } from '../../src/features/providers/imap/provider.ts';
 
 export type CheckRequest = {
   user: string;
+  /** A password, or an access token when `oauth`. */
   secret: string;
-  auth: 'password' | 'oauth';
+  oauth: boolean;
   imap: Endpoint;
-  smtp: Endpoint[];
-  /** How long to hold IDLE before sending to self and waiting to be told. Zero skips the watch. */
+  smtp: Endpoint;
+  filesSent: boolean;
+  /** How long to watch the Inbox before sending to self and waiting to be told. Zero skips it. */
   watchSeconds: number;
 };
 
@@ -32,6 +32,9 @@ type Namespace = {
   newUniqueId(): unknown;
   get(id: unknown): { fetch(request: Request): Promise<Response> };
 };
+
+/** How long a send waits for a host that files its own copy in Sent, as the Outbox does. */
+const HOST_FILING_MS = 120_000;
 
 export default {
   async fetch(request: Request, env: { CHECK: Namespace }): Promise<Response> {
@@ -49,6 +52,27 @@ export default {
 export class Check {
   async fetch(request: Request): Promise<Response> {
     const check = await request.json<CheckRequest>();
+    const { user, secret } = check;
+    const provider = imapProvider(
+      {
+        account: 'check',
+        imap: check.imap,
+        smtp: check.smtp,
+        auth: check.oauth
+          ? { user, accessToken: () => Promise.resolve(secret) }
+          : { user, pass: secret },
+        filesSent: check.filesSent,
+      },
+      {
+        // As the Mailroom passes it. Its types want `allowHalfOpen` given.
+        imapTransport: createSocketsTransport((address, options) =>
+          connect(
+            address,
+            options && { ...options, allowHalfOpen: options.allowHalfOpen ?? false },
+          ),
+        ),
+      },
+    );
     const { readable, writable } = new TransformStream<Uint8Array, Uint8Array>();
     const writer = writable.getWriter();
     const encoder = new TextEncoder();
@@ -58,9 +82,12 @@ export class Check {
       const heartbeat = setInterval(() => void send(''), 30_000);
       try {
         await send(JSON.stringify({ runtime: navigator.userAgent }));
-        for (const [name, run] of checks(check)) await send(JSON.stringify(await timed(name, run)));
+        for (const [name, run] of checks(check, provider)) {
+          await send(JSON.stringify(await timed(name, run)));
+        }
       } finally {
         clearInterval(heartbeat);
+        await provider.close().catch(() => {});
         await writer.close();
       }
     })();
@@ -68,135 +95,92 @@ export class Check {
   }
 }
 
-function checks(check: CheckRequest): [string, () => Promise<unknown>][] {
-  const label = ({ port, secure }: Endpoint) => `${port} (${secure ? 'implicit TLS' : 'STARTTLS'})`;
-  return [
-    [`list folders and fetch a message over ${check.imap.port}`, () => listAndFetch(check)],
-    ...check.smtp.map((endpoint): [string, () => Promise<unknown>] => [
-      `send to self over ${label(endpoint)}`,
-      () => sendToSelf(check, endpoint, `Trail Mix check over ${label(endpoint)}`),
-    ]),
-    ...(check.watchSeconds > 0
-      ? [
-          [`watch INBOX for ${check.watchSeconds}s, then see new mail`, () => watch(check)] as [
-            string,
-            () => Promise<unknown>,
-          ],
-        ]
-      : []),
+function checks(check: CheckRequest, provider: MailProvider) {
+  const { imap, smtp, watchSeconds } = check;
+  const tls = smtp.secure ? 'implicit TLS' : 'STARTTLS';
+  const steps: [string, () => Promise<unknown>][] = [
+    [`list folders and open the newest message over ${imap.port}`, () => listAndOpen(provider)],
+    [`send to self over ${smtp.port} (${tls})`, () => sendToSelf(check, provider)],
   ];
-}
-
-async function listAndFetch(check: CheckRequest) {
-  const client = imap(check);
-  await client.connect();
-  try {
-    const folders = (await client.list()).map((f) =>
-      f.specialUse ? `${f.path} ${f.specialUse}` : f.path,
-    );
-    const lock = await client.getMailboxLock('INBOX');
-    try {
-      const newest = await client.fetchOne('*', { uid: true, size: true });
-      return {
-        capabilities: [...client.capabilities.keys()],
-        folders,
-        newest: newest ? { uid: newest.uid, size: newest.size } : null,
-      };
-    } finally {
-      lock.release();
-    }
-  } finally {
-    await client.logout().catch(() => {});
-  }
-}
-
-// One message from the account to itself, so a check never mails anyone else.
-async function sendToSelf(check: CheckRequest, endpoint: Endpoint, subject: string) {
-  const transport = nodemailer.createTransport({
-    ...endpoint,
-    requireTLS: !endpoint.secure,
-    auth:
-      check.auth === 'oauth'
-        ? { type: 'OAuth2', user: check.user, accessToken: check.secret }
-        : { user: check.user, pass: check.secret },
-    getSocket: socketByName(endpoint),
-  });
-  try {
-    const info = await transport.sendMail({
-      from: check.user,
-      to: check.user,
-      subject,
-      text: `${subject}\n\nSent by Trail Mix's mail check. Delete it at will.`,
-    });
-    return { response: info.response };
-  } finally {
-    transport.close();
-  }
-}
-
-// Holds IDLE across the wait, then sends to self and waits for the server to announce it.
-async function watch(check: CheckRequest) {
-  const client = imap(check);
-  let closed = false;
-  client.on('close', () => (closed = true));
-  await client.connect();
-  try {
-    await client.mailboxOpen('INBOX');
-    const idling = client.idle();
-    const openedAt = Date.now();
-    await new Promise((resolve) => setTimeout(resolve, check.watchSeconds * 1000));
-    if (closed) throw new Error('the connection closed during the watch');
-    const announced = new Promise<void>((resolve) => client.once('exists', () => resolve()));
-    const sentAt = Date.now();
-    const endpoint = check.smtp[0];
-    if (!endpoint) throw new Error('no submission endpoint to send with');
-    await sendToSelf(check, endpoint, `Trail Mix watch check ${new Date().toISOString()}`);
-    await Promise.race([
-      announced,
-      rejectAfter(60_000, 'the server announced no new mail within 60s'),
+  if (watchSeconds > 0) {
+    steps.push([
+      `watch INBOX for ${watchSeconds}s, then see new mail`,
+      () => watch(check, provider),
     ]);
-    const result = {
-      heldSeconds: Math.round((sentAt - openedAt) / 1000),
-      announcedAfterMs: Date.now() - sentAt,
-    };
-    await client.logout();
-    await idling.catch(() => {});
-    return result;
-  } finally {
-    client.close();
+  }
+  return steps;
+}
+
+async function listAndOpen(provider: MailProvider) {
+  const folders = await provider.folders();
+  const { events } = await provider.sync('INBOX', null, { since: new Date(0).toISOString() });
+  const newest = events.find((event) => event.type === 'message')?.envelope;
+  const body = newest && (await new Response(await provider.body(newest)).arrayBuffer());
+  return {
+    folders: folders.map(({ path, role }) => (role ? `${path} (${role})` : path)),
+    newest: newest ? { uid: newest.uid, bytes: body?.byteLength } : null,
+  };
+}
+
+/**
+ * One message from the account to itself, so a check never mails anyone else, sent as the Outbox
+ * sends: saved in Drafts, submitted, then filed in Sent, which takes the draft away. A host that
+ * files its own copy is waited for as the Outbox waits. A send that stops partway says what it left.
+ */
+async function sendToSelf({ user, filesSent }: CheckRequest, provider: MailProvider) {
+  const messageId = `<${crypto.randomUUID()}@check.trail-mix>`;
+  const subject = `Trail Mix check ${new Date().toISOString()}`;
+  const message = [
+    `From: ${user}`,
+    `To: ${user}`,
+    `Subject: ${subject}`,
+    `Message-ID: ${messageId}`,
+    `Date: ${new Date().toUTCString()}`,
+    '',
+    `${subject}. Sent by Trail Mix's mail check. Delete it at will.`,
+  ].join('\r\n');
+  let left: string | undefined;
+  try {
+    const draft = await provider.saveDraft(new TextEncoder().encode(message));
+    left = 'its draft in Drafts';
+    if ((await provider.submit(draft, messageId)) === 'missing') {
+      throw new Error('Its draft went missing before it was sent.');
+    }
+    left = 'its draft in Drafts, sent and not yet filed in Sent';
+    const until = Date.now() + (filesSent ? HOST_FILING_MS : 0);
+    while ((await provider.file(draft, messageId, Date.now() < until)) === 'unfiled') {
+      await sleep(5000);
+    }
+    return { messageId };
+  } catch (error) {
+    if (left && error instanceof Error) error.message += ` It left ${left}.`;
+    throw error;
   }
 }
 
-// imapflow always goes through `cloudflare:sockets`. Its default path fails STARTTLS on workerd.
-function imap(check: CheckRequest) {
-  const { host, port, secure } = check.imap;
-  return new ImapFlow({
-    host,
-    port,
-    secure,
-    doSTARTTLS: secure ? undefined : true,
-    auth:
-      check.auth === 'oauth'
-        ? { user: check.user, accessToken: check.secret }
-        : { user: check.user, pass: check.secret },
-    logger: false,
-    // workerd's types require `allowHalfOpen` once options are given, and imapflow may leave it out.
-    transport: createSocketsTransport((address, options) =>
-      connect(address, options && { ...options, allowHalfOpen: options.allowHalfOpen ?? false }),
-    ),
+/** Watches the Inbox as the Mailroom does, then sends to self and waits to be told of it. */
+async function watch(check: CheckRequest, provider: MailProvider) {
+  let told = 0;
+  let heard = () => {};
+  const stop = provider.watch('INBOX', () => {
+    told++;
+    heard();
   });
-}
-
-// nodemailer always gets a socket opened by host name. Left to resolve names itself, it connects to
-// an address, and workerd then checks the certificate against that address instead of the name.
-function socketByName({ host, port, secure }: Endpoint): SMTPTransportGetSocket {
-  return (_options, callback) => {
-    const socket = secure ? tls({ host, port, servername: host }) : tcp({ host, port });
-    socket.once(secure ? 'secureConnect' : 'connect', () =>
-      callback(null, { connection: socket, secured: secure }),
-    );
-    socket.once('error', (error) => callback(error));
-  };
+  try {
+    await sleep(check.watchSeconds * 1000);
+    // News while nothing was sent, as a dropped connection gives when it reconnects.
+    const toldWhileHeld = told;
+    const announced = new Promise<number>((resolve) => (heard = () => resolve(Date.now())));
+    const sentAt = Date.now();
+    await sendToSelf(check, provider);
+    const at = await Promise.race([
+      announced,
+      sleep(60_000).then(() => Promise.reject(new Error('No news of the new mail within 60s.'))),
+    ]);
+    return { toldWhileHeld, toldAfterMs: at - sentAt };
+  } finally {
+    stop();
+  }
 }
 
 async function timed(check: string, run: () => Promise<unknown>): Promise<CheckResult> {
@@ -205,12 +189,11 @@ async function timed(check: string, run: () => Promise<unknown>): Promise<CheckR
     const detail = await run();
     return { check, ok: true, ms: Date.now() - start, detail };
   } catch (error) {
-    const e = error as Error & { code?: string; response?: string; responseText?: string };
-    const message = [e.code, e.message, e.responseText ?? e.response].filter(Boolean).join(' | ');
+    // imapflow says only that a command failed, and keeps what the server said beside it.
+    const e = error as Error & { code?: string; responseText?: string };
+    const message = [e.code, e.message, e.responseText].filter(Boolean).join(' | ');
     return { check, ok: false, ms: Date.now() - start, error: message };
   }
 }
 
-function rejectAfter(ms: number, message: string) {
-  return new Promise<never>((_, reject) => setTimeout(() => reject(new Error(message)), ms));
-}
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));

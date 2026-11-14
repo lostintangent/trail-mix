@@ -1,6 +1,7 @@
-// The mail check: lists folders, fetches a message, submits over each of the host's submission
-// ports and, with --watch-minutes, holds IDLE that long before seeing new mail. It runs all of it in
-// a Durable Object on the local Workers runtime, so it tests the runtime the Mailroom runs on.
+// The mail check: lists folders, opens the newest message, sends to self as the Outbox sends and,
+// with --watch-minutes, watches the Inbox that long before seeing new mail. It runs all of it in a
+// Durable Object on the local Workers runtime, through the provider the Mailroom uses, so it tests
+// what the Mailroom does on the runtime it runs on.
 //
 //   bun tests/mail-check/check.ts --preset zoho --user me@example.com
 //   op read op://Private/Zoho/app-password | bun tests/mail-check/check.ts --preset zoho --user …
@@ -13,115 +14,60 @@
 //
 // A password is read from the terminal with echo off, or from the first line of a pipe. It is never
 // an argument or an environment variable, so it stays out of shell history and process listings.
-// Outlook signs in with Microsoft's device-code flow instead, and no refresh token is requested.
-// The secret reaches workerd in one request body over loopback, and nothing writes it to disk.
+// Outlook signs in with Microsoft's device-code flow instead, as the Mailroom does, and keeps only
+// the access token. The secret reaches workerd in one request body over loopback, and nothing
+// writes it to disk.
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
+import {
+  PRESETS,
+  codeFrom,
+  codeRequest,
+  pollRequest,
+  polled,
+  withStandIn,
+  type DeviceSignIn,
+  type Preset,
+  type VendorRequest,
+} from '../../src/features/providers/index.ts';
 import { caFile, identity, ports } from '../mail-server/server.ts';
 import { startWorker } from '../workerd.ts';
-import type { CheckRequest, CheckResult, Endpoint } from './worker.ts';
+import type { CheckRequest, CheckResult } from './worker.ts';
 
-type Preset = {
-  imap: Endpoint;
-  smtp: Endpoint[];
-  /** Microsoft's sign-in, for presets that use OAuth instead of a password. */
-  authority?: string;
-  /** Trust the test mail server's certificate authority, which no real host needs. */
-  test?: boolean;
+/** The test mail server: a host of its own, and one standing in for Outlook. */
+const local = (port: number, secure: boolean) => ({ host: 'localhost', port, secure });
+const TEST: Preset = {
+  imap: local(ports.imaps, true),
+  smtp: local(ports.submissions, true),
+  filesSent: false,
+  authServers: {},
 };
+const TEST_OUTLOOK = withStandIn(
+  PRESETS.outlook,
+  JSON.stringify({ ...TEST, authority: identity.authority, smtp: local(ports.submission, false) }),
+);
+const presets: Record<string, Preset> = { ...PRESETS, test: TEST, 'test-outlook': TEST_OUTLOOK };
 
-const at = (host: string, port: number): Endpoint => ({
-  host,
-  port,
-  secure: port === 993 || port === 465 || port === ports.imaps || port === ports.submissions,
-});
-
-export const presets: Record<string, Preset> = {
-  // A paid Zoho organization's names. Other accounts use other names, given with --imap-host and
-  // --smtp-host: imap and smtp.zoho.com for a personal or free one, other domains outside the US.
-  zoho: {
-    imap: at('imappro.zoho.com', 993),
-    smtp: [at('smtppro.zoho.com', 465), at('smtppro.zoho.com', 587)],
-  },
-  outlook: {
-    imap: at('outlook.office365.com', 993),
-    smtp: [at('smtp-mail.outlook.com', 587)],
-    authority: 'https://login.microsoftonline.com/consumers',
-  },
-  test: {
-    imap: at('localhost', ports.imaps),
-    smtp: [at('localhost', ports.submissions), at('localhost', ports.submission)],
-    test: true,
-  },
-  'test-outlook': {
-    imap: at('localhost', ports.imaps),
-    smtp: [at('localhost', ports.submission)],
-    authority: identity.authority,
-    test: true,
-  },
-};
-
-/** What Trail Mix asks Microsoft for: IMAP and SMTP as the signed-in person, and nothing else. */
-export const outlookScopes = [
-  'https://outlook.office.com/IMAP.AccessAsUser.All',
-  'https://outlook.office.com/SMTP.Send',
-];
-
-/**
- * Signs in with Microsoft's device-code flow (RFC 8628): asks for a code, shows it, and polls until
- * the person has signed in elsewhere. Resolves to an access token, and keeps nothing else.
- */
-export async function signInWithDeviceCode(options: {
-  authority: string;
-  clientId: string;
-  scopes: string[];
-  show: (message: string) => void;
-  sleep?: (ms: number) => Promise<void>;
-}): Promise<string> {
-  const { authority, clientId, scopes, show, sleep = Bun.sleep } = options;
-  const post = async (path: string, form: Record<string, string>) => {
-    const response = await fetch(`${authority}/oauth2/v2.0/${path}`, {
-      method: 'POST',
-      body: new URLSearchParams(form),
-    });
-    return { ok: response.ok, body: await response.json<Record<string, unknown>>() };
+/** Signs in at the vendor as the Mailroom does, showing the code, and resolves to an access token. */
+async function signInWithDeviceCode(device: DeviceSignIn, clientId: string): Promise<string> {
+  const ask = async ({ url, form }: VendorRequest) => {
+    const response = await fetch(url, { method: 'POST', body: form });
+    const body: unknown = await response.json().catch(() => null);
+    return { status: response.status, body };
   };
-
-  const code = await post('devicecode', { client_id: clientId, scope: scopes.join(' ') });
-  if (!code.ok) throw new Error(`Microsoft refused to start sign-in: ${describe(code.body)}`);
-  const deviceCode = String(code.body.device_code);
-  let interval = Number(code.body.interval ?? 5) * 1000;
-  const deadline = Date.now() + Number(code.body.expires_in ?? 900) * 1000;
-  show(String(code.body.message));
-
-  while (Date.now() < deadline) {
-    await sleep(interval);
-    const token = await post('token', {
-      grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
-      client_id: clientId,
-      device_code: deviceCode,
-    });
-    if (token.ok) return String(token.body.access_token);
-    switch (token.body.error) {
-      case 'authorization_pending':
-        continue;
-      case 'slow_down':
-        interval += 5000;
-        continue;
-      case 'authorization_declined':
-        throw new Error('Sign-in was declined.');
-      case 'expired_token':
-        throw new Error('The code expired before sign-in finished.');
-      default:
-        throw new Error(`Microsoft refused the sign-in: ${describe(token.body)}`);
-    }
+  const client = { id: clientId };
+  const started = codeFrom(device, await ask(codeRequest(device, client)), Date.now());
+  console.error(`To sign in, open ${started.link} and enter the code ${started.code}.`);
+  let interval = started.interval;
+  while (Date.now() < started.expiresAt) {
+    await Bun.sleep(interval);
+    const poll = await ask(pollRequest(device, client, started.deviceCode));
+    const result = polled(device, poll, interval, Date.now());
+    if ('granted' in result) return result.granted.access;
+    if ('refused' in result) throw new Error(result.refused);
+    interval = result.pending;
   }
   throw new Error('The code expired before sign-in finished.');
-}
-
-function describe(body: Record<string, unknown>) {
-  const reason = body.error_description ?? body.error;
-  return typeof reason === 'string' ? reason : 'no reason given';
 }
 
 // The command
@@ -148,19 +94,16 @@ if (import.meta.main) {
     process.exit(2);
   }
 
+  const test = preset === TEST || preset === TEST_OUTLOOK;
   let secret: string;
-  if (preset.authority) {
-    const clientId = values['client-id'] ?? (preset.test ? 'trail-mix-test' : undefined);
-    if (!clientId)
+  if (preset.device) {
+    const clientId = values['client-id'] ?? (test ? 'trail-mix-test' : undefined);
+    if (!clientId) {
       throw new Error(
         'Outlook needs --client-id, the Application ID of your Entra app registration.',
       );
-    secret = await signInWithDeviceCode({
-      authority: preset.authority,
-      clientId,
-      scopes: outlookScopes,
-      show: (m) => console.error(m),
-    });
+    }
+    secret = await signInWithDeviceCode(preset.device, clientId);
   } else {
     secret = await readSecret(`Password for ${user}: `);
   }
@@ -168,15 +111,16 @@ if (import.meta.main) {
   const request: CheckRequest = {
     user,
     secret,
-    auth: preset.authority ? 'oauth' : 'password',
+    oauth: Boolean(preset.device),
     imap: imapHost ? { ...preset.imap, host: imapHost } : preset.imap,
-    smtp: smtpHost ? preset.smtp.map((endpoint) => ({ ...endpoint, host: smtpHost })) : preset.smtp,
+    smtp: smtpHost ? { ...preset.smtp, host: smtpHost } : preset.smtp,
+    filesSent: preset.filesSent,
     watchSeconds: Math.round(Number(values['watch-minutes']) * 60),
   };
-  process.exitCode = await runInWorkerd(request, preset);
+  process.exitCode = await runInWorkerd(request, test);
 }
 
-async function runInWorkerd(request: CheckRequest, preset: Preset): Promise<number> {
+async function runInWorkerd(request: CheckRequest, test: boolean): Promise<number> {
   const workerd = await startWorker(
     {
       name: 'trail-mix-mail-check',
@@ -184,7 +128,8 @@ async function runInWorkerd(request: CheckRequest, preset: Preset): Promise<numb
       durable_objects: { bindings: [{ name: 'CHECK', class_name: 'Check' }] },
       migrations: [{ tag: 'v1', new_sqlite_classes: ['Check'] }],
     },
-    { env: preset.test ? { NODE_EXTRA_CA_CERTS: caFile } : {} },
+    // Trust the test mail server's certificate authority, which no real host needs.
+    { env: test ? { NODE_EXTRA_CA_CERTS: caFile } : {} },
   );
   try {
     const response = await fetch(`${workerd.url}/run`, {
@@ -198,7 +143,7 @@ async function runInWorkerd(request: CheckRequest, preset: Preset): Promise<numb
       );
     }
     // One JSON line per check, printed as each one finishes. Blank lines only keep the response alive.
-    const expected = 1 + request.smtp.length + (request.watchSeconds > 0 ? 1 : 0);
+    const expected = request.watchSeconds > 0 ? 3 : 2;
     let [reported, failed] = [0, 0];
     let pending = '';
     for await (const chunk of response.body.pipeThrough(new TextDecoderStream())) {
@@ -207,7 +152,7 @@ async function runInWorkerd(request: CheckRequest, preset: Preset): Promise<numb
       for (const line of lines.filter(Boolean)) {
         const message = JSON.parse(line) as CheckResult | { runtime: string };
         if ('runtime' in message) {
-          const hosts = new Set([request.imap, ...request.smtp].map(({ host }) => host));
+          const hosts = new Set([request.imap.host, request.smtp.host]);
           console.log(`On ${message.runtime}, as ${request.user}, at ${[...hosts].join(' and ')}:`);
           continue;
         }
