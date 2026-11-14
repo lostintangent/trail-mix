@@ -10,9 +10,6 @@ export type CloudflareApi = ReturnType<typeof cloudflareApi>;
 /** Where Cloudflare's API answers. Tests point a developer's deployment at a stand-in instead. */
 export const CLOUDFLARE_API = 'https://api.cloudflare.com/client/v4';
 
-/** A request Cloudflare refused, in Cloudflare's own words. */
-class CloudflareRefused extends Error {}
-
 type Application = { id: string; aud?: string; policies?: AccessPolicy[] };
 
 export function cloudflareApi({
@@ -38,7 +35,7 @@ export function cloudflareApi({
         },
       });
     } catch {
-      throw new CloudflareRefused('Trail Mix couldn’t reach Cloudflare’s API.');
+      throw new Error('Trail Mix couldn’t reach Cloudflare’s API.');
     }
     const body = (await response.json().catch(() => ({}))) as {
       success?: boolean;
@@ -50,7 +47,7 @@ export function cloudflareApi({
         ?.map(({ message }) => message)
         .filter(Boolean)
         .join(' ');
-      throw new CloudflareRefused(`Cloudflare refused it: ${said || `HTTP ${response.status}`}`);
+      throw new Error(`Cloudflare refused it: ${said || `HTTP ${response.status}`}`);
     }
     return body.result as T;
   }

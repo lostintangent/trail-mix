@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { cloudflareStandIn, STAND_IN_AUD } from '../../../../tests/cloudflare-stand-in.ts';
 import { cloudflareApi } from './cloudflare.ts';
-import { membersFor, NotTheOperator } from './members.ts';
+import { membersFor } from './members.ts';
 
 const OPERATOR = 'ada@example.com';
 
@@ -55,9 +55,11 @@ test('the operator sees each member with their last sign-in', async () => {
 test('anyone else is refused before Cloudflare or any Mailroom is reached', async () => {
   const { members, standIn, reached } = setUp('bo@x.org');
   expect(await members.isOperator()).toBe(false);
-  await expect(members.members()).rejects.toBeInstanceOf(NotTheOperator);
-  await expect(members.invite('cy@x.org')).rejects.toBeInstanceOf(NotTheOperator);
-  await expect(members.remove(OPERATOR, true)).rejects.toBeInstanceOf(NotTheOperator);
+  await expect(members.members()).rejects.toThrow('Only the operator can manage members.');
+  await expect(members.invite('cy@x.org')).rejects.toThrow('Only the operator can manage members.');
+  await expect(members.remove(OPERATOR, true)).rejects.toThrow(
+    'Only the operator can manage members.',
+  );
   expect(standIn.calls).toEqual([]);
   expect(reached).toEqual([]);
 });

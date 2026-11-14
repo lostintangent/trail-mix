@@ -15,13 +15,6 @@ import type { CloudflareApi } from './cloudflare.ts';
 /** What the Worker may do to a member's Mailroom while the operator removes them, and only then. */
 type Departing = { closeDevices(): Promise<void>; eraseEverything(): Promise<void> };
 
-/** Asked of anyone but the operator. */
-export class NotTheOperator extends Error {
-  constructor() {
-    super('Only the operator can manage members.');
-  }
-}
-
 /**
  * Members' server side, for one verified caller. Every answer but `isOperator` is the
  * operator's alone, refused for anyone else before Cloudflare or any Mailroom is reached. Only
@@ -53,7 +46,8 @@ export function membersFor({
     app: string;
     policy: AccessPolicy;
   }> {
-    if (!isOperator || operator === undefined) throw new NotTheOperator();
+    if (!isOperator || operator === undefined)
+      throw new Error('Only the operator can manage members.');
     if (!api || !audience) {
       throw new Error(
         'This Trail Mix has no member-list token, so its members are managed in the Cloudflare dashboard.',
