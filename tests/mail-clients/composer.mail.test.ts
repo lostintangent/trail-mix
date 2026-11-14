@@ -11,7 +11,7 @@
 import { afterAll, beforeAll, describe, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ImapFlow } from 'imapflow';
+import { ImapFlow, type SearchObject } from 'imapflow';
 import type { Page } from 'playwright';
 import PostalMime from 'postal-mime';
 import { SAVE_AT_LEAST_EVERY_MS } from '../../src/features/composer/core/session.ts';
@@ -30,8 +30,9 @@ type User = { email: string; password: string };
 const PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAQAAAADCAIAAAA7ljmRAAAAGElEQVR4nGOQ91/86aA3hGSAs4AkA7IMAGQcEltTdKHYAAAAAElFTkSuQmCC';
 const NOTES = 'Bring a jacket, the terrace gets cold.\n';
+const clients = missing('mutt', 'php') === undefined;
 
-describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix', () => {
+describe('Mail written in Trail Mix', () => {
   let ca: string;
   let webmail: Roundcube;
 
@@ -50,19 +51,17 @@ describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix
       subject: 'Lunch on Thursday?',
       text: 'Shall we try the new place?',
     });
-    for (const user of [alice, bob])
-      await withImap(user, (client) => client.append('INBOX', question));
-    await withImap(bob, (client) =>
-      client.append(
-        'INBOX',
-        raw({
-          id: 'other-lunch',
-          from: 'Dan <dan@example.com>',
-          to: bob.email,
-          subject: 'Re: Lunch on Thursday?',
-          text: 'A different lunch altogether.',
-        }),
-      ),
+    for (const user of [alice, bob]) await append(user, 'INBOX', question);
+    await append(
+      bob,
+      'INBOX',
+      raw({
+        id: 'other-lunch',
+        from: 'Dan <dan@example.com>',
+        to: bob.email,
+        subject: 'Re: Lunch on Thursday?',
+        text: 'A different lunch altogether.',
+      }),
     );
   }, 120_000);
 
@@ -76,7 +75,7 @@ describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix
 
   beforeAll(
     app.witnessed('Alice’s account, added', async () => {
-      webmail = await roundcube(ports.webmail);
+      if (clients) webmail = await roundcube(ports.webmail);
       const page = await trailMix();
       await addAlice(page);
       await page.close();
@@ -140,9 +139,9 @@ describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix
         .waitFor();
 
       // Once the undo window closes, the Mailroom sends it.
-      const sent = await until(() => replyIn(bob), 60_000);
-      messageId = sent.messageId;
-      written = sent.text;
+      const sent = await until(() => found(bob, 'INBOX', { from: alice.email }), 60_000);
+      messageId = sent.messageId ?? '';
+      written = sent.text ?? '';
       await page.close();
     }
 
@@ -154,193 +153,171 @@ describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix
       expect(written).not.toMatch(/<\/?[a-z]+[\s>]/i);
     });
 
-    test('shows in Roundcube with its formatting, its pasted image inline and its file, in its thread', async () => {
-      const page = await signedIn(bob);
-      const parent = await uidOf(bob, '<lunch@example.com>');
-      const answer = await uidOf(bob, messageId);
+    describe.skipIf(!clients)('in other clients', () => {
+      test('shows in Roundcube with its formatting, its pasted image inline and its file, in its thread', async () => {
+        const page = await signedIn(bob);
+        const uidOf = async (id: string) =>
+          (await until(() => found(bob, 'INBOX', { header: { 'message-id': id } }), 5_000)).uid;
+        const [parent, answer] = [await uidOf('<lunch@example.com>'), await uidOf(messageId)];
 
-      // Roundcube's own model of the list, threaded by Dovecot.
-      await page.waitForFunction(
-        () => (globalThis as unknown as RoundcubePage).rcmail.message_list.rowcount >= 3,
-      );
-      const rows = await page.evaluate(() =>
-        Object.values((globalThis as unknown as RoundcubePage).rcmail.message_list.rows).map(
-          ({ uid, parent_uid, depth }) => ({
-            uid: Number(uid),
-            parent: Number(parent_uid ?? 0),
-            depth,
-          }),
-        ),
-      );
-      expect(rows.find(({ uid }) => uid === answer)).toMatchObject({ parent, depth: 1 });
+        // Roundcube's own model of the list, threaded by Dovecot.
+        await page.waitForFunction(
+          () => (globalThis as unknown as RoundcubePage).rcmail.message_list.rowcount >= 3,
+        );
+        const rows = await page.evaluate(() =>
+          Object.values((globalThis as unknown as RoundcubePage).rcmail.message_list.rows).map(
+            ({ uid, parent_uid, depth }) => ({
+              uid: Number(uid),
+              parent: Number(parent_uid ?? 0),
+              depth,
+            }),
+          ),
+        );
+        expect(rows.find(({ uid }) => uid === answer)).toMatchObject({ parent, depth: 1 });
 
-      await page.goto(`${webmail.url}/?_task=mail&_mbox=INBOX&_uid=${answer}&_action=show`);
-      const body = page.locator('#messagebody');
-      await expect(body.locator('strong').textContent()).resolves.toBe('noon at Café Rosa');
-      expect(await body.locator('li').allTextContents()).toEqual([
-        "I'll bring the plans",
-        'You bring the menu: https://example.com/menu',
-      ]);
-      await expect(
-        body.locator('a', { hasText: 'example.com' }).getAttribute('href'),
-      ).resolves.toBe('https://example.com/menu');
-      const image = body.locator('img');
-      await image.evaluate((img) => (img as unknown as Picture).decode());
-      expect(
-        await image.evaluate((img) => [
-          (img as unknown as Picture).naturalWidth,
-          (img as unknown as Picture).naturalHeight,
-        ]),
-      ).toEqual([4, 3]);
+        await page.goto(`${webmail.url}/?_task=mail&_mbox=INBOX&_uid=${answer}&_action=show`);
+        const body = page.locator('#messagebody');
+        await expect(body.locator('strong').textContent()).resolves.toBe('noon at Café Rosa');
+        expect(await body.locator('li').allTextContents()).toEqual([
+          "I'll bring the plans",
+          'You bring the menu: https://example.com/menu',
+        ]);
+        await expect(
+          body.locator('a', { hasText: 'example.com' }).getAttribute('href'),
+        ).resolves.toBe('https://example.com/menu');
+        const image = body.locator('img');
+        await image.evaluate((img) => (img as unknown as Picture).decode());
+        expect(
+          await image.evaluate((img) => [
+            (img as unknown as Picture).naturalWidth,
+            (img as unknown as Picture).naturalHeight,
+          ]),
+        ).toEqual([4, 3]);
 
-      // The pasted image shows in the message, so only the file is listed to download.
-      const files = page.locator('#attachment-list li');
-      const listed = await files.allTextContents();
-      expect(listed).toHaveLength(1);
-      expect(listed[0]).toContain('notes.txt');
-      const link = await files.locator('a').first().getAttribute('href');
-      const download = await page.request.get(
-        new URL(`${link}&_download=1`, `${webmail.url}/`).href,
-      );
-      expect(await download.text()).toBe(NOTES);
-      await page.context().close();
-    }, 60_000);
+        // The pasted image shows in the message, so only the file is listed to download.
+        const files = page.locator('#attachment-list li');
+        const listed = await files.allTextContents();
+        expect(listed).toHaveLength(1);
+        expect(listed[0]).toContain('notes.txt');
+        const link = await files.locator('a').first().getAttribute('href');
+        const download = await page.request.get(
+          new URL(`${link}&_download=1`, `${webmail.url}/`).href,
+        );
+        expect(await download.text()).toBe(NOTES);
+        await page.context().close();
+      }, 60_000);
 
-    test('shows in mutt in its thread, its plain text exactly as the composer saved it, with its file intact', async () => {
-      const id = messageId.replace(/^<|>$/g, '');
-      const dir = await mutt(
-        bob,
-        [
-          // Every message mutt threads with Bob's question. Dan's Message-ID ends the same way.
-          '<search>~i ^.lunch@example<enter><tag-thread>',
-          '<tag-prefix><pipe-message>cat >> thread.txt<enter><untag-pattern>~A<enter>',
-          // The reply as mutt shows it, and its file as mutt saves it.
-          `<search>~i ${id}<enter><pipe-message>cat > reply.txt<enter>`,
-          '<view-attachments><search>notes.txt<enter><save-entry><kill-line>notes.txt<enter><exit>',
-          '<quit>',
-        ].join(''),
-      );
-      const thread = readFileSync(join(dir, 'thread.txt'), 'utf8');
-      expect(thread.match(/^Subject: .*$/gm)).toEqual([
-        'Subject: Lunch on Thursday?',
-        'Subject: Re: Lunch on Thursday?',
-      ]);
-      expect(thread).not.toContain('A different lunch');
+      test('shows in mutt in its thread, its plain text exactly as the composer saved it, with its file intact', async () => {
+        const id = messageId.replace(/^<|>$/g, '');
+        const dir = await mutt(
+          bob,
+          [
+            // Every message mutt threads with Bob's question. Dan's Message-ID ends the same way.
+            '<search>~i ^.lunch@example<enter><tag-thread>',
+            '<tag-prefix><pipe-message>cat >> thread.txt<enter><untag-pattern>~A<enter>',
+            // The reply as mutt shows it, and its file as mutt saves it.
+            `<search>~i ${id}<enter><pipe-message>cat > reply.txt<enter>`,
+            '<view-attachments><search>notes.txt<enter><save-entry><kill-line>notes.txt<enter><exit>',
+            '<quit>',
+          ].join(''),
+        );
+        const thread = readFileSync(join(dir, 'thread.txt'), 'utf8');
+        expect(thread.match(/^Subject: .*$/gm)).toEqual([
+          'Subject: Lunch on Thursday?',
+          'Subject: Re: Lunch on Thursday?',
+        ]);
+        expect(thread).not.toContain('A different lunch');
 
-      const shown = readFileSync(join(dir, 'reply.txt'), 'utf8');
-      expect(shown).toContain(written);
-      expect(shown).not.toMatch(/<\/?(p|strong|ul|li|a|img|html|body)\b/i);
-      expect(readFileSync(join(dir, 'notes.txt'), 'utf8')).toBe(NOTES);
-    }, 60_000);
+        const shown = readFileSync(join(dir, 'reply.txt'), 'utf8');
+        expect(shown).toContain(written);
+        expect(shown).not.toMatch(/<\/?(p|strong|ul|li|a|img|html|body)\b/i);
+        expect(readFileSync(join(dir, 'notes.txt'), 'utf8')).toBe(NOTES);
+      }, 60_000);
+    });
   });
 
-  test('a draft is in Roundcube’s Drafts within ten seconds, keeps what a closed tab wrote, and opens again intact', async () => {
-    const subject = `Plans for Friday ${Date.now()}`;
-    const page = await trailMix();
-    const drafts = await signedIn(alice);
-    await page.keyboard.press('c');
-    const composer = page.getByRole('region', { name: 'New message' });
-    await composer.waitFor();
+  describe.skipIf(!clients)('a draft', () => {
+    test('is in Roundcube’s Drafts within ten seconds, keeps what a closed tab wrote, and opens again intact', async () => {
+      const subject = `Plans for Friday ${Date.now()}`;
+      const page = await trailMix();
+      const drafts = await signedIn(alice);
+      await page.keyboard.press('c');
+      const composer = page.getByRole('region', { name: 'New message' });
+      await composer.waitFor();
 
-    // From the first keystroke, Roundcube's Drafts is read again until the draft is in it.
-    const firstKey = performance.now();
-    await page.keyboard.type(bob.email);
-    const listed = until(async () => {
-      // Roundcube draws the page, then asks for its list, so the rows count once the list arrives.
-      const listing = drafts.waitForResponse((response) => response.url().includes('_action=list'));
-      await drafts.goto(`${webmail.url}/?_task=mail&_mbox=Drafts`);
-      await listing;
-      const rows = await drafts.locator('#messagelist tr.message').count();
-      return rows > 0 ? performance.now() : undefined;
-    }, 20_000);
-    await composer.getByRole('textbox', { name: 'Subject' }).fill(subject);
-    const message = composer.getByRole('textbox', { name: 'Message' });
-    await message.click();
-    await page.keyboard.type('**Agenda** for Friday: ');
-    await composer.locator('input[type="file"]:not([accept])').setInputFiles({
-      name: 'agenda.txt',
-      mimeType: 'text/plain',
-      buffer: Buffer.from('1. Lunch\n2. The engine\n'),
-    });
-    await composer.getByText('agenda.txt').waitFor();
-    await message.focus();
-    await page.keyboard.press('End');
-
-    // Words go in steadily, with no pause long enough to save after, until the tab closes.
-    const typed: { word: string; at: number }[] = [];
-    const typingUntil = performance.now() + SAVE_AT_LEAST_EVERY_MS * 2.5;
-    for (let at = 0; performance.now() < typingUntil; at++) {
-      const word = `w${at}`;
-      await page.keyboard.type(`${word} `);
-      typed.push({ word, at: performance.now() });
-      await page.waitForTimeout(100);
-    }
-    const shownAfter = (await listed) - firstKey;
-    console.log(
-      `The draft was in Roundcube's Drafts ${Math.round(shownAfter)} ms after the first keystroke.`,
-    );
-    expect(shownAfter).toBeLessThan(10_000);
-
-    // At worst, the network goes with the tab, so the save the page makes as it hides never lands.
-    const closedAt = performance.now();
-    await page.context().setOffline(true);
-    await page.context().close();
-
-    // Roundcube shows every word typed before the last save the tab could have started.
-    const uid = await until(async () => {
-      const found = await withImap(alice, async (client) => {
-        const lock = await client.getMailboxLock('Drafts');
-        try {
-          const uids = await client.search({ subject }, { uid: true });
-          return Array.isArray(uids) && uids.length === 1 ? uids[0] : undefined;
-        } finally {
-          lock.release();
-        }
+      // From the first keystroke, Roundcube's Drafts is read again until the draft is in it.
+      const firstKey = performance.now();
+      await page.keyboard.type(bob.email);
+      const listed = until(async () => {
+        // Roundcube draws the page, then asks for its list, so the rows count once the list arrives.
+        const listing = drafts.waitForResponse((response) =>
+          response.url().includes('_action=list'),
+        );
+        await drafts.goto(`${webmail.url}/?_task=mail&_mbox=Drafts`);
+        await listing;
+        const rows = await drafts.locator('#messagelist tr.message').count();
+        return rows > 0 ? performance.now() : undefined;
+      }, 20_000);
+      await composer.getByRole('textbox', { name: 'Subject' }).fill(subject);
+      const message = composer.getByRole('textbox', { name: 'Message' });
+      await message.click();
+      await page.keyboard.type('**Agenda** for Friday: ');
+      await composer.locator('input[type="file"]:not([accept])').setInputFiles({
+        name: 'agenda.txt',
+        mimeType: 'text/plain',
+        buffer: Buffer.from('1. Lunch\n2. The engine\n'),
       });
-      return found;
-    }, 10_000);
-    await drafts.goto(`${webmail.url}/?_task=mail&_mbox=Drafts&_uid=${uid}&_action=show`);
-    const kept = new Set((await drafts.locator('#messagebody').textContent())?.split(/\s+/));
-    const mustKeep = typed.filter(({ at }) => at < closedAt - SAVE_AT_LEAST_EVERY_MS - 1_000);
-    expect(mustKeep.length).toBeGreaterThan(10);
-    expect(mustKeep.filter(({ word }) => !kept.has(word))).toEqual([]);
-    await drafts.context().close();
+      await composer.getByText('agenda.txt').waitFor();
+      await message.focus();
+      await page.keyboard.press('End');
 
-    // Trail Mix opens it again with its bold and its file.
-    const again = await trailMix();
-    await again
-      .getByRole('button', { name: /^Drafts/ })
-      .first()
-      .click();
-    await again.getByRole('option').filter({ hasText: subject }).click();
-    await again
-      .getByRole('region', { name: 'Reader' })
-      .getByRole('button', { name: /^Draft/ })
-      .click();
-    const reopened = again.getByRole('region', { name: 'New message' });
-    const words = reopened.getByRole('textbox', { name: 'Message' });
-    await expect(words.locator('strong').textContent()).resolves.toBe('Agenda');
-    await expect(
-      reopened.getByRole('list', { name: 'Attachments' }).textContent(),
-    ).resolves.toMatch(/^agenda\.txt/);
-    await again.context().close();
-  }, 120_000);
+      // Words go in steadily, with no pause long enough to save after, until the tab closes.
+      const typed: { word: string; at: number }[] = [];
+      const typingUntil = performance.now() + SAVE_AT_LEAST_EVERY_MS * 2.5;
+      for (let at = 0; performance.now() < typingUntil; at++) {
+        const word = `w${at}`;
+        await page.keyboard.type(`${word} `);
+        typed.push({ word, at: performance.now() });
+        await page.waitForTimeout(100);
+      }
+      const shownAfter = (await listed) - firstKey;
+      console.log(
+        `The draft was in Roundcube's Drafts ${Math.round(shownAfter)} ms after the first keystroke.`,
+      );
+      expect(shownAfter).toBeLessThan(10_000);
+
+      // At worst, the network goes with the tab, so the save the page makes as it hides never lands.
+      const closedAt = performance.now();
+      await page.context().setOffline(true);
+      await page.context().close();
+
+      // Roundcube shows every word typed before the last save the tab could have started.
+      const { uid } = await until(() => found(alice, 'Drafts', { subject }), 10_000);
+      await drafts.goto(`${webmail.url}/?_task=mail&_mbox=Drafts&_uid=${uid}&_action=show`);
+      const kept = new Set((await drafts.locator('#messagebody').textContent())?.split(/\s+/));
+      const mustKeep = typed.filter(({ at }) => at < closedAt - SAVE_AT_LEAST_EVERY_MS - 1_000);
+      expect(mustKeep.length).toBeGreaterThan(10);
+      expect(mustKeep.filter(({ word }) => !kept.has(word))).toEqual([]);
+      await drafts.context().close();
+
+      // Trail Mix opens it again with its bold and its file.
+      const again = await trailMix();
+      await openDraft(again, subject);
+      const reopened = again.getByRole('region', { name: 'New message' });
+      const words = reopened.getByRole('textbox', { name: 'Message' });
+      await expect(words.locator('strong').textContent()).resolves.toBe('Agenda');
+      await expect(
+        reopened.getByRole('list', { name: 'Attachments' }).textContent(),
+      ).resolves.toMatch(/^agenda\.txt/);
+      await again.context().close();
+    }, 120_000);
+  });
 
   test('a draft another client wrote, with an image in its HTML, opens in Trail Mix with the image shown', async () => {
     const subject = `Floor plan ${Date.now()}`;
-    await withImap(alice, (client) =>
-      client.append('Drafts', htmlDraft(subject), ['\\Draft', '\\Seen']),
-    );
+    await append(alice, 'Drafts', htmlDraft(subject), ['\\Draft', '\\Seen']);
     const page = await trailMix();
-    await page
-      .getByRole('button', { name: /^Drafts/ })
-      .first()
-      .click();
-    await page.getByRole('option').filter({ hasText: subject }).click({ timeout: 30_000 });
-    await page
-      .getByRole('region', { name: 'Reader' })
-      .getByRole('button', { name: /^Draft/ })
-      .click();
+    await openDraft(page, subject);
     const words = page
       .getByRole('region', { name: 'New message' })
       .getByRole('textbox', { name: 'Message' });
@@ -365,35 +342,26 @@ describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix
       inReplyTo: '<old-plan@example.com>',
       references: '<first-plan@example.com> <old-plan@example.com>',
     };
-    await withImap(alice, (client) =>
-      client.append(
-        'Drafts',
-        [
-          `Message-ID: <plan-reply-${Date.now()}@example.com>`,
-          `Date: ${new Date().toUTCString()}`,
-          `From: Alice <${alice.email}>`,
-          `To: Bob <${bob.email}>`,
-          `Subject: ${subject}`,
-          `In-Reply-To: ${thread.inReplyTo}`,
-          `References: ${thread.references}`,
-          'Content-Type: text/plain; charset=utf-8',
-          '',
-          'Still on for it?',
-          '',
-        ].join('\r\n'),
-        ['\\Draft', '\\Seen'],
-      ),
+    await append(
+      alice,
+      'Drafts',
+      [
+        `Message-ID: <plan-reply-${Date.now()}@example.com>`,
+        `Date: ${new Date().toUTCString()}`,
+        `From: Alice <${alice.email}>`,
+        `To: Bob <${bob.email}>`,
+        `Subject: ${subject}`,
+        `In-Reply-To: ${thread.inReplyTo}`,
+        `References: ${thread.references}`,
+        'Content-Type: text/plain; charset=utf-8',
+        '',
+        'Still on for it?',
+        '',
+      ].join('\r\n'),
+      ['\\Draft', '\\Seen'],
     );
     const page = await trailMix();
-    await page
-      .getByRole('button', { name: /^Drafts/ })
-      .first()
-      .click();
-    await page.getByRole('option').filter({ hasText: subject }).click({ timeout: 30_000 });
-    await page
-      .getByRole('region', { name: 'Reader' })
-      .getByRole('button', { name: /^Draft/ })
-      .click();
+    await openDraft(page, subject);
     const reply = page.getByRole('region', { name: 'Reply' });
     // Nothing it answers lies above it, so it fills the reader with its subject.
     await expect(reply.getByRole('textbox', { name: 'Subject' }).inputValue()).resolves.toBe(
@@ -404,26 +372,10 @@ describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix
     await page.keyboard.type(' Let me know by Friday.');
 
     // Saved over the draft it opened, which answers the same mail.
-    const saved = await until(
-      () =>
-        withImap(alice, async (client) => {
-          const lock = await client.getMailboxLock('Drafts');
-          try {
-            const found = await client.search({ subject }, { uid: true });
-            if (!Array.isArray(found) || found.length !== 1) return undefined;
-            const message = await client.fetchOne(
-              String(found[0]),
-              { source: true },
-              { uid: true },
-            );
-            const parsed = message && message.source && (await PostalMime.parse(message.source));
-            return parsed && parsed.text?.includes('Let me know by Friday.') ? parsed : undefined;
-          } finally {
-            lock.release();
-          }
-        }),
-      10_000,
-    );
+    const saved = await until(async () => {
+      const draft = await found(alice, 'Drafts', { subject });
+      return draft?.text?.includes('Let me know by Friday.') ? draft : undefined;
+    }, 10_000);
     expect({ inReplyTo: saved.inReplyTo, references: saved.references }).toEqual(thread);
 
     // Sent, then undone, it comes back as the reply it was.
@@ -501,13 +453,7 @@ describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix
     async function writeInAndRead(offer: { subject: string }) {
       asked.length = 0;
       const page = await trailMix();
-      const reader = page.getByRole('region', { name: 'Reader' });
-      await page
-        .getByRole('button', { name: /^Drafts/ })
-        .first()
-        .click();
-      await page.getByRole('option').filter({ hasText: offer.subject }).click({ timeout: 30_000 });
-      await reader.getByRole('button', { name: /^Draft/ }).click();
+      await openDraft(page, offer.subject);
       const composer = page.getByRole('region', { name: 'Reply' });
       const words = composer.getByRole('textbox', { name: 'Reply' });
       await words.getByText('Claim your prize:').waitFor();
@@ -526,7 +472,10 @@ describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix
         .first()
         .click();
       await page.getByRole('option').filter({ hasText: offer.subject }).click({ timeout: 30_000 });
-      await reader.getByText('Images from Mallory are hidden.').waitFor();
+      await page
+        .getByRole('region', { name: 'Reader' })
+        .getByText('Images from Mallory are hidden.')
+        .waitFor();
       // Long enough for a load the page started to reach the server.
       await page.waitForTimeout(1_000);
       expect(asked).toEqual([]);
@@ -537,20 +486,19 @@ describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix
     async function fromMallory() {
       const id = `offer-${Date.now()}@example.com`;
       const subject = `You have won ${Date.now()}`;
-      await withImap(alice, (client) =>
-        client.append(
-          'INBOX',
-          alternative({
-            headers: [
-              `Message-ID: <${id}>`,
-              'From: Mallory <mallory@example.com>',
-              `To: ${alice.email}`,
-              `Subject: ${subject}`,
-            ],
-            text: `Claim your prize:\r\n![prize](${pixel('inbox-markdown')})`,
-            html: `<p>Claim your prize:</p><img src="${pixel('inbox-html')}" alt="prize">`,
-          }),
-        ),
+      await append(
+        alice,
+        'INBOX',
+        alternative({
+          headers: [
+            `Message-ID: <${id}>`,
+            'From: Mallory <mallory@example.com>',
+            `To: ${alice.email}`,
+            `Subject: ${subject}`,
+          ],
+          text: `Claim your prize:\r\n![prize](${pixel('inbox-markdown')})`,
+          html: `<p>Claim your prize:</p><img src="${pixel('inbox-html')}" alt="prize">`,
+        }),
       );
       return { id, subject };
     }
@@ -580,7 +528,7 @@ describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix
               '',
             ].join('\r\n')
           : alternative({ headers, text: body.text, html: body.html });
-      await withImap(alice, (client) => client.append('Drafts', draft, ['\\Draft', '\\Seen']));
+      await append(alice, 'Drafts', draft, ['\\Draft', '\\Seen']);
     }
   });
 
@@ -593,6 +541,19 @@ describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix
     const page = await context.newPage();
     await page.goto(app.url);
     return page;
+  }
+
+  /** Opens the draft with this subject from Drafts, in the composer. */
+  async function openDraft(page: Page, subject: string) {
+    await page
+      .getByRole('button', { name: /^Drafts/ })
+      .first()
+      .click();
+    await page.getByRole('option').filter({ hasText: subject }).click({ timeout: 30_000 });
+    await page
+      .getByRole('region', { name: 'Reader' })
+      .getByRole('button', { name: /^Draft/ })
+      .click();
   }
 
   /** Adds Alice's account as the browser does: a command to the Mailroom, from Trail Mix's page. */
@@ -637,44 +598,27 @@ describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix
     return page;
   }
 
-  /** Alice's reply in `user`'s Inbox, once it is there: its Message-ID and its text part. */
-  async function replyIn(user: User) {
-    return withImap(user, async (client) => {
-      const lock = await client.getMailboxLock('INBOX');
-      try {
-        const found = await client.search({ from: alice.email }, { uid: true });
-        if (!Array.isArray(found) || found.length === 0) return undefined;
-        const message = await client.fetchOne(
-          String(found.at(-1)),
-          { source: true },
-          { uid: true },
-        );
-        if (!message || !message.source) return undefined;
-        const parsed = await PostalMime.parse(message.source);
-        return { messageId: parsed.messageId ?? '', text: parsed.text ?? '' };
-      } finally {
-        lock.release();
-      }
+  /** The one message `query` finds in `user`'s `folder`, parsed, or nothing until there is one. */
+  function found(user: User, folder: string, query: SearchObject) {
+    return withImap(user, folder, async (client) => {
+      const uids = (await client.search(query, { uid: true })) || [];
+      if (uids.length !== 1) return undefined;
+      const message = await client.fetchOne(String(uids[0]), { source: true }, { uid: true });
+      if (!message || !message.source) return undefined;
+      return { uid: uids[0], ...(await PostalMime.parse(message.source)) };
     });
   }
 
-  /** The UID of the message with this Message-ID in `user`'s Inbox. */
-  async function uidOf(user: User, messageId: string) {
-    return withImap(user, async (client) => {
-      const lock = await client.getMailboxLock('INBOX');
-      try {
-        const found = await client.search({ header: { 'message-id': messageId } }, { uid: true });
-        if (!Array.isArray(found) || found.length !== 1) {
-          throw new Error(`${user.email}'s Inbox has no one message ${messageId}.`);
-        }
-        return found[0]!;
-      } finally {
-        lock.release();
-      }
-    });
+  function append(user: User, folder: string, message: string, flags?: string[]) {
+    return withImap(user, folder, (client) => client.append(folder, message, flags));
   }
 
-  async function withImap<T>(user: User, use: (client: ImapFlow) => Promise<T>): Promise<T> {
+  /** `use`, with `user`'s `folder` open over IMAP. */
+  async function withImap<T>(
+    user: User,
+    folder: string,
+    use: (client: ImapFlow) => Promise<T>,
+  ): Promise<T> {
     const client = new ImapFlow({
       host: 'localhost',
       port: ports.imaps,
@@ -684,9 +628,11 @@ describe.skipIf(missing('mutt', 'php') !== undefined)('Mail written in Trail Mix
       logger: false,
     });
     await client.connect();
+    const lock = await client.getMailboxLock(folder);
     try {
       return await use(client);
     } finally {
+      lock.release();
       await client.logout();
     }
   }
