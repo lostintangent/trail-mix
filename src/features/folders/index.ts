@@ -1,4 +1,4 @@
-export { Sidebar, type SidebarRail } from './ui/Sidebar.tsx';
+export { Sidebar } from './ui/Sidebar.tsx';
 export { UNIFIED_VIEWS, viewIcon, type ViewCounts } from './ui/views.ts';
 export { viewCounts } from './ui/counts.ts';
 export { folderName } from './ui/name.ts';

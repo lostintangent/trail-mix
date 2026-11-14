@@ -146,7 +146,6 @@ import {
   useFolderEditing,
   viewCommands,
   viewIcon,
-  type SidebarRail,
   type ViewCounts,
 } from '../../folders/index.ts';
 import { useMediaQuery } from '../../../shared/useMediaQuery.ts';
@@ -193,10 +192,8 @@ const OFFLINE: Record<Exclude<Reach, 'online'>, { said: string; more?: string }>
   'offline-kept': { said: 'Offline', more: 'kept mail' },
 };
 
-/** How a desktop's sidebar folds: to its rail, with a button that holds still. */
-const RAIL: SidebarRail = {
-  fold: <FoldToggle />,
-};
+/** The button that folds a desktop's sidebar to its rail and back. */
+const FOLD = <FoldToggle />;
 
 /** Where a phone's toasts rise to: above the island, where the pane's actions float. */
 const ABOVE_ISLAND = { blockEnd: `calc(${tm.target} + ${spacingVars['--spacing-1']} * 2)` };
@@ -1218,7 +1215,7 @@ export function Workbench({
                 accounts={accounts}
                 folders={folders}
                 counts={counts}
-                rail={isPhone ? undefined : RAIL}
+                fold={isPhone ? undefined : FOLD}
                 isCollapsed={sidebar.isCollapsed}
                 // While its edge is dragged, the tree follows the edge.
                 expandedWidth={isPhone || isResizing ? undefined : sidebar.width}

@@ -20,12 +20,6 @@ import { AccountSection, ViewRows } from './Tree.tsx';
 import { onTreeKey, preloadTreeMoves } from './treeKeys.ts';
 import type { ViewCounts } from './views.ts';
 
-/** What a desktop's sidebar needs to fold to its rail. A phone's never folds. */
-export type SidebarRail = {
-  /** The button that folds and unfolds the sidebar, which holds still across the fold. */
-  fold: ReactNode;
-};
-
 /** The name at the foot of the sidebar. */
 const NAME = 'Trail Mix';
 
@@ -48,7 +42,7 @@ export const Sidebar = memo(function Sidebar({
   accounts,
   folders,
   counts,
-  rail,
+  fold,
   isCollapsed,
   expandedWidth,
   search,
@@ -68,8 +62,11 @@ export const Sidebar = memo(function Sidebar({
   accounts: readonly Account[];
   folders: readonly Folder[];
   counts: ViewCounts;
-  /** How the sidebar folds, which only a desktop's does. */
-  rail?: SidebarRail;
+  /**
+   * The button that folds the sidebar to its rail and back, which holds still across the fold.
+   * Only a desktop's sidebar folds, so a phone's has none.
+   */
+  fold?: ReactNode;
   /** Whether it shows its rail. */
   isCollapsed: boolean;
   /**
@@ -105,7 +102,8 @@ export const Sidebar = memo(function Sidebar({
   onAddAccount?: () => void;
 }) {
   const [folds, toggleFold] = useFolds();
-  const isRail = rail !== undefined && isCollapsed;
+  const canFold = fold !== undefined;
+  const isRail = canFold && isCollapsed;
   const { isDrawn: isRailDrawn, isShown: isRailShown } = useRail(isRail);
   // Whether a line of the tree lifts for the view, which a search's or a folder's on its way doesn't.
   const isViewHere =
@@ -117,7 +115,7 @@ export const Sidebar = memo(function Sidebar({
   return (
     <nav id={id} aria-label="Mailboxes" aria-busy={isBusy} {...stylex.props(styles.sidebar)}>
       {/* First, as it reads: it heads both layouts. */}
-      {rail && <div {...stylex.props(styles.pinned)}>{rail.fold}</div>}
+      {canFold && <div {...stylex.props(styles.pinned)}>{fold}</div>}
       <div
         aria-hidden={isRail || undefined}
         inert={isRail}
@@ -125,13 +123,13 @@ export const Sidebar = memo(function Sidebar({
           styles.layer,
           styles.expanded,
           expandedWidth !== undefined && styles.width(`${expandedWidth}px`),
-          rail && (isRail ? styles.leaving : styles.arriving),
+          canFold && (isRail ? styles.leaving : styles.arriving),
         )}
       >
-        {(rail || search) && (
+        {(canFold || search) && (
           <div {...stylex.props(styles.header)}>
             {/* Where the pinned fold button lands. */}
-            {rail && <span {...stylex.props(styles.foldRoom)} />}
+            {canFold && <span {...stylex.props(styles.foldRoom)} />}
             {search && <div {...stylex.props(styles.search)}>{search}</div>}
           </div>
         )}
@@ -167,14 +165,14 @@ export const Sidebar = memo(function Sidebar({
         {note && <p {...stylex.props(styles.note)}>{note}</p>}
         <div {...stylex.props(styles.footer)}>
           {/* Where the pinned gear lands, or the gear itself where the sidebar never folds. */}
-          {rail ? <span {...stylex.props(styles.footRoom)} /> : settings}
+          {canFold ? <span {...stylex.props(styles.footRoom)} /> : settings}
           <span aria-hidden {...stylex.props(styles.footRule)} />
           <span {...stylex.props(styles.name)}>{NAME}</span>
           {/* Where the pinned New message lands. */}
-          {compose && (rail ? <span {...stylex.props(styles.footRoom)} /> : compose)}
+          {compose && (canFold ? <span {...stylex.props(styles.footRoom)} /> : compose)}
         </div>
       </div>
-      {rail && (
+      {canFold && (
         <>
           {isRailDrawn && (
             <div
