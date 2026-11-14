@@ -1,7 +1,8 @@
 import { afterEach, beforeAll, expect } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { BrowserContextOptions, Locator, Page, Route } from 'playwright';
+import type { BrowserContextOptions, Locator, Page, Request, Route } from 'playwright';
+import { REST_MS } from '../../src/features/reader/core/rest.ts';
 import { bareSubject } from '../../src/features/reader/core/subject.ts';
 import { unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
@@ -33,7 +34,7 @@ afterEach(() => {
 
 async function open(
   options: BrowserContextOptions,
-  beforeLoad?: (page: Page) => Promise<unknown>,
+  beforeLoad?: (page: Page) => unknown,
 ): Promise<Page> {
   const page = await (await app.context({ deviceScaleFactor: 2, ...options })).newPage();
   page.on('pageerror', (error) => errors.push(error.message));
@@ -267,26 +268,25 @@ test('light paper, chosen in the palette, holds for a sender on every device unt
   await row(first, 'Lunch Thursday?').click();
   const plain = reader(first).getByRole('article').last();
   await plain.getByText('Thursday at 12:30').waitFor();
-  // Whether the sheet's paper, as the screen draws it, is light.
-  const isLight = () =>
-    plain.evaluate((sheet) => {
-      const context = new OffscreenCanvas(1, 1).getContext('2d', { willReadFrequently: true })!;
-      context.fillStyle = getComputedStyle(sheet).backgroundColor;
-      context.fillRect(0, 0, 1, 1);
-      const [r = 0, g = 0, b = 0] = context.getImageData(0, 0, 1, 1).data;
-      return r + g + b > 3 * 128;
-    });
-  const becomes = async (light: boolean) => {
-    for (const start = Date.now(); Date.now() - start < 5_000; await first.waitForTimeout(20)) {
-      if ((await isLight()) === light) return true;
-    }
-    return false;
-  };
-  expect(await isLight()).toBe(false);
+  // Waits for the sheet's paper, as the screen draws it, to be light or not.
+  const sheet = await plain.elementHandle();
+  const becomes = (light: boolean) =>
+    first.waitForFunction(
+      ([sheet, light]) => {
+        const context = new OffscreenCanvas(1, 1).getContext('2d', { willReadFrequently: true })!;
+        context.fillStyle = getComputedStyle(sheet).backgroundColor;
+        context.fillRect(0, 0, 1, 1);
+        const [r = 0, g = 0, b = 0] = context.getImageData(0, 0, 1, 1).data;
+        return r + g + b > 3 * 128 === light;
+      },
+      [sheet, light] as const,
+      { timeout: 5_000 },
+    );
+  await becomes(false);
   await control(first).click();
-  expect(await becomes(true)).toBe(true);
+  await becomes(true);
   await control(first).click();
-  expect(await becomes(false)).toBe(true);
+  await becomes(false);
 
   // The member's own mail offers none: light paper is a choice about someone else.
   await row(first, 'Q4 planning').click();
@@ -671,11 +671,14 @@ for (const [size, options] of Object.entries({ desktop: DESKTOP, phone: PHONE })
 }
 
 test('an older message’s body is asked for as the pointer rests on its line or it takes the focus', async () => {
-  const page = await open({ ...DESKTOP, colorScheme: 'light' });
+  let asksAlone!: () => Promise<void>;
+  const page = await open({ ...DESKTOP, colorScheme: 'light' }, (page) => {
+    asksAlone = askingAlone(page);
+  });
   await openRow(page, 'Workers migration plan');
   await bodies(page);
   // The conversations either side are prepared while the browser is idle, which this waits out.
-  await page.waitForTimeout(1_500);
+  await asksAlone();
   const asked: string[] = [];
   page.on('request', (request) => {
     if (request.url().includes(encodeURIComponent('"body"'))) asked.push(request.url());
@@ -689,7 +692,7 @@ test('an older message’s body is asked for as the pointer rests on its line or
   const box = await first.boundingBox();
   await page.mouse.move(box!.x + 20, box!.y + box!.height / 2);
   await page.mouse.move(0, 0);
-  await page.waitForTimeout(400);
+  await page.waitForTimeout(PAST_A_REST_MS);
   expect(asked).toEqual([]);
 
   // One that rests there asks for its body, and focus asks at once.
@@ -701,10 +704,14 @@ test('an older message’s body is asked for as the pointer rests on its line or
 
 // The dark theme offers light paper for the conversation open, which must ask for nothing itself.
 test('a held key in the dark theme asks for no conversation it passes', async () => {
-  const page = await open({ ...DESKTOP, colorScheme: 'dark' });
+  let asksAlone!: () => Promise<void>;
+  const page = await open({ ...DESKTOP, colorScheme: 'dark' }, (page) => {
+    asksAlone = askingAlone(page);
+  });
   await page.getByRole('option').first().click();
-  // The first conversations are prepared while the browser is idle, which this waits out.
-  await page.waitForTimeout(1_500);
+  await bodies(page);
+  // The conversations either side are prepared while the browser is idle, which this waits out.
+  await asksAlone();
   const asked = new Set<string>();
   page.on('request', (request) => {
     const url = decodeURIComponent(request.url());
@@ -714,16 +721,20 @@ test('a held key in the dark theme asks for no conversation it passes', async ()
   // mail causes may ask for one, where asking for each row passed would ask for about twelve.
   for (let press = 0; press < 12; press++) {
     await page.keyboard.press('ArrowDown');
-    await page.waitForTimeout(30);
+    await page.waitForTimeout(HELD_KEY_MS);
   }
   expect(asked.size).toBeLessThanOrEqual(2);
 }, 30_000);
 
 test('a conversation is asked for as the pointer rests on its row, and its newest body as the row is pressed', async () => {
-  const page = await open({ ...DESKTOP, colorScheme: 'light' });
-  await page.getByRole('option').first().waitFor();
-  // The first conversations are prepared while the browser is idle, which this waits out.
-  await page.waitForTimeout(1_500);
+  let asksAlone!: () => Promise<void>;
+  const page = await open({ ...DESKTOP, colorScheme: 'light' }, (page) => {
+    asksAlone = askingAlone(page);
+  });
+  // The newest conversation opens, and those either side are prepared while the browser is idle,
+  // which this waits out.
+  await bodies(page);
+  await asksAlone();
   const asked: string[] = [];
   page.on('request', (request) => {
     const url = decodeURIComponent(request.url());
@@ -736,7 +747,7 @@ test('a conversation is asked for as the pointer rests on its row, and its newes
   const box = await target.boundingBox();
   await page.mouse.move(box!.x + 40, box!.y + box!.height / 2);
   await page.mouse.move(0, 0);
-  await page.waitForTimeout(400);
+  await page.waitForTimeout(PAST_A_REST_MS);
   expect(asked).toEqual([]);
 
   // One that rests asks for the conversation, and a press for its newest body, before the click.
@@ -925,6 +936,44 @@ async function goTo(page: Page, view: 'Inbox' | 'Sent' | 'Archive' | 'Drafts') {
 async function reachable(control: Locator): Promise<boolean> {
   return (await control.isVisible()) && control.evaluate((element) => !element.closest('[inert]'));
 }
+
+/**
+ * Follows what a page asks for from its first request, and gives a wait for it to stop asking on its
+ * own, as it does while idle for the conversations either side of the one open: until nothing is on
+ * its way and three idle periods in a row ask for nothing new.
+ */
+function askingAlone(page: Page): () => Promise<void> {
+  const onTheirWay = new Set<Request>();
+  let asked = 0;
+  page.on('request', (request) => {
+    onTheirWay.add(request);
+    asked++;
+  });
+  const arrived = (request: Request) => onTheirWay.delete(request);
+  page.on('requestfinished', arrived);
+  page.on('requestfailed', arrived);
+  return async () => {
+    for (let quiet = 0; quiet < 3;) {
+      const before = asked;
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) => {
+            if ('requestIdleCallback' in window) requestIdleCallback(() => resolve());
+            else setTimeout(resolve, 50);
+          }),
+      );
+      quiet = onTheirWay.size === 0 && asked === before ? quiet + 1 : 0;
+    }
+  };
+}
+
+/**
+ * Nothing shows a pointer that only passed asking for nothing, so a test waits longer than the rest
+ * that would have asked.
+ */
+const PAST_A_REST_MS = REST_MS + 250;
+/** The pace of a held key, quicker than a rest. */
+const HELD_KEY_MS = 30;
 
 /** Polls until `isTrue` holds, for a second at most. */
 async function waitUntil(isTrue: () => boolean) {

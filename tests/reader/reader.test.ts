@@ -112,8 +112,15 @@ for (const type of BROWSERS) {
 
       /** Every key a shortcut could hear: those the page heard and those a message handed on. */
       const heard = () => page.evaluate(() => [...window.pageKeys, ...window.messageKeys]);
-      /** The focused element, or the frame whose document holds the focus. */
-      const focused = () => page.evaluate(() => document.activeElement?.tagName);
+      /**
+       * Once a message with nothing selected lets the shortcuts hear keys: at once where its
+       * document hands them on, and in WebKit once the page has taken the focus back.
+       */
+      const keysFree = () =>
+        page.waitForFunction(
+          (webkit) => !webkit || document.activeElement?.tagName !== 'IFRAME',
+          type.name() === 'webkit',
+        );
       /** Every element that held the focus over the given time. */
       const focusedOver = (ms: number) =>
         page.evaluate(
@@ -140,7 +147,7 @@ for (const type of BROWSERS) {
       test('a key pressed after a click inside a message still reaches the shortcuts', async () => {
         await open('lunch');
         await message().click();
-        await page.waitForTimeout(500);
+        await keysFree();
         await page.keyboard.press('e');
         expect(await heard()).toEqual(['e']);
         await page.close();
@@ -150,13 +157,12 @@ for (const type of BROWSERS) {
         await open('lunch');
         // A double click on the first word of its first line selects the word.
         await message().dblclick({ position: { x: 12, y: 8 } });
-        await page.waitForTimeout(500);
         expect(await selected()).toBe('Perfect');
         expect(await focusedOver(1_000)).toEqual(['IFRAME']);
 
         // A click on another word, which selects nothing, gives the keys back to the shortcuts.
         await message().click({ position: { x: 120, y: 8 } });
-        await page.waitForTimeout(500);
+        await keysFree();
         await page.keyboard.press('e');
         expect(await heard()).toEqual(['e']);
         await page.close();
@@ -171,13 +177,12 @@ for (const type of BROWSERS) {
           const line = (await message().boundingBox())!;
           await page.mouse.move(line.x + 1, line.y + 8);
           await page.mouse.down();
-          // Long enough for the page to take the focus back before anything is selected.
-          await page.waitForTimeout(500);
+          // The page takes the focus back before anything is selected.
+          await keysFree();
           await page.mouse.move(line.x + 60, line.y + 8);
           await page.mouse.up();
-          await page.waitForTimeout(300);
+          await page.waitForFunction(() => document.activeElement?.tagName === 'IFRAME');
           expect(await selected()).toStartWith('Perfect');
-          expect(await focused()).toBe('IFRAME');
           await page.close();
         },
       );
@@ -234,11 +239,8 @@ for (const type of BROWSERS) {
         await open('newsletter');
         expect(harness.proxied).toEqual([]);
         await page.getByRole('button', { name: 'Show', exact: true }).click();
-        await framesFitted(page);
-        await page.waitForTimeout(300);
-        expect(harness.proxied.map((url) => new URL(url).pathname)).toContain(
-          '/newsletter/logo.png',
-        );
+        await until(() => proxiedLogo());
+        expect(proxiedLogo()).toBe(true);
         expect(canary.hits).toEqual([]);
         await page.close();
       });
@@ -251,11 +253,8 @@ for (const type of BROWSERS) {
         expect(harness.calls).toEqual([
           { name: 'allowImages', args: ['personal', 'news@trailhead.example.com'] },
         ]);
-        await framesFitted(page);
-        await page.waitForTimeout(300);
-        expect(harness.proxied.map((url) => new URL(url).pathname)).toContain(
-          '/newsletter/logo.png',
-        );
+        await until(() => proxiedLogo());
+        expect(proxiedLogo()).toBe(true);
         await page.close();
       });
 
@@ -304,6 +303,10 @@ function mailroom({ name, args }: Call): unknown {
   if (name === 'body') return fixture.bodies[bodyKey(args[0] as Parameters<typeof bodyKey>[0])];
   return null;
 }
+
+/** Whether the newsletter's logo has loaded, which it may only through the proxy. */
+const proxiedLogo = () =>
+  harness.proxied.some((url) => new URL(url).pathname === '/newsletter/logo.png');
 
 async function until(condition: () => boolean, timeout = 2_000) {
   for (const start = Date.now(); !condition() && Date.now() - start < timeout;) {

@@ -118,11 +118,17 @@ test('a reply is saved as it is written, opens again with its words and files, a
   // While it is written again, the draft it came from stays out of the conversation.
   await expect(draft.count()).resolves.toBe(0);
 
-  // Discarding it moves it to the Trash, and it leaves the conversation.
+  // Discarding it moves it to the Trash, and once the Mailroom has synced that, the conversation
+  // leaves it out.
+  const synced = page.waitForResponse(
+    async (response) =>
+      decodeURIComponent(response.url()).includes('"conversation"') &&
+      !(await response.text()).includes('See you Thursday'),
+  );
   await reopened.getByRole('button', { name: 'Discard draft' }).click();
   await page.getByRole('region', { name: 'Notifications' }).getByText('Draft discarded').waitFor();
-  await page.waitForTimeout(2_000);
-  await expect(draft.count()).resolves.toBe(0);
+  await synced;
+  await draft.waitFor({ state: 'detached' });
 }, 60_000);
 
 test('a pasted image shows as it is pasted, once its draft is saved, and when it opens again', async () => {
@@ -177,6 +183,9 @@ test('pasted HTML brings no remote image, which never loads, even as the compose
   const composer = composerNamed(page, 'New message');
   const text = composer.getByRole('textbox', { name: 'Message' });
   await text.click();
+  const saved = page.waitForResponse((response) =>
+    Boolean(response.request().postData()?.includes('saveDraft')),
+  );
   await page.evaluate(() => {
     const pasted = new DataTransfer();
     pasted.setData(
@@ -190,7 +199,7 @@ test('pasted HTML brings no remote image, which never loads, even as the compose
   await text.locator('strong').waitFor();
   await expect(text.locator('img').count()).resolves.toBe(0);
   await leave(page, composer);
-  await page.waitForTimeout(500);
+  await saved;
   expect(tracked).toEqual([]);
 }, 60_000);
 
@@ -393,6 +402,7 @@ test('a draft another client wrote as HTML opens with its words, and closed unto
   await expect(words.getByRole('listitem').count()).resolves.toBe(3);
 
   await leave(page, composerNamed(page, 'New message'));
+  // Nothing shows a save that never came, so this waits past when one would have.
   await page.waitForTimeout(SAVE_AFTER_MS + 1_000);
   expect(sent.filter((body) => /saveDraft|"move"/.test(body))).toEqual([]);
   await line.waitFor();
