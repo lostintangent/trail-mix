@@ -99,19 +99,21 @@ git push
 
 Each Mailroom upgrades its own storage the first time a new version runs.
 
-To deploy from a clone instead of the button, sign in with `npx wrangler login`, then run `bun install`, `bun run build` and `bun run deploy`. It makes the same keys the first time and the R2 bucket if it's missing.
+To deploy from a clone instead of the button, with Bun and Node installed as [Try it locally](#try-it-locally) says, sign in with `npx wrangler login`, then run `bun install`, `bun run build` and `bun run deploy`. It makes the same keys the first time and the R2 bucket if it's missing.
 
 ## Who can read your mail
 
-The mail server stays the only authority for your mail. Trail Mix stores your account settings, your encrypted credentials, an index of your mail, the messages you've opened, and the messages waiting to be sent, all in the Cloudflare account it is deployed to. Whoever controls that Cloudflare account can read everything stored there, encryption included, because the key is theirs. If someone else runs Trail Mix for you, you are trusting them with your mail.
+The mail server stays the only authority for your mail. Trail Mix stores your account settings, your encrypted credentials, an index of your mail, the messages you've opened, the messages waiting to be sent, and the devices you've turned notifications on for, all in the Cloudflare account it is deployed to. Whoever controls that Cloudflare account can read everything stored there, encryption included, because the key is theirs. If someone else runs Trail Mix for you, you are trusting them with your mail.
 
 To show who a message is from, Trail Mix looks up the picture of each sender whose mail their server verified: their brand's logo through DNS, their photo at Gravatar by a hash of their address, and their site's icon. Cloudflare asks, never your browser, at most once a week for each. Gravatar can match a hash to an address it knows, so it can learn who writes to you.
 
-A Mailroom nobody opens for 30 days stops checking mail, and after 90 days it erases itself. Anyone can erase everything Trail Mix holds for them at any time, from the foot of any account's page. [SECURITY.md](SECURITY.md) says how to report a problem.
+A notification of new mail carries its sender, subject and first words to your device through the push service its browser's maker runs, such as Apple's, Google's or Mozilla's. It is encrypted for that device alone, so the push service learns when one is sent, never what it says.
+
+A Mailroom nobody opens for 30 days stops checking mail, and after 90 days it erases itself. Anyone can erase everything Trail Mix holds for them at any time, from the command palette or the foot of any account's page. [SECURITY.md](SECURITY.md) says how to report a problem.
 
 ## Try it locally
 
-You need Bun canary 1.4.4 or newer, which `bun upgrade --canary` installs.
+You need Bun canary 1.4.4 or newer, which `bun upgrade --canary` installs, and Node 22.18 or newer, which runs the local Workers runtime and the deploy.
 
 ```sh
 bun install
