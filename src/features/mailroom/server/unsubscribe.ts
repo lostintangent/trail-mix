@@ -1,4 +1,4 @@
-import { isPublicHost } from '../../../shared/public-host.ts';
+import { isPublicHttps } from '../../../shared/public-host.ts';
 import { oneClickUnsubscribe, type AccountId, type MessageRef } from '../../mail/core/index.ts';
 import { namesThisMachine, type DemoServer } from '../../providers/index.ts';
 import type { Unsubscribed } from '../client/contract.ts';
@@ -33,7 +33,7 @@ export function oneClick(ports: {
       const { standIn } = ports;
       return unsubscribeAt(
         address,
-        internet,
+        fetch,
         standIn && namesThisMachine(standIn) ? standIn : undefined,
       );
     },
@@ -54,12 +54,7 @@ export async function unsubscribeAt(
 ): Promise<Unsubscribed> {
   const url = new URL(address);
   const isStandIn = standIn !== undefined && url.origin === new URL(standIn).origin;
-  if (
-    url.protocol !== 'https:' ||
-    url.username ||
-    url.password ||
-    !(isStandIn || isPublicHost(url.hostname))
-  ) {
+  if (!isPublicHttps(url, isStandIn)) {
     return { taken: false, reason: `Trail Mix unsubscribes only at public hosts over HTTPS.` };
   }
   let response: Response;
@@ -85,9 +80,6 @@ export async function unsubscribeAt(
   const status = `${response.status} ${response.statusText}`.trim();
   return { taken: false, reason: `${url.host} answered ${status}.` };
 }
-
-/** The internet, as a Worker reaches it. */
-export const internet: Post = (url, init) => fetch(url, init);
 
 /** A raw message's header, as text: its bytes up to the first empty line. */
 export function headerOf(bytes: Uint8Array): string {

@@ -99,13 +99,10 @@ export function accountBook(sql: Sql) {
           allowImagesFrom: [],
           lightPaperFrom: [],
         };
-        const [last] = sql.all<{ position: number | null }>(
-          `SELECT MAX(position) AS position FROM accounts`,
-        );
         sql.run(
-          `INSERT INTO accounts (id, position, account, connection) VALUES (?, ?, ?, ?)`,
+          `INSERT INTO accounts (id, position, account, connection)
+           SELECT ?, COALESCE(MAX(position), -1) + 1, ?, ? FROM accounts`,
           added.id,
-          (last?.position ?? -1) + 1,
           JSON.stringify(added),
           JSON.stringify(connection),
         );

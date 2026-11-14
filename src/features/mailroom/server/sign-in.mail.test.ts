@@ -180,6 +180,14 @@ describe('Signing in to Outlook', () => {
     expect((await requests()).filter(({ answer }) => answer === 'invalid_grant').length).toBe(0);
   }, 90_000);
 
+  test('removing an account forgets the sign-in it had under way', async () => {
+    const fay = fresh('fay');
+    const account = await signedIn(fay);
+    await fay.call('signIn', account.id);
+    await fay.call('removeAccount', account.id);
+    expect(await fay.call('signIns')).toEqual([]);
+  }, 60_000);
+
   test('a revoked sign-in waits for its member, who signs the same account in again', async () => {
     const eve = fresh('eve');
     const account = await signedIn(eve, { expires_in: '2' });

@@ -21,6 +21,13 @@ export function isPublicHost(hostname: string): boolean {
   );
 }
 
+/** Whether an address is HTTPS with no credentials in it, on a public host unless any will do. */
+export const isPublicHttps = (url: URL | null, anyHost = false): boolean =>
+  url?.protocol === 'https:' &&
+  !url.username &&
+  !url.password &&
+  (anyHost || isPublicHost(url.hostname));
+
 /** Whether a host names this machine, as a socket writes IPv6 or in a URL's brackets. */
 export const isLoopback = (hostname: string): boolean =>
   ['localhost', '127.0.0.1', '::1'].includes(hostname.replace(/^\[(.*)\]$/, '$1'));

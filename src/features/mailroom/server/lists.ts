@@ -217,7 +217,7 @@ export function listsIn(sql: Sql) {
       }
       const listed = [...newest];
       const at = startOf(asked, size, (id) =>
-        placeIn(listed, ([conversation]) => conversation === id),
+        listed.findIndex(([conversation]) => conversation === id),
       );
       const items = listed.slice(at, at + size).flatMap(([conversation, rowid]) => {
         const [row] = sql.all<{ summary: string }>(
@@ -246,13 +246,14 @@ export function pageAfter(
   asked: PageAt = 0,
   size = PAGE_SIZE,
 ): Page<ConversationSummary> {
-  const at = startOf(asked, size, (id) => placeIn(rows, (row) => row.id === id));
+  const at = startOf(asked, size, (id) => rows.findIndex((row) => row.id === id));
   return { items: rows.slice(at, at + size), at, total: rows.length };
 }
 
 /**
  * Where a page starts: at the place asked for, or at the page of `size` holding the row asked
- * around, from the place `placeOfRow` finds for it, or at the top of a list that doesn't hold it.
+ * around, from the place `placeOfRow` finds for it, or at the top of a list that doesn't hold it,
+ * for which it finds nothing or −1, as `findIndex` does.
  */
 function startOf(
   asked: PageAt,
@@ -260,14 +261,8 @@ function startOf(
   placeOfRow: (id: string) => number | undefined,
 ): number {
   if (typeof asked === 'number') return asked;
-  const place = placeOfRow(asked.around);
-  return place === undefined ? 0 : place - (place % size);
-}
-
-/** The place of the first row that is the one sought, or nothing when none is. */
-function placeIn<Row>(rows: readonly Row[], isIt: (row: Row) => boolean): number | undefined {
-  const place = rows.findIndex(isIt);
-  return place < 0 ? undefined : place;
+  const place = placeOfRow(asked.around) ?? -1;
+  return place < 0 ? 0 : place - (place % size);
 }
 
 /** A query of a list's rows of one kind, and the values it takes. */

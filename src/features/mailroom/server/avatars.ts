@@ -22,7 +22,7 @@ import {
   type Picture,
   type Pictures,
 } from '../core/avatars.ts';
-import { isPublicHost } from '../../../shared/public-host.ts';
+import { isPublicHttps } from '../../../shared/public-host.ts';
 import { sha256Hex } from '../../../shared/sha256.ts';
 import { report } from './report.ts';
 import type { Sql } from './schema.ts';
@@ -464,21 +464,11 @@ const USER_AGENT = 'TrailMix (sender avatars; +https://github.com/lostintangent/
  * this machine serves everything from this machine.
  */
 export function avatarNetwork(internet: Internet, isStandIn = false): AvatarNetwork {
-  const reachable = (location: string) => {
-    const url = URL.parse(location);
-    return (
-      url?.protocol === 'https:' &&
-      !url.username &&
-      !url.password &&
-      (isStandIn || isPublicHost(url.hostname))
-    );
-  };
-
   /** The answer at a location, following redirects that stay reachable, or none if one doesn't. */
   async function reach(location: string, accept: string) {
     let at = location;
     for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
-      if (!reachable(at)) return undefined;
+      if (!isPublicHttps(URL.parse(at), isStandIn)) return undefined;
       const response = await fetch(at, {
         redirect: 'manual',
         headers: { accept, 'user-agent': USER_AGENT },
@@ -501,8 +491,9 @@ export function avatarNetwork(internet: Internet, isStandIn = false): AvatarNetw
       await response.body?.cancel();
       return undefined;
     }
-    const bytes = await bytesWithin(response.body, PICTURE_BYTES);
-    return bytes && pictureOf(bytes);
+    // A byte more than a picture may weigh is as much as `pictureOf` needs to refuse it.
+    const read = new Response(within(response.body, PICTURE_BYTES + 1));
+    return pictureOf(new Uint8Array(await read.arrayBuffer()));
   }
 
   return {
@@ -606,38 +597,16 @@ function within(
   let size = 0;
   return new ReadableStream({
     async pull(controller) {
-      const { done, value } = (await reader?.read()) ?? { done: true, value: undefined };
-      if (done || size >= limit) {
-        if (!done) await reader?.cancel();
+      const next = size < limit ? await reader?.read() : undefined;
+      if (!next || next.done) {
+        if (!next) await reader?.cancel();
         controller.close();
         return;
       }
-      const chunk = value.subarray(0, limit - size);
+      const chunk = next.value.subarray(0, limit - size);
       size += chunk.byteLength;
       controller.enqueue(chunk);
     },
     cancel: (reason) => reader?.cancel(reason),
   });
-}
-
-/** A body's bytes, or none once it passes `limit` bytes, read no further than that. */
-async function bytesWithin(
-  body: ReadableStream<Uint8Array> | null,
-  limit: number,
-): Promise<Uint8Array<ArrayBuffer> | undefined> {
-  if (!body) return undefined;
-  const reader = body.getReader();
-  const chunks: Uint8Array[] = [];
-  let size = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    size += value.byteLength;
-    if (size > limit) {
-      await reader.cancel();
-      return undefined;
-    }
-    chunks.push(value);
-  }
-  return new Uint8Array(await new Blob(chunks).arrayBuffer());
 }

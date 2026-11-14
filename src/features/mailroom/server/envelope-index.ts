@@ -614,13 +614,13 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
 
     /** Forgets an account's mail and folders, leaving nothing of them on disk. */
     forget(account: string) {
-      const ids = sql.all<{ conversation: string }>(
-        `SELECT DISTINCT conversation FROM messages WHERE account = ?`,
-        account,
-      );
       people.forget(account);
       sql.run(
         `DELETE FROM search WHERE rowid IN (SELECT rowid FROM messages WHERE account = ?)`,
+        account,
+      );
+      sql.run(
+        `DELETE FROM conversations WHERE id IN (SELECT conversation FROM messages WHERE account = ?)`,
         account,
       );
       for (const table of [
@@ -633,8 +633,6 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
         'gone_bodies',
       ])
         sql.run(`DELETE FROM ${table} WHERE account = ?`, account);
-      for (const { conversation } of ids)
-        sql.run(`DELETE FROM conversations WHERE id = ?`, conversation);
       // A deleted search row stays readable in the table's segments until they merge, so they merge now.
       sql.run(`INSERT INTO search (search) VALUES ('optimize')`);
       sql.run(`INSERT INTO people_search (people_search) VALUES ('optimize')`);

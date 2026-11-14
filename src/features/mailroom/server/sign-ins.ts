@@ -334,9 +334,7 @@ const lapsed = (account: Account) => `Sign in to ${account.name} again.`;
  * address, with the device code sealed beside it while it waits. Once a sign-in stops, its row
  * holds only the reason, and rows the state machine no longer keeps are deleted as they're read.
  */
-export type SignInBook = ReturnType<typeof signInBook>;
-
-export function signInBook(sql: Sql) {
+function signInBook(sql: Sql) {
   const rows = () =>
     sql
       .all<{ pending: string }>(`SELECT pending FROM sign_ins`)
@@ -398,9 +396,7 @@ export function signInBook(sql: Sql) {
 
     /** Any sign-in for an account that has gone. */
     forget(account: AccountId) {
-      for (const pending of rows()) {
-        if ('account' in pending.to && pending.to.account === account) remove(pending.address);
-      }
+      sql.run(`DELETE FROM sign_ins WHERE json_extract(pending, '$.to.account') = ?`, account);
     },
   };
 }

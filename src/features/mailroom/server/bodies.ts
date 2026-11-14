@@ -1,4 +1,4 @@
-import PostalMime from 'postal-mime';
+import PostalMime, { type Attachment } from 'postal-mime';
 import {
   oneClickUnsubscribe,
   refKey,
@@ -99,13 +99,10 @@ export function bodyCache(ports: {
       return {
         ...(parsed.html === undefined ? {} : { html: parsed.html }),
         ...(parsed.text === undefined ? {} : { text: parsed.text }),
-        attachments: parsed.attachments.map((each, index) => ({
-          id: String(index),
-          name: each.filename ?? `Attachment ${index + 1}`,
-          type: each.mimeType,
-          size: sizeOf(each.content),
-          ...(each.contentId ? { contentId: each.contentId.replace(/^<|>$/g, '') } : {}),
-        })),
+        attachments: parsed.attachments.map((each, index) => {
+          const { content, ...part } = attachmentIn(each, index);
+          return { id: String(index), ...part, size: content.byteLength };
+        }),
         headers: parsed.headers.map((header) => [header.originalKey, header.value]),
         ...(unsubscribe ? { unsubscribe } : {}),
       };
@@ -122,9 +119,8 @@ export function bodyCache(ports: {
       ref: MessageRef,
       id: string,
     ): Promise<{ body: ReadableStream<Uint8Array>; type: string; name: string } | null> {
-      const raw = await bytes(ref);
-      if (!raw || !/^\d{1,4}$/.test(String(id))) return null;
-      const held = await attachmentOf(raw, Number(id));
+      if (!/^\d{1,4}$/.test(String(id))) return null;
+      const held = await attachment(ref, Number(id));
       if (!held) return null;
       return {
         // The Workers runtime types a Blob's stream loosely, as ReadableStream<any>, so it's named here.
@@ -208,18 +204,14 @@ export function bodyCache(ports: {
 /** One attachment of a raw message, by its place among them, as `Body.attachments` numbers them. */
 async function attachmentOf(bytes: Uint8Array, index: number): Promise<MimeAttachment | undefined> {
   const attachment = (await PostalMime.parse(bytes)).attachments[index];
-  if (!attachment) return undefined;
-  const content =
-    typeof attachment.content === 'string'
-      ? new TextEncoder().encode(attachment.content)
-      : new Uint8Array(attachment.content);
-  return {
-    name: attachment.filename ?? `Attachment ${index + 1}`,
-    type: attachment.mimeType,
-    content,
-    ...(attachment.contentId ? { contentId: attachment.contentId.replace(/^<|>$/g, '') } : {}),
-  };
+  return attachment && attachmentIn(attachment, index);
 }
 
-const sizeOf = (content: ArrayBuffer | Uint8Array | string) =>
-  typeof content === 'string' ? new TextEncoder().encode(content).length : content.byteLength;
+/** A parsed attachment as the Mailroom names it, at its place among the message's. */
+const attachmentIn = (attachment: Attachment, index: number): MimeAttachment => ({
+  name: attachment.filename ?? `Attachment ${index + 1}`,
+  type: attachment.mimeType,
+  // postal-mime gives an attachment's content as an ArrayBuffer unless asked for a string.
+  content: new Uint8Array(attachment.content as ArrayBuffer),
+  ...(attachment.contentId ? { contentId: attachment.contentId.replace(/^<|>$/g, '') } : {}),
+});

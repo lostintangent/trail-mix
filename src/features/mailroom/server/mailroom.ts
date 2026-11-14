@@ -446,7 +446,7 @@ export class Mailroom extends DurableObject implements Contract {
     this.fullText.forget();
     this.signingIn.clear();
     try {
-      await this.ctx.storage.deleteAlarm();
+      // From compatibility date 2026-02-24, deleting everything deletes the alarm too.
       await this.ctx.storage.deleteAll();
       upgrade(this.sql);
       // Nothing of the member's stays, not even when they last opened it.
@@ -851,14 +851,12 @@ function loadImapCode(): Promise<ImapCode> {
 
 /** The Mailroom's storage, as `schema.ts` speaks to it, on a Durable Object's SQLite. */
 function durableSql(storage: DurableObjectStorage): Sql {
-  const bind = (params: SqlValue[]) =>
-    params.map((param) => (param instanceof Uint8Array ? param.slice().buffer : param));
   return {
     all: <Row>(query: string, ...params: SqlValue[]) =>
-      storage.sql.exec(query, ...bind(params)).toArray() as Row[],
+      storage.sql.exec(query, ...params).toArray() as Row[],
     each: <Row>(query: string, ...params: SqlValue[]) =>
-      storage.sql.exec(query, ...bind(params)) as Iterable<Row>,
-    run: (query, ...params) => void storage.sql.exec(query, ...bind(params)).toArray(),
+      storage.sql.exec(query, ...params) as Iterable<Row>,
+    run: (query, ...params) => void storage.sql.exec(query, ...params).toArray(),
     transaction: (work) => storage.transactionSync(work),
   };
 }

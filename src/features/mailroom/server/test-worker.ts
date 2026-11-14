@@ -14,22 +14,21 @@ export class TestMailroom extends Mailroom {
   private readonly wakes: Wake[] = [];
 
   /** Set while a test holds wakes back, and resolved when it lets them go. */
-  private held: { wakes: Promise<void>; release: () => void } | undefined;
+  private held: PromiseWithResolvers<void> | undefined;
 
   /** Holds every wake back until `releaseWakes`, so nothing a command owes lands meanwhile. */
   holdWakes(): void {
-    const { promise, resolve } = Promise.withResolvers<void>();
-    this.held = { wakes: promise, release: resolve };
+    this.held = Promise.withResolvers();
   }
 
   releaseWakes(): void {
-    this.held?.release();
+    this.held?.resolve();
     this.held = undefined;
   }
 
   /** Records each wake that landed anything, with each account's status and indexed mail after it. */
   protected override async wake(): Promise<number> {
-    await this.held?.wakes;
+    await this.held?.promise;
     const steps = await super.wake();
     if (steps === 0) return steps;
     const accounts = await this.accounts();
@@ -153,12 +152,11 @@ export class TestMailroom extends Mailroom {
 
   private readonly synced: Synced[] = [];
   private readonly fetched: MessageRef[] = [];
-  private filing: { saving: number; release: Promise<void>; let: () => void } | undefined;
+  private filing: (PromiseWithResolvers<void> & { saving: number }) | undefined;
 
   /** Holds each draft the server is asked to file until `letDraftsFile`, counting them. */
   holdDrafts(): void {
-    const { promise, resolve } = Promise.withResolvers<void>();
-    this.filing = { saving: 0, release: promise, let: resolve };
+    this.filing = { ...Promise.withResolvers(), saving: 0 };
   }
 
   /** How many drafts are held on their way to the server. */
@@ -167,7 +165,7 @@ export class TestMailroom extends Mailroom {
   }
 
   letDraftsFile(): void {
-    this.filing?.let();
+    this.filing?.resolve();
     this.filing = undefined;
   }
 
@@ -227,7 +225,7 @@ export class TestMailroom extends Mailroom {
         const held = this.filing;
         if (held) {
           held.saving++;
-          await held.release;
+          await held.promise;
         }
         const saved = await provider.saveDraft(raw);
         const cut = this.filingCut;
