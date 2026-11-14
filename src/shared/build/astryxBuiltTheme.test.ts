@@ -2,28 +2,10 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { parseSync } from 'vite';
 import { leanBuiltTheme, trapResolvedTokens } from './astryxBuiltTheme.ts';
 import { splitUseTheme } from './astryxUseTheme.ts';
 
 const BUILT = readFileSync(new URL('../../app/theme/built/trail-mix.js', import.meta.url), 'utf8');
-
-/** The fields of the theme object a module exports, by name. */
-const fieldsOf = (code: string) => {
-  const { program } = parseSync('theme.js', code);
-  const themes = program.body.flatMap((node) =>
-    node.type === 'ExportNamedDeclaration' && node.declaration?.type === 'VariableDeclaration'
-      ? node.declaration.declarations.flatMap(({ init }) =>
-          init?.type === 'ObjectExpression' ? init.properties : [],
-        )
-      : [],
-  );
-  return themes.map((field) =>
-    field.type === 'Property' && field.key.type === 'Identifier'
-      ? `${field.kind === 'get' ? 'get ' : ''}${field.key.name}`
-      : '?',
-  );
-};
 
 /** A module's exports once it runs, each name it imports standing for an empty object. */
 const run = async (code: string): Promise<Record<string, unknown>> => {
@@ -38,7 +20,8 @@ const run = async (code: string): Promise<Record<string, unknown>> => {
 };
 
 test('the built theme keeps what Astryx reads at runtime, with its tokens empty', async () => {
-  expect(fieldsOf(leanBuiltTheme(BUILT, false))).toEqual([
+  const theme = (await run(leanBuiltTheme(BUILT, false))).trailMixTheme as Record<string, unknown>;
+  expect(Object.keys(theme)).toEqual([
     'name',
     '__built',
     'tokens',
@@ -47,7 +30,6 @@ test('the built theme keeps what Astryx reads at runtime, with its tokens empty'
     '__axes',
     'icons',
   ]);
-  const theme = (await run(leanBuiltTheme(BUILT, false))).trailMixTheme as Record<string, unknown>;
   expect(theme.tokens).toEqual({});
   expect(theme.__axes).toMatchObject({ motion: { fast: 125, medium: 300 } });
 });

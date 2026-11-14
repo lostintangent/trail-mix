@@ -13,15 +13,15 @@ const IMPORT = /^import [^;]+;\n/gm;
 const DECLARED = /^(?:export )?(?:function|const|let) ([\w$]+)/gm;
 const EXPORTED = /^export (?:function|const|let) ([\w$]+)/gm;
 const COMMENT = /\/\*[\s\S]*?\*\/|^\s*\/\/.*$/gm;
-const IMPORTS_USE_THEME = /\b(import|export) \{([^}]*)\} from "([^"]*\/useTheme\.js)";/g;
 const RELATIVE = /from (["'])(\.\.?\/[^"']+)\1/g;
 
 /**
  * Astryx's `useTheme` resolves every token through the theme generator, about 23 KiB gzip, and
  * only toasts call it, which load lazily. It shares `useTheme.js` with `useThemeName`, which every
  * `Icon` calls, and Rolldown places code by module rather than by export, so the generator rode on
- * the first load. This moves the hook into a module of its own, which its importers name directly,
- * so only what calls it reaches the generator.
+ * the first load. This moves the hook into a module of its own, which what stays of the file
+ * re-exports. Astryx's modules have no side effects, so only what calls the hook reaches the
+ * generator.
  *
  * The build fails if `useTheme.js` changes so the split can't be made, if what stays of it would
  * still reach the generator, or if the chunk that holds it loads the generator anyway.
@@ -42,10 +42,7 @@ export function astryxUseTheme(): Plugin {
       });
     },
     transform(code, id) {
-      if (id.endsWith(USE_THEME)) return { code: splitUseTheme(code).rest, map: null };
-      if (!id.includes(DIST)) return null;
-      const next = hookImportsOf(code);
-      return next === code ? null : { code: next, map: null };
+      return id.endsWith(USE_THEME) ? { code: splitUseTheme(code).rest, map: null } : null;
     },
     generateBundle(_, bundle) {
       for (const { fileName } of loadedAlongside(bundle, USE_THEME, [GENERATOR])) {
@@ -59,9 +56,10 @@ export function astryxUseTheme(): Plugin {
 }
 
 /**
- * Cuts Astryx's `useTheme.js` in two: what stays, without the hook or the imports only the hook
- * uses, and the hook's own module, which imports what the file did and the file's own helpers it
- * calls. Throws if the hook isn't the file's last export, or if what stays still imports `tokens.js`.
+ * Cuts Astryx's `useTheme.js` in two: what stays, which drops the imports only the hook uses and
+ * re-exports the hook, and the hook's own module, which imports what the file did and the file's
+ * own helpers it calls. Throws if the hook isn't the file's last export, or if what stays still
+ * imports `tokens.js`.
  */
 export function splitUseTheme(code: string): { rest: string; hook: string } {
   const at = code.indexOf(HOOK_START);
@@ -91,7 +89,8 @@ export function splitUseTheme(code: string): { rest: string; hook: string } {
 
   const rest =
     dropped.reduce((text, line) => text.replace(line, ''), code.slice(0, start)) +
-    (toExport.length ? `export { ${toExport.join(', ')} };\n` : '');
+    (toExport.length ? `export { ${toExport.join(', ')} };\n` : '') +
+    `export { useTheme } from "./useTheme.js${HOOK}";\n`;
   if (/^import [^;]*"\.\/tokens\.js";$/m.test(rest)) {
     throw new Error(
       "What stays of Astryx's useTheme.js still imports tokens.js, so the theme generator would " +
@@ -100,22 +99,6 @@ export function splitUseTheme(code: string): { rest: string; hook: string } {
   }
   const hook = `${imports.join('')}import { ${shared.join(', ')} } from "./useTheme.js";\n${hookCode}`;
   return { rest, hook };
-}
-
-/**
- * An Astryx module's code with each `useTheme` it imports or re-exports from `useTheme.js` named
- * from the hook's own module instead.
- */
-function hookImportsOf(code: string): string {
-  return code.replace(IMPORTS_USE_THEME, (whole, kind: string, list: string, from: string) => {
-    const names = list.split(',').map((name) => name.trim());
-    const hooks = names.filter((name) => /^useTheme(?:\s+as\s+[\w$]+)?$/.test(name));
-    if (!hooks.length) return whole;
-    const others = names.filter((name) => name && !hooks.includes(name));
-    const named = (some: string[], path: string) =>
-      `${kind} { ${some.join(', ')} } from "${path}";`;
-    return (others.length ? `${named(others, from)}\n` : '') + named(hooks, from + HOOK);
-  });
 }
 
 /** The local names an import statement binds. A bare import binds none. */

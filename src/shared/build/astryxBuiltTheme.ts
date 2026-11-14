@@ -107,11 +107,7 @@ export function leanBuiltTheme(code: string, isTrapped: boolean): string {
     if (property.type !== 'Property' || property.key.type !== 'Identifier') {
       throw new Error('A built theme has a field the build cannot name.');
     }
-    const source = code.slice(property.start, property.end);
-    if (!source.startsWith(property.key.name)) {
-      throw new Error('The parser placed a built theme field where its code is not.');
-    }
-    return { name: property.key.name, source };
+    return { name: property.key.name, source: code.slice(property.start, property.end) };
   });
   const missing = GENERATOR_FIELDS.filter((name) => !fields.some((field) => field.name === name));
   if (missing.length) throw new Error(`A built theme no longer has ${missing.join(', ')}.`);

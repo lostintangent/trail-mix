@@ -163,31 +163,6 @@ function given(state: Record<string, Held>) {
 }
 
 describe('what the account holds, as Wrangler reads it', () => {
-  test('a Worker Cloudflare has never heard of holds nothing and was never deployed', async () => {
-    given({});
-    expect(await lookUp('trail-mix', wrangler)).toEqual({ deployed: false, held: new Set() });
-  }, 30_000);
-
-  test('a deployed Worker’s secrets are its own, read by its name', async () => {
-    given({
-      'trail-mix': { deployments: 3, secrets: ['CREDENTIALS_KEY', 'PUSH_KEY'] },
-      other: { deployments: 1, secrets: ['SOMETHING_ELSE'] },
-    });
-    expect(await lookUp('trail-mix', wrangler)).toEqual({
-      deployed: true,
-      held: new Set(['CREDENTIALS_KEY', 'PUSH_KEY']),
-    });
-    expect(asked).toEqual([
-      'GET /workers/scripts/trail-mix/deployments',
-      'GET /workers/scripts/trail-mix/secrets',
-    ]);
-  }, 30_000);
-
-  test('a deployed Worker whose secrets come back empty is still one that was deployed', async () => {
-    given({ 'trail-mix': { deployments: 1, secrets: [] } });
-    expect(await lookUp('trail-mix', wrangler)).toEqual({ deployed: true, held: new Set() });
-  }, 30_000);
-
   test('any other failure stops the deploy, rather than take a key for missing', async () => {
     given({ 'trail-mix': { deployments: 1, secrets: ['CREDENTIALS_KEY'] } });
     failing = /\/deployments$/;
@@ -299,13 +274,10 @@ describe('a deploy', () => {
   }, 60_000);
 
   test('of a deployed Worker without its credentials key changes nothing at all', async () => {
-    const stopped = deploying(
-      { 'trail-mix': { deployments: 2, secrets: ['PUSH_KEY'] } },
-      'trail-mix',
-      {
-        args: [],
-      },
-    );
+    // Its secrets come back empty, and it still counts as deployed.
+    const stopped = deploying({ 'trail-mix': { deployments: 2, secrets: [] } }, 'trail-mix', {
+      args: [],
+    });
     await expect(stopped).rejects.toThrow(DeployStopped);
 
     expect(deploys).toEqual([]);

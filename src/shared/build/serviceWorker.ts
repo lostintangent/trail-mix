@@ -1,6 +1,5 @@
 import { createHash } from 'node:crypto';
-import { readdir, readFile } from 'node:fs/promises';
-import { join, relative } from 'node:path';
+import { join } from 'node:path';
 import type { Plugin } from 'vite';
 
 /**
@@ -20,11 +19,17 @@ export function serviceWorker({ entry }: { entry: string }): Plugin {
     generateBundle: {
       order: 'post',
       async handler(_options, bundle) {
+        if (typeof Bun === 'undefined') throw new Error('The service worker is bundled with Bun.');
         const built = Object.values(bundle).map((file) => ({
           path: `/${file.fileName}`,
           content: file.type === 'asset' ? file.source : file.code,
         }));
-        const files = keptOf([...built, ...(await filesUnder(publicDir))]);
+        // What the build copies from `public/`, by its path there.
+        const copied = await Array.fromAsync(new Bun.Glob('**').scan(publicDir), async (path) => ({
+          path: `/${path}`,
+          content: await Bun.file(join(publicDir, path)).bytes(),
+        }));
+        const files = keptOf([...built, ...copied]);
         const source = await bundleWorker(entry, buildOf(files));
         this.emitFile({ type: 'asset', fileName: 'sw.js', source });
       },
@@ -53,7 +58,6 @@ export function buildOf(files: readonly File[]): { version: string; kept: string
 }
 
 async function bundleWorker(entry: string, build: { version: string; kept: string[] }) {
-  if (typeof Bun === 'undefined') throw new Error('The service worker is bundled with Bun.');
   const result = await Bun.build({
     entrypoints: [entry],
     target: 'browser',
@@ -64,17 +68,4 @@ async function bundleWorker(entry: string, build: { version: string; kept: strin
   const [output] = result.outputs;
   if (!result.success || !output) throw new AggregateError(result.logs, 'sw.js did not build.');
   return output.text();
-}
-
-/** Every file under `folder`, by its path from it, as the build copies `public/`. */
-async function filesUnder(folder: string): Promise<File[]> {
-  const entries = await readdir(folder, { recursive: true, withFileTypes: true });
-  return Promise.all(
-    entries
-      .filter((entry) => entry.isFile())
-      .map(async (entry) => {
-        const file = join(entry.parentPath, entry.name);
-        return { path: `/${relative(folder, file)}`, content: await readFile(file) };
-      }),
-  );
 }
