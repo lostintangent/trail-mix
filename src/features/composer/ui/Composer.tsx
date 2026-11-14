@@ -59,10 +59,10 @@ type ComposerProps = {
    */
   onDraft: Showing['onDraft'];
   /**
-   * Sends the message, with what was written, and the composer closes at once. Its last save
+   * Sends the message, holding what was written, and the composer closes at once. Its last save
    * finishes behind it, and the message comes back if the send is undone.
    */
-  onSend: (drafting: Drafting, at: string | undefined, writing: Writing) => void;
+  onSend: (drafting: Drafting, at: string | undefined) => void;
   /** Filled with the composer's Send while it is open, for the registry's Send and its keys. */
   sender: Sender;
   /** Whether what's written can be sent now, which it can once it is to someone. */
@@ -215,7 +215,7 @@ function Writer({
     if (isSent.current || !canSend) return;
     isSent.current = true;
     autosave.flush();
-    onSend(drafting, at, { ...writing });
+    onSend(drafting, at);
     onClose();
   };
   useLayoutEffect(() => {

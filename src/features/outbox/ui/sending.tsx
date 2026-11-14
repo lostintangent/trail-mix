@@ -12,9 +12,8 @@ import {
 } from '../../mailroom/client/index.ts';
 import type { Leaving } from '../core/leaving.ts';
 import { briefly, type Standing } from '../core/standing.ts';
-import { askedFor, handed, unreached, type Answer } from './asked.ts';
+import { askedFor, handed, unreached, type Answer, type Press } from './asked.ts';
 import LeavingToast, { said } from './LeavingToast.tsx';
-import type { Press } from './useSend.ts';
 
 /**
  * What the browser does with the Outbox, loaded when it's first wanted rather than with the first

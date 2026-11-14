@@ -14,16 +14,16 @@ import { askedFor, closesFor, handed, pressOf, unreached, type Hand } from './as
  * it couldn't.
  */
 export async function undo(queryClient: QueryClient, id: string): Promise<string | undefined> {
-  const press = askedFor(id);
-  switch (press?.hand.is) {
+  const asked = askedFor(id);
+  switch (asked?.hand.is) {
     case 'saving':
       handed(id, { is: 'stopped' });
-      press.onUndone();
+      asked.press.onUndone();
       return undefined;
     case 'asking':
-      return stop(queryClient, id, press.hand);
+      return stop(queryClient, id, asked.hand);
     case 'asked':
-      return takeBack(queryClient, press.hand.send);
+      return takeBack(queryClient, asked.hand.send);
     default:
       return undefined;
   }
@@ -56,7 +56,7 @@ async function stop(
       void queryClient.invalidateQueries({ queryKey: outboxQuery.queryKey });
       return refusalOf(answer.send, error);
     }
-    const press = askedFor(id);
+    const press = askedFor(id)?.press;
     if (answer) {
       handed(id, { is: 'failed' });
       press?.onFailed(answer.refused);
@@ -66,7 +66,7 @@ async function stop(
     }
     return undefined;
   }
-  const press = askedFor(id);
+  const press = askedFor(id)?.press;
   handed(id, { is: 'stopped' });
   settle();
   queryClient.setQueryData(outboxQuery.queryKey, (held) => held?.filter((each) => each.id !== id));
@@ -89,10 +89,10 @@ export async function takeBack(
     queryClient.setQueryData(outboxQuery.queryKey, (held) =>
       held?.filter(({ id }) => id !== outgoing.id),
     );
-    const press = pressOf(outgoing);
-    if (press && press.hand.is !== 'stopped') {
-      handed(press.id, { is: 'stopped' });
-      press.onUndone(draft);
+    const asked = pressOf(outgoing);
+    if (asked && asked.hand.is !== 'stopped') {
+      handed(asked.press.id, { is: 'stopped' });
+      asked.press.onUndone(draft);
     }
     return undefined;
   } catch (error) {

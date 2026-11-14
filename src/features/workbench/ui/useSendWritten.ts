@@ -1,7 +1,7 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { toast } from '../../../shared/toasts.tsx';
 import type { ConversationId, MessageRef } from '../../mail/core/index.ts';
-import { isDocked, type Drafting, type Sender, type Writing } from '../../composer/ui/index.ts';
+import { isDocked, type Drafting, type Sender } from '../../composer/ui/index.ts';
 import { useSend, useSendCommands, type LeavingSends } from '../../outbox/index.ts';
 import { leftBySend, type useComposing } from './useComposing.ts';
 
@@ -43,9 +43,10 @@ export function useSendWritten({
   // A reply is on its way at the end of its conversation in the frame its composer closes, as is a
   // draft opened in its own, and leaves it again if the send fails or Undo takes it back. A new
   // message has no conversation until the Outbox names one.
-  const onSend = (drafting: Drafting, at: string | undefined, writing: Writing) => {
+  const onSend = (drafting: Drafting, at: string | undefined) => {
     // Before the composer closes, which would save what it owes.
     drafting.hand();
+    const { writing } = drafting;
     const from = { conversation: opened, isDocked: compose !== undefined && isDocked(compose) };
     const left = leftBySend(compose, opened, isDraftsList, leaving.all);
     if (left !== undefined) onLeft(left);
