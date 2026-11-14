@@ -126,6 +126,7 @@ import {
   useIsReplyOnItsWay,
 } from '../../composer/ui/index.ts';
 import { useComposing } from './useComposing.ts';
+import { useOpensNewest } from './useOpensNewest.ts';
 import { useSendWritten } from './useSendWritten.ts';
 
 import { useReach, type Reach } from '../../offline/index.ts';
@@ -294,13 +295,6 @@ export function Workbench({
   const [list, setList] = usePanel(PANELS.list);
   const [isResizing, setIsResizing] = useState(false);
   const isPhone = useMediaQuery(media.phone);
-  // The view that opens at its newest conversation once its list is known, as one does that arrives
-  // naming none.
-  const [opening, setOpening] = useState(() =>
-    place.open === undefined && place.bundle === undefined && opensNewest(view, isPhone)
-      ? view
-      : undefined,
-  );
   const sidebarId = useId();
   const listId = useId();
   const { title, unread, scope } = describeView(view, accounts, folders, counts);
@@ -325,9 +319,8 @@ export function Workbench({
       setSeeking(bundle ?? open);
       arriveAt({ view, bundle, open });
       setPhonePane(bundle !== undefined || open !== undefined ? 'reader' : 'list');
-      setOpening(
-        bundle === undefined && open === undefined && opensNewest(view, isPhone) ? view : undefined,
-      );
+      if (bundle === undefined && open === undefined) openNewestAt(view);
+      else cancelOpening();
     },
     // A thread gone from its bundle leaves the bundle open.
     close: () => {
@@ -514,6 +507,24 @@ export function Workbench({
     [replyTo],
   );
 
+  const { openedByView, openedByMember } = readMark;
+  const openNewest = useCallback(
+    (newest: ListItem) => {
+      // A member's pick made in this same moment, as a key held for a row just arrived, wins.
+      setSelection((current) => (current.ids.length > 0 ? current : selectOnly(newest.id)));
+      // Opening a bundle reads nothing.
+      if (!isBundle(newest)) openedByView(newest.id);
+    },
+    [openedByView, setSelection],
+  );
+  const { openAt: openNewestAt, cancel: cancelOpening } = useOpensNewest({
+    view,
+    isPhone,
+    isNaming: place.open !== undefined || place.bundle !== undefined,
+    newest: conversations?.[0],
+    isReaderTaken: selected !== undefined || compose !== undefined || page !== undefined,
+    open: openNewest,
+  });
   // Moving the selection re-renders only what shows it: the list, its two changed rows, and the
   // reader. The sidebar and the panel edges are memoized, and what they're handed stays the same.
   // Choosing a view opens it afresh, at its newest conversation where it opens one, and leaves
@@ -524,28 +535,10 @@ export function Workbench({
       chooseView(next);
       setPhonePane('list');
       clearSelection();
-      setOpening(opensNewest(next, isPhone) ? next : undefined);
+      openNewestAt(next);
     },
-    [chooseView, closeComposer, isPhone, clearSelection],
+    [chooseView, closeComposer, clearSelection, openNewestAt],
   );
-  // Before the frame is drawn, so the reader shows no empty sheet between the two. A list still
-  // empty may be filling, as a new member's first sync fills it, so the view waits for its newest,
-  // unless the member opens something of their own first: a conversation, a message or a page.
-  const { openedByView, openedByMember } = readMark;
-  useLayoutEffect(() => {
-    if (opening === undefined) return;
-    if (opening !== view || selected !== undefined || compose !== undefined || page !== undefined) {
-      setOpening(undefined);
-      return;
-    }
-    const newest = conversations?.[0];
-    if (newest === undefined) return;
-    setOpening(undefined);
-    // A member's pick made in this same moment, as a key held for a row just arrived, wins.
-    setSelection((current) => (current.ids.length > 0 ? current : selectOnly(newest.id)));
-    // Opening a bundle reads nothing.
-    if (!isBundle(newest)) openedByView(newest.id);
-  }, [opening, view, selected, compose, page, conversations, openedByView, setSelection]);
   // Folders are named in place in the sidebar, so naming one brings it into view.
   const revealSidebar = useCallback(() => {
     if (isPhone) setPhonePane('sidebar');
@@ -572,8 +565,8 @@ export function Workbench({
   const closePage = useCallback(() => {
     setPage(undefined);
     if (isPhone) setPhonePane('list');
-    else if (opensNewest(latestPlace.current.view, false)) setOpening(latestPlace.current.view);
-  }, [isPhone]);
+    else openNewestAt(latestPlace.current.view);
+  }, [isPhone, openNewestAt]);
   // The phone's ways between panes, the same functions every render, so the buttons they're on stay
   // drawn as they are while the list and the reader change.
   const showFolders = useCallback(() => setPhonePane('sidebar'), []);
@@ -671,7 +664,7 @@ export function Workbench({
   const pick = useCallback(
     (id: ConversationId, by: SelectBy) => {
       setPage(undefined);
-      setOpening(undefined);
+      cancelOpening();
       // Picking a bundle's row again shows the bundle, not the thread open in it.
       setThreadIn(undefined);
       selectBy(id, by);
@@ -685,7 +678,7 @@ export function Workbench({
         move(bundlePartsOf(id) ? { view, bundle: id } : { view, open: id }, 'push');
       }
     },
-    [move, pushed, written, openedByMember, setThreadIn, selectBy],
+    [move, pushed, written, openedByMember, setThreadIn, selectBy, cancelOpening],
   );
   // A finger tapping a row's avatar starts picking with it, or adds it or lets it go while picking.
   const pickRow = useCallback(
@@ -1228,13 +1221,6 @@ export function Workbench({
     </Commands>
   );
 }
-
-/**
- * Whether a view opens at its newest conversation: on a desktop, where the reader lies beside the
- * list, so the reader always belongs to the list. The Outbox lists sends, not conversations, and a
- * phone shows the list alone.
- */
-const opensNewest = (view: View, isPhone: boolean) => !isPhone && view.in !== 'outbox';
 
 /** How the public demo names itself, under a visitor's accounts. */
 const VISITORS_NOTE = 'A sample mailbox, yours for a day.';
