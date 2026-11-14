@@ -139,8 +139,8 @@ import {
   CREATE,
   folderName,
   Sidebar,
-  UNIFIED_VIEWS,
   DeleteQuestion,
+  describeView,
   FolderMenu,
   useFolderEditing,
   viewCommands,
@@ -1438,36 +1438,6 @@ const NO_PLACES: ReadonlyMap<ConversationId, number> = new Map();
 
 /** How the public demo names itself, under a visitor's accounts. */
 const VISITORS_NOTE = 'A sample mailbox, yours for a day.';
-
-/**
- * A view's title, the unread count its header shows (Inbox's across accounts, or a folder's), and
- * the one account it holds, if it holds only one.
- */
-function describeView(
-  view: View,
-  accounts: readonly Account[],
-  folders: readonly Folder[],
-  counts: ViewCounts,
-): { title: string; unread?: number; scope?: Account } {
-  switch (view.in) {
-    case 'folder': {
-      const { account, path } = view.folder;
-      const folder = folders.find((each) => each.account === account && each.path === path);
-      return {
-        title: folder ? folderName(folder) : path,
-        unread: folder?.unread,
-        scope: accounts.find(({ id }) => id === account),
-      };
-    }
-    case 'search':
-      return { title: 'Search' };
-    default:
-      return {
-        title: UNIFIED_VIEWS.find((unified) => unified.in === view.in)?.label ?? '',
-        unread: view.in === 'inbox' ? counts.inbox : undefined,
-      };
-  }
-}
 
 const styles = stylex.create({
   desk: {

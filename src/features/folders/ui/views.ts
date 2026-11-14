@@ -11,11 +11,13 @@ import {
   Trash2,
   type LucideIcon,
 } from 'lucide-react';
-import type { Folder, FolderRole, View } from '../../mail/core/index.ts';
+import type { Account, Folder, FolderRef, FolderRole, View } from '../../mail/core/index.ts';
+import { folderName } from './name.ts';
 
 /**
- * The views the sidebar offers, and the one icon each shows wherever it is named: in the sidebar,
- * on its rail, at the head of the list and in the palette.
+ * The views the sidebar offers, the title and count each shows at the head of the list, and the one
+ * icon each shows wherever it is named: in the sidebar, on its rail, at the head of the list and in
+ * the palette.
  */
 
 type UnifiedView = Exclude<View['in'], 'folder' | 'search'>;
@@ -48,8 +50,7 @@ export const folderIcon = ({ role }: Folder): LucideIcon => (role ? ROLE_ICONS[r
 export function viewIcon(view: View, folders: readonly Folder[]): LucideIcon {
   switch (view.in) {
     case 'folder': {
-      const { account, path } = view.folder;
-      const folder = folders.find((each) => each.account === account && each.path === path);
+      const folder = folderOf(view.folder, folders);
       return folder ? folderIcon(folder) : FolderIcon;
     }
     case 'search':
@@ -60,3 +61,36 @@ export function viewIcon(view: View, folders: readonly Folder[]): LucideIcon {
     }
   }
 }
+
+/**
+ * A view's title, the unread count its header shows (Inbox's across accounts, or a folder's), and
+ * the one account it holds, if it holds only one.
+ */
+export function describeView(
+  view: View,
+  accounts: readonly Account[],
+  folders: readonly Folder[],
+  counts: ViewCounts,
+): { title: string; unread?: number; scope?: Account } {
+  switch (view.in) {
+    case 'folder': {
+      const folder = folderOf(view.folder, folders);
+      return {
+        title: folder ? folderName(folder) : view.folder.path,
+        unread: folder?.unread,
+        scope: accounts.find(({ id }) => id === view.folder.account),
+      };
+    }
+    case 'search':
+      return { title: 'Search' };
+    default:
+      return {
+        title: UNIFIED_VIEWS.find((unified) => unified.in === view.in)?.label ?? '',
+        unread: view.in === 'inbox' ? counts.inbox : undefined,
+      };
+  }
+}
+
+/** The folder a folder view lists, while the server lists it. */
+const folderOf = ({ account, path }: FolderRef, folders: readonly Folder[]) =>
+  folders.find((each) => each.account === account && each.path === path);
