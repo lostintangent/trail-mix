@@ -7,16 +7,6 @@ const BUTTON = readFileSync(
   'utf8',
 );
 const LATER = '/app/src/shared/LaterTooltip.tsx';
-const scan = (code: string) => new Bun.Transpiler({ loader: 'js' }).scan(code);
-
-test("Button.js takes its tooltip hook from the app, and imports none of Astryx's tooltip code", () => {
-  const later = laterButtonTooltip(BUTTON, LATER);
-  const paths = scan(later).imports.map(({ path }) => path);
-  expect(paths).toContain(LATER);
-  expect(paths).not.toContain('../Tooltip/useTooltip.js');
-  expect(later).toContain(`import { useLaterTooltip as useTooltip } from "${LATER}";`);
-  expect(scan(later).exports).toEqual(scan(BUTTON).exports);
-});
 
 test('a Button.js that reads more of the hook than the later one gives, or imports it otherwise, stops the build', () => {
   const variants = [

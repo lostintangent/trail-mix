@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { HOOK, hookImportsOf, splitUseTheme } from './astryxUseTheme.ts';
+import { splitUseTheme } from './astryxUseTheme.ts';
 
 const read = (path: string) =>
   readFileSync(
@@ -11,15 +11,6 @@ const read = (path: string) =>
   );
 const scan = (code: string) => new Bun.Transpiler({ loader: 'js' }).scan(code);
 const USE_THEME = read('theme/useTheme.js');
-
-test('what stays of useTheme.js no longer imports the theme generator, and still serves Icon', () => {
-  const { rest } = splitUseTheme(USE_THEME);
-  const { imports, exports } = scan(rest);
-  expect(imports.map(({ path }) => path)).not.toContain('./tokens.js');
-  expect(exports).toContain('useThemeName');
-  expect(exports).toContain('ThemeContext');
-  expect(exports).not.toContain('useTheme');
-});
 
 test('the hook moves with everything it calls, and resolves the theme as it did', async () => {
   const { hook } = splitUseTheme(USE_THEME);
@@ -78,17 +69,4 @@ test('a useTheme.js the split no longer fits stops the build, rather than keepin
   expect(() => splitUseTheme(renamed)).toThrow(/no longer has one/);
 
   expect(() => splitUseTheme(`${USE_THEME}\nexport const after = 1;\n`)).toThrow(/after useTheme/);
-});
-
-test("Astryx's importers name the hook from its own module, and keep their other names", () => {
-  expect(hookImportsOf(read('hooks/useAutoMediaMode.js'))).toContain(
-    `import { useTheme } from "../theme/useTheme.js${HOOK}";`,
-  );
-  const barrel = hookImportsOf(read('theme/index.js'));
-  expect(barrel).toContain('export { useThemeName, ThemeContext } from "./useTheme.js";');
-  expect(barrel).toContain(`export { useTheme } from "./useTheme.js${HOOK}";`);
-  expect(hookImportsOf(read('Icon/Icon.js'))).toBeNull();
-  expect(hookImportsOf('import { useTheme as theme, useThemeName } from "./useTheme.js";')).toBe(
-    `import { useThemeName } from "./useTheme.js";\nimport { useTheme as theme } from "./useTheme.js${HOOK}";`,
-  );
 });

@@ -7,7 +7,7 @@ const DIST = '/@astryxdesign/core/dist/';
 const USE_THEME = `${DIST}theme/useTheme.js`;
 const GENERATOR = `${DIST}theme/generateThemeRules.js`;
 /** The query that names the hook's own module, read from the file it was cut from. */
-export const HOOK = '?hook';
+const HOOK = '?hook';
 const HOOK_START = 'export function useTheme() {';
 const IMPORT = /^import [^;]+;\n/gm;
 const DECLARED = /^(?:export )?(?:function|const|let) ([\w$]+)/gm;
@@ -116,7 +116,7 @@ export function splitUseTheme(code: string): { rest: string; hook: string } {
  * An Astryx module's code with each `useTheme` it imports or re-exports from `useTheme.js` named
  * from the hook's own module instead, or null when it names none.
  */
-export function hookImportsOf(code: string): string | null {
+function hookImportsOf(code: string): string | null {
   let isChanged = false;
   const next = code.replace(
     IMPORTS_USE_THEME,

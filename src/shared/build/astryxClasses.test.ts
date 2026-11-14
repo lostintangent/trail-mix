@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import stylex from '@stylexjs/unplugin/vite';
 import { dirname, join, resolve } from 'node:path';
+import { classesOf } from './astryxStyles.ts';
 import { stylexOptions } from './stylexOptions.ts';
 
 /**
@@ -22,7 +23,7 @@ const GLOBAL_CSS = join(ROOT, 'src/app/global.css');
 
 test("no StyleX class of ours shares a name with Astryx's stylesheet", async () => {
   const ours = await appClasses(stylexOptions.classNamePrefix);
-  const theirs = stylesheetClasses(await stylesheets(GLOBAL_CSS));
+  const theirs = await astryxClasses();
 
   expect(ours.size).toBeGreaterThan(0);
   expect(theirs.size).toBeGreaterThan(1000);
@@ -31,7 +32,7 @@ test("no StyleX class of ours shares a name with Astryx's stylesheet", async () 
 
 test("the check finds the clash that Astryx's own prefix would cause", async () => {
   const ours = await appClasses('x');
-  const theirs = stylesheetClasses(await stylesheets(GLOBAL_CSS));
+  const theirs = await astryxClasses();
 
   expect(shared(ours, theirs).length).toBeGreaterThan(0);
 }, 30_000);
@@ -76,13 +77,9 @@ async function stylesheets(entry: string, seen = new Set<string>()): Promise<str
   return sheets;
 }
 
-function stylesheetClasses(sheets: string[]): Set<string> {
-  const classes = new Set<string>();
-  for (const css of sheets) {
-    for (const [, name = ''] of css.matchAll(/\.(-?[_a-zA-Z][\w-]*)/g)) classes.add(name);
-  }
-  return classes;
-}
+/** Every class Astryx's stylesheet names. */
+const astryxClasses = async () =>
+  new Set((await stylesheets(GLOBAL_CSS)).flatMap((css) => [...classesOf(css).named]));
 
 /** Every cascade layer the stylesheets name, in the order they first name it. */
 function stylesheetLayers(sheets: string[]): string[] {
