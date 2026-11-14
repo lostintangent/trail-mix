@@ -35,6 +35,7 @@ import {
   type PaletteKeys,
 } from '../../commands/index.ts';
 import { useMediaQuery } from '../../../shared/useMediaQuery.ts';
+import { whenIdle } from '../../../shared/whenIdle.ts';
 import { highlight, marksOf, type Marks, type View } from '../../mail/core/index.ts';
 import { conversationsQuery } from '../../mailroom/client/index.ts';
 import type { SearchScopeProps } from './SearchScope.tsx';
@@ -95,6 +96,8 @@ export function SearchField({ isCompact = false }: { isCompact?: boolean }) {
   // The commands show while the member works in the field: at once when ⌘K opened it, and
   // otherwise for whatever typed text names one.
   const [commands, setCommands] = useState<'closed' | 'typed' | 'all'>('closed');
+  // Loaded ahead, they show in the frame that opens them, not after React's pause for a reveal.
+  useEffect(() => whenIdle(preloadCommandMatches), []);
   useEffect(
     () =>
       registerSearchFocus(() => {
@@ -159,7 +162,7 @@ export function SearchField({ isCompact = false }: { isCompact?: boolean }) {
             onChange={(event) => onSearch(event.target.value)}
             onFocus={() => {
               void loadScope().catch(() => {});
-              preloadCommandMatches();
+              void preloadCommandMatches().catch(() => {});
             }}
             enterKeyHint="search"
             autoComplete="off"

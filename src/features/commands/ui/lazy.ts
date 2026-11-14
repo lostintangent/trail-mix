@@ -1,12 +1,10 @@
 import { lazy } from 'react';
+import { preloadable } from '../../../shared/preloadable.ts';
 
 /** The palette's list and the shortcut sheet load when first shown, off the first load. */
-const loadMatches = () => import('./CommandMatches.tsx');
-
-export const CommandMatches = lazy(async () => ({ default: (await loadMatches()).CommandMatches }));
-
-/** Loads the palette's list ahead, as the field it lies under takes the focus. */
-export const preloadCommandMatches = () => void loadMatches().catch(() => {});
+export const { Component: CommandMatches, preload: preloadCommandMatches } = preloadable(
+  async () => (await import('./CommandMatches.tsx')).CommandMatches,
+);
 
 export const ShortcutSheet = lazy(async () => ({
   default: (await import('./ShortcutSheet.tsx')).ShortcutSheet,
