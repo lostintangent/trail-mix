@@ -40,6 +40,12 @@ export interface MailProvider {
   saveDraft(message: Uint8Array): Promise<MessageRef>;
 
   /**
+   * The draft the account's Drafts holds with this Message-ID, if any, so a save that may have been
+   * filed already, as one whose answer was lost, finds its copy rather than filing another.
+   */
+  findDraft(messageId: string): Promise<MessageRef | undefined>;
+
+  /**
    * Removes a draft for good, as one a newer version has replaced. A message outside the account's
    * Drafts is skipped, so a wrong ref costs no message, and so is a draft already gone.
    */

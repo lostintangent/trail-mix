@@ -303,6 +303,16 @@ export function describeContract(
       expect(arrived((await syncAll(drafts)).events).map(refOf)).toEqual([second]);
     });
 
+    it('finds a draft by its Message-ID, as a save asked again does, and only in Drafts', async () => {
+      const raw = bytes(message({ id: 'filed', subject: 'Filed once', to: world().address }));
+      const saved = await provider.saveDraft(raw);
+      expect(await provider.findDraft('<filed@example.com>')).toEqual(saved);
+      await world().deliver(message({ id: 'arrived', subject: 'Arrived' }));
+      await only('INBOX', 'Arrived');
+      expect(await provider.findDraft('<arrived@example.com>')).toBeUndefined();
+      expect(await provider.findDraft('<nowhere@example.com>')).toBeUndefined();
+    });
+
     it('discards only a draft, so a wrong ref costs no message', async () => {
       await world().deliver(message({ id: 'kept', subject: 'Kept' }));
       const kept = refOf(await only('INBOX', 'Kept'));

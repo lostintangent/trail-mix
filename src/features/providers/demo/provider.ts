@@ -212,6 +212,13 @@ export function demoServer(
       return refOf(drafts, filed);
     },
 
+    findDraft: (messageId) =>
+      settle(() => {
+        const drafts = roleFolder('drafts');
+        const uid = messageIdIn(drafts, messageId);
+        return uid === undefined ? undefined : refOf(drafts, uid);
+      }),
+
     async discardDraft(draft) {
       const drafts = roleFolder('drafts');
       // Only a draft is ever discarded, so a ref to anything else cannot cost a message.

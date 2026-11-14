@@ -1575,6 +1575,39 @@ for (const profile of ['full', 'outlook'] as const satisfies Profile[]) {
       expect(await whereIs('Carried')).toEqual({ delivered: 0, sent: 0, drafts: 0 });
     }, 90_000);
 
+    test('a press a restart cut short once its save was filed finds that draft when asked again, and goes once', async () => {
+      const before = await drafted('Cut short');
+      const press = crypto.randomUUID();
+      const last = { save: draftOf('Cut short, as last written'), replaces: before };
+      await cal.call('cutNextFiling', 'restart');
+      await expect(cal.call('send', last, undefined, 0, press)).rejects.toThrow();
+      const sending = await cal.call<Outgoing>('send', last, undefined, 2_000, press);
+      expect(sending).toMatchObject({ id: press, subject: 'Cut short, as last written' });
+      await cal.until(async () => (await outbox()).length === 0, 60_000);
+      expect(await whereIs('Cut short, as last written')).toEqual({
+        delivered: 1,
+        sent: 1,
+        drafts: 0,
+      });
+      expect(await whereIs('Cut short')).toEqual({ delivered: 0, sent: 0, drafts: 0 });
+    }, 90_000);
+
+    test('a save whose answer was lost answers with the draft it filed, and files no other', async () => {
+      await cal.call('cutNextFiling', 'answer');
+      const saved = await drafted('Unanswered');
+      expect(new TextDecoder().decode((await draftOnServer(saved)).source)).toContain(
+        'About Unanswered.',
+      );
+      expect(await whereIs('Unanswered')).toEqual({ delivered: 0, sent: 0, drafts: 1 });
+
+      // A send carrying its save, whose answer was lost, goes once.
+      const press = crypto.randomUUID();
+      await cal.call('cutNextFiling', 'answer');
+      await cal.call('send', { save: draftOf('Unanswered, sent') }, undefined, 0, press);
+      await cal.until(async () => (await outbox()).length === 0, 60_000);
+      expect(await whereIs('Unanswered, sent')).toEqual({ delivered: 1, sent: 1, drafts: 0 });
+    }, 90_000);
+
     test('an undo while a send’s last save is filed keeps it as a draft, and nothing goes', async () => {
       const press = crypto.randomUUID();
       await cal.call('holdDrafts');

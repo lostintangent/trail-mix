@@ -193,6 +193,17 @@ export class TestMailroom extends Mailroom {
     return Promise.resolve();
   }
 
+  private filingCut: 'restart' | 'answer' | undefined;
+
+  /**
+   * Has the next draft the server files go unheard: the instance ends once it is filed, as a
+   * deploy would, or only the server's answer is lost, as with a connection that drops.
+   */
+  cutNextFiling(how: 'restart' | 'answer'): Promise<void> {
+    this.filingCut = how;
+    return Promise.resolve();
+  }
+
   /** Whether the member has undone a send whose last save is being filed. */
   isUndoing(id: string): Promise<boolean> {
     return Promise.resolve(this.handing.get(id)?.isUndone === true);
@@ -211,7 +222,12 @@ export class TestMailroom extends Mailroom {
           held.saving++;
           await held.release;
         }
-        return provider.saveDraft(raw);
+        const saved = await provider.saveDraft(raw);
+        const cut = this.filingCut;
+        this.filingCut = undefined;
+        if (cut === 'restart') this.ctx.abort('A test restarted the Mailroom mid-save.');
+        if (cut === 'answer') throw new Error('The connection closed before the server answered.');
+        return saved;
       },
       sync: async (path, cursor, window) => {
         const batch = await provider.sync(path, cursor, window);

@@ -107,10 +107,10 @@ const PREVIEW_BYTES = { text: 1024, html: 4096 };
 const WATCH_RETRY_MS = 2000;
 
 /**
- * How many of Sent's newest messages are read when looking for a copy by its Message-ID. A host's
- * search may not yet know a copy it just filed, but the copy is among the newest.
+ * How many of a folder's newest messages are read when looking for one by its Message-ID. A host's
+ * search may not yet know a message just filed, but the message is among the newest.
  */
-const NEWEST_IN_SENT = 50;
+const NEWEST_READ = 50;
 
 /** The IMAP and SMTP provider. Vendors differ only in the account's hosts, sign-in and quirks. */
 export function imapProvider(account: ImapAccount, network: Network = {}): MailProvider {
@@ -377,15 +377,10 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
   /** Whether Sent holds a message with this Message-ID, by search or among its newest. */
   async function inSent(messageId: string) {
     if (!messageId) return false;
-    return inFresh(await folderFor('sent'), async (connection, mailbox) => {
-      if ((await uidOf(connection, messageId)) !== undefined) return true;
-      if (!mailbox.exists) return false;
-      const newest = `${Math.max(1, mailbox.exists - NEWEST_IN_SENT + 1)}:*`;
-      for await (const message of connection.fetch(newest, { envelope: true })) {
-        if (messageIdOf(message.envelope?.messageId) === messageId) return true;
-      }
-      return false;
-    });
+    return inFresh(
+      await folderFor('sent'),
+      async (connection, mailbox) => (await heldUid(connection, mailbox, messageId)) !== undefined,
+    );
   }
 
   const provider: MailProvider = {
@@ -539,11 +534,19 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
           ? refIn(drafts, appended.uidValidity, appended.uid)
           : await inFresh(drafts, async (connection, mailbox) => {
               const messageId = (await PostalMime.parse(message)).messageId;
-              const uid = messageId ? await uidOf(connection, messageId) : undefined;
+              const uid = messageId ? await heldUid(connection, mailbox, messageId) : undefined;
               return uid === undefined ? undefined : refIn(drafts, mailbox.uidValidity, uid);
             });
       if (!filed) throw new Error('The server did not say where it filed the draft');
       return filed;
+    },
+
+    async findDraft(messageId: string) {
+      const drafts = await folderFor('drafts');
+      return inFresh(drafts, async (connection, mailbox) => {
+        const uid = await heldUid(connection, mailbox, messageId);
+        return uid === undefined ? undefined : refIn(drafts, mailbox.uidValidity, uid);
+      });
     },
 
     async discardDraft(draft: MessageRef) {
@@ -932,6 +935,25 @@ async function messageIdsOf(connection: ImapFlow, uids: number[]): Promise<Map<n
 async function uidOf(connection: ImapFlow, messageId: string): Promise<number | undefined> {
   const found = await connection.search({ header: { 'message-id': messageId } }, { uid: true });
   return Array.isArray(found) && found.length ? Math.max(...found) : undefined;
+}
+
+/**
+ * The UID of the message with this Message-ID in the folder selected, found through the host's
+ * search or else among the folder's newest messages, which a search may not yet know.
+ */
+async function heldUid(
+  connection: ImapFlow,
+  mailbox: MailboxObject,
+  messageId: string,
+): Promise<number | undefined> {
+  const found = await uidOf(connection, messageId);
+  if (found !== undefined || !mailbox.exists) return found;
+  const newest = `${Math.max(1, mailbox.exists - NEWEST_READ + 1)}:*`;
+  let held: number | undefined;
+  for await (const message of connection.fetch(newest, { envelope: true, uid: true })) {
+    if (messageIdOf(message.envelope?.messageId) === messageId) held = message.uid;
+  }
+  return held;
 }
 
 /** Ascending UIDs as an IMAP sequence set, with runs collapsed, so a long list stays short. */

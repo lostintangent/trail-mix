@@ -745,7 +745,8 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
    * Send may carry the message's last save in place of a draft, which is filed first, so a device
    * that closes once it has asked still sends. `id` names the press, which the Outbox keeps for a
    * week, so asking again answers as the first ask did: with the send, as it stands or as it went,
-   * or refused once it was undone. A press older than that is refused, since it may have gone.
+   * or refused once it was undone. A press older than that is refused, since it may have gone. A
+   * press a restart cut short may have filed its save, so its second ask looks for that draft first.
    */
   async send(
     draft: MessageRef | LastUpload,
@@ -759,6 +760,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     const ago = input.optional(waited, input.waitedOf) ?? 0;
     const press = input.optional(id, input.sendOf);
     const opened = new Date(arrived - Math.min(ago, UNDO_SECONDS * 1000)).toISOString();
+    let isCutShort = false;
     if (press !== undefined) {
       const handing = this.handing.get(press);
       if (handing) return handing.sent;
@@ -773,11 +775,12 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       if (!known && ago >= PRESS_KEPT_MS) {
         throw new Error('Send was pressed over a week ago, so it wasn’t sent.');
       }
+      isCutShort = known !== undefined;
       this.sending.press(press, new Date(arrived).toISOString());
     }
     if ('save' in sent) {
       if (press === undefined) throw new TypeError('A send that carries its save needs an id.');
-      return this.sendLastSave(sent, when, opened, press);
+      return this.sendLastSave(sent, when, opened, { id: press, isCutShort });
     }
     try {
       if (!this.book.get(sent.account)) throw new Error('There is no such account.');
@@ -828,9 +831,10 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     { save, replaces }: LastUpload,
     when: string | undefined,
     opened: string,
-    id: string,
+    press: Carrying,
   ): Promise<Outgoing> {
-    const filing = this.fileDraft(save, replaces);
+    const { id } = press;
+    const filing = this.fileDraft(save, replaces, press);
     const handing = { closes: closesAfterPress(Date.parse(opened), when), isUndone: false, filing };
     const sent = (async () => {
       const filed = await filing.catch((error: unknown) => {
@@ -860,9 +864,19 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 
   /**
    * Writes a draft as mail and files it in Drafts, in place of the version before it, with what a
-   * send of it needs to know. Everything it refuses, it refuses before the server is asked.
+   * send of it needs to know. Everything it refuses, it refuses before it files anything.
+   *
+   * A save filed twice would leave a stray copy in Drafts, so a save that may have been filed
+   * already finds its copy instead, by a Message-ID Trail Mix made. The save a press carries is
+   * named by its press, and a press a restart cut short looks first, before it reads anything from
+   * the version it replaces, which the replacing may have let go. A save whose filing fails looks
+   * after, since the host may have filed it and lost only the answer.
    */
-  private async fileDraft(draft: DraftUpload, replaces?: MessageRef): Promise<FiledDraft> {
+  private async fileDraft(
+    draft: DraftUpload,
+    replaces?: MessageRef,
+    press?: Carrying,
+  ): Promise<FiledDraft> {
     const checked = input.draftOf(draft);
     const older = replaces === undefined ? undefined : input.refOf(replaces);
     const account = this.book.get(checked.account)?.account;
@@ -870,8 +884,17 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     if (older && older.account !== account.id) {
       throw new TypeError('A draft replaces only a draft of the account it is from.');
     }
+    const domain = account.address.split('@')[1]!;
+    const messageId = press
+      ? await messageIdOfPress(press.id, domain)
+      : `<${crypto.randomUUID()}@${domain}>`;
+    const addressing = { messageId, to: [...checked.to, ...checked.cc], subject: checked.subject };
     if (older && this.sending.holds(older)) {
       throw new Error('That draft is on its way. Undo the send to change it.');
+    }
+    if (press?.isCutShort) {
+      const held = await (await this.provider(account.id)).findDraft(messageId);
+      if (held) return { ...this.filed(held, older), addressing };
     }
     const known = checked.inReplyTo && this.known(checked.inReplyTo);
     if (checked.inReplyTo && !known && !older) {
@@ -891,7 +914,6 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       if (!held) throw new Error('An attachment this draft carried over is gone.');
       attachments.push(held);
     }
-    const messageId = `<${crypto.randomUUID()}@${account.address.split('@')[1]}>`;
     const message = messageOf(
       {
         from: { ...(account.fromName ? { name: account.fromName } : {}), email: account.address },
@@ -906,7 +928,19 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       { date: new Date().toISOString(), messageId, boundary: crypto.randomUUID() },
     );
     const raw = new TextEncoder().encode(writeMime(message));
-    const saved = await (await this.provider(account.id)).saveDraft(raw);
+    const provider = await this.provider(account.id);
+    // A restart before the press is on disk would leave its second ask not knowing to look.
+    if (press) await this.ctx.storage.sync();
+    const saved = await provider.saveDraft(raw).catch(async (error: unknown) => {
+      const held = await provider.findDraft(messageId).catch(() => undefined);
+      if (!held) throw error;
+      return held;
+    });
+    return { ...this.filed(saved, older), raw, addressing };
+  }
+
+  /** Notes a draft filed in place of the version before it, which its server now owes a discard. */
+  private filed(saved: MessageRef, older: MessageRef | undefined) {
     this.drafts.add(refKeyOf(saved));
     const replacing = older && !sameRef(older, saved) ? older : undefined;
     if (replacing) {
@@ -918,16 +952,16 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       this.store.oweBody(replacing);
       this.sending.release(replacing);
     }
-    const addressing = { messageId, to: [...checked.to, ...checked.cc], subject: checked.subject };
-    return { saved, raw, ...(replacing ? { replacing } : {}), addressing };
+    return { saved, ...(replacing ? { replacing } : {}) };
   }
 
   /** Keeps a filed draft's bytes for the composer, and owes the sync that folds it in. */
   private async keepFiled({ saved, raw, replacing }: FiledDraft): Promise<void> {
     // The composer reads the draft back at once, and the server's copy would wait behind the sync
     // this save owes. Once the draft is filed, a failure here costs only that wait, so it never
-    // fails the save, which a retry would file again.
-    await this.env.BODIES.put(this.bodyKey(saved), raw).catch(report);
+    // fails the save, which a retry would file again. A copy found rather than filed was written
+    // by an ask before, so only the server's bytes are its own.
+    if (raw) await this.env.BODIES.put(this.bodyKey(saved), raw).catch(report);
     // A discard owes its folder's sync, so no sync this save asks for finds both versions.
     await this.owe(() => {
       if (replacing?.path !== saved.path) {
@@ -1998,10 +2032,26 @@ type LastUpload = { save: DraftUpload; replaces?: MessageRef };
 /** A draft just filed, with what a send of it names. */
 type FiledDraft = {
   saved: MessageRef;
-  raw: Uint8Array;
+  /** The bytes filed, unless the draft was found, as filed by an ask before. */
+  raw?: Uint8Array;
   replacing?: MessageRef;
   addressing: Pick<Outgoing, 'messageId' | 'to' | 'subject'>;
 };
+
+/** The press of Send a save is carried by, and whether a restart cut its first ask short. */
+type Carrying = { id: string; isCutShort: boolean };
+
+/**
+ * The Message-ID of the save a press carries, made from the press so that asking again names the
+ * same message. A press may be any text, so it is hashed into what a Message-ID can hold.
+ */
+async function messageIdOfPress(press: string, domain: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(press));
+  const hex = [...new Uint8Array(digest).slice(0, 16)]
+    .map((byte) => byte.toString(16).padStart(2, '0'))
+    .join('');
+  return `<${hex}@${domain}>`;
+}
 
 /** A send whose last save is being filed. Undo before its window closes keeps it as a draft. */
 type Handing = {
