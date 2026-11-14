@@ -1,13 +1,13 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useCommands } from '../../commands/index.ts';
-import type { Leaving } from '../core/leaving.ts';
+import { standingOfLeaving, type Leaving } from '../core/leaving.ts';
 import { formatAhead } from '../core/later.ts';
+import { UNDO_SECONDS } from '../core/outbox.ts';
 import { isUndoable, type Standing } from '../core/standing.ts';
 import { isAsked, useAskedVersion } from './asked.ts';
 import { takeBack, undo as undoPress } from './undo.ts';
 import { offerUndo } from './undoable.ts';
-import { useLeavingStanding } from './useLeaving.ts';
 
 /** What a send's line in its conversation says, and the one thing it offers to do. */
 export type LeavingLine = {
@@ -104,3 +104,29 @@ function useTold(standing: Standing, reason: string | undefined): string {
   if (told.key !== key) setTold({ key, text });
   return told.text;
 }
+
+/**
+ * Where a send followed stands, now: its countdown turns over each second on time, and a wait for a
+ * later time ends when its countdown begins. The rest come with the Outbox's snapshots.
+ */
+function useLeavingStanding(leaving: Leaving): Standing {
+  const [now, setNow] = useState(Date.now);
+  const standing = standingOfLeaving(leaving, now);
+  const isWaiting = standing.is === 'scheduled';
+  const isCounting = standing.is === 'counting';
+  useEffect(() => {
+    if (!isWaiting) return;
+    const counts = leaving.closes - UNDO_SECONDS * 1000;
+    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, counts - Date.now()) + 1);
+    return () => clearTimeout(timer);
+  }, [isWaiting, leaving.closes]);
+  useEffect(() => {
+    if (!isCounting) return;
+    const timer = setInterval(() => setNow(Date.now()), TICK_MS);
+    return () => clearInterval(timer);
+  }, [isCounting]);
+  return standing;
+}
+
+/** How often a countdown looks at the clock, so each second turns over on time. */
+const TICK_MS = 250;

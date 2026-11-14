@@ -1,7 +1,8 @@
 import { mailroom } from '../../mailroom/client/index.ts';
 import { toast } from '../../../shared/toasts.tsx';
 import { fromBase64Url, subscriptionOf, type Subscription } from '../core/subscription.ts';
-import { needsOf, type Standing } from './device.ts';
+import type { Standing } from './device.ts';
+import { needsOf } from './needs.ts';
 
 /**
  * Turning this device's notifications on and off, which the first screen goes without. It loads

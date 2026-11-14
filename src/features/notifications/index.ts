@@ -4,7 +4,7 @@ export {
   useNotifications,
   type Notifications,
 } from './ui/useNotifications.ts';
-export { needsOf } from './ui/device.ts';
+export { needsOf } from './ui/needs.ts';
 export {
   clickNotification,
   showPush,

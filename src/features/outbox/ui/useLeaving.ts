@@ -13,8 +13,6 @@ import {
   standingOfLeaving,
   type Leaving,
 } from '../core/leaving.ts';
-import { UNDO_SECONDS } from '../core/outbox.ts';
-import type { Standing } from '../core/standing.ts';
 import { closesFor } from './asked.ts';
 
 /** How often the Outbox is asked again while a send is under way, in case a hint is lost. */
@@ -118,29 +116,3 @@ function useIsUnderWay(all: readonly Leaving[]): boolean {
       ['sending', 'retrying'].includes(standingOfLeaving(leaving, now).is),
   );
 }
-
-/**
- * Where a send followed stands, now: its countdown turns over each second on time, and a wait for a
- * later time ends when its countdown begins. The rest come with the Outbox's snapshots.
- */
-export function useLeavingStanding(leaving: Leaving): Standing {
-  const [now, setNow] = useState(Date.now);
-  const standing = standingOfLeaving(leaving, now);
-  const isWaiting = standing.is === 'scheduled';
-  const isCounting = standing.is === 'counting';
-  useEffect(() => {
-    if (!isWaiting) return;
-    const counts = leaving.closes - UNDO_SECONDS * 1000;
-    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, counts - Date.now()) + 1);
-    return () => clearTimeout(timer);
-  }, [isWaiting, leaving.closes]);
-  useEffect(() => {
-    if (!isCounting) return;
-    const timer = setInterval(() => setNow(Date.now()), TICK_MS);
-    return () => clearInterval(timer);
-  }, [isCounting]);
-  return standing;
-}
-
-/** How often a countdown looks at the clock, so each second turns over on time. */
-const TICK_MS = 250;

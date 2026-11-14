@@ -56,12 +56,3 @@ export const isOwn = (folder: Folder, folders: readonly Folder[]) =>
   [folder, ...inside(folder, folders)].every(
     ({ role, path }) => role === undefined && path.toUpperCase() !== 'INBOX',
   );
-
-/** What deleting a folder takes with it: the folders inside it, and the messages in them all. */
-export function whatGoes(folder: Folder, folders: readonly Folder[]) {
-  const within = inside(folder, folders);
-  return {
-    folders: within.length,
-    messages: [folder, ...within].reduce((sum, { total }) => sum + total, 0),
-  };
-}

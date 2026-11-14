@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { Folder, FolderRole } from '../../mail/core/index.ts';
-import { childPath, inside, isOwn, placeOf, renamedPath, whatGoes } from './names.ts';
+import { childPath, inside, isOwn, placeOf, renamedPath } from './names.ts';
+import { whatGoes } from './question.ts';
 import { createProblem, deleteProblem, nameProblem, renameProblem } from './problems.ts';
 
 const folder = (path: string, extra: Partial<Folder> = {}): Folder => {

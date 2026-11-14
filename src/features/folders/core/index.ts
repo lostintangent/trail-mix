@@ -6,9 +6,8 @@ export {
   isOwn,
   placeOf,
   renamedPath,
-  whatGoes,
   type Place,
 } from './names.ts';
 export { createProblem, deleteProblem, nameProblem, renameProblem } from './problems.ts';
 export { changed, followed, isShown, standing, type FolderChange } from './changes.ts';
-export { deleteSaid } from './question.ts';
+export { deleteSaid, whatGoes } from './question.ts';

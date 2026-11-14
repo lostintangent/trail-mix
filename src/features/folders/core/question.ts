@@ -1,8 +1,17 @@
 import type { Folder } from '../../mail/core/index.ts';
-import { whatGoes } from './names.ts';
+import { inside } from './names.ts';
 
 const counted = (count: number, one: string, many: string) =>
   `${count} ${count === 1 ? one : many}`;
+
+/** What deleting a folder takes with it: the folders inside it, and the messages in them all. */
+export function whatGoes(folder: Folder, folders: readonly Folder[]) {
+  const within = inside(folder, folders);
+  return {
+    folders: within.length,
+    messages: [folder, ...within].reduce((sum, { total }) => sum + total, 0),
+  };
+}
 
 /** What the question before a delete says goes with a folder, which can't be brought back. */
 export function deleteSaid(folder: Folder, folders: readonly Folder[]): string {
