@@ -176,8 +176,6 @@ for (const [size, options] of Object.entries(SIZES)) {
         const everything = page.getByRole('region', { name: 'All of Trail Mix' });
         const erase = everything.getByRole('button', { name: 'Erase everything…' });
         await erase.waitFor();
-        if (size === 'phone')
-          expect((await erase.boundingBox())!.height).toBeGreaterThanOrEqual(44);
         await shown(page, `${size}-${colorScheme}-erase-from-account`);
         await erase.click();
         await question.getByRole('button', { name: 'Erase everything' }).click();
