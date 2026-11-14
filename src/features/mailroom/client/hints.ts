@@ -10,10 +10,11 @@ import { isStale, type Key } from './queries.ts';
  * time it opens everything refetches. A new Mailroom, as a demo visitor's first query makes, can
  * fill before the socket that page opened reaches it.
  *
- * A refetch starts at once for a hint, and hints that follow within `SETTLE_MS` wait to refetch
- * together. A refetch that a new one replaces is dropped, so during a burst of hints, as a first
- * sync sends, refetching for each would leave the lists on their first, empty snapshot until the
- * burst ends.
+ * A refetch waits `GATHER_MS` after a hint for the others its change sends, as a conversation in
+ * two folders sends one for each, so they refetch together rather than buying a second round.
+ * Hints that follow within `SETTLE_MS` of a refetch wait to refetch together after it. A refetch
+ * that a new one replaces is dropped, so during a burst of hints, as a first sync sends, refetching
+ * for each would leave the lists on their first, empty snapshot until the burst ends.
  */
 export function useHints(): void {
   const queryClient = useQueryClient();
@@ -80,7 +81,7 @@ export function listen(queryClient: QueryClient): () => void {
   const heard = (hint: Hint) => {
     waiting.push(hint);
     if (refetching) return;
-    refetching = setTimeout(refetch, Math.max(0, refetchedAt + SETTLE_MS - Date.now()));
+    refetching = setTimeout(refetch, Math.max(GATHER_MS, refetchedAt + SETTLE_MS - Date.now()));
   };
 
   const connect = () => {
@@ -131,6 +132,9 @@ function readHint(data: unknown): Hint | undefined {
     return undefined;
   }
 }
+
+/** How long a hint waits for the others its change sends, before they refetch together. */
+const GATHER_MS = 50;
 
 /** How long a refetch for hints is left to finish before hints after it start another. */
 export const SETTLE_MS = 250;

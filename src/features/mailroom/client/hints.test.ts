@@ -98,6 +98,36 @@ test('a burst of hints, as a first sync sends, can’t keep the list from refres
   stop();
 });
 
+test('the hints one change sends refetch what they name once, together', async () => {
+  const queryClient = new QueryClient();
+  // The list and the counts on screen, each counting how often it is asked.
+  const asked = { list: 0, folders: 0 };
+  const observers = [
+    new QueryObserver(queryClient, {
+      queryKey: keys.conversations({ in: 'inbox' }),
+      queryFn: () => ++asked.list,
+    }),
+    new QueryObserver(queryClient, { queryKey: keys.folders, queryFn: () => ++asked.folders }),
+  ];
+  const unsubscribe = observers.map((observer) => observer.subscribe(() => {}));
+  const stop = listen(queryClient);
+  const [socket] = Socket.made.slice(-1);
+  socket!.open();
+  await Bun.sleep(10);
+  const before = { ...asked };
+  // A conversation read in a folder it shares with Sent, then the counts the server lists after.
+  const send = (hint: object) => socket!.onmessage?.({ data: JSON.stringify(hint) });
+  send({ changed: 'conversations', folder: { account: 'personal', path: 'INBOX' } });
+  await Bun.sleep(2);
+  send({ changed: 'conversations', folder: { account: 'personal', path: 'Sent' } });
+  await Bun.sleep(10);
+  send({ changed: 'folders', account: 'personal' });
+  await Bun.sleep(SETTLE_MS * 2);
+  expect(asked).toEqual({ list: before.list + 1, folders: before.folders + 1 });
+  for (const done of unsubscribe) done();
+  stop();
+});
+
 test('a page catches up once its socket has opened and what it held is asked again', async () => {
   const queryClient = new QueryClient();
   const { promise: answered, resolve: answer } = Promise.withResolvers<number>();

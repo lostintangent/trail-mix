@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { BundleId, ConversationId, Folder, ListItem, View } from '../../mail/core/index.ts';
 import { overlaid, rowChange, type Action } from '../core/triage.ts';
 import { afterFirstScreen } from '../../../shared/afterFirstScreen.ts';
@@ -64,9 +64,16 @@ export function useTriage(
   );
   // What carries a triage out loads once the first screen has settled, ready before the first one.
   useEffect(() => afterFirstScreen(() => void loadCarrying()), []);
+  // Read as a triage starts, so `triage` stays the same function as counts change, and every row
+  // it's handed to doesn't draw again for a folder's count.
+  const latestFolders = useRef(folders);
+  useLayoutEffect(() => {
+    latestFolders.current = folders;
+  });
 
   const triage = useCallback<Triage>(
     (action, ids, { quietly = false, onRefused, in: bundle } = {}) => {
+      const folders = latestFolders.current;
       const overlays = overlaysOf(queryClient);
       const list: ListOf = bundle ?? view;
       const fetched = fetchedRows(queryClient, list, ids);
@@ -104,7 +111,7 @@ export function useTriage(
         }
       })();
     },
-    [queryClient, view, folders, undoKey],
+    [queryClient, view, undoKey],
   );
   return { triage, undoLast, canUndo };
 }
