@@ -13,8 +13,8 @@ import {
   type MemoryIndex,
   type SyncEvent,
 } from '../../mail/core/index.ts';
-import type { Page } from '../client/contract.ts';
-import { envelopeIndex, type EnvelopeIndex } from './envelope-index.ts';
+import type { Page, PageAt } from '../client/contract.ts';
+import { envelopeIndex, pageAfter, type EnvelopeIndex } from './envelope-index.ts';
 import { RESUMMARIZE, upgrade, type Sql, type SqlValue } from './schema.ts';
 import { testSql } from './test-sql.ts';
 
@@ -105,6 +105,25 @@ function heldAsOf(version: number, from: Sql): Sql {
 /** A list's conversations, of a list that holds no bundle. */
 const conversationsIn = ({ items }: Page) =>
   items.filter((item): item is ConversationSummary => !isBundle(item));
+
+/**
+ * Checks that a list asked around each of its rows gives the page of `size` holding it, as asked at
+ * that page's place, and its first page around a row it doesn't hold.
+ */
+function expectPagesAround(
+  pageOf: (at: PageAt, size: number) => Page,
+  size: number,
+  elsewhere: string,
+) {
+  const rows = pageOf(0, 1000).items;
+  expect(rows.length).toBeGreaterThan(size);
+  rows.forEach((row, place) => {
+    const page = pageOf({ around: row.id }, size);
+    expect(page).toEqual(pageOf(place - (place % size), size));
+    expect(page.items[place % size]?.id).toBe(row.id);
+  });
+  expect(pageOf({ around: elsewhere }, size)).toEqual(pageOf(0, size));
+}
 
 /** A seeded run of arrivals, flag changes, removals and resets over threads that share ids. */
 function story(seed: number): SyncEvent[] {
@@ -482,6 +501,36 @@ describe('a list', () => {
     expect(seen).toEqual([...seen].sort().reverse());
   });
 
+  test('asked around a row, gives the page holding it, however the dates tie', () => {
+    const store = fresh();
+    const dates = ['2026-11-01', '2026-11-02', '2026-11-02', '2026-11-03', '2026-11-02'];
+    const date = (i: number) => `${dates[i % 5]}T08:00:00.000Z`;
+    store.fold(
+      arrive(
+        ...Array.from({ length: 23 }, (_, i) =>
+          envelope(`page-${i}`, { date: date(i), flags: { ...FLAGS, flagged: i % 2 === 0 } }),
+        ),
+        ...Array.from({ length: 12 }, (_, i) =>
+          envelope(`draft-${i}`, {
+            path: 'Drafts',
+            date: date(i),
+            flags: { ...FLAGS, seen: true, draft: true },
+          }),
+        ),
+      ),
+    );
+    const draft = store.page({ in: 'drafts' }).items[0]!.id;
+    const inbox = store.page({ in: 'inbox' }).items[0]!.id;
+    for (const view of [
+      { in: 'inbox' },
+      { in: 'folder', folder: INBOX },
+      { in: 'flagged' },
+    ] as const) {
+      expectPagesAround((at, size) => store.page(view, at, size), 5, draft);
+    }
+    expectPagesAround((at, size) => store.page({ in: 'drafts' }, at, size), 5, inbox);
+  });
+
   test('of a folder holds the conversations with a message there; the unified ones go by role', () => {
     const store = fresh();
     const project = envelope('project', { path: 'Projects' });
@@ -733,6 +782,58 @@ describe('a GitHub bundle', () => {
       expect(shown(store.page(view).items)).toEqual(['o/r ×2', 'lunch']);
       const kept = store.page(view, 0, 50, bundleIdOf('personal', 'o/s'));
       expect([shown(kept.items), kept.total]).toEqual([['o/r ×2', 'lunch', 'o/s ×1'], 3]);
+    }
+  });
+
+  test('asked around a row, a conversation or a bundle, gives the page holding it', () => {
+    const store = fresh();
+    const dates = ['2026-11-01', '2026-11-02', '2026-11-02', '2026-11-03', '2026-11-02'];
+    const date = (i: number) => `${dates[i % 5]}T08:00:00.000Z`;
+    store.fold(
+      arrive(
+        ...Array.from({ length: 17 }, (_, i) => envelope(`page-${i}`, { date: date(i) })),
+        ...Array.from({ length: 6 }, (_, i) =>
+          notification(`o/r${i}`, i + 1, { date: date(i + 2) }),
+        ),
+        ...Array.from({ length: 7 }, (_, i) => notification('o/many', i + 1, { date: date(i) })),
+      ),
+    );
+    const many = bundleIdOf('personal', 'o/many');
+    const [thread] = store.bundle(bundleIdOf('personal', 'o/r0')).items;
+    // An Inbox lists a bundled thread only inside its bundle.
+    for (const view of [{ in: 'inbox' }, { in: 'folder', folder: INBOX }] as const) {
+      expectPagesAround((at, size) => store.page(view, at, size), 5, thread!.id);
+    }
+    expectPagesAround((at, size) => store.bundle(many, at, size), 3, thread!.id);
+  });
+
+  test('asked around an unread row, or the read one kept open, gives the page holding it', () => {
+    const store = fresh();
+    const dates = ['2026-11-01', '2026-11-02', '2026-11-02', '2026-11-03', '2026-11-02'];
+    const date = (i: number) => `${dates[i % 5]}T08:00:00.000Z`;
+    store.fold(
+      arrive(
+        ...Array.from({ length: 17 }, (_, i) =>
+          envelope(`page-${i}`, { date: date(i), flags: { ...FLAGS, seen: i % 3 === 0 } }),
+        ),
+        ...Array.from({ length: 6 }, (_, i) =>
+          notification(`o/r${i}`, i + 1, {
+            date: date(i + 2),
+            flags: { ...FLAGS, seen: i % 2 === 0 },
+          }),
+        ),
+      ),
+    );
+    const idOf = (subject: string) =>
+      store
+        .page({ in: 'inbox' }, 0, 50)
+        .items.find((item) => !isBundle(item) && item.subject === subject)!.id;
+    const [kept, other] = [idOf('page-0'), idOf('page-3')];
+    for (const view of [
+      { in: 'inbox', unread: true },
+      { in: 'folder', folder: INBOX, unread: true },
+    ] as const) {
+      expectPagesAround((at, size) => store.page(view, at, size, kept), 5, other);
     }
   });
 
@@ -1013,6 +1114,25 @@ describe('search', () => {
       'Kiwi 3',
       'Kiwi 1',
     ]);
+  });
+
+  test('asked around a match, gives the page holding it among those it lists', () => {
+    const store = fresh();
+    const day = (n: number) => new Date(Date.UTC(2026, 10, n, 8)).toISOString();
+    store.fold(
+      arrive(
+        ...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => envelope(`Kiwi ${n}`, { date: day(n) })),
+        envelope('Plum tart', { date: day(9) }),
+      ),
+    );
+    const plum = store.search('plum').items[0]!.id;
+    expectPagesAround((at, size) => store.search('kiwi', at, size), 3, plum);
+    // A full-text search's rows, which the servers found, page alike.
+    const found = store.search('kiwi').items;
+    expectPagesAround((at, size) => pageAfter(found, at, size), 3, plum);
+    // A match past the limit isn't listed, so the page is the first.
+    const oldest = found.at(-1)!.id;
+    expect(store.search('kiwi', { around: oldest }, 2, 4)).toEqual(store.search('kiwi', 0, 2, 4));
   });
 
   test('a search lists only its newest conversations up to its limit, and counts no further', () => {

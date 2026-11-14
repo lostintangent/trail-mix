@@ -8,6 +8,7 @@ export type {
   LastSave,
   Mailroom,
   Page,
+  PageAt,
   Queries,
   SignIn,
   SignInPreset,

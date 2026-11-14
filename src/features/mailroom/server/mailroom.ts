@@ -85,6 +85,7 @@ import {
   type DraftUpload,
   type Mailroom as Contract,
   type Page,
+  type PageAt,
   type QueryName,
   type SignIn,
   type SignInPreset,
@@ -385,27 +386,28 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     return Promise.resolve(this.store.folders());
   }
 
-  async conversations(view: View, at?: number, keep?: ConversationId): Promise<Page> {
+  async conversations(view: View, at?: PageAt, keep?: ConversationId): Promise<Page> {
     const checked = input.viewOf(view);
-    const place = input.placeOf(at);
+    const asked = input.pageAtOf(at);
     if (checked.in === 'outbox') throw new TypeError('The Outbox is listed by outbox().');
     if (checked.in !== 'search') {
-      return this.named(this.store.page(checked, place, undefined, input.keptOf(keep)));
+      return this.named(this.store.page(checked, asked, undefined, input.keptOf(keep)));
     }
-    if (!checked.fullText) return this.named(this.store.search(checked.text, place));
-    // The first page asks the servers again. Pages further down read what that one found.
-    if (place === 0 || this.found?.text !== checked.text) {
+    if (!checked.fullText) return this.named(this.store.search(checked.text, asked));
+    // The first page asks the servers again. Pages further down, and a page around a result, read
+    // what that one found.
+    if (asked === 0 || this.found?.text !== checked.text) {
       this.found = await this.searchServers(checked.text);
     }
-    return this.named(pageAfter(this.found.rows, place));
+    return this.named(pageAfter(this.found.rows, asked));
   }
 
   people(typed: string): Promise<Address[]> {
     return Promise.resolve(this.store.people(input.typedOf(typed)));
   }
 
-  bundle(id: BundleId, at?: number): Promise<BundlePage> {
-    const page = this.store.bundle(input.bundleOf(id), input.placeOf(at));
+  bundle(id: BundleId, at?: PageAt): Promise<BundlePage> {
+    const page = this.store.bundle(input.bundleOf(id), input.pageAtOf(at));
     const pictures = this.pictures(
       avatarCandidates([...page.items, ...(page.bundle ? [page.bundle] : [])]),
     );

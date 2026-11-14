@@ -36,11 +36,13 @@ export interface Queries {
    * A stretch of a view's list from its place `at`, with 0 the newest, and how long the list is,
    * so any stretch of it can be asked for. A search's list holds the conversations that match. A
    * view of unread mail holds its unread rows, and the conversation or bundle `keep` names, which
-   * the member has open, whether or not it is read.
+   * the member has open, whether or not it is read. Asked `around` a row, it is the page holding
+   * that row, at a multiple of `PAGE_SIZE`, so the row's place is the page's `at` plus its index. A
+   * list that doesn't hold the row gives its first.
    */
-  conversations(view: View, at?: number, keep?: ConversationId): Promise<Page>;
+  conversations(view: View, at?: PageAt, keep?: ConversationId): Promise<Page>;
   /** A stretch of a bundle's conversations, as `conversations` gives a view's. */
-  bundle(id: BundleId, at?: number): Promise<BundlePage>;
+  bundle(id: BundleId, at?: PageAt): Promise<BundlePage>;
   conversation(id: ConversationId): Promise<Message[]>;
   body(ref: MessageRef): Promise<Body>;
   outbox(): Promise<Outgoing[]>;
@@ -159,6 +161,9 @@ export type Unsubscribed = { taken: true } | { taken: false; reason: string };
  * many rows the whole list holds. A row is a conversation, or in an Inbox view, a bundle.
  */
 export type Page<Item extends ListItem = ListItem> = { items: Item[]; at: number; total: number };
+
+/** Where a page of a list starts: at a place, with 0 the newest, or around a row the list holds. */
+export type PageAt = number | { around: ListItem['id'] };
 
 /**
  * A bundle's messages as its row showed them: those dated no later than its row's date, so mail

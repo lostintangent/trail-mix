@@ -7,6 +7,7 @@ import {
   keptOf,
   messagesOf,
   optional,
+  pageAtOf,
   refOf,
   setupOf,
   signInOf,
@@ -73,6 +74,23 @@ test('an argument left out before a later one arrives as null, and reads as left
   expect(optional(4000, waitedOf)).toBe(4000);
   for (const wait of [-1, Number.NaN, Number.POSITIVE_INFINITY, '4000']) {
     expect(() => optional(wait, waitedOf)).toThrow(TypeError);
+  }
+});
+
+test('a page starts at a place, or around a row named by its id and nothing else', () => {
+  expect(pageAtOf(null)).toBe(0);
+  expect(pageAtOf(50)).toBe(50);
+  expect(pageAtOf({ around: 'c1', member: 'eve@example.com' })).toEqual({ around: 'c1' });
+  for (const at of [
+    -1,
+    1.5,
+    '50',
+    [],
+    { around: 5 },
+    { around: '' },
+    { around: 'c'.repeat(1001) },
+  ]) {
+    expect(() => pageAtOf(at)).toThrow(TypeError);
   }
 });
 

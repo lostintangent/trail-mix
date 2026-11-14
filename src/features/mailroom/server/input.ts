@@ -17,6 +17,7 @@ import type {
   BundleScope,
   DraftUpload,
   FileBytes,
+  PageAt,
   SignInSetup,
 } from '../client/contract.ts';
 import { STAMPS } from './accounts.ts';
@@ -93,13 +94,18 @@ export function viewOf(value: unknown): View {
 /** Whether a view shows only its unread conversations, as nothing does unless it says so. */
 const unreadOf = (value: unknown) => (value === true ? ({ unread: true } as const) : {});
 
-/** A place in a list, with 0 the newest, or the start of the list when there is none. */
-export function placeOf(value: unknown): number {
+/**
+ * Where a page of a list starts: at a place, with 0 the newest, or the start of the list when there
+ * is none, or around a row, a conversation or a bundle, named by its id.
+ */
+export function pageAtOf(value: unknown): PageAt {
   if (value === undefined || value === null) return 0;
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
-    throw new TypeError('That isn’t a place in a list.');
+  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return value;
+  const { around } = record(value, 'a place in a list');
+  if (typeof around !== 'string' || !around || around.length > 1000) {
+    throw new TypeError('That isn’t a row of a list.');
   }
-  return value;
+  return { around };
 }
 
 export function conversationOf(value: unknown): ConversationId {

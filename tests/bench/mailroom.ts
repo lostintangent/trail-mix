@@ -111,6 +111,21 @@ export const mailroom: BenchArea = {
           reads.unreadLast.time,
           BUDGET.pageAnywhere,
         ),
+        measured(
+          `A page around the unified Inbox's deepest row, p95`,
+          reads.inboxLast.around,
+          BUDGET.pageAnywhere,
+        ),
+        measured(
+          `A page around the Inbox folder's deepest row, p95`,
+          reads.folderLast.around,
+          BUDGET.pageAnywhere,
+        ),
+        measured(
+          `A page around the unified Inbox's deepest unread row, p95`,
+          reads.unreadLast.around,
+          BUDGET.pageAnywhere,
+        ),
         measured('A 50-message conversation, p95', reads.conversation, BUDGET.conversation),
         measured('Search as it is typed, p95', reads.search, BUDGET.search),
         measured('An address completion as it is typed, p95', reads.people, BUDGET.people),
@@ -202,12 +217,24 @@ async function readTimes(url: string) {
   }
   const page = await call<number[]>(url, 'timed', 'conversations', [INBOX], READS);
   // A page anywhere reads as quickly as the first, even the last, which passes over the most rows,
-  // in a unified view and in a folder, whose placements it joins to its conversations.
+  // in a unified view and in a folder, whose placements it joins to its conversations. So does one
+  // asked around the list's deepest row, as a reload naming it asks, which counts every row above.
   const lastPage = async (view: View, keep?: string) => {
-    const { total } = await call<Page>(url, 'conversations', view);
+    const { total } = await call<Page>(url, 'conversations', view, 0, keep);
     const at = Math.max(0, Math.floor((total - 1) / PAGE_SIZE) * PAGE_SIZE);
+    const deepest = (await call<Page>(url, 'conversations', view, at, keep)).items.at(-1)!;
+    const around = { around: deepest.id };
+    const found = await call<Page>(url, 'conversations', view, around, keep);
+    if (found.at !== at) throw new Error(`The deepest row was found at ${found.at}, not ${at}.`);
     const times = await call<number[]>(url, 'timed', 'conversations', [view, at, keep], READS);
-    return { at, time: percentile(times, 0.95) };
+    const aroundTimes = await call<number[]>(
+      url,
+      'timed',
+      'conversations',
+      [view, around, keep],
+      READS,
+    );
+    return { at, time: percentile(times, 0.95), around: percentile(aroundTimes, 0.95) };
   };
   const [account] = await call<Account[]>(url, 'accounts');
   const inboxLast = await lastPage(INBOX);
