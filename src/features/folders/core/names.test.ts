@@ -1,21 +1,9 @@
 import { expect, test } from 'bun:test';
-import type { Folder, FolderRole } from '../../mail/core/index.ts';
+import type { FolderRole } from '../../mail/core/index.ts';
 import { childPath, inside, isOwn, nestingOf, renamedPath } from './names.ts';
 import { createProblem, deleteProblem, nameProblem, renameProblem } from './problems.ts';
+import { folder } from '../../../../tests/folders.ts';
 
-const folder = (path: string, extra: Partial<Folder> = {}): Folder => {
-  const at = path.lastIndexOf('/');
-  return {
-    account: 'personal',
-    path,
-    name: path.slice(at + 1),
-    ...(at >= 0 ? { parent: path.slice(0, at) } : {}),
-    delimiter: '/',
-    unread: 0,
-    total: 0,
-    ...extra,
-  };
-};
 const role = (path: string, role: FolderRole, total = 0) => folder(path, { role, total });
 
 const inbox = role('INBOX', 'inbox', 12);

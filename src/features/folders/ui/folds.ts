@@ -30,7 +30,7 @@ export function readFolds(storage: Pick<Storage, 'getItem'>): ReadonlySet<string
 }
 
 /** The folded keys with `key` folded if it wasn't, and unfolded if it was. */
-export function toggleFold(folds: ReadonlySet<string>, key: string): ReadonlySet<string> {
+function toggleFold(folds: ReadonlySet<string>, key: string): ReadonlySet<string> {
   const next = new Set(folds);
   if (!next.delete(key)) next.add(key);
   return next;

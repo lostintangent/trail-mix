@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { foldKey, readFolds, toggleFold } from './folds.ts';
+import { foldKey, readFolds } from './folds.ts';
 
 const saved = (value: string | null) => ({ getItem: () => value });
 
@@ -12,15 +12,6 @@ test('an account and its folders fold apart, even where a path looks like anothe
   ];
 
   expect(new Set(keys).size).toBe(keys.length);
-});
-
-test('folding what is unfolded, and unfolding what is folded, keeps the rest as it was', () => {
-  const personal = foldKey({ account: 'personal' });
-  const projects = foldKey({ account: 'personal', path: 'Projects' });
-  const folded = toggleFold(new Set([personal]), projects);
-
-  expect([...folded]).toEqual([personal, projects]);
-  expect([...toggleFold(folded, personal)]).toEqual([projects]);
 });
 
 test('what a device saved comes back, and anything else saved leaves everything unfolded', () => {

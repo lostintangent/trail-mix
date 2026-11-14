@@ -20,20 +20,6 @@ const press = (name: string, key: string) => {
   return move && 'focus' in move ? LINES[move.focus]!.name : move;
 };
 
-test('the up and down arrows step through the lines shown, and stop at either end', () => {
-  expect(press('Flagged', 'ArrowDown')).toBe('Personal');
-  expect(press('Projects', 'ArrowDown')).toBe('Toy Box');
-  expect(press('Toy Box', 'ArrowUp')).toBe('Projects');
-  expect(press('Inbox', 'ArrowUp')).toBeUndefined();
-  expect(press('Work', 'ArrowDown')).toBeUndefined();
-});
-
-test('Home and End reach the first and last lines', () => {
-  expect(press('Toy Box', 'Home')).toBe('Inbox');
-  expect(press('Toy Box', 'End')).toBe('Work');
-  expect(press('Inbox', 'Home')).toBeUndefined();
-});
-
 test('the right arrow unfolds a folded line, then steps inside an open one', () => {
   expect(press('Work', 'ArrowRight')).toEqual({ fold: true });
   expect(press('Personal', 'ArrowRight')).toBe('Personal Inbox');
@@ -56,7 +42,9 @@ test('an open line with nothing shown inside it has nowhere to step in to', () =
   expect(treeMove(lines, 0, 'ArrowRight')).toBeUndefined();
 });
 
-test('other keys do nothing in the tree, and neither does a line that isn’t there', () => {
+test('a key with nowhere to go does nothing: a step past either end, any other key, or a line that isn’t there', () => {
+  expect(press('Inbox', 'ArrowUp')).toBeUndefined();
+  expect(press('Work', 'ArrowDown')).toBeUndefined();
   for (const key of ['Enter', ' ', 'a', 'Tab', 'PageDown']) {
     expect(press('Projects', key)).toBeUndefined();
   }

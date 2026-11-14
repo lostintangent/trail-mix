@@ -2,20 +2,8 @@ import { expect, test } from 'bun:test';
 import type { Folder, View } from '../../mail/core/index.ts';
 import { changed, followed, isShown, standing, type FolderChange } from './changes.ts';
 import { deleteSaid } from './question.ts';
+import { folder } from '../../../../tests/folders.ts';
 
-const folder = (path: string, extra: Partial<Folder> = {}): Folder => {
-  const at = path.lastIndexOf('/');
-  return {
-    account: 'personal',
-    path,
-    name: path.slice(at + 1),
-    ...(at >= 0 ? { parent: path.slice(0, at) } : {}),
-    delimiter: '/',
-    unread: 0,
-    total: 0,
-    ...extra,
-  };
-};
 const trips = folder('Trips', { total: 3 });
 const japan = folder('Trips/Japan', { total: 1 });
 const kyoto = folder('Trips/Japan/Kyoto', { total: 5 });

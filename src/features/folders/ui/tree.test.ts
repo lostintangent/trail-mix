@@ -10,19 +10,7 @@ import {
   type FolderNode,
   type TreeState,
 } from './tree.ts';
-
-const folder = (path: string, extra: Partial<Folder> = {}): Folder => {
-  const slash = path.lastIndexOf('/');
-  return {
-    account: 'personal',
-    path,
-    name: path.slice(slash + 1),
-    ...(slash > 0 && { parent: path.slice(0, slash) }),
-    unread: 0,
-    total: 0,
-    ...extra,
-  };
-};
+import { folder } from '../../../../tests/folders.ts';
 
 /** The tree as the sidebar reads it, one line per folder, indented by depth. */
 const outline = (nodes: FolderNode[], depth = 0): string[] =>
