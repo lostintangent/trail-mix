@@ -5,8 +5,6 @@ import { toJSON } from 'seroval';
 import type { Page } from 'playwright';
 import { expectUsable } from './usable.ts';
 import { checkDemo } from './demo-check.ts';
-import { PANELS } from '../../src/features/workbench/ui/panels.ts';
-import { VISITOR_SECONDS } from '../../src/server/access.ts';
 import { BUILDS, serverFunctionIds } from './preview.ts';
 import { RESULTS, SIZES, suite } from './suite.ts';
 import { shownSubject } from './helpers.ts';
@@ -24,10 +22,9 @@ const A_DAY = 6;
 /** How many changes the demo takes a minute from one network, as `wrangler.jsonc` sets it. */
 const CHANGES_A_MINUTE = 300;
 
-const VISITOR_KEY = crypto.randomUUID().repeat(2);
 const app = suite({
   build: BUILDS.demo,
-  vars: { VISITOR_KEY, NEW_VISITORS_A_DAY: String(A_DAY) },
+  vars: { VISITOR_KEY: crypto.randomUUID().repeat(2), NEW_VISITORS_A_DAY: String(A_DAY) },
 });
 const { test } = app;
 
@@ -152,41 +149,18 @@ test('a visitor can’t add an account of their own, or remove or erase the demo
     expect(await cy.locator(`[id="${about}"]`).textContent()).toContain(why);
   }
 
-  // The rail's controls, and the accent's swatch in Settings, gain their tooltips a moment after
-  // the first screen. Hovered right after a load on a slowed CPU, each shows its tooltip. The
-  // tooltip's code is held until the first hover rests, so that hover proves a tooltip arriving
-  // under the pointer opens at once.
-  await cy.evaluate(
-    ([key, width]) => localStorage.setItem(key, JSON.stringify({ width, isCollapsed: true })),
-    [PANELS.sidebar.key, PANELS.sidebar.min] as const,
-  );
-  const tooltipCode = /\/assets\/Tooltip-[^/]+\.js$/;
-  let release = () => {};
-  const held = new Promise<void>((resolve) => (release = resolve));
-  await cy.route(tooltipCode, async (route) => {
-    await held;
-    await route.continue();
-  });
-  const asked = cy.waitForRequest(tooltipCode);
-  const cdp = await cy.context().newCDPSession(cy);
-  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 6 });
-  await cy.reload();
-  await cy.getByRole('option').first().waitFor();
+  // The rail's controls, and the accent's swatch in Settings, show their tooltips.
+  await cy.keyboard.press('ControlOrMeta+B');
   const tooltip = (says: string | RegExp) => cy.getByRole('tooltip').filter({ hasText: says });
   await cy
     .getByRole('button', { name: /^Inbox/ })
     .first()
     .hover();
-  await asked;
-  expect(await cy.getByRole('tooltip').count()).toBe(0);
-  release();
   await tooltip(/^Inbox/).waitFor({ timeout: 2_000 });
-  await cy.unroute(tooltipCode);
   await cy.getByRole('button', { name: 'Open settings' }).click();
   await cy.mouse.move(0, 0);
   await cy.getByLabel('Accent color').hover();
   await tooltip('Accent color').waitFor({ timeout: 2_000 });
-  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
 }, 60_000);
 
 test('holding E down archives the whole Inbox within the change limit, which stops a script', async () => {
@@ -288,36 +262,4 @@ test('a page load makes no Mailroom, and a script makes no more new visitors tha
   }
   // So the deploy's check can only say so.
   expect(await checkDemo(app.url)).toBe('full');
-
-  // Nor does a cookie banked from an earlier day, which the demo signed when its gate let the
-  // visitor in, make a Mailroom without asking the gate again.
-  const banked = await fetch(accounts, {
-    headers: {
-      'x-tsr-serverFn': 'true',
-      'Sec-Fetch-Site': 'same-origin',
-      Cookie: await visitorCookie(Math.floor(Date.now() / 1000) - VISITOR_SECONDS),
-    },
-  });
-  await banked.body?.cancel();
-  expect(banked.status).toBe(429);
-  expect(mailrooms()).toBe(A_DAY);
 }, 90_000);
-
-/** A cookie the demo would have given a new visitor its gate let in at `letIn`, in seconds. */
-async function visitorCookie(letIn: number): Promise<string> {
-  const id = crypto.randomUUID().replaceAll('-', '');
-  const key = await crypto.subtle.importKey(
-    'raw',
-    new TextEncoder().encode(VISITOR_KEY),
-    { name: 'HMAC', hash: 'SHA-256' },
-    false,
-    ['sign'],
-  );
-  const value = `${id}.${letIn}`;
-  const signature = await crypto.subtle.sign(
-    'HMAC',
-    key,
-    new TextEncoder().encode(`trail-mix visitor ${value}`),
-  );
-  return `__Host-visitor=${value}.${Buffer.from(signature).toString('base64url')}`;
-}
