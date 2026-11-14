@@ -24,21 +24,18 @@ export type Command = CommandLike & {
 };
 
 /** The icons a command only menus draw may name, which the menus bring with them. */
-export const MENU_ICON_NAMES = [
-  'code',
-  'eraser',
-  'folderPen',
-  'folderPlus',
-  'folderX',
-  'keyboard',
-  'logIn',
-  'mailMinus',
-  'rotateCw',
-  'settings',
-  'undo',
-] as const;
-
-export type MenuIconName = (typeof MENU_ICON_NAMES)[number];
+export type MenuIconName =
+  | 'code'
+  | 'eraser'
+  | 'folderPen'
+  | 'folderPlus'
+  | 'folderX'
+  | 'keyboard'
+  | 'logIn'
+  | 'mailMinus'
+  | 'rotateCw'
+  | 'settings'
+  | 'undo';
 
 /** Whether `Mod` means ⌘, as on Apple platforms, rather than Ctrl. */
 export const isApple =

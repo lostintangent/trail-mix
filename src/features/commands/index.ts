@@ -6,7 +6,6 @@ export {
   Commands,
   focusSearch,
   isApple,
-  MENU_ICON_NAMES,
   registerSearchFocus,
   runCommandKey,
   SEARCH_COMMAND,
