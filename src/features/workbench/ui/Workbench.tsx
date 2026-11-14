@@ -76,13 +76,11 @@ import {
   gitHubCommand,
   idsIn,
   listsUnreadOnly,
-  NOTHING_SELECTED,
   neighbors,
   rowChange,
   SearchContext,
   SearchField,
   SearchScope,
-  selectOnly,
   TriageActions,
   triageCommands,
   unreadFilter,
@@ -245,7 +243,6 @@ export function Workbench({
   // The conversation or bundle the address opens is the one selected, from the first render.
   const {
     selection,
-    setSelection,
     isPicking,
     selected,
     isMany,
@@ -257,8 +254,11 @@ export function Workbench({
     giveWay,
     backIfRefused: selectionBackIfRefused,
     selectBy,
+    selectOnly,
+    selectIfNone,
     startPicking,
-    clearSelection,
+    clear: clearSelection,
+    deselect,
     releaseRow,
   } = useSelection(conversations, place.bundle ?? place.open);
   // The conversation or bundle a place arrived naming, which the list looks for until it lists it.
@@ -315,7 +315,7 @@ export function Workbench({
     // The conversation or bundle a place names is the one selected, with the thread it names open
     // in the bundle, and a view that names none opens at its newest.
     arrive: ({ view, bundle, open }) => {
-      setSelection(selectOnly(bundle ?? open));
+      selectOnly(bundle ?? open);
       setSeeking(bundle ?? open);
       arriveAt({ view, bundle, open });
       setPhonePane(bundle !== undefined || open !== undefined ? 'reader' : 'list');
@@ -328,7 +328,7 @@ export function Workbench({
         setThreadIn(undefined);
         return;
       }
-      setSelection(NOTHING_SELECTED);
+      clearSelection();
       setPhonePane('list');
     },
   });
@@ -389,8 +389,7 @@ export function Workbench({
   const leave = (id: ConversationId): Selection => {
     if (!isPhone) return giveWay(id);
     setPhonePane('list');
-    setSelection(NOTHING_SELECTED);
-    return NOTHING_SELECTED;
+    return clearSelection();
   };
   // A refused triage puts the phone's pane back with the selection, as it was when the triage began.
   const phonePaneNow = useRef(phonePane);
@@ -423,8 +422,7 @@ export function Workbench({
   // A selection that leaves the list is done with, and so is picking.
   const triageSelection = (action: Action) => {
     if (rowChange(action, view) !== 'gone') return triage(action, selection.ids);
-    const onRefused = backIfRefused(NOTHING_SELECTED);
-    clearSelection();
+    const onRefused = backIfRefused(clearSelection());
     triage(action, selection.ids, { onRefused });
   };
   // Opening a conversation with no network, as from what the installed app kept, leaves it
@@ -511,11 +509,11 @@ export function Workbench({
   const openNewest = useCallback(
     (newest: ListItem) => {
       // A member's pick made in this same moment, as a key held for a row just arrived, wins.
-      setSelection((current) => (current.ids.length > 0 ? current : selectOnly(newest.id)));
+      selectIfNone(newest.id);
       // Opening a bundle reads nothing.
       if (!isBundle(newest)) openedByView(newest.id);
     },
-    [openedByView, setSelection],
+    [openedByView, selectIfNone],
   );
   const { openAt: openNewestAt, cancel: cancelOpening } = useOpensNewest({
     view,
@@ -591,11 +589,10 @@ export function Workbench({
     }
     written.current = undefined;
     // The list stays at the row it came from, which stays the one keys move from.
-    const row = bundle ?? open;
-    setSelection(row === undefined ? NOTHING_SELECTED : { ids: [], active: row });
+    deselect(bundle ?? open);
     setPhonePane('list');
     if (at !== undefined) move({ view }, 'replace');
-  }, [onBack, move, pushed, written, setSelection]);
+  }, [onBack, move, pushed, written, deselect]);
   // A thread opens in its bundle's place in the reader. On a phone that pushes the address, so Back
   // returns to the bundle, and a step to the next thread takes the place of the one open. Otherwise
   // the selection writes it, as a conversation's does.
@@ -801,9 +798,9 @@ export function Workbench({
     inBundle.bundle === undefined;
   useEffect(() => {
     if (!isBundleGone) return;
-    setSelection(NOTHING_SELECTED);
+    clearSelection();
     setPhonePane('list');
-  }, [isBundleGone, setSelection]);
+  }, [isBundleGone, clearSelection]);
   // A bundle open with no thread lies on the reader's sheet, its threads in place of messages, with
   // its row's actions where a conversation's are. A thread open in it names it above, as the way back.
   const bundleRow = bundleOpen === undefined ? undefined : rowOf(bundleOpen);

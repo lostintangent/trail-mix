@@ -1,11 +1,4 @@
-export {
-  isSameSelection,
-  NOTHING_SELECTED,
-  select,
-  selectOnly,
-  type SelectBy,
-  type Selection,
-} from './core/selection.ts';
+export type { SelectBy, Selection } from './core/selection.ts';
 export { rowChange, type Action } from './core/triage.ts';
 export { listsUnreadOnly, unreadFilter } from './core/unread.ts';
 export { ConversationList, ConversationListSkeleton } from './ui/ConversationList.tsx';

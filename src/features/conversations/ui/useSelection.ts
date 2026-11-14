@@ -100,9 +100,21 @@ export function useSelection(
     setPicking(true);
     setSelection(selectOnly(id));
   }, []);
-  const clearSelection = useCallback(() => {
+  /** Selects only this conversation, or nothing. */
+  const only = useCallback((id: ConversationId | undefined) => setSelection(selectOnly(id)), []);
+  /** Selects this conversation, unless the member has selected one of their own in the meantime. */
+  const selectIfNone = useCallback((id: ConversationId) => {
+    setSelection((current) => (current.ids.length > 0 ? current : selectOnly(id)));
+  }, []);
+  /** Selects nothing, and so ends picking, returning the selection it leaves. */
+  const clear = useCallback(() => {
     setSelection(NOTHING_SELECTED);
     setPicking(false);
+    return NOTHING_SELECTED;
+  }, []);
+  /** Selects nothing, while the row keys move from stays the one given. */
+  const deselect = useCallback((active: ConversationId | undefined) => {
+    setSelection(active === undefined ? NOTHING_SELECTED : { ids: [], active });
   }, []);
   /** A row that leaves, as a swipe takes it, leaves any selection that held it. */
   const releaseRow = useCallback((id: ConversationId) => {
@@ -113,7 +125,6 @@ export function useSelection(
   }, []);
   return {
     selection,
-    setSelection,
     isPicking,
     /** The one conversation selected, if only one is. */
     selected,
@@ -127,8 +138,11 @@ export function useSelection(
     giveWay,
     backIfRefused,
     selectBy,
+    selectOnly: only,
+    selectIfNone,
     startPicking,
-    clearSelection,
+    clear,
+    deselect,
     releaseRow,
   };
 }
