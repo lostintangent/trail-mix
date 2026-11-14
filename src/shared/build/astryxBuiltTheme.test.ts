@@ -2,8 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { leanBuiltTheme, trapResolvedTokens } from './astryxBuiltTheme.ts';
-import { splitUseTheme } from './astryxUseTheme.ts';
+import { leanBuiltTheme, leanUseTheme } from './astryxBuiltTheme.ts';
 
 const BUILT = readFileSync(new URL('../../app/theme/built/trail-mix.js', import.meta.url), 'utf8');
 
@@ -19,18 +18,16 @@ const run = async (code: string): Promise<Record<string, unknown>> => {
   }
 };
 
-test('the built theme keeps what Astryx reads at runtime, with its tokens empty', async () => {
+test('the built theme keeps what Astryx reads at runtime', async () => {
   const theme = (await run(leanBuiltTheme(BUILT, false))).trailMixTheme as Record<string, unknown>;
   expect(Object.keys(theme)).toEqual([
     'name',
     '__built',
-    'tokens',
     'localTokens',
     '__adaptations',
     '__axes',
     'icons',
   ]);
-  expect(theme.tokens).toEqual({});
   expect(theme.__axes).toMatchObject({ motion: { fast: 125, medium: 300 } });
 });
 
@@ -48,14 +45,14 @@ test('a built theme that no longer has a field the build leaves out fails the bu
   expect(() => leanBuiltTheme(without, false)).toThrow('no longer has __onLight');
 });
 
-test("a trapped useTheme's resolved tokens throw when read", async () => {
-  const { hook } = splitUseTheme(
+test("a trapped useTheme's tokens throw when read", async () => {
+  const trapped = leanUseTheme(
     readFileSync(
       new URL('../../../node_modules/@astryxdesign/core/dist/theme/useTheme.js', import.meta.url),
       'utf8',
     ),
+    true,
   );
-  const trapped = trapResolvedTokens(hook);
   expect(trapped).not.toContain('resolveThemeTokens(');
   const { unresolvedTokens } = (await run(
     `${trapped.slice(trapped.indexOf('function unresolvedTokens'))}export { unresolvedTokens };\n`,
@@ -63,5 +60,5 @@ test("a trapped useTheme's resolved tokens throw when read", async () => {
   const tokens = unresolvedTokens();
   expect(tokens[Symbol.iterator]).toBeUndefined();
   expect(() => tokens['--color-accent']).toThrow("Astryx read the theme's --color-accent");
-  expect(() => trapResolvedTokens(trapped)).toThrow('no longer calls resolveThemeTokens');
+  expect(() => leanUseTheme(trapped, true)).toThrow('no longer calls resolveThemeTokens');
 });

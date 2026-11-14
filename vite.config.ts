@@ -10,7 +10,6 @@ import { astryxButtonTooltip } from './src/shared/build/astryxButtonTooltip.ts';
 import { astryxIcons } from './src/shared/build/astryxIcons.ts';
 import { astryxStyles } from './src/shared/build/astryxStyles.ts';
 import { astryxMessages } from './src/shared/build/astryxMessages.ts';
-import { astryxUseTheme } from './src/shared/build/astryxUseTheme.ts';
 import { preloadMissing } from './src/shared/build/preloadMissing.ts';
 import { serviceWorker } from './src/shared/build/serviceWorker.ts';
 import { stylexDefinitionsFirst } from './src/shared/build/stylexDefinitionsFirst.ts';
@@ -52,14 +51,13 @@ export default defineConfig(({ isPreview }) => ({
       client: { entry: 'app/main.tsx' },
     }),
     // Astryx's message formatter and its fallback icons, kept to what the bundled components use,
-    // its theme generator, kept with the toasts, the only screen that runs it, and its buttons'
-    // tooltips, kept until the first screen has settled.
+    // and its buttons' tooltips, kept until the first screen has settled.
     astryxMessages(),
     astryxIcons(),
-    astryxUseTheme(),
     astryxButtonTooltip(),
-    // A built theme's fields that only generate its CSS, which its stylesheet already holds. The
-    // e2e suite drives a build that throws where Astryx reads one.
+    // A built theme's fields that only generate its CSS, which its stylesheet already holds, and
+    // the tokens `useTheme` resolves, which nothing reads, so the theme generator loads only with
+    // the toasts. The e2e suite drives a build that throws where Astryx reads one.
     astryxBuiltTheme({ isTrapped: process.env.THEME_TRAPS === '1' }),
     // Astryx's stylesheet, kept to the rules whose classes Astryx code the app imports names.
     astryxStyles(),
