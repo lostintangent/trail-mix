@@ -14,7 +14,7 @@ import {
 import type { CloudflareApi } from './cloudflare.ts';
 
 /** What the Worker may do to a member's Mailroom while the operator removes them, and only then. */
-export type Departing = { closeDevices(): Promise<void>; eraseEverything(): Promise<void> };
+type Departing = { closeDevices(): Promise<void>; eraseEverything(): Promise<void> };
 
 /** Asked of anyone but the operator. */
 export class NotTheOperator extends Error {

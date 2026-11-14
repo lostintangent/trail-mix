@@ -11,6 +11,5 @@ export {
   withoutMember,
   type AccessPolicy,
   type Member,
-  type MemberList,
   type Members,
 } from './policy.ts';

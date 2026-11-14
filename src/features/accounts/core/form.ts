@@ -63,7 +63,7 @@ export function nameFor(form: Pick<AccountForm, 'name' | 'address'>): string {
   return form.name.trim() || form.address.trim().split('@')[1]?.toLowerCase() || '';
 }
 
-export type Problems = Partial<Record<keyof AccountForm, string>>;
+type Problems = Partial<Record<keyof AccountForm, string>>;
 
 /** Why the form can't be sent yet, field by field, said before anything reaches the Mailroom. */
 export function formProblems(form: AccountForm, accounts: readonly Account[]): Problems {

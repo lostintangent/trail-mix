@@ -7,7 +7,7 @@
  * only, nothing imported or declared outside it.
  */
 
-export type PanelName = 'sidebar' | 'list';
+type PanelName = 'sidebar' | 'list';
 
 export type PanelSpec = {
   /** The localStorage key the panel's state is saved under. */
@@ -45,7 +45,7 @@ export const PANELS: Record<PanelName, PanelSpec> = {
 };
 
 /** How far one arrow key moves a panel's edge. */
-export const KEYBOARD_STEP = 16;
+const KEYBOARD_STEP = 16;
 
 /** A panel's saved state, or its defaults when nothing valid is saved or storage is blocked. */
 export function readPanel(spec: PanelSpec, storage: Pick<Storage, 'getItem'>): PanelState {

@@ -11,7 +11,7 @@ export type CloudflareApi = ReturnType<typeof cloudflareApi>;
 export const CLOUDFLARE_API = 'https://api.cloudflare.com/client/v4';
 
 /** A request Cloudflare refused, in Cloudflare's own words. */
-export class CloudflareRefused extends Error {}
+class CloudflareRefused extends Error {}
 
 type Application = { id: string; aud?: string; policies?: AccessPolicy[] };
 

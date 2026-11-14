@@ -13,7 +13,7 @@ import { fetchedRows } from './useConversations.ts';
  * Triages some of a view's rows, conversations or bundles, by default saying so with a way to undo
  * it.
  */
-export type Triage = (
+type Triage = (
   action: Action,
   rows: readonly ConversationId[],
   options?: {

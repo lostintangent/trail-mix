@@ -28,7 +28,7 @@ import { highlight, type Marks } from '../../mail/core/index.ts';
 import type { SearchScopeProps } from './SearchScope.tsx';
 
 /** What the search field shows, and where what the member types goes. */
-export type SearchState = { text: string; onSearch: (text: string) => void };
+type SearchState = { text: string; onSearch: (text: string) => void };
 
 /**
  * The search the field shows. The field reads it from here rather than from props, so whatever

@@ -3,7 +3,7 @@
  * is ⌘ on Apple platforms and Ctrl elsewhere. A key that's a character on its own, such as `#` or
  * `?`, matches whatever modifiers made it, since keyboards differ in which Shift gives it.
  */
-export type Shortcut = string;
+type Shortcut = string;
 export type Shortcuts = Shortcut | readonly [Shortcut, ...Shortcut[]];
 
 /** The keys that run a command, whether it has one key or aliases. */

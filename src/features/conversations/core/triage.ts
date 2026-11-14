@@ -23,7 +23,7 @@ export type Action =
   | { do: 'unread' };
 
 /** How a conversation's row changes in the list it was triaged from. */
-export type RowChange = 'gone' | Partial<Pick<ConversationSummary, 'flagged' | 'unread'>>;
+type RowChange = 'gone' | Partial<Pick<ConversationSummary, 'flagged' | 'unread'>>;
 
 /** How a triaged conversation's row changes in the view it was triaged from, if it does. */
 export function rowChange(action: Action, view: View): RowChange | undefined {

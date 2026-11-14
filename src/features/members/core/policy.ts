@@ -22,10 +22,10 @@ export interface Members {
 export type Member = { email: string; operator: boolean; lastSeenAt?: string };
 
 /** The members, and what else admits people, in words, for the page to show as it is. */
-export type MemberList = { members: Member[]; alsoAdmitted: string[] };
+type MemberList = { members: Member[]; alsoAdmitted: string[] };
 
 /** One rule of an Access policy, as Cloudflare's API spells it. Only `email` rules are members. */
-export type AccessRule = Record<string, unknown>;
+type AccessRule = Record<string, unknown>;
 
 /** An Access policy, with every field Cloudflare sent, so writing it back loses nothing. */
 export type AccessPolicy = Record<string, unknown> & {
@@ -100,7 +100,7 @@ export function listOf(
 }
 
 /** A rule Trail Mix doesn't change, as the page says it. */
-export function ruleSaid(rule: AccessRule): string {
+function ruleSaid(rule: AccessRule): string {
   if ('everyone' in rule)
     return 'Anyone with an email address. Cloudflare calls this a misconfiguration.';
   const domain = domainOf(rule);

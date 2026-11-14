@@ -36,7 +36,7 @@ export const SOURCE_HASH = join(import.meta.dir, 'icons.sha256');
 const BACKGROUND = /<rect width="32" height="32" rx="[\d.]+" fill="([^"]+)"\/>/;
 
 /** The drawing of one icon, as SVG. */
-export function drawingOf(favicon: string, { isFullBleed, scale }: Icon): string {
+function drawingOf(favicon: string, { isFullBleed, scale }: Icon): string {
   if (!isFullBleed) return favicon.trim();
   const background = BACKGROUND.exec(favicon);
   if (!background) throw new Error('favicon.svg has no 32-unit background square to fill.');

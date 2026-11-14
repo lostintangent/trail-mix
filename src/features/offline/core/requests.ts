@@ -6,7 +6,7 @@
  */
 
 /** The parts of a request the worker decides by. */
-export type Asked = { method: string; mode: string; url: string };
+type Asked = { method: string; mode: string; url: string };
 
 /**
  * - `shell`: a page load, answered by the network, and by the build's kept shell only when the
@@ -14,7 +14,7 @@ export type Asked = { method: string; mode: string; url: string };
  * - `kept`: one of the build's own files, answered from what the worker keeps.
  * - `network`: left alone.
  */
-export type Answer = 'shell' | 'kept' | 'network';
+type Answer = 'shell' | 'kept' | 'network';
 
 export function answerFor(
   { method, mode, url }: Asked,

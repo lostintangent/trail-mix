@@ -36,7 +36,7 @@ import { fetchedList } from './useConversations.ts';
  */
 
 /** A triage the rows already show, and what carrying it out needs. */
-export type Triaged = {
+type Triaged = {
   queryClient: QueryClient;
   /** The view the rows were triaged in, which says what a move takes out. */
   view: View;

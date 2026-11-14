@@ -1,5 +1,5 @@
 /** How long ago a date was, as a list tells it: today, yesterday, in the last week, this year, or before. */
-export type DateDistance = 'today' | 'yesterday' | 'week' | 'year' | 'older';
+type DateDistance = 'today' | 'yesterday' | 'week' | 'year' | 'older';
 
 /**
  * Counted in calendar days on the device's clock, so 11pm is yesterday by 1am. A date still to
