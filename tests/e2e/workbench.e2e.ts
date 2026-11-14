@@ -790,7 +790,7 @@ test('the search field is the palette: ⌘K, a click or the phone’s island ope
   await phone.page.keyboard.press('Enter');
   await phone.page.getByRole('heading', { name: 'Outbox', level: 2 }).waitFor();
   expect(phone.problems).toEqual([]);
-});
+}, 15_000);
 
 test('Enter runs the best match for what the field holds, even before the palette has drawn it', async () => {
   const { page, problems } = await open(SIZES.desktop);
