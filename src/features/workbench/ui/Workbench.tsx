@@ -50,7 +50,7 @@ import { PanelEdge } from './PanelEdge.tsx';
 import { PANELS } from './panels.ts';
 import { useReadMark } from './useReadMark.ts';
 import { useSelectedPlace } from './useSelectedPlace.ts';
-import { ReaderPane, type Acting, type ActionsPlace, type ComposerPlace } from './ReaderPane.tsx';
+import { ReaderPane, type Acting, type ComposerPlace } from './ReaderPane.tsx';
 import { ReaderPlace } from './ReaderPlace.tsx';
 import {
   askAhead,
@@ -64,6 +64,7 @@ import {
 } from '../../reader/index.ts';
 import {
   ConversationListSkeleton,
+  type ActionsPlace,
   gitHubCommand,
   idsIn,
   listsUnreadOnly,
@@ -73,6 +74,7 @@ import {
   SearchField,
   SearchScope,
   TriageActions,
+  triageAt,
   triageCommands,
   unreadFilter,
   useAround,
@@ -438,12 +440,12 @@ export function Workbench({
     latestTriageShown.current = triageShown;
   });
   const { replyIn, replyTo } = composing;
-  // A desktop's reader bar files and marks the conversation, with its place and arrows at the far
-  // end. On a phone, marks sit at the top of the screen and filing sits in the island beside Reply.
+  // The reader's triage controls, where each place shows them, and on a phone Reply beside the
+  // island's filing.
   const readerActions = useCallback(
     ({ id, account, isFlagged, isUnread, conversation }: Acting, place: ActionsPlace) => {
-      // A desktop shows the bar, and a phone the top and island, so only those are drawn.
-      if (isPhone === (place === 'bar')) return null;
+      const part = triageAt(place, isPhone);
+      if (!part) return null;
       const triage = (
         <TriageActions
           commands={triageCommands({
@@ -453,7 +455,7 @@ export function Workbench({
             isUnread,
             onTriage: (action) => latestTriageShown.current(action, id),
           })}
-          part={place === 'bar' ? 'all' : place === 'top' ? 'marking' : 'filing'}
+          part={part}
         />
       );
       if (place !== 'island' || !conversation) return triage;
@@ -791,16 +793,14 @@ export function Workbench({
     clearSelection();
     setPhonePane('list');
   }, [isBundleGone, clearSelection]);
-  // A bundle's actions are its row's: all of them in a desktop's bar, and on a phone its marks at
-  // the top and its filing in the island, where Archive leads.
-  const bundleActions = (place: ActionsPlace) =>
-    isPhone === (place === 'bar') ? null : (
-      <TriageActions
-        commands={selectedCommands}
-        part={place === 'bar' ? 'all' : place === 'top' ? 'marking' : 'filing'}
-        isArchiveMain={place === 'island'}
-      />
+  // A bundle's actions are its row's, where each place shows them, and in the island Archive leads.
+  const bundleActions = (place: ActionsPlace) => {
+    const part = triageAt(place, isPhone);
+    if (!part) return null;
+    return (
+      <TriageActions commands={selectedCommands} part={part} isArchiveMain={place === 'island'} />
     );
+  };
   const unsubscribe = useUnsubscribeCommand(openInView);
   const backTo = backFrom({
     isPageOpen: page !== undefined,

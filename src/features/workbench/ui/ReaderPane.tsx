@@ -20,7 +20,7 @@ import {
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { afterPaint } from '../../../shared/afterPaint.ts';
 import type { Command } from '../../commands/index.ts';
-import type { InBundle } from '../../conversations/index.ts';
+import type { ActionsPlace, InBundle } from '../../conversations/index.ts';
 import { folderName } from '../../folders/index.ts';
 import {
   bundlePartsOf,
@@ -63,9 +63,6 @@ export type Acting = {
   isUnread: boolean;
   conversation?: Message[];
 };
-
-/** Where a conversation's actions are drawn: a desktop's bar, or a phone's top bar and island. */
-export type ActionsPlace = 'bar' | 'top' | 'island';
 
 /**
  * Where the composer lies: docked under the conversation it answers, filling the reader for a

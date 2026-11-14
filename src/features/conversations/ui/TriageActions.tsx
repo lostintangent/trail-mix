@@ -7,6 +7,7 @@ import { memo, Suspense, useMemo, useRef, useState, type ReactNode } from 'react
 import { tm } from '../../../app/theme/tokens.stylex.ts';
 import { preloadable } from '../../../shared/preloadable.ts';
 import { CommandButton, useSteadyCommands, type Command } from '../../commands/index.ts';
+import type { TriagePart } from '../core/triagePlaces.ts';
 import { MOVE } from './commands.ts';
 
 /**
@@ -32,7 +33,7 @@ export function TriageActions({
   isArchiveMain = false,
 }: {
   commands: readonly Command[];
-  part?: 'all' | 'filing' | 'marking';
+  part?: TriagePart;
   isCompact?: boolean;
   isArchiveMain?: boolean;
 }) {

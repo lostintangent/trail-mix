@@ -3,6 +3,7 @@ export { rowChange, type Action } from './core/triage.ts';
 export { listsUnreadOnly, unreadFilter } from './core/unread.ts';
 export { ConversationList, ConversationListSkeleton } from './ui/ConversationList.tsx';
 export { preloadTriageMenus, TriageActions } from './ui/TriageActions.tsx';
+export { triageAt, type ActionsPlace } from './core/triagePlaces.ts';
 export { useTriage } from './ui/useTriage.tsx';
 export { useAround, useConversations } from './ui/useConversations.ts';
 export { idsIn, neighbors, placesOf, type Listed } from './core/pages.ts';
