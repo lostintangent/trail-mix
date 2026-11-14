@@ -82,11 +82,7 @@ export type PresetName = keyof typeof PRESETS;
 export function authServersFor(host: string, standIn?: string): readonly string[] {
   const name = host.toLowerCase().replace(/\.$/, '');
   if (LOOPBACK.includes(name)) {
-    const given = parsed(standIn);
-    const names =
-      typeof given === 'object' && given !== null
-        ? (given as Record<string, unknown>)[name]
-        : undefined;
+    const names = standInOf(standIn)[name];
     return Array.isArray(names)
       ? names.filter((each): each is string => typeof each === 'string')
       : [];
@@ -108,10 +104,9 @@ const LOOPBACK = ['localhost', '127.0.0.1', '::1'];
  * the vendor itself.
  */
 export function withStandIn(preset: Preset, standIn: string | undefined): Preset {
-  const given = parsed(standIn);
-  if (!preset.device || typeof given !== 'object' || given === null) return preset;
-  const { authority, imap, smtp } = given as Record<string, unknown>;
-  if (typeof authority !== 'string' || !namesThisMachine(authority)) return preset;
+  const { authority, imap, smtp } = standInOf(standIn);
+  if (!preset.device || typeof authority !== 'string' || !namesThisMachine(authority))
+    return preset;
   if (!isLocal(imap) || !isLocal(smtp)) return preset;
   return {
     ...preset,
@@ -123,8 +118,7 @@ export function withStandIn(preset: Preset, standIn: string | undefined): Preset
 
 /** An endpoint on this machine. */
 function isLocal(value: unknown): value is Endpoint {
-  if (typeof value !== 'object' || value === null) return false;
-  const { host, port, secure } = value as Record<string, unknown>;
+  const { host, port, secure } = (value ?? {}) as Record<string, unknown>;
   return (
     typeof host === 'string' &&
     LOOPBACK.includes(host) &&
@@ -133,10 +127,11 @@ function isLocal(value: unknown): value is Endpoint {
   );
 }
 
-function parsed(text: string | undefined): unknown {
+/** The stand-in's settings, as JSON names them, or none. */
+function standInOf(text: string | undefined): Record<string, unknown> {
   try {
-    return text ? JSON.parse(text) : undefined;
+    return (JSON.parse(text ?? '{}') ?? {}) as Record<string, unknown>;
   } catch {
-    return undefined;
+    return {};
   }
 }

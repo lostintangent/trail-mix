@@ -1,4 +1,5 @@
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
+import { useLatest } from '../../../shared/useLatest.ts';
 import type { Opening } from './worker.ts';
 
 /**
@@ -6,10 +7,7 @@ import type { Opening } from './worker.ts';
  * forward rather than opening a new window. `open` gets the address, from Trail Mix's own origin.
  */
 export function useNotificationOpenings(open: (address: string) => void) {
-  const latest = useRef(open);
-  useEffect(() => {
-    latest.current = open;
-  });
+  const latest = useLatest(open);
   useEffect(() => {
     const workers = navigator.serviceWorker as ServiceWorkerContainer | undefined;
     if (!workers) return;
@@ -22,5 +20,5 @@ export function useNotificationOpenings(open: (address: string) => void) {
     };
     workers.addEventListener('message', opened);
     return () => workers.removeEventListener('message', opened);
-  }, []);
+  }, [latest]);
 }

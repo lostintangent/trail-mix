@@ -22,13 +22,9 @@ export function readinessOf(): Readiness {
   const isInstalled = standalone === true || matchMedia('(display-mode: standalone)').matches;
   const isApplePhone = /iPhone|iPad/.test(navigator.userAgent) || standalone !== undefined;
   if (!isInstalled) return isApplePhone ? 'needs-home-screen' : 'needs-install';
-  if (
-    !('serviceWorker' in navigator) ||
-    !('PushManager' in window) ||
-    !('Notification' in window)
-  ) {
-    return 'unable';
-  }
+  const canPush =
+    'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+  if (!canPush) return 'unable';
   return Notification.permission === 'denied' ? 'blocked' : 'able';
 }
 

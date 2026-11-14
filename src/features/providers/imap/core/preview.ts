@@ -131,11 +131,8 @@ function textOfHtml(html: string): string {
 function decoded(text: string): string {
   return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entity: string, name: string) => {
     if (name.startsWith('#')) {
-      const code =
-        name[1]?.toLowerCase() === 'x' ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10);
-      return Number.isFinite(code) && code > 0 && code < 0x110000
-        ? String.fromCodePoint(code)
-        : ' ';
+      const code = Number(name.slice(1).replace(/^x/i, '0x'));
+      return code > 0 && code < 0x110000 ? String.fromCodePoint(code) : ' ';
     }
     return ENTITIES[name.toLowerCase()] ?? entity;
   });

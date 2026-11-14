@@ -137,13 +137,9 @@ function leavesOf(node: Structure): Structure[] {
 }
 
 function addressesOf(list: ImapAddress[] | undefined): Address[] {
-  return (list ?? [])
-    .filter((entry) => entry.address)
-    .map((entry) =>
-      entry.name
-        ? { name: entry.name, email: entry.address ?? '' }
-        : { email: entry.address ?? '' },
-    );
+  return (list ?? []).flatMap(({ name, address: email }) =>
+    email ? [name ? { name, email } : { email }] : [],
+  );
 }
 
 /** Header lines by lowercase name, with folding undone. */

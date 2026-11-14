@@ -1,6 +1,11 @@
 import { mailroom } from '../../mailroom/client/index.ts';
 import { toast } from '../../../shared/toasts.tsx';
-import { fromBase64Url, subscriptionOf, type Subscription } from '../core/subscription.ts';
+import {
+  fromBase64Url,
+  subscriptionOf,
+  toBase64Url,
+  type Subscription,
+} from '../core/subscription.ts';
 import type { Readiness } from './device.ts';
 import { needsOf } from './needs.ts';
 
@@ -57,12 +62,14 @@ async function subscribe(pushKey: string): Promise<Subscription> {
   const answer = await Notification.requestPermission();
   if (answer !== 'granted') throw new NotAllowed(answer);
   const { pushManager } = await navigator.serviceWorker.ready;
-  const key = fromBase64Url(pushKey);
   const held = await pushManager.getSubscription();
-  if (held && !isSameKey(held.options.applicationServerKey, key)) await held.unsubscribe();
+  const heldKey = held?.options.applicationServerKey;
+  if (held && (!heldKey || toBase64Url(new Uint8Array(heldKey)) !== pushKey)) {
+    await held.unsubscribe();
+  }
   const subscription = await pushManager.subscribe({
     userVisibleOnly: true,
-    applicationServerKey: key,
+    applicationServerKey: fromBase64Url(pushKey),
   });
   return subscriptionOf(subscription.toJSON());
 }
@@ -73,10 +80,4 @@ async function unsubscribe(): Promise<string | undefined> {
   const held = await registration?.pushManager.getSubscription();
   await held?.unsubscribe();
   return held?.endpoint;
-}
-
-function isSameKey(held: ArrayBuffer | null, key: Uint8Array): boolean {
-  if (!held) return false;
-  const bytes = new Uint8Array(held);
-  return bytes.length === key.length && bytes.every((byte, at) => byte === key[at]);
 }

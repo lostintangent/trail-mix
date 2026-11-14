@@ -135,15 +135,13 @@ export function planSync(
   };
 }
 
+/** The flags a message has, each IMAP's system flag of its name. */
+const FLAG_NAMES = ['seen', 'flagged', 'answered', 'draft'] as const;
+
 /** Reads IMAP's system flags, which compare without regard to case. Keywords are ignored. */
 export function flagsOf(imapFlags: Iterable<string>): Flags {
   const set = new Set([...imapFlags].map((flag) => flag.toLowerCase()));
-  return {
-    seen: set.has('\\seen'),
-    flagged: set.has('\\flagged'),
-    answered: set.has('\\answered'),
-    draft: set.has('\\draft'),
-  };
+  return Object.fromEntries(FLAG_NAMES.map((name) => [name, set.has(`\\${name}`)])) as Flags;
 }
 
 /** What the cursor remembers about a folder. */
@@ -168,8 +166,6 @@ function flagsToFetch(known: Remembered, state: FolderState): SyncPlan['flags'] 
 
 // The cursor. UIDs are stored as runs, and flags as runs over those UIDs, each run a variable-length
 // number in base64url, so even a folder of 50,000 messages riddled with gaps stays under 64 KB.
-
-const FLAG_NAMES = ['seen', 'flagged', 'answered', 'draft'] as const;
 
 /** The cursor as stored. `v` changes whenever the shape does, and an older shape starts over. */
 type Stored = {

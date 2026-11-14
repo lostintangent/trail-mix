@@ -854,15 +854,9 @@ async function imapConnection(
   return connection;
 }
 
-const ROLES: Record<string, FolderRole> = {
-  '\\Inbox': 'inbox',
-  '\\Sent': 'sent',
-  '\\Drafts': 'drafts',
-  '\\Archive': 'archive',
-  '\\Trash': 'trash',
-  '\\Junk': 'junk',
-};
-const roleOf = (specialUse: string | undefined) => (specialUse ? ROLES[specialUse] : undefined);
+/** Each role is the SPECIAL-USE attribute of its name, which compares without regard to case. */
+const ROLES: readonly FolderRole[] = ['inbox', 'sent', 'drafts', 'archive', 'trash', 'junk'];
+const roleOf = (specialUse = '') => ROLES.find((role) => `\\${role}` === specialUse.toLowerCase());
 
 /** What each connection's server said when it last refused a command. */
 const refusals = new WeakMap<ImapFlow, string>();
