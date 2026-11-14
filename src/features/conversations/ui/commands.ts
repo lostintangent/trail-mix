@@ -1,7 +1,14 @@
 import { Archive, ExternalLink, Mail, MailOpen, Star, Trash2 } from 'lucide-react';
 import type { Command } from '../../commands/index.ts';
 import { folderName } from '../../folders/index.ts';
-import type { Account, Folder } from '../../mail/core/index.ts';
+import {
+  isBundle,
+  repositoryAddressOf,
+  threadAddressOf,
+  type Account,
+  type Folder,
+  type ListItem,
+} from '../../mail/core/index.ts';
 import type { Action } from '../core/triage.ts';
 
 /** The prefix of the commands that move mail to a folder, one for each folder it can go to. */
@@ -92,7 +99,13 @@ export function triageCommands({
  * Opening what the member reads on GitHub, in a new tab: the thread open, or else the bundle's
  * repository. It can't run while neither is open.
  */
-export function gitHubCommand(address: string | undefined): Command {
+export function gitHubCommand(open: ListItem | undefined): Command {
+  const address =
+    open === undefined
+      ? undefined
+      : isBundle(open)
+        ? repositoryAddressOf(open.repository)
+        : open.github && threadAddressOf(open.github);
   return {
     id: 'github.open',
     title: 'Open on GitHub',

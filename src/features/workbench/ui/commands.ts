@@ -8,6 +8,8 @@ import {
   Settings,
 } from 'lucide-react';
 import { SEARCH_COMMAND, UNDO_COMMAND, type Command } from '../../commands/index.ts';
+import type { ConversationId } from '../../mail/core/index.ts';
+import type { ComposerPlace } from './ReaderPane.tsx';
 
 /** The id of the command that folds the sidebar to its rail and back. */
 export const FOLD_SIDEBAR = 'sidebar.fold';
@@ -129,4 +131,59 @@ export function workbenchCommands({
       run: showShortcuts,
     },
   ];
+}
+
+/** The pane a phone shows, one at a time on its sliding track. */
+export type PhonePane = 'sidebar' | 'list' | 'reader';
+
+/**
+ * What the composer leaves of the conversation open in the reader for the commands to act on. A new
+ * message fills the reader, and on a phone any composer lies over it, so neither keys nor the
+ * palette act on the conversation behind it or move the list from under it. Keys typed straight
+ * after New message, before its fields are drawn, then do nothing. A reply docked under its
+ * conversation leaves it to them, and one on its way to its editor counts as the composer too,
+ * while its conversation stays in view with its place in the list.
+ */
+export function readerCover({
+  composer,
+  isReplyOnItsWay,
+  open,
+}: {
+  composer: ComposerPlace | undefined;
+  isReplyOnItsWay: boolean;
+  /** The one conversation open in the reader, if one is rather than none or several picked. */
+  open: ConversationId | undefined;
+}) {
+  const isOverReader = composer !== undefined && composer !== 'docked';
+  const isBehindComposer = isOverReader || isReplyOnItsWay;
+  /** The conversation the member can see, if any. */
+  const inView = isOverReader ? undefined : open;
+  /** The conversation the commands act on, if any. */
+  const openInView = isBehindComposer ? undefined : inView;
+  return { isOverReader, isBehindComposer, inView, openInView };
+}
+
+/**
+ * What Back closes, the nearest first: a page, the composer, a thread in its bundle, and then on a
+ * phone the reader or the sidebar for the list, or on a desktop a selection of several.
+ */
+export function backFrom({
+  isPageOpen,
+  isComposing,
+  isThreadOpen,
+  phonePane,
+  isMany,
+}: {
+  isPageOpen: boolean;
+  isComposing: boolean;
+  isThreadOpen: boolean;
+  /** The pane a phone shows, or none on a desktop. */
+  phonePane: PhonePane | undefined;
+  isMany: boolean;
+}): 'page' | 'composer' | 'thread' | 'reader' | 'sidebar' | 'selection' | undefined {
+  if (isPageOpen) return 'page';
+  if (isComposing) return 'composer';
+  if (isThreadOpen) return 'thread';
+  if (phonePane !== undefined) return phonePane === 'list' ? undefined : phonePane;
+  return isMany ? 'selection' : undefined;
 }

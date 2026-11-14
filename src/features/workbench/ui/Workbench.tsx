@@ -18,8 +18,6 @@ import {
   bundlePartsOf,
   isBundle,
   newestShown,
-  repositoryAddressOf,
-  threadAddressOf,
   type Account,
   type AccountId,
   type BundleId,
@@ -52,7 +50,13 @@ import { PanelEdge } from './PanelEdge.tsx';
 import { PANELS } from './panels.ts';
 import { useReadMark } from './useReadMark.ts';
 import { useSelectedPlace } from './useSelectedPlace.ts';
-import { ReaderPane, type Acting, type ActionsPlace, type ReaderSheet } from './ReaderPane.tsx';
+import {
+  ReaderPane,
+  type Acting,
+  type ActionsPlace,
+  type ComposerPlace,
+  type ReaderSheet,
+} from './ReaderPane.tsx';
 import { ReaderPlace } from './ReaderPlace.tsx';
 import {
   askAhead,
@@ -93,7 +97,13 @@ import {
   type Selection,
 } from '../../conversations/index.ts';
 import { PickedActions, SelectionPane } from './SelectionPane.tsx';
-import { OPEN_SETTINGS, workbenchCommands } from './commands.ts';
+import {
+  backFrom,
+  OPEN_SETTINGS,
+  readerCover,
+  workbenchCommands,
+  type PhonePane,
+} from './commands.ts';
 import { FoldToggle } from './FoldToggle.tsx';
 import { UnreadToggle } from './UnreadToggle.tsx';
 import {
@@ -151,8 +161,6 @@ export type SettingsAt = 'notifications' | 'accent' | 'members';
 /** What can lie on the reader's sheet in place of a conversation. */
 type SheetPage = AccountPageOf | { as: 'settings'; at?: SettingsAt };
 import { usePanel } from './usePanel.ts';
-
-type Pane = 'sidebar' | 'list' | 'reader';
 
 /** The one search field, wherever it sits. It reads the search from `SearchContext`. */
 const SEARCH_FIELD = <SearchField />;
@@ -279,7 +287,7 @@ export function Workbench({
   // Stamps mark rows only in a list that mixes accounts.
   const mixesAccounts = view.in !== 'folder' && accounts.length > 1;
   // On a phone, an address with a conversation opens on the reader, with no slide to it.
-  const [phonePane, setPhonePane] = useState<Pane>(() =>
+  const [phonePane, setPhonePane] = useState<PhonePane>(() =>
     place.open !== undefined || place.bundle !== undefined ? 'reader' : 'list',
   );
   const [sidebar, setSidebar] = usePanel(PANELS.sidebar);
@@ -346,7 +354,7 @@ export function Workbench({
   // leads the rail and the field sits above the list, as it does on a phone.
   const isFieldInSidebar = !isPhone && !sidebar.isCollapsed;
   // Panes off a phone's screen are inert, so focus and assistive tech stay on the one in view.
-  const isOffscreen = (pane: Pane) => isPhone && pane !== phonePane;
+  const isOffscreen = (pane: PhonePane) => isPhone && pane !== phonePane;
 
   const { triage, undoLast, canUndo } = useTriage(view, folders);
   // Drafts on their way can't be written on until their send is undone. Each lies at the end of its
@@ -772,33 +780,24 @@ export function Workbench({
 
   // The registry is made anew each render, as the selection moves, but its commands keep their
   // identity while they look the same, so what draws them and the palette render only on a change.
-  // A new message fills the reader, over the conversation open behind it, so neither keys nor the
-  // palette act on that conversation or move the list from under it. Keys typed straight after
-  // New message, before its fields are drawn, then do nothing. A reply on its way to its editor
-  // counts as the composer too, while its conversation stays in view with its place in the list.
-  const isOverReader = compose !== undefined && (isPhone || !isDocked(compose));
-  const isBehindComposer = isOverReader || isReplyOnItsWay;
-  const isInView = opened !== undefined && !isMany && !isOverReader;
-  const isOpenInView = isInView && !isBehindComposer;
+  // On a phone the composer rises over everything, wherever it was begun.
+  const composerPlace: ComposerPlace | undefined =
+    compose && (isPhone ? 'over' : isDocked(compose) ? 'docked' : 'filled');
+  const { isOverReader, isBehindComposer, inView, openInView } = readerCover({
+    composer: composerPlace,
+    isReplyOnItsWay,
+    open: isMany ? undefined : opened,
+  });
   // A send on its way says where it stands on its line in its conversation while that's on screen,
   // and in a toast while the member is elsewhere.
   // One giving way to the next is already left, so a send from it is followed elsewhere.
   const shown =
-    (!isPhone || phonePane === 'reader') &&
-    page === undefined &&
-    isInView &&
-    opened !== vacating?.row.id
-      ? opened
+    (!isPhone || phonePane === 'reader') && page === undefined && inView !== vacating?.row.id
+      ? inView
       : undefined;
   useLeavingToasts(leaving.all, shown);
-  // What GitHub shows of what's open: the thread, or the bundle's repository.
+  // The thread open in its bundle, or else the conversation or bundle open in the reader.
   const openRow = threadRow ?? (selected === undefined ? undefined : rowOf(selected));
-  const gitHubAddress =
-    openRow === undefined || isMany
-      ? undefined
-      : isBundle(openRow)
-        ? repositoryAddressOf(openRow.repository)
-        : openRow.github && threadAddressOf(openRow.github);
 
   // A bundle gone from the server, as one emptied on another device, closes as a conversation gone
   // from it does.
@@ -869,7 +868,14 @@ export function Workbench({
           go: closeThread,
         }
       : undefined;
-  const unsubscribe = useUnsubscribeCommand(isOpenInView ? opened : undefined);
+  const unsubscribe = useUnsubscribeCommand(openInView);
+  const backTo = backFrom({
+    isPageOpen: page !== undefined,
+    isComposing: compose !== undefined,
+    isThreadOpen: thread !== undefined,
+    phonePane: isPhone ? phonePane : undefined,
+    isMany,
+  });
   const commands = useSteadyCommands([
     ...(isBehindComposer ? [] : selectedCommands),
     ...workbenchCommands({
@@ -887,21 +893,16 @@ export function Workbench({
           : active.at > 0
             ? stepTo(active.at - 1)
             : undefined,
-      back: page
-        ? closePage
-        : compose
-          ? closeComposer
-          : thread !== undefined
-            ? closeThread
-            : isPhone
-              ? phonePane === 'list'
-                ? undefined
-                : phonePane === 'reader'
-                  ? backToList
-                  : () => setPhonePane('list')
-              : isMany
-                ? clearSelection
-                : undefined,
+      back:
+        backTo &&
+        {
+          page: closePage,
+          composer: closeComposer,
+          thread: closeThread,
+          reader: backToList,
+          sidebar: () => setPhonePane('list'),
+          selection: clearSelection,
+        }[backTo],
       // While a send can still be taken back, Undo takes it back first.
       undo: outbox.undoSend ?? (canUndo ? undoLast : undefined),
       focusSearch,
@@ -917,16 +918,16 @@ export function Workbench({
     }),
     ...composerCommands({
       write,
-      reply: isOpenInView ? (all) => void composing.reply(all) : undefined,
+      reply: openInView === undefined ? undefined : (all) => void composing.reply(all),
     }),
-    gitHubCommand(isBehindComposer ? undefined : gitHubAddress),
+    gitHubCommand(isBehindComposer || isMany ? undefined : openRow),
     sourceCommand(
-      isOpenInView
-        ? () =>
+      openInView === undefined
+        ? undefined
+        : () =>
             void queryClient
-              .ensureQueryData(conversationQuery(opened))
-              .then((conversation) => setSource(newestShown(conversation)))
-        : undefined,
+              .ensureQueryData(conversationQuery(openInView))
+              .then((conversation) => setSource(newestShown(conversation))),
     ),
     lightPaperCommand(reading === undefined ? undefined : read, accounts, selves, (choice) =>
       setLightPaper(queryClient, choice),
@@ -962,6 +963,7 @@ export function Workbench({
   const searchAndCommands = commands.find(({ id }) => id === SEARCH_COMMAND);
   const writing =
     compose &&
+    composerPlace &&
     ({
       composer: (
         <Suspense
@@ -988,8 +990,7 @@ export function Workbench({
           />
         </Suspense>
       ),
-      // On a phone the composer rises over everything, wherever it was begun.
-      place: isPhone ? 'over' : isDocked(compose) ? 'docked' : 'filled',
+      place: composerPlace,
     } as const);
 
   return (

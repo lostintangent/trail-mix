@@ -11,7 +11,7 @@ import { triageCommands } from '../../conversations/index.ts';
 import { viewCommands } from '../../folders/index.ts';
 import { sendCommands } from '../../outbox/index.ts';
 import type { Account, Folder } from '../../mail/core/index.ts';
-import { workbenchCommands } from './commands.ts';
+import { backFrom, readerCover, workbenchCommands } from './commands.ts';
 
 const account = (id: string, name: string): Account =>
   ({ id, name, stamp: 'teal', address: `${id}@trailmix.test` }) as Account;
@@ -100,4 +100,46 @@ test('the keys the prototypes promise are all there', () => {
   for (const key of ['E', '#', 'S', 'Shift+I', 'Shift+U', 'Z', 'J', 'K', 'Escape', '?', 'Mod+K']) {
     expect(keys).toContain(key);
   }
+});
+
+test('a new message covers the reader, so no command acts on the conversation behind it or moves the list', () => {
+  for (const composer of ['filled', 'over'] as const) {
+    expect(readerCover({ composer, isReplyOnItsWay: false, open: 'lunch' })).toEqual({
+      isOverReader: true,
+      isBehindComposer: true,
+      inView: undefined,
+      openInView: undefined,
+    });
+  }
+});
+
+test('a docked reply leaves its conversation to the commands, but one on its way to its editor doesn’t', () => {
+  expect(readerCover({ composer: 'docked', isReplyOnItsWay: false, open: 'lunch' })).toEqual({
+    isOverReader: false,
+    isBehindComposer: false,
+    inView: 'lunch',
+    openInView: 'lunch',
+  });
+  // Keys typed while the reply comes are the reply's, while the conversation stays in view.
+  expect(readerCover({ composer: 'docked', isReplyOnItsWay: true, open: 'lunch' })).toEqual({
+    isOverReader: false,
+    isBehindComposer: true,
+    inView: 'lunch',
+    openInView: undefined,
+  });
+});
+
+test('Back closes the nearest first: a page, the composer, a thread, then the phone’s pane or a selection', () => {
+  const open = { isPageOpen: true, isComposing: true, isThreadOpen: true, isMany: true };
+
+  expect(backFrom({ ...open, phonePane: 'reader' })).toBe('page');
+  expect(backFrom({ ...open, isPageOpen: false, phonePane: 'reader' })).toBe('composer');
+  const closed = { isPageOpen: false, isComposing: false, isThreadOpen: false, isMany: true };
+  expect(backFrom({ ...closed, isThreadOpen: true, phonePane: 'reader' })).toBe('thread');
+  expect(backFrom({ ...closed, phonePane: 'reader' })).toBe('reader');
+  expect(backFrom({ ...closed, phonePane: 'sidebar' })).toBe('sidebar');
+  // A phone's list is as far back as it goes, and its picking has its own way out.
+  expect(backFrom({ ...closed, phonePane: 'list' })).toBe(undefined);
+  expect(backFrom({ ...closed, phonePane: undefined })).toBe('selection');
+  expect(backFrom({ ...closed, isMany: false, phonePane: undefined })).toBe(undefined);
 });

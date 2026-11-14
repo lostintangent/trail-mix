@@ -62,6 +62,12 @@ export type Acting = {
 export type ActionsPlace = 'bar' | 'top' | 'island';
 
 /**
+ * Where the composer lies: docked under the conversation it answers, filling the reader for a
+ * message of its own, or over everything on a phone, wherever it was begun.
+ */
+export type ComposerPlace = 'docked' | 'filled' | 'over';
+
+/**
  * Something other than a conversation that lies on the reader's sheet in its place, with its own
  * actions where a conversation's would be, as a bundle does.
  */
@@ -129,11 +135,8 @@ export function ReaderPane({
   actionsFor: (message: Message) => readonly Command[];
   /** Keys pressed inside a message, which the window never hears. The same function each render. */
   onMessageKey: (event: KeyboardEvent) => void;
-  /**
-   * The composer, while the member writes: docked under the conversation it answers, or filling
-   * the sheet for a message of its own.
-   */
-  writing: { composer: ReactNode; place: 'docked' | 'filled' | 'over' } | undefined;
+  /** The composer, while the member writes, and where it lies. */
+  writing: { composer: ReactNode; place: ComposerPlace } | undefined;
   /** Drafts the reader leaves out, such as the one being written. */
   hiding: Hiding;
   /** The sends this device follows, each at the end of its conversation while it is on its way. */
