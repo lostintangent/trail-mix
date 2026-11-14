@@ -6,6 +6,7 @@ import {
   type QueryClient,
   type QueryKey,
   type UseQueryOptions,
+  type UseQueryResult,
 } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { ConversationId, ListItem, View } from '../../mail/core/index.ts';
@@ -49,21 +50,10 @@ export function useConversations(
 } {
   const isUnread = listsUnreadOnly(view);
   const kept = isUnread ? keep : undefined;
-  const first = useQuery({
-    ...conversationsQuery(view, 0, kept),
-    enabled,
-    placeholderData: (previous, previousQuery) =>
-      view.in === 'search' && previousQuery?.queryKey[1].in === 'search' ? previous : undefined,
-  });
-  const placeholder = first.isPlaceholderData ? first.data : undefined;
-  const placeheld = useMemo(
-    () => placeholder && listOf([{ ...placeholder, fetchedAt: 0 }]),
-    [placeholder],
-  );
   const { rows, isFetching, show } = usePages(view, {
     pageAt: (at) => conversationsQuery(view, at, kept),
-    isFirstFetching: first.isFetching,
-    placeheld,
+    placeholderData: (previous, previousQuery) =>
+      view.in === 'search' && previousQuery?.queryKey[1].in === 'search' ? previous : undefined,
     enabled,
   });
   useKeptListed(view, kept, rows, isFetching);
@@ -109,30 +99,36 @@ export type Show = (first: number, last: number, selected: number, ahead?: boole
  * A list's rows at its true length from its first page on: a view's, or a bundle's threads. Each
  * page is a snapshot of its own, kept by its place, so a hint refetches only the first page, which
  * says how long the list is, and the pages on screen. Pages fetched earlier, now out of sight, still
- * show where they lie, as a selected row scrolled far away does. The first page is the caller's to
- * ask for, since it carries what the list says of itself, and `show` asks for the rest.
+ * show where they lie, as a selected row scrolled far away does. The first page, which also carries
+ * what the list says of itself, is asked for at once, and `show` asks for the rest.
  */
-export function usePages<
-  Fetched extends Page,
-  Key extends readonly unknown[],
-  Row extends ListItem = Fetched['items'][number],
->(
+export function usePages<Fetched extends Page, Key extends readonly unknown[]>(
   list: ListOf,
   {
     pageAt,
-    isFirstFetching,
-    placeheld,
+    placeholderData,
     enabled,
   }: {
     /** How to ask for the page that starts at a place. */
     pageAt: (at: number) => UseQueryOptions<Fetched, Error, Fetched, Key>;
-    isFirstFetching: boolean;
-    /** What shows while the first page is on its way, as a search's earlier results do. */
-    placeheld?: Listed<Row> | undefined;
+    /** What the first page shows while it is on its way, as a search's earlier results. */
+    placeholderData?: UseQueryOptions<Fetched, Error, Fetched, Key>['placeholderData'];
     enabled: boolean;
   },
-): { rows: Listed<Row> | undefined; isFetching: boolean; show: Show } {
+): {
+  first: UseQueryResult<Fetched>;
+  rows: Listed<Fetched['items'][number]> | undefined;
+  isFetching: boolean;
+  show: Show;
+} {
+  type Row = Fetched['items'][number];
   const queryClient = useQueryClient();
+  const first = useQuery({ ...pageAt(0), enabled, placeholderData });
+  const placeholder = first.isPlaceholderData ? first.data : undefined;
+  const placeheld = useMemo(
+    () => placeholder && listOf([{ ...placeholder, fetchedAt: 0 }]),
+    [placeholder],
+  );
   const key = hashKey(listKeyOf(list));
   const [wanted, setWanted] = useState({ key, pages: FIRST_PAGE });
   const pages = wanted.key === key ? wanted.pages : FIRST_PAGE;
@@ -144,7 +140,7 @@ export function usePages<
   // Pages on screen refetched for a hint land a moment apart, and mail that arrived between them
   // moves every row, so until all of them have landed, the list stays as it was. Then it moves once,
   // and the list can keep its top row in sight where it was.
-  const isFetching = isFirstFetching || isRestFetching;
+  const isFetching = first.isFetching || isRestFetching;
   const latest = placeheld ?? fetched;
   const shown = useRef<{ key: string; rows: Listed<Row> }>(undefined);
   const held = isFetching && latest && shown.current?.key === key ? shown.current.rows : undefined;
@@ -175,7 +171,7 @@ export function usePages<
     },
     [key, total, pages],
   );
-  return { rows, isFetching, show };
+  return { first, rows, isFetching, show };
 }
 
 /**
@@ -200,27 +196,11 @@ export function useAround<Fetched extends Page, Key extends QueryKey>(
   return { awaits, isDone };
 }
 
-/**
- * A list as the pages of it the browser holds show it, fetched lately or a while ago. Only the
- * list's own pages count, not those of a view whose key holds more, as a full-text search's does a
- * plain one's.
- */
-export function fetchedList<Row extends ListItem = ListItem>(
+/** A list as the pages of it the browser holds show it, fetched lately or a while ago. */
+export const fetchedList = <Row extends ListItem = ListItem>(
   queryClient: QueryClient,
   list: ListOf,
-): Listed<Row> | undefined {
-  const key = hashKey(listKeyOf(list));
-  return listOf(
-    queryClient
-      .getQueryCache()
-      .findAll({ queryKey: listKeyOf(list) })
-      .flatMap(({ queryKey, state: { data, dataUpdatedAt } }) =>
-        data && listOfKey(queryKey) === key
-          ? [{ ...(data as Page<Row>), fetchedAt: dataUpdatedAt }]
-          : [],
-      ),
-  );
-}
+) => listOf(pagesOf<Row>(queryClient, list));
 
 /**
  * Some conversations' rows among the pages of a list the browser holds, each as the freshest page
@@ -231,21 +211,33 @@ export function fetchedRows(
   list: ListOf,
   ids: readonly ConversationId[],
 ): ListItem[] {
-  const key = hashKey(listKeyOf(list));
   const wanted = new Set(ids);
   const found = new Map<ConversationId, { row: ListItem; fetchedAt: number }>();
-  for (const { queryKey, state } of queryClient
-    .getQueryCache()
-    .findAll({ queryKey: listKeyOf(list) })) {
-    if (!state.data || listOfKey(queryKey) !== key) continue;
-    for (const row of (state.data as Page).items) {
+  for (const { items, fetchedAt } of pagesOf(queryClient, list)) {
+    for (const row of items) {
       const seen = found.get(row.id);
-      if (wanted.has(row.id) && (!seen || seen.fetchedAt < state.dataUpdatedAt)) {
-        found.set(row.id, { row, fetchedAt: state.dataUpdatedAt });
+      if (wanted.has(row.id) && (!seen || seen.fetchedAt < fetchedAt)) {
+        found.set(row.id, { row, fetchedAt });
       }
     }
   }
   return [...found.values()].map(({ row }) => row);
+}
+
+/**
+ * The pages of a list the browser holds, each with when it was fetched. Only the list's own pages
+ * count, not those of a view whose key holds more, as a full-text search's does a plain one's.
+ */
+function pagesOf<Row extends ListItem = ListItem>(queryClient: QueryClient, list: ListOf) {
+  const key = hashKey(listKeyOf(list));
+  return queryClient
+    .getQueryCache()
+    .findAll({ queryKey: listKeyOf(list) })
+    .flatMap(({ queryKey, state: { data, dataUpdatedAt } }) =>
+      data && listOfKey(queryKey) === key
+        ? [{ ...(data as Page<Row>), fetchedAt: dataUpdatedAt }]
+        : [],
+    );
 }
 
 /** A list as `fetchedList` makes it, made anew as a page of it arrives or leaves the cache. */

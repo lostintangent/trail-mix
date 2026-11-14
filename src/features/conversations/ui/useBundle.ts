@@ -1,4 +1,3 @@
-import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type {
   BundleId,
@@ -40,10 +39,8 @@ export type InBundle = {
  */
 export function useBundle(id: BundleId | undefined): InBundle {
   const enabled = id !== undefined;
-  const first = useQuery({ ...bundleQuery(id ?? NONE), enabled });
-  const { rows, isFetching, show } = usePages(id ?? NONE, {
+  const { first, rows, isFetching, show } = usePages(id ?? NONE, {
     pageAt: (at) => bundleQuery(id ?? NONE, at),
-    isFirstFetching: first.isFetching,
     enabled,
   });
   const threads = useTriagedList(id ?? NONE, enabled ? rows : undefined);
