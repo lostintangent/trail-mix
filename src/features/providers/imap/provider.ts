@@ -70,7 +70,8 @@ export type ImapAccount = {
  * How the provider reaches the network. On workerd, the Mailroom passes imapflow's transport over
  * `cloudflare:sockets`, whose STARTTLS works there. Elsewhere Node's sockets serve, and `ca` adds
  * a certificate authority to trust, such as the test mail server's. `patience` stands in for
- * `SMTP_PATIENCE_MS` and `IMAP_PATIENCE_MS`, so a test of a host gone quiet need not wait as long.
+ * `SMTP_PATIENCE_MS`, `IMAP_PATIENCE_MS` and `SIGN_IN_PATIENCE_MS`, so a test of a host gone quiet
+ * need not wait as long.
  * `spent` hears where the time of each use of the IMAP connection went.
  */
 export type Network = {
@@ -688,10 +689,12 @@ export function imapProvider(account: ImapAccount, network: Network): MailProvid
 /**
  * Signs in to the account's IMAP host, then to its SMTP host, and out of each again, sending
  * nothing. Rejects with why a host turned it away, in its own words when it gave any. Each host has
- * `SIGN_IN_PATIENCE_MS` to connect, greet and take the password, so a mistyped host is told soon.
+ * `SIGN_IN_PATIENCE_MS`, unless the network says, to connect, greet and take the password, so a
+ * mistyped host is told soon.
  */
 export async function checkSignIn(account: ImapAccount, network: Network): Promise<void> {
   const { auth } = account;
+  const patient = { ...network, patience: network.patience ?? SIGN_IN_PATIENCE_MS };
   // What was sent, so no part of it is in a reason a host gives.
   const sent: SentCredentials =
     'pass' in auth
@@ -714,7 +717,7 @@ export async function checkSignIn(account: ImapAccount, network: Network): Promi
   // Only the reason leaves, never the client's error, which may carry what was sent. A token that
   // can't be had is not a host's refusal, so it rejects as it was.
   const signIn = async (endpoint: Endpoint, attempt: Promise<unknown>, stop: () => void) => {
-    const refused = await inTime(attempt, stop).then(
+    const refused = await inTime(attempt, stop, patient.patience).then(
       () => undefined,
       (error: SignInError) => signInFailure(error, endpoint, sent),
     );
@@ -726,7 +729,6 @@ export async function checkSignIn(account: ImapAccount, network: Network): Promi
   await connection.logout().catch(() => connection.close());
 
   const sockets: Socket[] = [];
-  const patient = { ...network, patience: SIGN_IN_PATIENCE_MS };
   const transport = await smtpTransport(signingIn, patient, {}, (socket) => sockets.push(socket));
   await signIn(account.smtp, transport.verify(), () => {
     for (const socket of sockets) socket.destroy();
@@ -734,17 +736,13 @@ export async function checkSignIn(account: ImapAccount, network: Network): Promi
 }
 
 /** How long a host has to connect, greet and take a password, when an account is added. */
-export const SIGN_IN_PATIENCE_MS = 15_000;
+const SIGN_IN_PATIENCE_MS = 15_000;
 
 /**
- * `attempt`, unless it outlasts `patience`, a sign-in's unless said. Then `stop` ends it, and it
- * fails as a host that never answered.
+ * `attempt`, unless it outlasts `patience`. Then `stop` ends it, and it fails as a host that never
+ * answered.
  */
-async function inTime<T>(
-  attempt: Promise<T>,
-  stop: () => void,
-  patience = SIGN_IN_PATIENCE_MS,
-): Promise<T> {
+async function inTime<T>(attempt: Promise<T>, stop: () => void, patience: number): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {

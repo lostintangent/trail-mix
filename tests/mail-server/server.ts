@@ -327,6 +327,8 @@ passdb passwd-file {
 userdb passwd-file {
   passwd_file_path = ${join(state, 'users')}
 }
+# A refused sign-in answers at once, rather than two seconds later, so tests of one don't wait.
+auth_failure_delay = 0
 
 # XOAUTH2 and OAUTHBEARER tokens are checked with the stand-in for Microsoft's sign-in.
 auth_mechanisms = plain login xoauth2 oauthbearer

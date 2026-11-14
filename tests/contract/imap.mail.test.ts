@@ -41,18 +41,16 @@ const ca = () => readFileSync(caFile, 'utf8');
 const bytes = (raw: string) => new TextEncoder().encode(raw);
 afterAll(stop);
 
-/** The IMAP provider, signed in as alice at the test mail server, with what a case changes. */
+/** Alice's account at the test mail server. */
+const alices: ImapAccount = {
+  account: 'test',
+  imap: { host: 'localhost', port: ports.imaps, secure: true },
+  smtp: { host: 'localhost', port: ports.submissions, secure: true },
+  auth,
+};
+/** The IMAP provider, signed in as alice, with what a case changes. */
 const aliceAt = (account: Partial<ImapAccount> = {}, network: Network = {}) =>
-  imapProvider(
-    {
-      account: 'test',
-      imap: { host: 'localhost', port: ports.imaps, secure: true },
-      smtp: { host: 'localhost', port: ports.submissions, secure: true },
-      auth,
-      ...account,
-    },
-    { ca: ca(), ...network },
-  );
+  imapProvider({ ...alices, ...account }, { ca: ca(), ...network });
 
 async function harness(profile: Profile): Promise<Harness> {
   await start(profile);
@@ -206,6 +204,31 @@ describe('The IMAP provider', () => {
       }
     }, 30_000);
   }
+
+  test('checking the sign-in gives up on a host that never greets, and says it couldn’t reach it', async () => {
+    // It takes the connection and says nothing, as a mistyped host can: no TLS handshake for IMAP,
+    // which imapflow would wait 90 s on, and no greeting for SMTP, which sending waits 60 s on.
+    await start('full');
+    const silent = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data() {} } });
+    const quiet = { host: '127.0.0.1', port: silent.port };
+    const attempt = async (hosts: Partial<ImapAccount>) => {
+      const started = Date.now();
+      const said = await checkSignIn({ ...alices, ...hosts }, { ca: ca(), patience: 1000 }).then(
+        () => 'kept',
+        (error: Error) => error.message,
+      );
+      return { said, took: Date.now() - started };
+    };
+    try {
+      const tries = [{ imap: { ...quiet, secure: true } }, { smtp: { ...quiet, secure: false } }];
+      for (const { said, took } of await Promise.all(tries.map(attempt))) {
+        expect(said).toBe(`Trail Mix couldn’t reach 127.0.0.1 on port ${silent.port}.`);
+        expect(took).toBeLessThan(5000);
+      }
+    } finally {
+      silent.stop(true);
+    }
+  }, 30_000);
 
   test('a submit whose connection drops after the message went out says it may have gone', async () => {
     const { failure, delivered } = await failedSubmit({

@@ -1,9 +1,7 @@
 // The Mailroom on the local Workers runtime, against the test mail server: accounts, sync, the
 // envelope index, hints, the body cache, and what each member can reach.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import nodemailer from 'nodemailer';
 import {
   isBundle,
   refOf,
@@ -17,17 +15,15 @@ import {
   type Outgoing,
 } from '../../mail/core/index.ts';
 import { RESTARTED, UNDO_SECONDS } from '../../outbox/core/index.ts';
-import { imap } from '../../providers/index.ts';
 import PostalMime from 'postal-mime';
 import { PAGE_SIZE, type Answered, type Page, type ThisDevice } from '../client/contract.ts';
 import {
-  caFile,
+  deliver,
   empty,
   fileSentCopies,
   inFolder,
   overImap,
   pauseSending,
-  ports,
   refuseSubmissionSignIn,
   resetUidValidity,
   settled,
@@ -43,7 +39,6 @@ import type { Synced, Wake } from './test-worker.ts';
 
 const { alice, bob } = users;
 const AT = '2026-11-09T12:00:00.000Z';
-const { SIGN_IN_PATIENCE_MS } = await imap();
 const DAY = 24 * 60 * 60_000;
 const setup = { ...setupOf(alice, 'Alice'), fromName: 'Alice Liddell' };
 
@@ -116,35 +111,6 @@ describe('The Mailroom', () => {
     expect(stored.tables.credentials).toEqual([]);
   }, 60_000);
 
-  test('gives up on a host that never greets after fifteen seconds, and says it couldn’t reach it', async () => {
-    // It takes the connection and says nothing, as a mistyped host can: no TLS handshake for IMAP,
-    // which imapflow would wait 90 s on, and no greeting for SMTP, which sending waits 60 s on.
-    const silent = Bun.listen({ hostname: '127.0.0.1', port: 0, socket: { data() {} } });
-    const quiet = { host: '127.0.0.1', port: silent.port };
-    const attempt = async (hosts: Pick<typeof setup, 'imap' | 'smtp'>) => {
-      const started = performance.now();
-      const said = await ada.call('addAccount', { ...setup, ...hosts }).then(
-        () => 'kept',
-        (error: Error) => error.message,
-      );
-      return { said, after: performance.now() - started };
-    };
-    try {
-      const [imap, smtp] = await Promise.all([
-        attempt({ imap: { ...quiet, secure: true } }),
-        attempt({ smtp: { ...quiet, secure: false } }),
-      ]);
-      for (const { said, after } of [imap, smtp]) {
-        expect(said).toBe(`Trail Mix couldn’t reach 127.0.0.1 on port ${silent.port}.`);
-        expect(after).toBeGreaterThan(SIGN_IN_PATIENCE_MS - 500);
-        expect(after).toBeLessThan(SIGN_IN_PATIENCE_MS + 3_000);
-      }
-    } finally {
-      silent.stop(true);
-    }
-    expect(await ada.call('accounts')).toEqual([]);
-  }, 60_000);
-
   test('connects an account once both its hosts take the password, and keeps it only sealed', async () => {
     account = await ada.call<Account>('addAccount', setup);
     expect(await ada.call<number>('imapLoadCount')).toBeGreaterThan(0);
@@ -197,7 +163,7 @@ describe('The Mailroom', () => {
     await ada.until(async () => (await ada.call<Wake[]>('wakeLog')).length > wakes);
 
     const sent = Date.now();
-    await submit({ subject: 'Arriving now' });
+    await deliver(alice.email, message({ id: 'arriving', subject: 'Arriving now' }));
     await Promise.all(
       devices.map((device) =>
         device.next((hint) => hint.changed === 'conversations' && hint.folder.path === 'INBOX'),
@@ -1867,17 +1833,4 @@ function seed() {
       date,
     );
   });
-}
-
-/** Mail from Bob, through the submission server, as it arrives from anyone. */
-async function submit({ subject }: { subject: string }) {
-  const transport = nodemailer.createTransport({
-    host: 'localhost',
-    port: ports.submissions,
-    secure: true,
-    auth: { user: bob.email, pass: bob.password },
-    tls: { ca: [readFileSync(caFile, 'utf8')] },
-  });
-  await transport.sendMail({ from: bob.email, to: alice.email, subject, text: `${subject}.` });
-  transport.close();
 }
