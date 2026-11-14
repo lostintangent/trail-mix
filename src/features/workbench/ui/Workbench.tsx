@@ -924,7 +924,7 @@ export function Workbench({
     };
     send({
       id,
-      last: (signal) => drafting.last(signal),
+      last: (signal, onUnreached) => drafting.last(signal, onUnreached),
       to,
       at,
       pressedAt,

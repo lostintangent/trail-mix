@@ -503,3 +503,37 @@ test('a tab closed mid-sentence keeps all but the last few seconds of what was w
   expect(mustKeep.length).toBeGreaterThan(10);
   expect(mustKeep.filter(({ word }) => !words.has(word))).toEqual([]);
 }, 60_000);
+
+test('a save whose answer was lost is asked again under its id, and Drafts keeps one copy with every word', async () => {
+  const page = await inbox();
+  const subject = `Unanswered ${Date.now()}`;
+  // The Mailroom files the first save, and its answer is lost on the way back.
+  const lost = Promise.withResolvers<void>();
+  let asks = 0;
+  await page.route('**/_serverFn/**', async (route) => {
+    if (!route.request().postData()?.includes('saveDraft') || asks++ > 0) return route.fallback();
+    await route.fetch();
+    await route.abort('failed');
+    lost.resolve();
+  });
+  await page.keyboard.press('c');
+  const composer = composerNamed(page, 'New message');
+  await page.keyboard.type('grace@example.com');
+  await composer.getByRole('textbox', { name: 'Subject' }).fill(subject);
+  await composer.getByRole('textbox', { name: 'Message' }).click();
+  await page.keyboard.type('Written before.');
+  await lost.promise;
+  // What's written while it's asked again saves once it's answered.
+  await page.keyboard.type(' And while.');
+  await saved(page).waitFor({ timeout: 15_000 });
+  await leave(page, composer);
+
+  await goToDrafts(page);
+  const rows = page.getByRole('option').filter({ hasText: subject });
+  await rows.first().click();
+  const drafts = reader(page).getByRole('button', { name: /^Draft/ });
+  await drafts.filter({ hasText: 'Written before. And while.' }).waitFor({ timeout: 10_000 });
+  await rows.nth(1).waitFor({ state: 'detached' });
+  await drafts.nth(1).waitFor({ state: 'detached' });
+  expect(asks).toBeGreaterThan(1);
+}, 60_000);

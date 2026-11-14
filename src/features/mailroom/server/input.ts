@@ -174,6 +174,13 @@ export function sendOf(value: unknown): string {
   return value;
 }
 
+export function saveOf(value: unknown): string {
+  if (typeof value !== 'string' || !value || value.length > 100) {
+    throw new TypeError('That isn’t a save.');
+  }
+  return value;
+}
+
 const FLAGS: readonly (keyof Flags)[] = ['seen', 'flagged', 'answered', 'draft'];
 
 export function flagsOf(value: unknown): Partial<Flags> {

@@ -271,6 +271,8 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   private readonly drafts = new Set<string>();
   /** Sends whose last save is being filed, by the press that named them. Memory alone holds them. */
   protected readonly handing = new Map<string, Handing>();
+  /** Saves being filed, by the id they were asked under. Memory alone holds them. */
+  private readonly saving = new Map<string, Promise<MessageRef>>();
   /** Whether this instance has had anything to do yet, so the first call can say it started it. */
   private isRunning = false;
   private readonly notifying: Notifying;
@@ -729,9 +731,37 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
    * is its own authority on what it answers: one that names no parent the index holds, as a draft
    * another client wrote may not, or whose parent went since the last save, keeps the threading of
    * the draft it replaces. Only a first save refuses a parent that has gone.
+   *
+   * `id` names the save, and the page asks again under it until the Mailroom answers, saying so
+   * with `isAgain`, since an ask whose answer was lost may have filed it. An ask again while that
+   * save is still being filed answers as it does, and one after looks for its copy first.
    */
-  async saveDraft(draft: DraftUpload, replaces?: MessageRef): Promise<MessageRef> {
-    const filed = await this.fileDraft(draft, replaces);
+  async saveDraft(
+    draft: DraftUpload,
+    replaces?: MessageRef,
+    id?: string,
+    isAgain?: boolean,
+  ): Promise<MessageRef> {
+    const named = input.optional(id, input.saveOf);
+    const again = input.optional(isAgain, input.switchOf) ?? false;
+    if (named === undefined) return this.savedDraft(draft, replaces);
+    const asked = this.saving.get(named);
+    if (asked) return asked;
+    const saving = this.savedDraft(draft, replaces, {
+      id: named,
+      mayBeFiled: again,
+      isPress: false,
+    }).finally(() => this.saving.delete(named));
+    this.saving.set(named, saving);
+    return saving;
+  }
+
+  private async savedDraft(
+    draft: DraftUpload,
+    replaces?: MessageRef,
+    asked?: Asked,
+  ): Promise<MessageRef> {
+    const filed = await this.fileDraft(draft, replaces, asked);
     await this.keepFiled(filed);
     return filed.saved;
   }
@@ -780,7 +810,11 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     }
     if ('save' in sent) {
       if (press === undefined) throw new TypeError('A send that carries its save needs an id.');
-      return this.sendLastSave(sent, when, opened, { id: press, isCutShort });
+      return this.sendLastSave(sent, when, opened, {
+        id: press,
+        mayBeFiled: isCutShort,
+        isPress: true,
+      });
     }
     try {
       if (!this.book.get(sent.account)) throw new Error('There is no such account.');
@@ -831,7 +865,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     { save, replaces }: LastUpload,
     when: string | undefined,
     opened: string,
-    press: Carrying,
+    press: Asked,
   ): Promise<Outgoing> {
     const { id } = press;
     const filing = this.fileDraft(save, replaces, press);
@@ -867,32 +901,33 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
    * send of it needs to know. Everything it refuses, it refuses before it files anything.
    *
    * A save filed twice would leave a stray copy in Drafts, so a save that may have been filed
-   * already finds its copy instead, by a Message-ID Trail Mix made. The save a press carries is
-   * named by its press, and a press a restart cut short looks first, before it reads anything from
-   * the version it replaces, which the replacing may have let go. A save whose filing fails looks
-   * after, since the host may have filed it and lost only the answer.
+   * already finds its copy instead, by a Message-ID Trail Mix made. A save is named by the id it
+   * was asked under, its own or the press that carries it, and one that an ask before may have
+   * filed looks first, before it reads anything from the version it replaces, which the replacing
+   * may have let go. A save whose filing fails looks after, since the host may have filed it and
+   * lost only the answer.
    */
   private async fileDraft(
     draft: DraftUpload,
     replaces?: MessageRef,
-    press?: Carrying,
+    asked?: Asked,
   ): Promise<FiledDraft> {
     const checked = input.draftOf(draft);
-    const older = replaces === undefined ? undefined : input.refOf(replaces);
+    const older = input.optional(replaces, input.refOf);
     const account = this.book.get(checked.account)?.account;
     if (!account) throw new Error('There is no such account.');
     if (older && older.account !== account.id) {
       throw new TypeError('A draft replaces only a draft of the account it is from.');
     }
     const domain = account.address.split('@')[1]!;
-    const messageId = press
-      ? await messageIdOfPress(press.id, domain)
+    const messageId = asked
+      ? await messageIdFor(asked.id, domain)
       : `<${crypto.randomUUID()}@${domain}>`;
     const addressing = { messageId, to: [...checked.to, ...checked.cc], subject: checked.subject };
     if (older && this.sending.holds(older)) {
       throw new Error('That draft is on its way. Undo the send to change it.');
     }
-    if (press?.isCutShort) {
+    if (asked?.mayBeFiled) {
       const held = await (await this.provider(account.id)).findDraft(messageId);
       if (held) return { ...this.filed(held, older), addressing };
     }
@@ -930,7 +965,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     const raw = new TextEncoder().encode(writeMime(message));
     const provider = await this.provider(account.id);
     // A restart before the press is on disk would leave its second ask not knowing to look.
-    if (press) await this.ctx.storage.sync();
+    if (asked?.isPress) await this.ctx.storage.sync();
     const saved = await provider.saveDraft(raw).catch(async (error: unknown) => {
       const held = await provider.findDraft(messageId).catch(() => undefined);
       if (!held) throw error;
@@ -2038,15 +2073,19 @@ type FiledDraft = {
   addressing: Pick<Outgoing, 'messageId' | 'to' | 'subject'>;
 };
 
-/** The press of Send a save is carried by, and whether a restart cut its first ask short. */
-type Carrying = { id: string; isCutShort: boolean };
+/**
+ * The id a save is asked under, its own or the press of Send that carries it, whether an ask before
+ * may have filed it, as one whose answer was lost or a press a restart cut short may have, and
+ * whether the id is a press, which the Outbox keeps.
+ */
+type Asked = { id: string; mayBeFiled: boolean; isPress: boolean };
 
 /**
- * The Message-ID of the save a press carries, made from the press so that asking again names the
- * same message. A press may be any text, so it is hashed into what a Message-ID can hold.
+ * The Message-ID of a save asked under `id`, made from it so that asking again names the same
+ * message. An id may be any text, so it is hashed into what a Message-ID can hold.
  */
-async function messageIdOfPress(press: string, domain: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(press));
+async function messageIdFor(id: string, domain: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(id));
   const hex = [...new Uint8Array(digest).slice(0, 16)]
     .map((byte) => byte.toString(16).padStart(2, '0'))
     .join('');

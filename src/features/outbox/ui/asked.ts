@@ -26,11 +26,11 @@ export type Asked = {
  * How a press reaches the Mailroom: any save of its message already on its way, then the asking,
  * which carries the last save and asks again until the Mailroom answers, then the send the Mailroom
  * scheduled. Undo stops it while it waits for the save, asks the Mailroom to stop it while it's
- * asked, and takes back the send once it is. While asking goes unanswered for a while, `unreached`
- * says what failed last.
+ * asked, and takes back the send once it is. While the save or the asking goes unanswered for a
+ * while, `unreached` says what failed last.
  */
 export type Hand =
-  | { is: 'saving' }
+  | { is: 'saving'; unreached?: string }
   | { is: 'asking'; answer: Promise<Answer | undefined>; unreached?: string }
   /**
    * Undo asked the Mailroom to stop a send it was still being asked for, which is asked for no more
@@ -67,19 +67,25 @@ export function handed(id: string, hand: Hand) {
 }
 
 /**
- * What failed when a press last went unanswered, while it's still being asked for, or that an ask
- * has landed.
+ * What failed when a press, or the save it waits for, last went unanswered, while it's still being
+ * saved or asked for, or that an ask has landed.
  */
 export function unreached(id: string, failed: string | undefined) {
   const was = asked.get(id);
-  if (!was || (was.hand.is !== 'asking' && was.hand.is !== 'undoing')) return;
+  if (!was || !mayGoUnanswered(was.hand)) return;
   if (was.hand.unreached !== failed)
     change(id, { ...was, hand: { ...was.hand, unreached: failed } });
 }
 
-/** What failed when a press still being asked for last went unanswered, if it has for a while. */
+/**
+ * What failed when a press still being saved or asked for last went unanswered, if it has for a
+ * while.
+ */
 export const unreachedOf = (hand: Hand | undefined) =>
-  hand?.is === 'asking' || hand?.is === 'undoing' ? hand.unreached : undefined;
+  hand && mayGoUnanswered(hand) ? hand.unreached : undefined;
+
+const mayGoUnanswered = (hand: Hand) =>
+  hand.is === 'saving' || hand.is === 'asking' || hand.is === 'undoing';
 
 export const isAsked = (id: string) => asked.has(id);
 

@@ -111,7 +111,17 @@ export interface Commands {
     messages: MessageRef[] | BundleScope,
     to: FolderRef | FolderRole,
   ): Promise<{ from: MessageRef; to: MessageRef }[]>;
-  saveDraft(draft: DraftInput, replaces?: MessageRef): Promise<MessageRef>;
+  /**
+   * Files a draft in place of the version it replaces. `id` names the save, which is asked again
+   * under it until the Mailroom answers or refuses it, with `isAgain`, since an ask whose answer was
+   * lost may have filed it. Asked again, it answers with the draft it filed, and files no other.
+   */
+  saveDraft(
+    draft: DraftInput,
+    replaces?: MessageRef,
+    id?: string,
+    isAgain?: boolean,
+  ): Promise<MessageRef>;
   /**
    * At the press of Send plus the undo window, unless given a later time. The press came `waited`
    * milliseconds before the call, while any save already on its way finished, and is now if not
@@ -283,7 +293,12 @@ export type DraftUpload = Omit<DraftInput, 'attachments'> & {
  */
 export type Mailroom = Queries &
   Omit<Commands, 'saveDraft' | 'send'> & {
-    saveDraft(draft: DraftUpload, replaces?: MessageRef): Promise<MessageRef>;
+    saveDraft(
+      draft: DraftUpload,
+      replaces?: MessageRef,
+      id?: string,
+      isAgain?: boolean,
+    ): Promise<MessageRef>;
     send(
       draft: MessageRef | { save: DraftUpload; replaces?: MessageRef },
       at?: string,

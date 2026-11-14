@@ -2,17 +2,18 @@ import type { QueryClient } from '@tanstack/react-query';
 import { Undo2 } from 'lucide-react';
 import { toast } from '../../../shared/toasts.tsx';
 import { sameRef, type MessageRef } from '../../mail/core/index.ts';
-import { bodyQuery, mailroom, type LastSave } from '../../mailroom/client/index.ts';
+import { bodyQuery, mailroom, untilAnswered, type LastSave } from '../../mailroom/client/index.ts';
 import {
   afterSave,
   draftInputOf,
   SAVE_AFTER_MS,
   SAVE_AT_LEAST_EVERY_MS,
   type Attached,
+  type DraftInput,
   type Writing,
 } from '../core/session.ts';
 
-/** How long after a save fails it is tried again. */
+/** How long after the Mailroom refuses a save a new one is tried. */
 const RETRY_AFTER_MS = 5_000;
 
 /** How many more times a message whose composer has closed tries its last save. */
@@ -33,8 +34,10 @@ export type Showing = {
  * A message being written, saved to the account's Drafts as it is: shortly after typing pauses, at
  * least every few seconds while it doesn't, whenever the page hides, and when its composer closes.
  * One save runs at a time, each replacing the draft the one before saved, and a change made during
- * a save is saved after it. It outlives its composer, so Send closes the composer at once and
- * carries its last save to the Mailroom, and Undo brings the same message back to a composer.
+ * a save is saved after it. A save is asked under an id of its own until the Mailroom answers or
+ * refuses it, so one whose answer was lost files one copy however often it's asked. It outlives its
+ * composer, so Send closes the composer at once and carries its last save to the Mailroom, and Undo
+ * brings the same message back to a composer.
  */
 export type Drafting = {
   /** The draft it was last saved as, if it has been. */
@@ -59,9 +62,13 @@ export type Drafting = {
   /**
    * What Send sends, once any save on its way has answered: the draft, if it holds everything
    * written, or else the last save, which the Mailroom files as it schedules the send. Stops
-   * waiting once `signal` aborts.
+   * waiting once `signal` aborts. While that save has gone unanswered for a while, `onUnreached`
+   * hears what failed each time.
    */
-  last: (signal: AbortSignal) => Promise<MessageRef | LastSave>;
+  last: (
+    signal: AbortSignal,
+    onUnreached: (error: unknown) => void,
+  ) => Promise<MessageRef | LastSave>;
   /** The draft the Mailroom filed the last save Send carried as, or the one it sent. */
   took: (saved: MessageRef) => void;
   /**
@@ -92,6 +99,10 @@ export function startDrafting(
   let retriesClosed = 0;
   let saving: Promise<void> | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  // What failed when the save under way last went unanswered, once it has for a while, and the
+  // Sends waiting for it, which hear of each.
+  let unreached: { error: unknown } | undefined;
+  const hearing = new Set<(error: unknown) => void>();
   // The files the save Send carries held, until they are named by the draft it was filed as. Their
   // old names may be of a draft that filing replaced, whose bytes the Mailroom lets go.
   let carried: readonly Attached[] | undefined;
@@ -133,7 +144,7 @@ export function startDrafting(
         // A draft replaces only one from its own account, so one moved to another account is saved
         // anew and the old one goes to the Trash.
         const replaces = older?.account === saved.account ? older : undefined;
-        const made = await mailroom.saveDraft(draftInputOf(saved), replaces);
+        const made = await file(draftInputOf(saved), replaces);
         draft = made;
         showing?.onDraft(made, older);
         for (const watcher of watchers) watcher(made);
@@ -149,6 +160,33 @@ export function startDrafting(
         }
       }
     });
+  };
+
+  /**
+   * Asks the Mailroom to file a save until it answers, under an id of the save's own, with which an
+   * ask after one whose answer was lost finds the copy that one filed rather than filing another.
+   * So nothing newer saves until it's answered or refused. Each ask that fails says so.
+   */
+  const file = async (save: DraftInput, replaces: MessageRef | undefined) => {
+    const id = crypto.randomUUID();
+    let asks = 0;
+    try {
+      return await untilAnswered(
+        () =>
+          mailroom.saveDraft(save, replaces, id, asks++ > 0).catch((error: unknown) => {
+            become('failed');
+            throw error;
+          }),
+        {
+          onUnreached: (error) => {
+            unreached = { error };
+            for (const hear of hearing) hear(error);
+          },
+        },
+      );
+    } finally {
+      unreached = undefined;
+    }
   };
 
   /**
@@ -201,7 +239,8 @@ export function startDrafting(
     owe: () => {
       if (!isOwed) owedSince = performance.now();
       isOwed = true;
-      if (state !== 'saving') become('unsaved');
+      // A save that failed says so until another starts.
+      if (state !== 'saving' && state !== 'failed') become('unsaved');
       // A change owes a save: shortly after typing pauses, and at least every few seconds meanwhile.
       if (saving || isDiscarded || isHanded) return;
       clearTimeout(timer);
@@ -219,9 +258,15 @@ export function startDrafting(
       clearTimeout(timer);
       timer = undefined;
     },
-    last: async (signal) => {
+    last: async (signal, onUnreached) => {
       carried = undefined;
-      while (saving) await saving;
+      if (unreached) onUnreached(unreached.error);
+      hearing.add(onUnreached);
+      try {
+        while (saving) await saving;
+      } finally {
+        hearing.delete(onUnreached);
+      }
       signal.throwIfAborted();
       if (draft && !isOwed) return draft;
       await nameCarried();

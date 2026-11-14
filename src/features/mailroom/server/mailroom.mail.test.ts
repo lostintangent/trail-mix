@@ -1608,6 +1608,40 @@ for (const profile of ['full', 'outlook'] as const satisfies Profile[]) {
       expect(await whereIs('Unanswered, sent')).toEqual({ delivered: 1, sent: 1, drafts: 0 });
     }, 90_000);
 
+    test('a save a restart cut short once it was filed, asked again under its id, answers with that draft and files no other', async () => {
+      const id = crypto.randomUUID();
+      const save = draftOf('Saved before the restart');
+      await cal.call('cutNextFiling', 'restart');
+      await expect(cal.call('saveDraft', save, undefined, id)).rejects.toThrow();
+      const saved = await cal.call<MessageRef>('saveDraft', save, undefined, id, true);
+      expect(new TextDecoder().decode((await draftOnServer(saved)).source)).toContain(
+        'About Saved before the restart.',
+      );
+      expect(await whereIs('Saved before the restart')).toEqual({
+        delivered: 0,
+        sent: 0,
+        drafts: 1,
+      });
+    }, 60_000);
+
+    test('a save asked again while its first ask is still being filed answers as that one does, and files no other', async () => {
+      const id = crypto.randomUUID();
+      const save = draftOf('Asked meanwhile');
+      await cal.call('holdDrafts');
+      const first = cal.call<MessageRef>('saveDraft', save, undefined, id);
+      let again: Promise<MessageRef>;
+      try {
+        await cal.until(async () => (await cal.call<number>('draftsHeld')) === 1);
+        again = cal.call<MessageRef>('saveDraft', save, undefined, id, true);
+        // Long enough for an ask that didn't wait for the first to reach the server too.
+        await Bun.sleep(1_000);
+      } finally {
+        await cal.call('letDraftsFile');
+      }
+      expect(await again).toEqual(await first);
+      expect(await whereIs('Asked meanwhile')).toEqual({ delivered: 0, sent: 0, drafts: 1 });
+    }, 60_000);
+
     test('an undo while a send’s last save is filed keeps it as a draft, and nothing goes', async () => {
       const press = crypto.randomUUID();
       await cal.call('holdDrafts');

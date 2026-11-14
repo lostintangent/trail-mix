@@ -16,9 +16,13 @@ export type Press = {
   id: string;
   /**
    * What the message sends, once any save already on its way has answered: its draft, or its last
-   * save. Stops waiting once `signal` aborts.
+   * save. Stops waiting once `signal` aborts. While that save has gone unanswered for a while,
+   * `onUnreached` hears what failed each time.
    */
-  last: (signal: AbortSignal) => Promise<MessageRef | LastSave>;
+  last: (
+    signal: AbortSignal,
+    onUnreached: (error: unknown) => void,
+  ) => Promise<MessageRef | LastSave>;
   /** Whom it goes to, as it was written. */
   to: readonly Address[];
   /** When to send, as an instant. A time inside the undo window sends when the window closes. */

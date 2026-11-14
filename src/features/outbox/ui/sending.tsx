@@ -33,7 +33,7 @@ import type { Press } from './useSend.ts';
 export async function handOff(queryClient: QueryClient, press: Press, signal: AbortSignal) {
   let last: MessageRef | LastSave;
   try {
-    last = await press.last(signal);
+    last = await press.last(signal, (error) => unreached(press.id, whatFailed(error)));
   } catch (error) {
     if (!signal.aborted) fail(press, error);
     return;
