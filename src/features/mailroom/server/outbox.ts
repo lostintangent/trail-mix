@@ -7,6 +7,10 @@ import {
 } from '../../mail/core/index.ts';
 import * as outbox from '../../outbox/core/index.ts';
 import { SendFailure, type MailProvider } from '../../providers/index.ts';
+import type { DraftUpload } from '../client/contract.ts';
+import type { AccountBook } from './accounts.ts';
+import type { Asked, FiledDraft, SavingDrafts } from './drafts.ts';
+import type { EnvelopeIndex } from './envelope-index.ts';
 import type { Sql } from './schema.ts';
 import { WAKE } from './sync.ts';
 
@@ -285,6 +289,186 @@ export function outboxQueue(sending: Sending) {
       } finally {
         running = false;
       }
+    },
+  };
+}
+
+/** What Send may carry in place of a draft: the message's last save. */
+export type LastUpload = { save: DraftUpload; replaces?: MessageRef };
+
+/** A send whose last save is being filed. Undo before its window closes keeps it as a draft. */
+type Handing = {
+  closes: number;
+  isUndone: boolean;
+  filing: Promise<FiledDraft>;
+  sent: Promise<Outgoing>;
+};
+
+/**
+ * The Outbox's commands as the member presses them, Send, Undo and Retry, each carried to the
+ * queue, and the Outbox as a device lists it, each send placed in its conversation.
+ */
+export type OutboxCommands = ReturnType<typeof outboxCommands>;
+
+export function outboxCommands(ports: {
+  queue: OutboxQueue;
+  drafts: Pick<SavingDrafts, 'file' | 'keep' | 'addressing'>;
+  book: Pick<AccountBook, 'get'>;
+  store: EnvelopeIndex;
+  /** Has the Mailroom wake by then, to send what is due. */
+  wakeBy: (at: number) => Promise<void>;
+}) {
+  const { queue, drafts, store } = ports;
+  /** Sends whose last save is being filed, by the press that named them. Memory alone holds them. */
+  const handing = new Map<string, Handing>();
+
+  /** A send with the conversation its draft is in, as the index knows it now. */
+  const placed = (outgoing: Outgoing): Outgoing => {
+    const conversation = store.reads.message(outgoing.draft)?.conversation;
+    return conversation === undefined ? outgoing : { ...outgoing, conversation };
+  };
+
+  /** Files a send's last save, then schedules the draft it made, unless the send was undone. */
+  const sendLastSave = (
+    { save, replaces }: LastUpload,
+    when: string | undefined,
+    opened: string,
+    press: Asked,
+  ): Promise<Outgoing> => {
+    const { id } = press;
+    const filing = drafts.file(save, replaces, press);
+    const entry = {
+      closes: outbox.closesAfterPress(Date.parse(opened), when),
+      isUndone: false,
+      filing,
+    };
+    const sent = (async () => {
+      const filed = await filing.catch((error: unknown) => {
+        queue.unpress(id);
+        throw error;
+      });
+      if (entry.isUndone) {
+        queue.undone(id, new Date().toISOString(), filed.saved);
+        await drafts.keep(filed);
+        throw new Error('The send was undone.');
+      }
+      // Scheduled before the save owes its sync, so the sync never finds the draft unsent.
+      const outgoing = queue.send(
+        { draft: filed.saved, ...filed.addressing },
+        new Date().toISOString(),
+        when,
+        opened,
+        id,
+      );
+      await drafts.keep(filed);
+      await ports.wakeBy(Date.parse(outgoing.sendAt));
+      return placed(outgoing);
+    })().finally(() => handing.delete(id));
+    handing.set(id, Object.assign(entry, { sent }));
+    return sent;
+  };
+
+  return {
+    /** The Outbox as a device lists it. */
+    list(): Outgoing[] {
+      return queue.list().map((outgoing) => placed(outgoing));
+    },
+
+    /**
+     * Schedules a draft to send when the undo window closes, or at a later time. The draft stays
+     * in Drafts, as it is, until the host accepts it. The window opened when the member pressed
+     * Send, `ago` milliseconds before the device asked, counted from when the request `arrived` at
+     * the Worker, and never further back than its own length.
+     *
+     * Send may carry the message's last save in place of a draft, which is filed first, so a
+     * device that closes once it has asked still sends. `press` names it, which the Outbox keeps
+     * for a week, so asking again answers as the first ask did: with the send, as it stands or as
+     * it went, or refused once it was undone. A press older than that is refused, since it may
+     * have gone. A press a restart cut short may have filed its save, so its second ask looks for
+     * that draft first.
+     */
+    async send(
+      sent: MessageRef | LastUpload,
+      when: string | undefined,
+      ago: number,
+      press: string,
+      arrived: number,
+    ): Promise<Outgoing> {
+      const opened = new Date(arrived - Math.min(ago, outbox.UNDO_SECONDS * 1000)).toISOString();
+      const held = handing.get(press);
+      if (held) return held.sent;
+      const known = queue.pressed(press);
+      if (known?.send) return placed(known.send);
+      if (known?.came) {
+        if ('sent' in known.came) return placed(known.came.sent);
+        throw new Error('The send was undone.');
+      }
+      // A press the Outbox no longer keeps may have gone. One it keeps unanswered was cut short by
+      // a restart, before it scheduled anything, and is taken again.
+      if (!known && ago >= PRESS_KEPT_MS) {
+        throw new Error('Send was pressed over a week ago, so it wasn’t sent.');
+      }
+      queue.press(press, new Date(arrived).toISOString());
+      if ('save' in sent) {
+        return sendLastSave(sent, when, opened, {
+          id: press,
+          mayBeFiled: known !== undefined,
+          isPress: true,
+        });
+      }
+      try {
+        if (!ports.book.get(sent.account)) throw new Error('There is no such account.');
+        if (store.reads.role(sent) !== 'drafts') throw new Error('Only a draft can be sent.');
+        const addressing = await drafts.addressing(sent);
+        const outgoing = queue.send(
+          { draft: sent, ...addressing },
+          new Date().toISOString(),
+          when,
+          opened,
+          press,
+        );
+        await ports.wakeBy(Date.parse(outgoing.sendAt));
+        return placed(outgoing);
+      } catch (error) {
+        queue.unpress(press);
+        throw error;
+      }
+    },
+
+    /**
+     * Undo, for a press or the send it scheduled. A send whose last save is still being filed is
+     * never scheduled, and its draft is returned once it is saved, while its window is open. A
+     * press the Mailroom has yet to take never will be, and returns no draft. Asked again, it
+     * answers as it did.
+     */
+    async undo(press: string): Promise<MessageRef | undefined> {
+      const now = new Date().toISOString();
+      const known = queue.pressed(press);
+      if (known?.send) return queue.cancel(known.send.id, now);
+      const held = handing.get(press);
+      if (held) {
+        if (Date.now() >= held.closes) throw new Error('It is being sent, so it can’t be undone.');
+        held.isUndone = true;
+        return (await held.filing).saved;
+      }
+      if (known?.came) {
+        if ('sent' in known.came) throw new Error('It has been sent.');
+        return known.came.undone ?? undefined;
+      }
+      queue.undone(press, now);
+      return undefined;
+    },
+
+    /** The member's Retry of a send that failed, by its id. */
+    async retry(id: string): Promise<Outgoing> {
+      const retried = queue.retry(id, new Date().toISOString());
+      await ports.wakeBy(Date.parse(retried.sendAt));
+      return placed(retried);
+    },
+
+    /** Whether the member has undone a send whose last save is being filed. */
+    isUndoing(press: string): boolean {
+      return handing.get(press)?.isUndone === true;
     },
   };
 }

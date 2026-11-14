@@ -206,7 +206,7 @@ export class TestMailroom extends Mailroom {
 
   /** Whether the member has undone a send whose last save is being filed. */
   isUndoing(id: string): Promise<boolean> {
-    return Promise.resolve(this.handing.get(id)?.isUndone === true);
+    return Promise.resolve(this.outboxCommands.isUndoing(id));
   }
 
   private closes = 0;
