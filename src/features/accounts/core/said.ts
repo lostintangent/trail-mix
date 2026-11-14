@@ -49,9 +49,6 @@ function listed(names: readonly string[]): string {
     : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
 }
 
-/** The Mailroom's refusal for a deployment that holds the demo mailbox. */
-const DEMO_ONLY = 'This deployment has only the demo mailbox.';
-
 /**
  * Whether this Trail Mix holds the demo mailbox, which only a preview or the public demo does, and
  * which never connects a real account. It shows in the accounts it already has.
@@ -59,12 +56,7 @@ const DEMO_ONLY = 'This deployment has only the demo mailbox.';
 export const isDemoOnly = (accounts: readonly Account[]) =>
   accounts.some(({ provider }) => provider === 'demo');
 
-/** Why an account wasn't added. A host's own words come through as the Mailroom gave them. */
-export function refusalSaid(message: string): string {
-  if (message === DEMO_ONLY) return DEMO_SAID;
-  return message;
-}
-
+/** Why a deployment that holds the demo mailbox adds no account, as the page and the Mailroom say. */
 export const DEMO_SAID =
   'This Trail Mix serves only the demo mailbox, so it can’t connect an account of your own.';
 

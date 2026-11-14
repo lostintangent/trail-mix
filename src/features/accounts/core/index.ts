@@ -1,4 +1,6 @@
-// What the Mailroom keeps of a sign-in at a vendor while the member enters its code.
+// What the Mailroom keeps of a sign-in at a vendor while the member enters its code, and the words
+// it shares with the account screens.
+export { DEMO_SAID, signInNotSetUp } from './said.ts';
 export {
   due,
   expired,

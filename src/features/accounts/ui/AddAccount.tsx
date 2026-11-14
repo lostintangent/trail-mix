@@ -25,7 +25,7 @@ import {
   type AccountForm,
   type PresetServers,
 } from '../core/form.ts';
-import { DEMO_SAID, isDemoOnly, refusalSaid, signInNotSetUp } from '../core/said.ts';
+import { DEMO_SAID, isDemoOnly, signInNotSetUp } from '../core/said.ts';
 import { SignInStep } from './SignInStep.tsx';
 
 const ZOHO: PresetServers = PRESETS.zoho;
@@ -95,7 +95,7 @@ export function AddAccount({
         added(await mailroom.addAccount(setupFrom(form, ZOHO)));
       }
     } catch (error) {
-      setRefusal(refusalSaid(error instanceof Error ? error.message : String(error)));
+      setRefusal(error instanceof Error ? error.message : String(error));
     } finally {
       setChecking(undefined);
     }

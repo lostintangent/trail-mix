@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { Account } from '../../mail/core/index.ts';
-import { DEMO_SAID, eraseSaid, isDemoOnly, refusalSaid, removeSaid } from './said.ts';
+import { eraseSaid, isDemoOnly, removeSaid } from './said.ts';
 
 const account = (provider: Account['provider'], name = 'trl.mx'): Account => ({
   id: name,
@@ -67,11 +67,4 @@ test('a deployment holding demo accounts serves only the demo mailbox', () => {
   expect(isDemoOnly([account('demo', 'Personal')])).toBe(true);
   expect(isDemoOnly([account('imap')])).toBe(false);
   expect(isDemoOnly([])).toBe(false);
-});
-
-test('the Mailroom’s refusal for a demo deployment reads as the member’s, and a host’s as it was', () => {
-  expect(refusalSaid('This deployment has only the demo mailbox.')).toBe(DEMO_SAID);
-  expect(refusalSaid('localhost refused the password: Authentication failed.')).toBe(
-    'localhost refused the password: Authentication failed.',
-  );
 });

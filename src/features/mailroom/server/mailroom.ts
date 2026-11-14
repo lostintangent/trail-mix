@@ -497,7 +497,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       return account;
     }
     // Preview and demo deployments hold the demo mailbox, and can never reach a real account.
-    if (this.demo) throw new Error('This deployment has only the demo mailbox.');
+    if (this.demo) throw new Error(signing.DEMO_SAID);
     if (!('password' in checked)) throw new Error('Outlook sign-in arrives with its own step.');
     const address = checked.address.toLowerCase();
     if (this.book.all().some((held) => held.address.toLowerCase() === address)) {
@@ -533,7 +533,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
    */
   async signIn(to: SignInSetup | AccountId): Promise<SignIn> {
     const checked = input.signInOf(to);
-    if (this.demo) throw new Error('This deployment has only the demo mailbox.');
+    if (this.demo) throw new Error(signing.DEMO_SAID);
     let address: string;
     let preset: PresetName | undefined;
     let pendingTo: signing.Pending['to'];
@@ -2142,7 +2142,7 @@ function notSetUp(preset: PresetName | undefined): string {
   const device = deviceOf(preset);
   if (!preset || !device || !(preset in APPS)) return 'That account doesn’t sign in at its vendor.';
   const { id } = APPS[preset as SignInPreset];
-  return `${device.vendor} sign-in isn’t set up on this Trail Mix. The operator registers an app with ${device.vendor} and sets ${id}.`;
+  return signing.signInNotSetUp(device.vendor, id);
 }
 
 /** What a member reads when an account's sign-in has lapsed. */

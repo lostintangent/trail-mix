@@ -255,7 +255,7 @@ describe('Outlook, where it can’t sign in', () => {
       const gus = member('gus', () => demo);
       expect(await gus.call('signInPresets')).toEqual([]);
       await expect(gus.call('signIn', outlook)).rejects.toThrow(
-        'This deployment has only the demo mailbox.',
+        'This Trail Mix serves only the demo mailbox, so it can’t connect an account of your own.',
       );
       expect((await requests()).length).toBe(asked);
     } finally {
