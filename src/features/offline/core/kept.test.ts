@@ -24,36 +24,26 @@ const persisted = (queryKey: readonly unknown[], data: unknown): Persisted => ({
 });
 
 describe('what is kept', () => {
+  const bundle = 'a:trailmix-demo%2Ftoy-box';
+  const kept = (list: (readonly unknown[])[]) => list.filter((key) => isKept(key));
+
   test('the snapshots that show mail, and nothing about signing in or this device', () => {
-    const kinds = (list: readonly (readonly unknown[])[]) => list.map((key) => isKept(key));
-    expect(
-      kinds([
-        keys.accounts,
-        keys.folders,
-        keys.outbox,
-        keys.page({ in: 'inbox' }, 0),
-        keys.bundlePage('a:trailmix-demo%2Ftoy-box', 0),
-        keys.conversation('c1'),
-        keys.body(ref),
-      ]),
-    ).toEqual([true, true, true, true, true, true, true]);
-    expect(kinds([keys.signIns, keys.signInPresets, keys.thisDevice])).toEqual([
-      false,
-      false,
-      false,
-    ]);
+    const showing = [
+      keys.accounts,
+      keys.folders,
+      keys.outbox,
+      keys.conversation('c1'),
+      keys.body(ref),
+    ];
+    expect(kept(showing)).toEqual(showing);
+    expect(kept([keys.signIns, keys.signInPresets, keys.thisDevice])).toEqual([]);
   });
 
   test('a list or a bundle keeps its first page, which is what opens first, and no page further down', () => {
-    expect([0, 50, 100].map((at) => isKept(keys.page({ in: 'inbox' }, at)))).toEqual([
-      true,
-      false,
-      false,
-    ]);
-    expect([0, 50].map((at) => isKept(keys.bundlePage('a:trailmix-demo%2Ftoy-box', at)))).toEqual([
-      true,
-      false,
-    ]);
+    const inbox = { in: 'inbox' };
+    const first = [keys.page(inbox, 0), keys.bundlePage(bundle, 0)];
+    const further = [keys.page(inbox, 50), keys.page(inbox, 100), keys.bundlePage(bundle, 50)];
+    expect(kept([...first, ...further])).toEqual(first);
   });
 
   test('a body knows its size, and nothing else counts', () => {

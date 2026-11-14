@@ -7,8 +7,12 @@ import {
   shortcutsOf,
   type Command,
 } from '../../commands/index.ts';
-import { triageCommands } from '../../conversations/index.ts';
+import { accountCommands } from '../../accounts/index.ts';
+import { composerCommands } from '../../composer/ui/index.ts';
+import { gitHubCommand, triageCommands } from '../../conversations/index.ts';
 import { viewCommands } from '../../folders/index.ts';
+import { notificationCommands } from '../../notifications/index.ts';
+import { sourceCommand } from '../../reader/index.ts';
 import { sendCommands } from '../../outbox/index.ts';
 import type { Account, Folder } from '../../mail/core/index.ts';
 import { backFrom, readerCover, workbenchCommands } from './commands.ts';
@@ -49,9 +53,28 @@ function registry(isUnread: boolean): Command[] {
       openSettings: nothing,
       showShortcuts: nothing,
     }),
+    ...composerCommands({ write: nothing, reply: nothing }),
+    gitHubCommand(undefined),
+    sourceCommand(nothing),
     ...viewCommands(accounts, folders, nothing),
+    ...accountCommands({
+      accounts,
+      keeps: true,
+      add: nothing,
+      edit: nothing,
+      remove: nothing,
+      signIn: nothing,
+      erase: nothing,
+    }),
     ...sendCommands({ onSend: nothing, isEnabled: true, shortcut: 'Mod+Enter' }),
     ...accentCommands('#c2185b', nothing, nothing),
+    ...notificationCommands({
+      isShown: true,
+      readiness: 'able',
+      isOn: false,
+      isBusy: false,
+      toggle: async () => {},
+    }),
   ];
 }
 

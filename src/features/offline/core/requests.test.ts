@@ -39,19 +39,11 @@ describe('what the worker answers', () => {
   });
 });
 
-describe('a shell of the worker’s build', () => {
+test('a shell of the worker’s build names only files it keeps, so a newer deployment’s or a sign-in page isn’t one', () => {
   const shell = (...assets: string[]) =>
     `<!doctype html><html><head>${assets.map((a) => `<link rel="modulepreload" href="${a}">`).join('')}</head></html>`;
 
-  test('names only files the worker keeps', () => {
-    expect(isShellOf(shell('/assets/main-abc123.js', '/assets/main-def456.css'), KEPT)).toBe(true);
-  });
-
-  test('from a newer deployment names one it doesn’t, and isn’t kept', () => {
-    expect(isShellOf(shell('/assets/main-abc123.js', '/assets/main-new789.js'), KEPT)).toBe(false);
-  });
-
-  test('that names no built file at all, such as a sign-in page, isn’t one', () => {
-    expect(isShellOf('<html><body>Sign in</body></html>', KEPT)).toBe(false);
-  });
+  expect(isShellOf(shell('/assets/main-abc123.js', '/assets/main-def456.css'), KEPT)).toBe(true);
+  expect(isShellOf(shell('/assets/main-abc123.js', '/assets/main-new789.js'), KEPT)).toBe(false);
+  expect(isShellOf('<html><body>Sign in</body></html>', KEPT)).toBe(false);
 });

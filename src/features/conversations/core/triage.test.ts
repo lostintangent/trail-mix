@@ -1,7 +1,14 @@
 import { expect, test } from 'bun:test';
-import type { Folder, FolderRole, Message, View } from '../../mail/core/index.ts';
-import { changeMessages, errandFor, followMoves, undoOf, type Errand } from './carrying.ts';
-import { changeRows, isShown, overlaid, putBack, rowChange } from './triage.ts';
+import type { BundleSummary, Folder, FolderRole, Message, View } from '../../mail/core/index.ts';
+import {
+  bundleErrandFor,
+  changeMessages,
+  errandFor,
+  followMoves,
+  undoOf,
+  type Errand,
+} from './carrying.ts';
+import { changeRows, isShown, overlaid, putBack, rowChange, type Action } from './triage.ts';
 
 const ROLES: Partial<Record<string, FolderRole>> = {
   INBOX: 'inbox',
@@ -131,6 +138,22 @@ test('an action that would change nothing sends nothing', () => {
 
   expect(errandFor({ do: 'read' }, inbox, [read], folders)).toBeUndefined();
   expect(errandFor({ do: 'archive' }, inbox, [[message('Archive')]], folders)).toBeUndefined();
+});
+
+test('a bundle’s errand reaches every conversation its row showed, and makes no move off its Inbox’s account or into it', () => {
+  const date = '2026-11-03T09:00:00Z';
+  const bundle = { kind: 'bundle', id: 'b1', account: 'personal', date } as BundleSummary;
+  const scope = { bundle: 'b1', through: date };
+  const projects = { account: 'personal', path: 'Projects' };
+  const errand = (action: Action) => bundleErrandFor(action, bundle, folders);
+
+  expect(errand({ do: 'archive' })).toEqual({ move: scope, to: 'archive' });
+  expect(errand({ do: 'delete' })).toEqual({ move: scope, to: 'trash' });
+  expect(errand({ do: 'move', to: projects })).toEqual({ move: scope, to: projects });
+  expect(errand({ do: 'move', to: { account: 'personal', path: 'INBOX' } })).toBeUndefined();
+  expect(errand({ do: 'move', to: { account: 'work', path: 'Archive' } })).toBeUndefined();
+  expect(errand({ do: 'unflag' })).toEqual({ setFlags: scope, change: { flagged: false } });
+  expect(errand({ do: 'unread' })).toEqual({ setFlags: scope, change: { seen: false } });
 });
 
 test('Undo puts each moved message back in the folder it left', () => {

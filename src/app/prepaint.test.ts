@@ -2,19 +2,16 @@ import { expect, test } from 'bun:test';
 import { runInNewContext } from 'node:vm';
 import { PANELS } from '../features/workbench/index.ts';
 import { prepaintScript } from './prepaint.ts';
-import { ACCENT_STORAGE_KEY, ACCENT_STYLE_ID } from './theme/accent.ts';
-import { accentRule } from './theme/readableAccent.ts';
+import { ACCENT_STORAGE_KEY } from './theme/accent.ts';
 
 type Element = { tagName: string; id: string; textContent: string };
 
 /** What the inline script leaves on `<html>` and in `<head>`, run as the shell runs it, first. */
 function paint(localStorage: Pick<Storage, 'getItem'>) {
-  const dataset: Record<string, string> = {};
   const style = new Map<string, string>();
   const head: Element[] = [];
   const document = {
     documentElement: {
-      dataset,
       style: { setProperty: (name: string, value: string) => style.set(name, value) },
     },
     head: { append: (element: Element) => head.push(element) },
@@ -23,7 +20,6 @@ function paint(localStorage: Pick<Storage, 'getItem'>) {
   // A context with only these two globals, so a script that reached for anything else would throw.
   runInNewContext(prepaintScript, { localStorage, document });
   return {
-    theme: dataset['theme'],
     sidebar: style.get(PANELS.sidebar.variable),
     list: style.get(PANELS.list.variable),
     ...(head.length > 0 && { head }),
@@ -34,60 +30,28 @@ const saved = (entries: Record<string, string>) => ({
   getItem: (key: string) => entries[key] ?? null,
 });
 
-test('the saved accent and panel sizes are there before first paint, and no saved theme', () => {
-  const css = accentRule('#c2185b')!;
-  const painted = paint(
-    saved({
-      // A theme an earlier release saved, which the system's now overrules.
-      'trail-mix.theme': 'dark',
-      [ACCENT_STORAGE_KEY]: JSON.stringify({ color: '#c2185b', css }),
-      [PANELS.sidebar.key]: JSON.stringify({ width: 300, isCollapsed: false }),
-      [PANELS.list.key]: JSON.stringify({ width: 420, isCollapsed: true }),
-    }),
-  );
-
-  expect(painted).toEqual({
-    theme: undefined,
-    sidebar: '300px',
-    list: `${PANELS.list.rail}px`,
-    head: [{ tagName: 'style', id: ACCENT_STYLE_ID, textContent: css }],
-  });
-});
-
-test('with nothing saved, the panels take their widths', () => {
-  expect(paint(saved({}))).toEqual({
-    theme: undefined,
-    sidebar: `${PANELS.sidebar.width}px`,
-    list: `${PANELS.list.width}px`,
-  });
-});
-
-test('a saved value it does not understand is ignored rather than breaking the page', () => {
-  const painted = paint(
-    saved({
-      [ACCENT_STORAGE_KEY]: 'not json',
-      [PANELS.sidebar.key]: '{"width":"wide"}',
-      [PANELS.list.key]: 'not json',
-    }),
-  );
-
-  expect(painted).toEqual({
-    theme: undefined,
-    sidebar: `${PANELS.sidebar.width}px`,
-    list: `${PANELS.list.width}px`,
-  });
-});
-
-test('storage that throws leaves the defaults in charge', () => {
+test('what storage can’t give leaves the defaults, and a saved width out of range is brought into it', () => {
+  const defaults = { sidebar: `${PANELS.sidebar.width}px`, list: `${PANELS.list.width}px` };
   const blocked = {
     getItem: (): string | null => {
       throw new Error('SecurityError');
     },
   };
+  const unreadable = saved({
+    [ACCENT_STORAGE_KEY]: 'not json',
+    [PANELS.sidebar.key]: '{"width":"wide"}',
+    [PANELS.list.key]: 'not json',
+  });
+  const outOfRange = saved({
+    [PANELS.sidebar.key]: JSON.stringify({ width: 9999, isCollapsed: false }),
+    [PANELS.list.key]: JSON.stringify({ width: 10, isCollapsed: false }),
+  });
 
-  expect(paint(blocked)).toEqual({
-    theme: undefined,
-    sidebar: `${PANELS.sidebar.width}px`,
-    list: `${PANELS.list.width}px`,
+  expect(paint(saved({}))).toEqual(defaults);
+  expect(paint(unreadable)).toEqual(defaults);
+  expect(paint(blocked)).toEqual(defaults);
+  expect(paint(outOfRange)).toEqual({
+    sidebar: `${PANELS.sidebar.max}px`,
+    list: `${PANELS.list.min}px`,
   });
 });

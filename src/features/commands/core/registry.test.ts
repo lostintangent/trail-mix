@@ -27,16 +27,15 @@ const inbox = command('inbox', 'Go to Inbox');
 const flag = command('flag', 'Flag', 'S', false);
 
 test('a key runs the command that has it, and nothing when that command can’t run now', () => {
-  expect(commandFor([archive, unread, flag], press('e'), true)).toBe(archive);
-  expect(commandFor([archive, unread, flag], press('U', true), true)).toBe(unread);
-  expect(commandFor([archive, unread, flag], press('s'), true)).toBeUndefined();
+  const run = (key: string, shiftKey?: boolean) =>
+    commandFor([archive, unread, flag], press(key, shiftKey), true);
+  expect([run('e'), run('U', true), run('s')]).toEqual([archive, unread, undefined]);
 });
 
 test('one command may answer to more than one key, and each key is unique across commands', () => {
   const remove = command('delete', 'Delete', ['#', 'Delete', 'Backspace']);
-  const commands = [remove];
   for (const key of ['#', 'Delete', 'Backspace']) {
-    expect(commandFor(commands, press(key), true)).toBe(remove);
+    expect(commandFor([remove], press(key), true)).toBe(remove);
   }
   expect(problemsOf([remove, command('forward', 'Forward', 'Delete')])).toEqual([
     'Delete is the key of both delete and forward.',
