@@ -57,13 +57,10 @@ export function CommandMatches({
     keys.current = (key, typed) => {
       const command = found[at];
       if (!command || typed !== text) return false;
+      // Up is all the way round but one, so the highlight wraps at either end.
+      const step = key === 'ArrowDown' ? 1 : found.length - 1;
       if (key === 'Enter') run(command);
-      else
-        setHighlight({
-          text,
-          at:
-            key === 'ArrowDown' ? (at + 1) % found.length : (at - 1 + found.length) % found.length,
-        });
+      else setHighlight({ text, at: (at + step) % found.length });
       return true;
     };
   });

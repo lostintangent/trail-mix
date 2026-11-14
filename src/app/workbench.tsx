@@ -98,8 +98,8 @@ function App() {
   const isFirstRun = accounts.data?.length === 0;
   const welcome = useLoaded(preloadFirstRun, isFirstRun);
   const hasMail = useHasMail(accounts.data);
-  usePreloadWhenIdle(preloadUnreachable);
-  usePreloadWhenIdle(preloadSettings);
+  useEffect(() => whenIdle(preloadUnreachable), []);
+  useEffect(() => whenIdle(preloadSettings), []);
   const settings = useCallback(
     (at: SettingsAt | undefined) => (
       <Suspense>
@@ -145,11 +145,6 @@ const { Component: Unreachable, preload: preloadUnreachable } = preloadable(
 const { Component: Settings, preload: preloadSettings } = preloadable(
   async () => (await import('./settings.tsx')).Settings,
 );
-
-/** Loads `load` once the first screen has had its turn and the browser is idle. */
-function usePreloadWhenIdle(load: () => Promise<unknown>) {
-  useEffect(() => whenIdle(load), [load]);
-}
 
 /** How long a device that doesn't know whether there's mail waits before saying it's opening. */
 const OPENING_QUIET_MS = 300;

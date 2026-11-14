@@ -12,10 +12,8 @@ export function useReach(): Reach {
 }
 
 function subscribe(onChange: () => void) {
-  addEventListener('online', onChange);
-  addEventListener('offline', onChange);
-  return () => {
-    removeEventListener('online', onChange);
-    removeEventListener('offline', onChange);
-  };
+  const listening = new AbortController();
+  addEventListener('online', onChange, { signal: listening.signal });
+  addEventListener('offline', onChange, { signal: listening.signal });
+  return () => listening.abort();
 }

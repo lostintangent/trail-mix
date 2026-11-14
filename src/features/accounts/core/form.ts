@@ -102,12 +102,9 @@ export function setupFrom(form: AccountForm, zoho: PresetServers) {
       ? { host: host.trim(), port: preset.port, secure: preset.secure }
       : { host: host.trim(), port: number, secure: !STARTTLS_PORTS.has(number) };
   };
-  const fromName = form.fromName.trim();
   return {
     provider: 'imap' as const,
-    name: nameFor(form),
-    address: form.address.trim(),
-    ...(fromName ? { fromName } : {}),
+    ...named(form),
     ...(isZoho ? { preset: 'zoho' as const } : {}),
     imap: at(form.imapHost, form.imapPort, zoho.imap),
     smtp: at(form.smtpHost, form.smtpPort, zoho.smtp),
@@ -117,13 +114,13 @@ export function setupFrom(form: AccountForm, zoho: PresetServers) {
 
 /** What the Mailroom is asked to sign in to at the vendor: an Outlook account, which has no password. */
 export function signInSetupFrom(form: AccountForm) {
+  return { preset: 'outlook' as const, ...named(form) };
+}
+
+/** What either setup names: the account, its address, and its From name if one was given. */
+function named(form: AccountForm) {
   const fromName = form.fromName.trim();
-  return {
-    preset: 'outlook' as const,
-    name: nameFor(form),
-    address: form.address.trim(),
-    ...(fromName ? { fromName } : {}),
-  };
+  return { name: nameFor(form), address: form.address.trim(), ...(fromName ? { fromName } : {}) };
 }
 
 /** One @, something before it, and a domain with a dot in it. */

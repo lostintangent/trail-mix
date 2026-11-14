@@ -20,12 +20,10 @@ export function Unreachable({ failed, onTryAgain }: { failed?: unknown; onTryAga
     const again = () => {
       if (document.visibilityState === 'visible' && navigator.onLine) onTryAgain();
     };
-    document.addEventListener('visibilitychange', again);
-    window.addEventListener('online', again);
-    return () => {
-      document.removeEventListener('visibilitychange', again);
-      window.removeEventListener('online', again);
-    };
+    const listening = new AbortController();
+    document.addEventListener('visibilitychange', again, { signal: listening.signal });
+    window.addEventListener('online', again, { signal: listening.signal });
+    return () => listening.abort();
   }, [onTryAgain]);
   const isFull = (failed as Unanswered | undefined)?.status === 429;
   return (

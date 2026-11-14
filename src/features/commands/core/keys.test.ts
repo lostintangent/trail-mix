@@ -54,9 +54,9 @@ test('a command can answer to aliases while its key cap keeps the primary key', 
   expect(labelShortcuts(keys, true)).toBe('#, Delete, Backspace');
 });
 
-test('only a shortcut with a modifier, or Escape, works while typing', () => {
-  expect(worksWhileTyping('Mod+K')).toBe(true);
-  expect(worksWhileTyping('Escape')).toBe(true);
-  expect(worksWhileTyping('E')).toBe(false);
-  expect(worksWhileTyping('Shift+U')).toBe(false);
+test('only a press with Mod, or Escape, works while typing', () => {
+  expect(worksWhileTyping(press('k', { metaKey: true }), true)).toBe(true);
+  expect(worksWhileTyping(press('k', { ctrlKey: true }), false)).toBe(true);
+  expect(worksWhileTyping(press('Escape'), true)).toBe(true);
+  expect(worksWhileTyping(press('U', { shiftKey: true, ctrlKey: true }), true)).toBe(false);
 });

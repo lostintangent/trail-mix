@@ -29,18 +29,11 @@ export type KeyPress = {
   altKey: boolean;
 };
 
-type Parsed = { key: string; mod: boolean; shift: boolean; alt: boolean };
-
-function parse(shortcut: Shortcut): Parsed {
-  const parts = shortcut.split('+');
-  const key = parts.at(-1) ?? '';
-  const modifiers = new Set(parts.slice(0, -1));
-  return {
-    key,
-    mod: modifiers.has('Mod'),
-    shift: modifiers.has('Shift'),
-    alt: modifiers.has('Alt'),
-  };
+function parse(shortcut: Shortcut) {
+  const modifiers = shortcut.split('+');
+  const key = modifiers.pop() ?? '';
+  const has = (modifier: string) => modifiers.includes(modifier);
+  return { key, mod: has('Mod'), shift: has('Shift'), alt: has('Alt') };
 }
 
 /** Whether a letter key, whose case says whether Shift was held, rather than a symbol. */
@@ -66,6 +59,6 @@ export function label(shortcut: Shortcut, isApple: boolean): string {
   return [mod && 'Ctrl', alt && 'Alt', shift && 'Shift', shown].filter(Boolean).join('+');
 }
 
-/** Whether a shortcut works while typing in a field, as one with a modifier or Escape does. */
-export const worksWhileTyping = (shortcut: Shortcut) =>
-  parse(shortcut).mod || parse(shortcut).key === 'Escape';
+/** Whether a key press runs its command while typing in a field, as one with `Mod` or Escape does. */
+export const worksWhileTyping = (press: KeyPress, isApple: boolean) =>
+  (isApple ? press.metaKey : press.ctrlKey) || press.key === 'Escape';

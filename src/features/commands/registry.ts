@@ -1,6 +1,6 @@
 import type { LucideIcon } from 'lucide-react';
 import { createContext, use, useEffect, useLayoutEffect, useRef } from 'react';
-import { labelShortcuts, matches, shortcutsOf, worksWhileTyping } from './core/keys.ts';
+import { labelShortcuts, worksWhileTyping } from './core/keys.ts';
 import { commandFor, matching, type CommandLike } from './core/registry.ts';
 import { useLatest } from '../../shared/useLatest.ts';
 
@@ -57,13 +57,12 @@ export function runCommandKey(event: KeyboardEvent) {
   // A key that composes text in an input method isn't a shortcut, and neither is one handled.
   if (event.isComposing || event.keyCode === 229 || event.defaultPrevented) return;
   const command = commandFor(bound, event, isApple);
-  if (!command?.shortcut) return;
-  const shortcut = shortcutsOf(command.shortcut).find((key) => matches(key, event, isApple));
+  if (!command) return;
   const target = event.target instanceof Element ? event.target : null;
   const isTyping = target?.closest(
     'input, textarea, select, [contenteditable]:not([contenteditable="false"])',
   );
-  if (isTyping && (!shortcut || !worksWhileTyping(shortcut))) return;
+  if (isTyping && !worksWhileTyping(event, isApple)) return;
   event.preventDefault();
   void command.run();
 }
@@ -93,11 +92,9 @@ export function useSteadyCommands(commands: readonly Command[]): readonly Comman
 
 /** Whether two commands show the same: alike in everything but what running each does. */
 function looksSame(a: Command, b: Command): boolean {
-  const { run: _a, ...shownA } = a;
-  const { run: _b, ...shownB } = b;
-  const keys = Object.keys(shownA) as (keyof typeof shownA)[];
+  const keys = Object.keys(a) as (keyof Command)[];
   return (
-    keys.length === Object.keys(shownB).length && keys.every((key) => shownA[key] === shownB[key])
+    keys.length === Object.keys(b).length && keys.every((key) => key === 'run' || a[key] === b[key])
   );
 }
 
