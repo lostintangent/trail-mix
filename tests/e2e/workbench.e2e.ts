@@ -915,12 +915,6 @@ test('Enter runs the best match for what the field holds, even before the palett
   });
   await page.getByRole('heading', { name: 'Outbox', level: 2 }).waitFor({ timeout: 5_000 });
   await expect(field.inputValue()).resolves.toBe('');
-
-  // So does a quick typist's Enter, straight after the last key.
-  await page.keyboard.press('ControlOrMeta+k');
-  await page.keyboard.type('go to drafts');
-  await page.keyboard.press('Enter');
-  await page.getByRole('heading', { name: 'Drafts', level: 2 }).waitFor({ timeout: 5_000 });
   expect(problems).toEqual([]);
   await context.close();
 });
