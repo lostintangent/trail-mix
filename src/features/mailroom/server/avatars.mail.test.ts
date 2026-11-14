@@ -16,6 +16,7 @@ import {
   users,
 } from '../../../../tests/mail-server/server.ts';
 import { mailrooms, member, setupOf } from '../../../../tests/mailrooms.ts';
+import { message } from '../../../../tests/message.ts';
 import type { LocalWorker } from '../../../../tests/workerd.ts';
 import type { Wake } from './test-worker.ts';
 
@@ -384,20 +385,10 @@ async function storedAvatars(name: string) {
 /** A message to Bob, with the Authentication-Results his server wrote on top, and any below it. */
 function signed(id: string, from: string, dmarc: 'pass' | 'fail', below: string[] = []) {
   const domain = from.split('@')[1]!;
-  return [
+  const results = [
     `Authentication-Results: ${SIGNER};`,
     `\tdkim=${dmarc} header.d=${domain};`,
     `\tdmarc=${dmarc} (p=reject dis=none) header.from=${domain}`,
-    ...below,
-    `From: ${from}`,
-    `To: ${bob.email}`,
-    `Subject: ${id}`,
-    `Date: ${new Date().toUTCString()}`,
-    `Message-ID: <${id}@${domain}>`,
-    'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset=utf-8',
-    '',
-    `This is ${id}.`,
-    '',
-  ].join('\r\n');
+  ];
+  return message({ id, subject: id, from, headers: [...results, ...below] });
 }

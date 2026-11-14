@@ -14,6 +14,7 @@ import {
   users,
 } from '../../../../tests/mail-server/server.ts';
 import { mailrooms, member, setupOf } from '../../../../tests/mailrooms.ts';
+import { message } from '../../../../tests/message.ts';
 import type { LocalWorker } from '../../../../tests/workerd.ts';
 
 const { bob } = users;
@@ -177,24 +178,19 @@ function offering(
     signed = 'From:To:Subject:Date:Message-ID:List-Unsubscribe:List-Unsubscribe-Post',
   }: { dmarc?: 'pass' | 'fail'; below?: string[]; signed?: string } = {},
 ) {
-  return [
-    `Authentication-Results: ${SIGNER};`,
-    `\tdkim=${dmarc} header.d=news.test header.s=s1;`,
-    `\tdmarc=${dmarc} (p=reject dis=none) header.from=news.test`,
-    ...below,
-    `DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=news.test; s=s1;`,
-    `\th=${signed}; bh=YmgK; b=c2lnbmF0dXJlCg==`,
-    'From: News <news@news.test>',
-    `To: ${bob.email}`,
-    `Subject: ${subject}`,
-    `Date: ${new Date().toUTCString()}`,
-    `Message-ID: <${subject}@news.test>`,
-    `List-Unsubscribe: <${address}>, <mailto:leave@news.test>`,
-    'List-Unsubscribe-Post: List-Unsubscribe=One-Click',
-    'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset=utf-8',
-    '',
-    `This is ${subject}.`,
-    '',
-  ].join('\r\n');
+  return message({
+    id: subject,
+    subject,
+    from: 'News <news@news.test>',
+    headers: [
+      `Authentication-Results: ${SIGNER};`,
+      `\tdkim=${dmarc} header.d=news.test header.s=s1;`,
+      `\tdmarc=${dmarc} (p=reject dis=none) header.from=news.test`,
+      ...below,
+      `DKIM-Signature: v=1; a=rsa-sha256; c=relaxed/relaxed; d=news.test; s=s1;`,
+      `\th=${signed}; bh=YmgK; b=c2lnbmF0dXJlCg==`,
+      `List-Unsubscribe: <${address}>, <mailto:leave@news.test>`,
+      'List-Unsubscribe-Post: List-Unsubscribe=One-Click',
+    ],
+  });
 }

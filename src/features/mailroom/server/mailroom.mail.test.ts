@@ -36,6 +36,7 @@ import {
   users,
 } from '../../../../tests/mail-server/server.ts';
 import { mailrooms, member, setupOf } from '../../../../tests/mailrooms.ts';
+import { message } from '../../../../tests/message.ts';
 import type { LocalWorker } from '../../../../tests/workerd.ts';
 import { WAKE } from './sync.ts';
 import type { Synced, Wake } from './test-worker.ts';
@@ -324,17 +325,17 @@ describe('The Mailroom', () => {
         account: account.id,
         path: 'Receipts',
       });
-      expect(await onServer('Receipts')).toContainKey('<garden@trailmix.test>');
+      expect(await onServer('Receipts')).toContainKey('<garden@example.com>');
       await undo(moved);
-      expect(await onServer('INBOX')).toContainKey('<garden@trailmix.test>');
+      expect(await onServer('INBOX')).toContainKey('<garden@example.com>');
 
       // Found only by the server's own search, outside the index.
       const [row] = await ada.page({ in: 'search', text: 'periwinkle', fullText: true });
       const [old] = await ada.call<Message[]>('conversation', row!.id);
       const deleted = await ada.call<Moved[]>('move', [refOf(old!)], 'trash');
-      expect(await onServer('Trash')).toContainKey('<old@trailmix.test>');
+      expect(await onServer('Trash')).toContainKey('<old@example.com>');
       await undo(deleted);
-      expect(await onServer('Archive')).toContainKey('<old@trailmix.test>');
+      expect(await onServer('Archive')).toContainKey('<old@example.com>');
 
       await ada.call('deleteFolder', { account: account.id, path: 'Receipts' });
       // Settled, so the next test hears only of its own changes.
@@ -348,7 +349,10 @@ describe('The Mailroom', () => {
       await ada.call('createFolder', at('Bills'));
       await ada.call('createFolder', at('Bills/Water'));
       await overImap(alice, (client) =>
-        client.append('Bills/Water', raw({ id: 'meter', subject: 'Meter reading', minutesAgo: 5 })),
+        client.append(
+          'Bills/Water',
+          message({ id: 'meter', subject: 'Meter reading', minutesAgo: 5 }),
+        ),
       );
       await ada.call('createFolder', at('Scratch'));
       await ada.until(async () =>
@@ -416,7 +420,7 @@ describe('The Mailroom', () => {
 
       // A message in Trips/Japan, which a check finds, as opening a browser asks for.
       await overImap(alice, (client) =>
-        client.append('Trips/Japan', raw({ id: 'ryokan', subject: 'Ryokan', minutesAgo: 10 })),
+        client.append('Trips/Japan', message({ id: 'ryokan', subject: 'Ryokan', minutesAgo: 10 })),
       );
       await ada.device().opened;
       await ada.until(async () => (await ada.page({ in: 'search', text: 'ryokan' })).length === 1);
@@ -479,7 +483,7 @@ describe('The Mailroom', () => {
       // Another client deleted this folder a moment ago, as far as the browser knows.
       const refused = ada.call('move', [garden], { account: account.id, path: 'Gone' });
       await expect(refused).rejects.toThrow(/doesn't exist/i);
-      expect(await onServer('INBOX')).toContainKey('<garden@trailmix.test>');
+      expect(await onServer('INBOX')).toContainKey('<garden@example.com>');
     });
   });
 
@@ -550,8 +554,8 @@ describe('The Mailroom', () => {
         from: { name: 'Alice Liddell', address: alice.email },
         to: [{ name: 'Bob', address: bob.email }],
         subject: 'Re: Lunch',
-        inReplyTo: '<lunch-reply@trailmix.test>',
-        references: '<lunch@trailmix.test> <lunch-reply@trailmix.test>',
+        inReplyTo: '<lunch-reply@example.com>',
+        references: '<lunch@example.com> <lunch-reply@example.com>',
       });
       expect(written.messageId).toMatch(/^<[\w-]+@trailmix\.test>$/);
       expect(written.html).toContain('src="cid:chart@trailmix.invalid"');
@@ -671,23 +675,21 @@ describe('The Mailroom', () => {
       // Written in another client, in answer to mail older than the index keeps.
       const subject = 'Re: Before the window';
       const thread = {
-        inReplyTo: '<before-window@trailmix.test>',
-        references: '<first-ever@trailmix.test> <before-window@trailmix.test>',
+        inReplyTo: '<before-window@example.com>',
+        references: '<first-ever@example.com> <before-window@example.com>',
       };
       await overImap(alice, (client) =>
         client.append(
           'Drafts',
-          [
-            `References: ${thread.references}`,
-            raw({
-              id: 'elsewhere',
-              subject,
-              minutesAgo: 5,
-              from: alice.email,
-              to: bob.email,
-              inReplyTo: 'before-window',
-            }),
-          ].join('\r\n'),
+          message({
+            id: 'elsewhere',
+            subject,
+            minutesAgo: 5,
+            from: alice.email,
+            to: bob.email,
+            inReplyTo: 'before-window',
+            headers: [`References: ${thread.references}`],
+          }),
           ['\\Draft', '\\Seen'],
         ),
       );
@@ -703,7 +705,7 @@ describe('The Mailroom', () => {
 
     test('a reply whose parent goes between two saves saves on, answering it, and only a first save refuses', async () => {
       await overImap(alice, (client) =>
-        client.append('INBOX', raw({ id: 'picnic', subject: 'Picnic', minutesAgo: 5 })),
+        client.append('INBOX', message({ id: 'picnic', subject: 'Picnic', minutesAgo: 5 })),
       );
       const picnic = await checked('Picnic');
       const reply = (markdown: string) =>
@@ -720,8 +722,8 @@ describe('The Mailroom', () => {
       // The composer still names the parent it began with.
       const second = await ada.save(reply('Count me in, rain or shine.\n'), first);
       expect(await answered(second)).toEqual({
-        inReplyTo: '<picnic@trailmix.test>',
-        references: '<picnic@trailmix.test>',
+        inReplyTo: '<picnic@example.com>',
+        references: '<picnic@example.com>',
       });
       await expect(ada.save(reply('Me too.\n'))).rejects.toThrow(/replies to is gone/);
       await ada.call('move', [second], 'trash');
@@ -752,7 +754,7 @@ describe('The Mailroom', () => {
       );
       const saved = await ada.save(draft({}), lunch);
       await discarded();
-      expect(await onServer('INBOX')).toContainKey('<lunch-reply@trailmix.test>');
+      expect(await onServer('INBOX')).toContainKey('<lunch-reply@example.com>');
       // Nor does it take what a message it doesn't replace answers.
       expect(await answered(saved)).toEqual({ inReplyTo: undefined, references: undefined });
       await ada.call('move', [saved], 'trash');
@@ -824,7 +826,7 @@ describe('The Mailroom', () => {
     const folderWith = async (path: string, subject: string) => {
       await overImap(alice, async (client) => {
         await client.mailboxCreate(path);
-        await client.append(path, raw({ id: subject.toLowerCase(), subject, minutesAgo: 5 }));
+        await client.append(path, message({ id: subject.toLowerCase(), subject, minutesAgo: 5 }));
       });
       await checkNow();
       return indexed(path, subject);
@@ -847,7 +849,7 @@ describe('The Mailroom', () => {
         for (const id of ids)
           await client.append(
             'INBOX',
-            raw({ id: `cache-${id}`, subject: `Cache ${id}`, minutesAgo: 3 }),
+            message({ id: `cache-${id}`, subject: `Cache ${id}`, minutesAgo: 3 }),
           );
       });
       await checkNow();
@@ -990,7 +992,7 @@ describe('The Mailroom', () => {
     // Only when the member last opened it remains, since they are still here: no word of mail.
     expect(await leftOf(ada, 'opened')).toEqual({ tables: [], bodies: [] });
     const { tables } = await ada.call<Stored>('stored');
-    expect(JSON.stringify(tables).toLowerCase()).not.toMatch(/garden|tickets|lunch|alice|bob/);
+    expect(JSON.stringify(tables).toLowerCase()).not.toMatch(/garden|tickets|lunch|park|alice|bob/);
   });
 
   test('erasing everything leaves no table, body, alarm, send or secret, and a fresh start holds nothing', async () => {
@@ -1854,24 +1856,24 @@ const foldersOnServer = () =>
 /** Alice's mailbox: two letters, and a question in Sent with its reply in Inbox. */
 function seed() {
   return overImap(alice, async (client) => {
-    await client.append('INBOX', raw({ id: 'garden', subject: 'Garden', minutesAgo: 90 }));
-    await client.append('INBOX', raw({ id: 'tickets', subject: 'Tickets', minutesAgo: 60 }));
+    await client.append('INBOX', message({ id: 'garden', subject: 'Garden', minutesAgo: 90 }));
+    await client.append('INBOX', message({ id: 'tickets', subject: 'Tickets', minutesAgo: 60 }));
     await client.append(
       'Sent',
-      raw({ id: 'lunch', subject: 'Lunch', minutesAgo: 30, from: alice.email, to: bob.email }),
+      message({ id: 'lunch', subject: 'Lunch', minutesAgo: 30, from: alice.email, to: bob.email }),
       ['\\Seen'],
     );
     await client.append(
       'INBOX',
-      raw({ id: 'lunch-reply', subject: 'Re: Lunch', minutesAgo: 10, inReplyTo: 'lunch' }),
+      message({ id: 'lunch-reply', subject: 'Re: Lunch', minutesAgo: 10, inReplyTo: 'lunch' }),
     );
     // Older than the index keeps, so only the server's own search finds it.
-    const twoYears = 2 * 365 * 24 * 60;
+    const date = new Date(Date.now() - 2 * 365 * DAY);
     await client.append(
       'Archive',
-      raw({ id: 'old', subject: 'Old letter', minutesAgo: twoYears, text: 'A periwinkle teapot.' }),
+      message({ id: 'old', subject: 'Old letter', date, text: 'A periwinkle teapot.' }),
       ['\\Seen'],
-      new Date(Date.now() - twoYears * 60_000),
+      date,
     );
   });
 }
@@ -1887,28 +1889,4 @@ async function submit({ subject }: { subject: string }) {
   });
   await transport.sendMail({ from: bob.email, to: alice.email, subject, text: `${subject}.` });
   transport.close();
-}
-
-function raw(fields: {
-  id: string;
-  subject: string;
-  minutesAgo: number;
-  from?: string;
-  to?: string;
-  inReplyTo?: string;
-  text?: string;
-}) {
-  return [
-    `From: ${fields.from ?? bob.email}`,
-    `To: ${fields.to ?? alice.email}`,
-    `Subject: ${fields.subject}`,
-    `Date: ${new Date(Date.now() - fields.minutesAgo * 60_000).toUTCString()}`,
-    `Message-ID: <${fields.id}@trailmix.test>`,
-    ...(fields.inReplyTo ? [`In-Reply-To: <${fields.inReplyTo}@trailmix.test>`] : []),
-    'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset=utf-8',
-    '',
-    fields.text ?? `This is ${fields.subject}.`,
-    '',
-  ].join('\r\n');
 }

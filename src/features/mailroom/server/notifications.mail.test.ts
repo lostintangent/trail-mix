@@ -7,10 +7,11 @@ import { standInPushService } from '../../../../tests/push-service.ts';
 import type { ThisDevice } from '../client/contract.ts';
 import { empty, overImap, start, stop, users } from '../../../../tests/mail-server/server.ts';
 import { mailrooms, member, setupOf } from '../../../../tests/mailrooms.ts';
+import { message } from '../../../../tests/message.ts';
 import type { LocalWorker } from '../../../../tests/workerd.ts';
 import type { SentPush, Wake } from './test-worker.ts';
 
-const { alice, bob } = users;
+const { bob } = users;
 const OPERATOR = 'operator@trailmix.test';
 
 describe('The Mailroom, notifying devices', () => {
@@ -80,7 +81,7 @@ describe('The Mailroom, notifying devices', () => {
     expect(more).toEqual([]);
     const message = await inInbox('Ridge trip');
     const notice: Notice = {
-      title: 'Alice',
+      title: 'Ada Park',
       body: 'Ridge trip\nThis is Ridge trip.',
       tag: message.conversation,
       navigate: addressOf({ view: { in: 'inbox' }, open: message.conversation }),
@@ -230,30 +231,16 @@ describe('A Trail Mix without a push key it can use', () => {
 });
 
 /**
- * Mail from Alice landing in Bob's Inbox, or another folder, as a server's rule files it: unseen
- * unless said, and dated a minute ago unless said.
+ * Mail landing in Bob's Inbox, or another folder, as a server's rule files it: unseen unless said,
+ * and dated a minute ago unless said.
  */
-async function arrive(fields: {
-  id: string;
-  subject: string;
-  seen?: boolean;
-  minutesAgo?: number;
-  folder?: string;
-}) {
-  const raw = [
-    `From: Alice <${alice.email}>`,
-    `To: ${bob.email}`,
-    `Subject: ${fields.subject}`,
-    `Date: ${new Date(Date.now() - (fields.minutesAgo ?? 1) * 60_000).toUTCString()}`,
-    `Message-ID: <${fields.id}@trailmix.test>`,
-    'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset=utf-8',
-    '',
-    `This is ${fields.subject}.`,
-    '',
-  ].join('\r\n');
+async function arrive({
+  folder = 'INBOX',
+  seen = false,
+  ...fields
+}: Parameters<typeof message>[0] & { seen?: boolean; folder?: string }) {
   await overImap(bob, (client) =>
-    client.append(fields.folder ?? 'INBOX', raw, fields.seen ? ['\\Seen'] : []),
+    client.append(folder, message({ minutesAgo: 1, ...fields }), seen ? ['\\Seen'] : []),
   );
 }
 
