@@ -74,8 +74,8 @@ export const HELD = 'data-tm-held';
 
 /** An image URL as a content security policy source: its origin and path. */
 function cspSource(url: string): string {
-  const parsed = URL.parse(url);
-  if (!parsed) return '';
+  if (!URL.canParse(url)) return '';
+  const parsed = new URL(url);
   const path = parsed.pathname.replace(/[;,\s']/g, (c) => `%${c.charCodeAt(0).toString(16)}`);
   return `${parsed.origin}${path}`;
 }

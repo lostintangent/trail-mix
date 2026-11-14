@@ -301,7 +301,8 @@ function remoteAddress(image: Element): URL | null {
 /** A URL as a browser reads it. Mail has no base, so a relative URL is no URL. */
 function parseUrl(raw: string): URL | null {
   const value = raw.replace(/[\t\n\r]/g, '').trim();
-  return URL.parse(value.startsWith('//') ? `https:${value}` : value);
+  const url = value.startsWith('//') ? `https:${value}` : value;
+  return URL.canParse(url) ? new URL(url) : null;
 }
 
 /** `cid:` URLs percent-encode the Content-ID, which a part's header writes in angle brackets. */
