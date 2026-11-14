@@ -15,12 +15,9 @@ export type SelectBy = 'only' | 'toggle' | 'extend';
 
 export const NOTHING_SELECTED: Selection = { ids: [] };
 
-/** A selection of `id` alone, which both ends of a range start from. */
-export const selectOnly = (id: ConversationId): Selection => ({
-  ids: [id],
-  anchor: id,
-  active: id,
-});
+/** A selection of `id` alone, which both ends of a range start from, or of nothing without one. */
+export const selectOnly = (id: ConversationId | undefined): Selection =>
+  id === undefined ? NOTHING_SELECTED : { ids: [id], anchor: id, active: id };
 
 /** Whether two selections pick the same conversations, in the same order. */
 export const isSameSelection = (a: Selection, b: Selection) =>
@@ -50,4 +47,43 @@ export function select(
       return { ids: order.slice(Math.min(from, to), Math.max(from, to) + 1), anchor, active: id };
     }
   }
+}
+
+/**
+ * A row leaving the list, and where it was, until the selection has moved on from it. Meanwhile it
+ * stays picked, and places count from where it was.
+ */
+export type Vacating<Row> = { row: Row; at: number };
+
+/**
+ * Where a conversation sits in a list, and where the row after it is: while it leaves, where it was,
+ * so the row that took its place is the one after it. One neither listed nor leaving sits at -1.
+ */
+export function placeAmong(
+  places: ReadonlyMap<ConversationId, number>,
+  vacating: Vacating<{ id: ConversationId }> | undefined,
+  id: ConversationId | undefined,
+): { at: number; after: number } {
+  const at = id === undefined ? -1 : (places.get(id) ?? -1);
+  return at < 0 && vacating !== undefined && vacating.row.id === id
+    ? { at: vacating.at, after: vacating.at }
+    : { at, after: at + 1 };
+}
+
+/**
+ * The rows a selection picks, in the list's order, whatever order they were picked in. One leaving
+ * the list stays among them, last, until the selection moves on from it.
+ */
+export function pickedIn<Row extends { id: ConversationId }>(
+  rows: readonly (Row | undefined)[] | undefined,
+  places: ReadonlyMap<ConversationId, number>,
+  ids: readonly ConversationId[],
+  vacating: Vacating<Row> | undefined,
+): Row[] {
+  const picked = ids
+    .flatMap((id) => rows?.[places.get(id) ?? -1] ?? [])
+    .toSorted((a, b) => (places.get(a.id) ?? 0) - (places.get(b.id) ?? 0));
+  return vacating && ids.includes(vacating.row.id) && !picked.includes(vacating.row)
+    ? [...picked, vacating.row]
+    : picked;
 }

@@ -2,7 +2,6 @@ import { colorVars, durationVars, spacingVars } from '@astryxdesign/core/theme/t
 import * as stylex from '@stylexjs/stylex';
 import { hashKey, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  startTransition,
   Suspense,
   useCallback,
   useEffect,
@@ -77,7 +76,6 @@ import {
   ConversationListSkeleton,
   gitHubCommand,
   idsIn,
-  isSameSelection,
   listsUnreadOnly,
   NOTHING_SELECTED,
   neighbors,
@@ -85,7 +83,6 @@ import {
   SearchContext,
   SearchField,
   SearchScope,
-  select,
   selectOnly,
   TriageActions,
   triageCommands,
@@ -93,9 +90,9 @@ import {
   useAround,
   useOpenThread,
   useSearch,
+  useSelection,
   useTriage,
   type Action,
-  placesOf,
   type Listed,
   type SelectBy,
   type Selection,
@@ -244,15 +241,26 @@ export function Workbench({
   const queryClient = useQueryClient();
   const { view } = place;
   // The conversation or bundle the address opens is the one selected, from the first render.
-  const [selection, setSelection] = useState<Selection>(() => openOnly(place.bundle ?? place.open));
+  const {
+    selection,
+    setSelection,
+    isPicking,
+    selected,
+    isMany,
+    vacating,
+    places,
+    rowOf,
+    placeOf,
+    picked,
+    giveWay,
+    backIfRefused: selectionBackIfRefused,
+    selectBy,
+    startPicking,
+    clearSelection,
+    releaseRow,
+  } = useSelection(conversations, place.bundle ?? place.open);
   // The conversation or bundle a place arrived naming, which the list looks for until it lists it.
   const [seeking, setSeeking] = useState(() => place.bundle ?? place.open);
-  const [isPicking, setPicking] = useState(false);
-  // Picking ends with the last conversation picked.
-  if (isPicking && selection.ids.length === 0) setPicking(false);
-  // One conversation selected is the one open in the reader. Several wait for an action together.
-  const selected = selection.ids.length === 1 ? selection.ids[0] : undefined;
-  const isMany = selection.ids.length > 1;
   // A bundle selected lies open in the reader, and one of its threads may lie open in its place,
   // until the selection moves on from the bundle.
   const bundleOpen = selected !== undefined && bundlePartsOf(selected) ? selected : undefined;
@@ -312,7 +320,7 @@ export function Workbench({
     // The conversation or bundle a place names is the one selected, with the thread it names open
     // in the bundle, and a view that names none opens at its newest.
     arrive: ({ view, bundle, open }) => {
-      setSelection(openOnly(bundle ?? open));
+      setSelection(selectOnly(bundle ?? open));
       setSeeking(bundle ?? open);
       arriveAt({ view, bundle, open });
       setPhonePane(bundle !== undefined || open !== undefined ? 'reader' : 'list');
@@ -368,19 +376,6 @@ export function Workbench({
       composing.write(writeFrom);
     });
   const [isSheetOpen, setSheetOpen] = useState(false);
-  // The conversation leaving the list, and where it was, until the selection has moved on from it.
-  // Meanwhile it stays picked, and the moves either side of it and the reader's place count from
-  // where it was, so the commands and what shows them don't change in the frame that shows it gone.
-  const [vacating, setVacating] = useState<{ row: ListItem; at: number }>();
-  // Where each fetched conversation lies, so finding one never reads the whole list.
-  const places = useMemo(
-    () => (conversations ? placesOf(conversations) : NO_PLACES),
-    [conversations],
-  );
-  const rowOf = useCallback(
-    (id: ConversationId) => conversations?.[places.get(id) ?? -1],
-    [conversations, places],
-  );
   // A place that arrives naming a conversation deeper in its list than the pages it holds asks for
   // the page holding it, until the list first lists it, so the row leaving the list later, as an
   // archive takes it, asks for nothing. The list waits for that page, and for the row it brought to
@@ -395,51 +390,30 @@ export function Workbench({
     conversationsQuery(view, { around: seeking ?? '' }, isUnreadOnly ? seeking : undefined),
   );
   if (seeking !== undefined && around.isDone) setSeeking(undefined);
-  // A conversation that leaves the list gives way to the one below it, or above it at the end. On a
-  // phone, where the reader fills the screen, the list comes back instead. The list shows the
-  // conversation gone at once, and the reader turns to the next one just after, so the frame that
-  // shows the archive doesn't wait for the next conversation to render.
-  const giveWay = (id: ConversationId): Selection => {
-    const at = places.get(id) ?? -1;
-    const leaving = conversations?.[at];
-    const next = conversations?.[at + 1] ?? conversations?.[at - 1];
-    if (isPhone) {
-      setPhonePane('list');
-      setSelection(NOTHING_SELECTED);
-      return NOTHING_SELECTED;
-    }
-    if (!leaving) return selection;
-    const left = next ? selectOnly(next.id) : NOTHING_SELECTED;
-    setVacating({ row: leaving, at });
-    startTransition(() => {
-      setSelection(left);
-      setVacating(undefined);
-    });
-    return left;
+  // A conversation that leaves the list gives way to the next. On a phone, where the reader fills
+  // the screen, the list comes back instead.
+  const leave = (id: ConversationId): Selection => {
+    if (!isPhone) return giveWay(id);
+    setPhonePane('list');
+    setSelection(NOTHING_SELECTED);
+    return NOTHING_SELECTED;
   };
-  // The selection, whether the member is picking, and the phone's pane as they are now, which a
-  // refused triage puts back.
-  const now = useRef({ selection, isPicking, phonePane });
+  // A refused triage puts the phone's pane back with the selection, as it was when the triage began.
+  const phonePaneNow = useRef(phonePane);
   useLayoutEffect(() => {
-    now.current = { selection, isPicking, phonePane };
+    phonePaneNow.current = phonePane;
   });
-  /**
-   * A triage the server refuses puts its rows back, so a selection it moved on to `left` comes back
-   * too, as nothing happened, unless the member has moved it since.
-   */
-  const backIfRefused = useCallback((left: Selection) => {
-    const before = now.current;
-    return () => {
-      if (!isSameSelection(now.current.selection, left)) return;
-      setSelection(before.selection);
-      setPicking(before.isPicking);
-      setPhonePane(before.phonePane);
-    };
-  }, []);
+  const backIfRefused = useCallback(
+    (left: Selection) => {
+      const pane = phonePaneNow.current;
+      return selectionBackIfRefused(left, () => setPhonePane(pane));
+    },
+    [selectionBackIfRefused],
+  );
   const triageShown = (action: Action, id: ConversationId): void => {
     if (bundleOpen !== undefined && id !== bundleOpen) return triageThread(action, id, bundleOpen);
     if (rowChange(action, view) !== 'gone') return triage(action, [id]);
-    const onRefused = backIfRefused(giveWay(id));
+    const onRefused = backIfRefused(leave(id));
     triage(action, [id], { onRefused });
   };
   /**
@@ -452,25 +426,11 @@ export function Workbench({
     const onRefused = giveThreadWay({ bundle, open: id }, isPhone);
     triage(action, [id], { in: bundle, onRefused });
   };
-  /**
-   * Where a conversation sits in the list, or, while it leaves, where it was: the row that took its
-   * place is the one after it.
-   */
-  const placeOf = useCallback(
-    (id: ConversationId | undefined) => {
-      const at = id === undefined ? -1 : (places.get(id) ?? -1);
-      return at < 0 && vacating !== undefined && vacating.row.id === id
-        ? { at: vacating.at, after: vacating.at }
-        : { at, after: at + 1 };
-    },
-    [places, vacating],
-  );
   // A selection that leaves the list is done with, and so is picking.
   const triageSelection = (action: Action) => {
     if (rowChange(action, view) !== 'gone') return triage(action, selection.ids);
     const onRefused = backIfRefused(NOTHING_SELECTED);
-    setSelection(NOTHING_SELECTED);
-    setPicking(false);
+    clearSelection();
     triage(action, selection.ids, { onRefused });
   };
   // Opening a conversation with no network, as from what the installed app kept, leaves it
@@ -562,11 +522,10 @@ export function Workbench({
       closeComposer();
       chooseView(next);
       setPhonePane('list');
-      setSelection(NOTHING_SELECTED);
-      setPicking(false);
+      clearSelection();
       setOpening(opensNewest(next, isPhone) ? next : undefined);
     },
-    [chooseView, closeComposer, isPhone],
+    [chooseView, closeComposer, isPhone, clearSelection],
   );
   // Before the frame is drawn, so the reader shows no empty sheet between the two. A list still
   // empty may be filling, as a new member's first sync fills it, so the view waits for its newest,
@@ -585,7 +544,7 @@ export function Workbench({
     setSelection((current) => (current.ids.length > 0 ? current : selectOnly(newest.id)));
     // Opening a bundle reads nothing.
     if (!isBundle(newest)) openedByView(newest.id);
-  }, [opening, view, selected, compose, page, conversations, openedByView]);
+  }, [opening, view, selected, compose, page, conversations, openedByView, setSelection]);
   // Folders are named in place in the sidebar, so naming one brings it into view.
   const revealSidebar = useCallback(() => {
     if (isPhone) setPhonePane('sidebar');
@@ -602,12 +561,11 @@ export function Workbench({
   const openPage = useCallback(
     (page: SheetPage) => {
       closeComposer();
-      setSelection(NOTHING_SELECTED);
-      setPicking(false);
+      clearSelection();
       setPage(page);
       setPhonePane('reader');
     },
-    [closeComposer],
+    [closeComposer, clearSelection],
   );
   // Closing a page leaves the view as if it had just arrived: on a desktop, its newest opens.
   const closePage = useCallback(() => {
@@ -643,7 +601,7 @@ export function Workbench({
     setSelection(row === undefined ? NOTHING_SELECTED : { ids: [], active: row });
     setPhonePane('list');
     if (at !== undefined) move({ view }, 'replace');
-  }, [onBack, move, pushed, written]);
+  }, [onBack, move, pushed, written, setSelection]);
   // A thread opens in its bundle's place in the reader. On a phone that pushes the address, so Back
   // returns to the bundle, and a step to the next thread takes the place of the one open. Otherwise
   // the selection writes it, as a conversation's does.
@@ -709,18 +667,13 @@ export function Workbench({
     if (page?.as === 'edit' && page.account === account.id) closePage();
     if (view.in === 'folder' && view.folder.account === account.id) onViewChange({ in: 'inbox' });
   };
-  // The list's order, read only by a pick that adds to the selection or extends it.
-  const order = useRef<Listed<ListItem>>([]);
-  useLayoutEffect(() => {
-    order.current = conversations ?? [];
-  }, [conversations]);
   const pick = useCallback(
     (id: ConversationId, by: SelectBy) => {
       setPage(undefined);
       setOpening(undefined);
       // Picking a bundle's row again shows the bundle, not the thread open in it.
       setThreadIn(undefined);
-      setSelection((current) => select(current, id, by, by === 'only' ? [] : idsIn(order.current)));
+      selectBy(id, by);
       if (by !== 'only') return;
       setPhonePane('reader');
       openedByMember(id);
@@ -731,12 +684,8 @@ export function Workbench({
         move(bundlePartsOf(id) ? { view, bundle: id } : { view, open: id }, 'push');
       }
     },
-    [move, pushed, written, openedByMember, setThreadIn],
+    [move, pushed, written, openedByMember, setThreadIn, selectBy],
   );
-  const startPicking = useCallback((id: ConversationId) => {
-    setPicking(true);
-    setSelection(selectOnly(id));
-  }, []);
   // A finger tapping a row's avatar starts picking with it, or adds it or lets it go while picking.
   const pickRow = useCallback(
     (id: ConversationId) => (isPicking ? pick(id, 'toggle') : startPicking(id)),
@@ -745,13 +694,10 @@ export function Workbench({
   // A swipe archives the row it moved, which leaves any selection that held it.
   const swipe = useCallback(
     (id: ConversationId) => {
-      const { selection } = now.current;
-      const left = selection.ids.includes(id) ? NOTHING_SELECTED : selection;
-      const onRefused = backIfRefused(left);
-      setSelection(left);
+      const onRefused = backIfRefused(releaseRow(id));
       triage({ do: 'archive' }, [id], { onRefused });
     },
-    [triage, backIfRefused],
+    [triage, backIfRefused, releaseRow],
   );
   // A conversation about to be opened is asked for before the click lands.
   // A bundle's threads are asked for, and the reader that shows them loaded.
@@ -775,20 +721,11 @@ export function Workbench({
     },
     [rowOf, vacating, inBundle.threads, inBundle.places],
   );
-  const stopPicking = () => {
-    setPicking(false);
-    setSelection(NOTHING_SELECTED);
-  };
   // A thread open stands for the selection, so what acts on it acts on the thread.
-  const pickedRows = useMemo(() => {
-    if (threadRow !== undefined) return [threadRow];
-    const rows = selection.ids
-      .flatMap((id) => rowOf(id) ?? [])
-      .toSorted((a, b) => (places.get(a.id) ?? 0) - (places.get(b.id) ?? 0));
-    return vacating && selection.ids.includes(vacating.row.id) && !rows.includes(vacating.row)
-      ? [...rows, vacating.row]
-      : rows;
-  }, [rowOf, places, selection.ids, vacating, threadRow]);
+  const pickedRows = useMemo(
+    () => (threadRow !== undefined ? [threadRow] : picked),
+    [threadRow, picked],
+  );
   // What's selected, as commands: the selection's own while several are picked, else the open one's.
   const selectedCommands =
     pickedRows.length === 0
@@ -842,7 +779,7 @@ export function Workbench({
       );
       const isLeft =
         !from.isDocked || (isDraftsView(view, folders) && leavesDrafts(leaving.all, others));
-      if (isLeft) giveWay(edited.conversation);
+      if (isLeft) leave(edited.conversation);
     }
     const id = crypto.randomUUID();
     const pressedAt = Date.now();
@@ -967,7 +904,7 @@ export function Workbench({
     if (!isBundleGone) return;
     setSelection(NOTHING_SELECTED);
     setPhonePane('list');
-  }, [isBundleGone]);
+  }, [isBundleGone, setSelection]);
   // A bundle open with no thread lies on the reader's sheet, its threads in place of messages, with
   // its row's actions where a conversation's are. A thread open in it names it above, as the way back.
   const bundleRow = bundleOpen === undefined ? undefined : rowOf(bundleOpen);
@@ -1056,7 +993,7 @@ export function Workbench({
                   ? backToList
                   : () => setPhonePane('list')
               : isMany
-                ? stopPicking
+                ? clearSelection
                 : undefined,
       // While a send can still be taken back, Undo takes it back first.
       undo: outbox.undoSend ?? (canUndo ? undoLast : undefined),
@@ -1250,7 +1187,7 @@ export function Workbench({
                 onSwipe={swipe}
                 onAhead={ahead}
                 picked={
-                  <PickedActions count={selection.ids.length} onCancel={stopPicking}>
+                  <PickedActions count={selection.ids.length} onCancel={clearSelection}>
                     {selectionActions('island')}
                   </PickedActions>
                 }
@@ -1290,7 +1227,7 @@ export function Workbench({
             </div>
             <div inert={isOffscreen('reader')} {...stylex.props(styles.pane, styles.reader)}>
               {isMany && !isPhone ? (
-                <SelectionPane count={selection.ids.length} onClear={stopPicking}>
+                <SelectionPane count={selection.ids.length} onClear={clearSelection}>
                   <Suspense>{selectionActions('bar')}</Suspense>
                 </SelectionPane>
               ) : (
@@ -1392,12 +1329,6 @@ export function Workbench({
  * phone shows the list alone.
  */
 const opensNewest = (view: View, isPhone: boolean) => !isPhone && view.in !== 'outbox';
-
-/** A selection of the one conversation an address opens, or of none. */
-const openOnly = (open: ConversationId | undefined): Selection =>
-  open === undefined ? NOTHING_SELECTED : selectOnly(open);
-
-const NO_PLACES: ReadonlyMap<ConversationId, number> = new Map();
 
 /** How the public demo names itself, under a visitor's accounts. */
 const VISITORS_NOTE = 'A sample mailbox, yours for a day.';
