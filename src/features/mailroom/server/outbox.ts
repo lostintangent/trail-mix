@@ -45,12 +45,6 @@ type Came = { sent: Outgoing } | { undone: MessageRef | null };
 /** A press the Mailroom has taken: its send, while the Outbox holds it, and what came of it. */
 type Pressed = { send?: Outgoing; came?: Came };
 
-/**
- * How long a press is kept from when it was taken, and for as long as its send waits after that, so
- * it answers alike when asked again.
- */
-export const PRESS_KEPT_MS = 7 * 24 * 60 * 60 * 1000;
-
 export function outboxQueue(sending: Sending) {
   const { sql, hint } = sending;
   let running = false;
@@ -69,9 +63,11 @@ export function outboxQueue(sending: Sending) {
       JSON.stringify(outgoing),
     );
   const changed = () => hint({ changed: 'outbox' });
-  /** Notes what came of the presses that scheduled a send. */
-  const came = (send: string, what: Came) =>
+  /** Lets a send go, noting what came of it for the presses that scheduled it. */
+  const came = (send: string, what: Came) => {
     sql.run(`UPDATE presses SET came = ? WHERE send = ?`, JSON.stringify(what), send);
+    sql.run(`DELETE FROM outbox WHERE id = ?`, send);
+  };
   const pressed = (id: string): Pressed | undefined => {
     const [row] = sql.all<{ send: string | null; came: string | null }>(
       `SELECT send, came FROM presses WHERE id = ?`,
@@ -117,7 +113,6 @@ export function outboxQueue(sending: Sending) {
       const result = outbox.filed(held, outcome as outbox.Filed, now());
       if (result === 'done') {
         came(id, { sent: held });
-        sql.run(`DELETE FROM outbox WHERE id = ?`, id);
         sending.sent(due.outgoing);
       } else {
         put(result);
@@ -178,7 +173,6 @@ export function outboxQueue(sending: Sending) {
     cancel(id: string, now: string): MessageRef {
       const draft = outbox.cancel(owned(id), now);
       came(id, { undone: draft });
-      sql.run(`DELETE FROM outbox WHERE id = ?`, id);
       changed();
       return draft;
     },
@@ -231,10 +225,7 @@ export function outboxQueue(sending: Sending) {
       const failed = all().filter(
         (entry) => sameRef(entry.draft, draft) && entry.state === 'failed',
       );
-      for (const { id } of failed) {
-        came(id, { undone: null });
-        sql.run(`DELETE FROM outbox WHERE id = ?`, id);
-      }
+      for (const { id } of failed) came(id, { undone: null });
       if (failed.length) changed();
     },
 
@@ -275,7 +266,7 @@ export function outboxQueue(sending: Sending) {
       running = true;
       sql.run(
         `DELETE FROM presses WHERE at < ? AND (send IS NULL OR send NOT IN (SELECT id FROM outbox))`,
-        Date.parse(now()) - PRESS_KEPT_MS,
+        Date.parse(now()) - outbox.PRESS_KEPT_MS,
       );
       const resting = new Set<AccountId>();
       try {
@@ -305,8 +296,6 @@ type Handing = {
  * The Outbox's commands as the member presses them, Send, Undo and Retry, each carried to the
  * queue, and the Outbox as a device lists it, each send placed in its conversation.
  */
-export type OutboxCommands = ReturnType<typeof outboxCommands>;
-
 export function outboxCommands(ports: {
   queue: OutboxQueue;
   drafts: Pick<SavingDrafts, 'file' | 'keep' | 'addressing'>;
@@ -400,11 +389,7 @@ export function outboxCommands(ports: {
         if ('sent' in known.came) return placed(known.came.sent);
         throw new Error('The send was undone.');
       }
-      // A press the Outbox no longer keeps may have gone. One it keeps unanswered was cut short by
-      // a restart, before it scheduled anything, and is taken again.
-      if (!known && ago >= PRESS_KEPT_MS) {
-        throw new Error('Send was pressed over a week ago, so it wasn’t sent.');
-      }
+      outbox.checkPress(ago, known !== undefined);
       queue.press(press, new Date(arrived).toISOString());
       if ('save' in sent) {
         return sendLastSave(sent, when, opened, {

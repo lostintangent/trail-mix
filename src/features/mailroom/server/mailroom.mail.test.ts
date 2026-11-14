@@ -1609,15 +1609,6 @@ describe('The Outbox', () => {
       expect(await whereIs('Overtaken, saved')).toEqual({ delivered: 0, sent: 0, drafts: 0 });
     }, 60_000);
 
-    test('a press the Mailroom never took, pressed over a week ago, is refused, since it may have gone', async () => {
-      const saved = await drafted('Stale');
-      const week = 7 * 24 * 60 * 60 * 1000;
-      await expect(cal.call('send', saved, undefined, week, crypto.randomUUID())).rejects.toThrow(
-        'Send was pressed over a week ago, so it wasn’t sent.',
-      );
-      expect(await outbox()).toEqual([]);
-    }, 30_000);
-
     test('a send scheduled ahead goes at its time, with no device open', async () => {
       const saved = await drafted('Scheduled');
       const at = new Date(Date.now() + 20_000).toISOString();

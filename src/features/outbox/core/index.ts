@@ -1,9 +1,11 @@
 export {
   HOST_FILING_SECONDS,
+  PRESS_KEPT_MS,
   RESTARTED,
   UNDO_SECONDS,
   begin,
   cancel,
+  checkPress,
   due,
   filed,
   nextWake,

@@ -64,6 +64,23 @@ const RETRYING_MINUTES = 24 * 60;
 /** How long Send can be undone, as Apple Mail's default. */
 export const UNDO_SECONDS = 10;
 
+/**
+ * How long a press is kept from when it was taken, and for as long as its send waits after that, so
+ * it answers alike when asked again.
+ */
+export const PRESS_KEPT_MS = 7 * 24 * 60 * 60 * 1000;
+
+/**
+ * Refuses a press of Send asked `ago` milliseconds after it was pressed, once the Outbox no longer
+ * keeps it, since it may have gone. One it `isKept` unanswered was cut short by a restart, before
+ * it scheduled anything, and is taken again.
+ */
+export function checkPress(ago: number, isKept: boolean) {
+  if (!isKept && ago >= PRESS_KEPT_MS) {
+    throw new Error('Send was pressed over a week ago, so it wasn’t sent.');
+  }
+}
+
 /** How long after acceptance filing leaves Sent to a host that files its own copy. */
 export const HOST_FILING_SECONDS = 120;
 /** How long filing waits before it first looks again for the host's copy. */

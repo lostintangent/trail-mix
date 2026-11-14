@@ -5,6 +5,7 @@ import {
   RESTARTED,
   begin,
   cancel,
+  checkPress,
   due,
   filed,
   nextWake,
@@ -239,6 +240,14 @@ test('a send cut short by a restart is held as failed, saying it may have gone',
   expect(b).toEqual({ ...sending, state: 'failed', attempts: 1, error: RESTARTED });
   expect(c).toBe(accepted);
   expect(d).toBe(rejected);
+});
+
+test('a press the Outbox no longer keeps is refused after a week, since it may have gone', () => {
+  const week = 7 * 24 * 60 * 60 * 1000;
+  expect(() => checkPress(week - 1, false)).not.toThrow();
+  expect(() => checkPress(week, false)).toThrow('Send was pressed over a week ago');
+  // One it keeps unanswered was cut short by a restart, and is taken again however old.
+  expect(() => checkPress(week * 2, true)).not.toThrow();
 });
 
 test('each step happens only from its own state', () => {
