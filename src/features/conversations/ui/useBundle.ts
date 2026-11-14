@@ -17,10 +17,9 @@ const NONE = '';
 
 /**
  * A bundle as the reader shows it: the row it stands as and its threads, newest first, with the
- * triage still on its way laid over them. Its threads are a list a page at a time, as a view's
- * are: as long as the bundle from its first page, with the pages the reader shows fetched.
+ * triage still on its way laid over them.
  */
-export function useBundle(id: BundleId | undefined): {
+export type InBundle = {
   bundle: BundleSummary | undefined;
   threads: Listed<ConversationSummary> | undefined;
   /** Where each thread that has arrived lies among them. */
@@ -33,7 +32,13 @@ export function useBundle(id: BundleId | undefined): {
   isPending: boolean;
   isError: boolean;
   refetch: () => void;
-} {
+};
+
+/**
+ * What a bundle holds, as the reader shows it. Its threads are a list a page at a time, as a view's
+ * are: as long as the bundle from its first page, with the pages the reader shows fetched.
+ */
+export function useBundle(id: BundleId | undefined): InBundle {
   const enabled = id !== undefined;
   const first = useQuery({ ...bundleQuery(id ?? NONE), enabled });
   const { rows, isFetching, show } = usePages(id ?? NONE, {

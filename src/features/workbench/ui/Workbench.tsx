@@ -50,19 +50,10 @@ import { PanelEdge } from './PanelEdge.tsx';
 import { PANELS } from './panels.ts';
 import { useReadMark } from './useReadMark.ts';
 import { useSelectedPlace } from './useSelectedPlace.ts';
-import {
-  ReaderPane,
-  type Acting,
-  type ActionsPlace,
-  type ComposerPlace,
-  type ReaderSheet,
-} from './ReaderPane.tsx';
+import { ReaderPane, type Acting, type ActionsPlace, type ComposerPlace } from './ReaderPane.tsx';
 import { ReaderPlace } from './ReaderPlace.tsx';
 import {
   askAhead,
-  BundleReader,
-  BundleSkeleton,
-  ConversationUnopened,
   lightPaperCommand,
   preloadBundleReader,
   setLightPaper,
@@ -130,7 +121,6 @@ import { useSendWritten } from './useSendWritten.ts';
 import { useReach, type Reach } from '../../offline/index.ts';
 import {
   CREATE,
-  folderName,
   Sidebar,
   DeleteQuestion,
   describeView,
@@ -801,63 +791,16 @@ export function Workbench({
     clearSelection();
     setPhonePane('list');
   }, [isBundleGone, clearSelection]);
-  // A bundle open with no thread lies on the reader's sheet, its threads in place of messages, with
-  // its row's actions where a conversation's are. A thread open in it names it above, as the way back.
-  const bundleRow = bundleOpen === undefined ? undefined : rowOf(bundleOpen);
-  const repository =
-    inBundle.bundle?.repository ?? (bundleRow && isBundle(bundleRow) ? bundleRow.repository : '');
-  const bundleAccount = bundleOpen && bundlePartsOf(bundleOpen)?.account;
-  const bundleInbox = folders.find(
-    (folder) => folder.account === bundleAccount && folder.role === 'inbox',
-  );
-  const bundleSheet: ReaderSheet | undefined =
-    bundleOpen === undefined || thread !== undefined
-      ? undefined
-      : {
-          id: bundleOpen,
-          label: 'Repository',
-          content: (scroller) =>
-            inBundle.bundle && inBundle.threads && !awaitsThread ? (
-              <Suspense fallback={<BundleSkeleton repository={repository} />}>
-                <BundleReader
-                  bundle={inBundle.bundle}
-                  threads={inBundle.threads}
-                  account={accounts.find(({ id }) => id === bundleAccount)}
-                  folder={bundleInbox ? folderName(bundleInbox) : 'Inbox'}
-                  scroller={scroller}
-                  onOpen={openThread}
-                  onShown={inBundle.show}
-                  from={cameFromAt}
-                />
-              </Suspense>
-            ) : inBundle.isError ? (
-              <ConversationUnopened
-                subject={repository}
-                isOffline={reach !== 'online'}
-                onTryAgain={inBundle.refetch}
-              />
-            ) : (
-              <BundleSkeleton repository={repository || undefined} />
-            ),
-          bar: isPhone ? undefined : (
-            <>
-              <TriageActions commands={selectedCommands} />
-              <ReaderPlace at={placeOf(bundleOpen).at + 1} of={conversations?.length ?? 0} />
-            </>
-          ),
-          top: isPhone ? <TriageActions commands={selectedCommands} part="marking" /> : undefined,
-          island: isPhone ? (
-            <TriageActions commands={selectedCommands} part="filing" isArchiveMain />
-          ) : undefined,
-        };
-  const backToBundle =
-    bundleOpen !== undefined && thread !== undefined && repository !== ''
-      ? {
-          label: repository,
-          short: repository.slice(repository.indexOf('/') + 1),
-          go: closeThread,
-        }
-      : undefined;
+  // A bundle's actions are its row's: all of them in a desktop's bar, and on a phone its marks at
+  // the top and its filing in the island, where Archive leads.
+  const bundleActions = (place: ActionsPlace) =>
+    isPhone === (place === 'bar') ? null : (
+      <TriageActions
+        commands={selectedCommands}
+        part={place === 'bar' ? 'all' : place === 'top' ? 'marking' : 'filing'}
+        isArchiveMain={place === 'island'}
+      />
+    );
   const unsubscribe = useUnsubscribeCommand(openInView);
   const backTo = backFrom({
     isPageOpen: page !== undefined,
@@ -1136,8 +1079,20 @@ export function Workbench({
                       ? neighbors(conversations, places, selected)
                       : idsIn([inBundle.threads?.[threadAt + 1], inBundle.threads?.[threadAt - 1]])
                   }
-                  sheet={bundleSheet}
-                  backTo={backToBundle}
+                  bundle={
+                    bundleOpen === undefined
+                      ? undefined
+                      : {
+                          id: bundleOpen,
+                          row: rowOf(bundleOpen),
+                          in: inBundle,
+                          awaitsThread,
+                          cameFromAt,
+                          onOpen: openThread,
+                          onClose: closeThread,
+                          actions: bundleActions,
+                        }
+                  }
                   onShown={readMark.onShown}
                   actions={readerActions}
                   place={readerPlace}

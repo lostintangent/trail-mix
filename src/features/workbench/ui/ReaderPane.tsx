@@ -20,17 +20,30 @@ import {
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { afterPaint } from '../../../shared/afterPaint.ts';
 import type { Command } from '../../commands/index.ts';
-import type {
-  Account,
-  ConversationId,
-  ConversationSummary,
-  Folder,
-  Message,
+import type { InBundle } from '../../conversations/index.ts';
+import { folderName } from '../../folders/index.ts';
+import {
+  bundlePartsOf,
+  isBundle,
+  type Account,
+  type AccountId,
+  type BundleId,
+  type ConversationId,
+  type ConversationSummary,
+  type Folder,
+  type ListItem,
+  type Message,
 } from '../../mail/core/index.ts';
 import { conversationQuery } from '../../mailroom/client/index.ts';
 import { isAwaitingCopy, leavingIn, type Leaving } from '../../outbox/index.ts';
 import { useReach } from '../../offline/index.ts';
-import { ConversationUnopened, Reader, ReaderSkeleton } from '../../reader/index.ts';
+import {
+  BundleReader,
+  BundleSkeleton,
+  ConversationUnopened,
+  Reader,
+  ReaderSkeleton,
+} from '../../reader/index.ts';
 import { PhoneIsland } from './PhoneIsland.tsx';
 import { usePreloadedComposer, usePreloadedReader } from './usePreloads.ts';
 import { useRestingSelection } from './useRestingSelection.ts';
@@ -61,28 +74,29 @@ export type ActionsPlace = 'bar' | 'top' | 'island';
 export type ComposerPlace = 'docked' | 'filled' | 'over';
 
 /**
- * Something other than a conversation that lies on the reader's sheet in its place, with its own
- * actions where a conversation's would be, as a bundle does.
+ * The bundle selected in the list. While none of its threads is open, its threads lie on the
+ * reader's sheet in place of a conversation's messages, with its actions where a conversation's are.
+ * A thread open in it lies there instead, under the bundle's name as the way back.
  */
-export type ReaderSheet = {
-  /**
-   * What it shows, which the reader rests on as it does on a conversation, so a held key passing
-   * it by never draws it.
-   */
-  id: string;
-  /** What it draws, given what the reader scrolls, so it can draw only what lies in sight. */
-  content: (scroller: HTMLElement | null) => ReactNode;
-  /** What names its actions to assistive technology, as "Conversation" names a conversation's. */
-  label: string;
-  bar?: ReactNode;
-  top?: ReactNode;
-  island?: ReactNode;
+export type OpenBundle = {
+  id: BundleId;
+  /** Its row in the list, which names its repository while the bundle is on its way. */
+  row: ListItem | undefined;
+  in: InBundle;
+  /** Whether it waits for the page that holds the thread a place arrived naming. */
+  awaitsThread: boolean;
+  /** Where the thread last open in it lies, which its threads show in sight. */
+  cameFromAt: number | undefined;
+  onOpen: (thread: ConversationId) => void;
+  onClose: () => void;
+  /** What can be done to it, drawn where a conversation's actions are. */
+  actions: (place: ActionsPlace) => ReactNode;
 };
 
 /**
- * The reader's sheet, where an open conversation lies. On a phone it fills the screen, with a way
- * back to the list at its top. The reader itself loads soon after the list shows a conversation to
- * open, while the browser is idle, ready for the click.
+ * The reader's sheet, where an open conversation lies, or a bundle's threads. On a phone it fills
+ * the screen, with a way back to the list at its top. The reader itself loads soon after the list
+ * shows a conversation to open, while the browser is idle, ready for the click.
  */
 export function ReaderPane({
   selected,
@@ -100,11 +114,11 @@ export function ReaderPane({
   onOpenDraft,
   page,
   rowOf,
-  sheet: selectedSheet,
-  backTo,
+  bundle,
   choose = 'Choose one from the list to read it here.',
   onBack,
 }: {
+  /** The conversation to show: the one selected, or a thread open in the bundle selected. */
   selected: ConversationId | undefined;
   accounts: readonly Account[];
   /** The member's folders, to name the one the conversation lies in. */
@@ -122,7 +136,7 @@ export function ReaderPane({
    * Reply needs the conversation, waits for it.
    */
   actions: (acting: Acting, place: ActionsPlace) => ReactNode;
-  /** Where the conversation shown sits in the list, at the end of a desktop's bar. */
+  /** Where the conversation or bundle shown sits in the list, at the end of a desktop's bar. */
   place: (shown: ConversationId) => ReactNode;
   /** What can be done with one of its messages, as the reader's own. The same function each render. */
   actionsFor: (message: Message) => readonly Command[];
@@ -143,27 +157,25 @@ export function ReaderPane({
    * its way.
    */
   rowOf: (id: ConversationId) => ConversationSummary | undefined;
-  /** What lies on the sheet while no conversation is selected, as a bundle's threads do. */
-  sheet: ReaderSheet | undefined;
-  /**
-   * What the conversation was opened from, other than the list, as a bundle: a way back to it above
-   * the conversation on a desktop, and on a phone what Back names, shorter, and goes to.
-   */
-  backTo: { label: string; short: string; go: () => void } | undefined;
+  /** The bundle selected, whose threads lie on the sheet while no thread of it is shown. */
+  bundle: OpenBundle | undefined;
   /** What the empty reader asks the member to choose, in the words of the list beside it. */
   choose: string | undefined;
   onBack: () => void;
 }) {
-  const { shown: rested, isPassing } = useRestingSelection(selectedSheet?.id ?? selected);
-  // The sheet the reader rests on, which stays as it was while the selection passes from it.
-  const lastSheet = useRef(selectedSheet);
+  // The bundle whose threads lie on the sheet, while none of them is open in its place.
+  const listing = bundle && selected === undefined ? bundle : undefined;
+  const { shown: rested, isPassing } = useRestingSelection(listing?.id ?? selected);
+  // The bundle the reader rests on, which stays as it was while the selection passes from it.
+  const lastListing = useRef(listing);
   useEffect(() => {
-    if (selectedSheet) lastSheet.current = selectedSheet;
+    if (listing) lastListing.current = listing;
   });
-  const sheet = [selectedSheet, lastSheet.current].find((each) => each && each.id === rested);
-  const shown = sheet || rested === lastSheet.current?.id ? undefined : rested;
-  // What a sheet other than a conversation scrolls in, once it is drawn.
-  const [sheetScroller, setSheetScroller] = useState<HTMLDivElement | null>(null);
+  const listed = [listing, lastListing.current].find((each) => each && each.id === rested);
+  const shown = listed || rested === lastListing.current?.id ? undefined : rested;
+  const listedAccount = listed && bundlePartsOf(listed.id)?.account;
+  // What a bundle's threads scroll in, once they are drawn.
+  const [threadsScroller, setThreadsScroller] = useState<HTMLDivElement | null>(null);
   const isOffline = useReach() !== 'online';
   const {
     data: conversation,
@@ -261,6 +273,21 @@ export function ReaderPane({
   // Preparing what comes next is never urgent, so a change to it, as when the open conversation
   // leaves the list, doesn't make the open conversation render again in the change's own frame.
   const preparing = useDeferredValue(upcoming);
+  // A bundle's actions stand where a conversation's do.
+  const bundleBar = listed?.actions('bar');
+  const bundleTop = listed?.actions('top');
+  const bundleIsland = listed?.actions('island');
+  // A thread open in its bundle lies under the bundle's name, the way back to its threads, which a
+  // phone's Back names shorter.
+  const repository = bundle && repositoryOf(bundle);
+  const backTo =
+    bundle && selected !== undefined && repository
+      ? {
+          label: repository,
+          short: repository.slice(repository.indexOf('/') + 1),
+          go: bundle.onClose,
+        }
+      : undefined;
   const crumbed = backTo && (
     <div {...stylex.props(styles.crumb)}>
       <Button
@@ -278,9 +305,9 @@ export function ReaderPane({
     <section aria-label="Reader" {...stylex.props(styles.sheet)}>
       <header {...stylex.props(styles.phoneHeader)}>
         <BackButton onClick={backTo?.go ?? onBack} label={backTo?.short} />
-        {(sheet?.top ?? top) && !writing && !page ? (
+        {(bundleTop ?? top) && !writing && !page ? (
           <div role="toolbar" aria-label="Marks" {...stylex.props(styles.top)}>
-            <Suspense>{sheet?.top ?? top}</Suspense>
+            <Suspense>{bundleTop ?? top}</Suspense>
           </div>
         ) : null}
       </header>
@@ -295,9 +322,12 @@ export function ReaderPane({
       ) : null}
       {/* A composer over everything lies outside the panes, wherever it is drawn. */}
       {writing?.place === 'over' && writing.composer}
-      {sheet?.bar && !isFilled ? (
-        <div role="toolbar" aria-label={sheet.label} {...stylex.props(styles.bar)}>
-          <Suspense>{sheet.bar}</Suspense>
+      {listed && bundleBar && !isFilled ? (
+        <div role="toolbar" aria-label="Repository" {...stylex.props(styles.bar)}>
+          <Suspense>
+            {bundleBar}
+            {place(listed.id)}
+          </Suspense>
         </div>
       ) : (bar || placed) && !isFilled ? (
         <div
@@ -309,9 +339,30 @@ export function ReaderPane({
           {placed}
         </div>
       ) : null}
-      {isFilled ? null : sheet ? (
-        <div ref={setSheetScroller} {...stylex.props(styles.scroll, styles.underBar)}>
-          {sheet.content(sheetScroller)}
+      {isFilled ? null : listed ? (
+        <div ref={setThreadsScroller} {...stylex.props(styles.scroll, styles.underBar)}>
+          {listed.in.bundle && listed.in.threads && !listed.awaitsThread ? (
+            <Suspense fallback={<BundleSkeleton repository={repositoryOf(listed)} />}>
+              <BundleReader
+                bundle={listed.in.bundle}
+                threads={listed.in.threads}
+                account={accounts.find(({ id }) => id === listedAccount)}
+                folder={inboxNameOf(folders, listedAccount)}
+                scroller={threadsScroller}
+                onOpen={listed.onOpen}
+                onShown={listed.in.show}
+                from={listed.cameFromAt}
+              />
+            </Suspense>
+          ) : listed.in.isError ? (
+            <ConversationUnopened
+              subject={repositoryOf(listed)}
+              isOffline={isOffline}
+              onTryAgain={listed.in.refetch}
+            />
+          ) : (
+            <BundleSkeleton repository={repositoryOf(listed) || undefined} />
+          )}
         </div>
       ) : reading ? (
         <div {...stylex.props(styles.scroll, styles.underBar)}>
@@ -357,9 +408,9 @@ export function ReaderPane({
           />
         </div>
       )}
-      {(sheet ? sheet.island : island) && !writing && !page ? (
-        <PhoneIsland label={sheet?.label ?? 'Conversation'} spans>
-          <Suspense>{sheet ? sheet.island : island}</Suspense>
+      {(listed ? bundleIsland : island) && !writing && !page ? (
+        <PhoneIsland label={listed ? 'Repository' : 'Conversation'} spans>
+          <Suspense>{listed ? bundleIsland : island}</Suspense>
         </PhoneIsland>
       ) : null}
     </section>
@@ -372,6 +423,16 @@ export function ReaderPane({
  */
 const headingOf = (row: ConversationSummary | undefined) =>
   row && (row.github?.title ?? row.subject);
+
+/** The repository a bundle gathers, as its newest thread writes it, once it or its row says. */
+const repositoryOf = ({ in: { bundle }, row }: OpenBundle) =>
+  bundle?.repository ?? (row && isBundle(row) ? row.repository : '');
+
+/** What the member calls an account's Inbox, where its bundles' threads lie. */
+const inboxNameOf = (folders: readonly Folder[], account: AccountId | undefined) => {
+  const inbox = folders.find((folder) => folder.account === account && folder.role === 'inbox');
+  return inbox ? folderName(inbox) : 'Inbox';
+};
 
 /** How often a conversation is fetched again while a reply that left it waits for its copy. */
 const AWAITING_COPY_MS = 2_000;
