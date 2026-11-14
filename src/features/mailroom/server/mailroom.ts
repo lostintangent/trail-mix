@@ -125,7 +125,7 @@ import {
   type DomainFound,
 } from './avatars.ts';
 import { upgrade, type Sql, type SqlValue } from './schema.ts';
-import { outboxQueue, type OutboxQueue } from './outbox.ts';
+import { outboxQueue, PRESS_KEPT_MS, type OutboxQueue } from './outbox.ts';
 import { replacedDrafts, type ReplacedDrafts } from './replaced.ts';
 import { foundOf, opened, type Found } from './search.ts';
 import { signInBook, type SignInBook } from './sign-ins.ts';
@@ -354,7 +354,11 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
    * Runs a query or command a browser sent, and says how long it took to reach this Mailroom and to
    * run here, for the response's Server-Timing.
    */
-  async answer({ name, args }: Call<QueryName | CommandName>, sentAt: number): Promise<Answered> {
+  async answer(
+    { name, args }: Call<QueryName | CommandName>,
+    sentAt: number,
+    received?: number,
+  ): Promise<Answered> {
     if (!CALLABLE.has(name))
       throw new TypeError('That isn’t something a browser can ask its Mailroom.');
     this.noteOpened();
@@ -364,7 +368,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     const started = Date.now();
     const methods = this as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
     const spent = new Map<ImapPart, number>();
-    const value = await spending.run(spent, () => methods[name]!(...args));
+    const value = await calling.run({ spent, received }, () => methods[name]!(...args));
     const ran = Date.now() - started;
     const parts = IMAP_PARTS.filter((part) => spent.has(part));
     return {
@@ -735,11 +739,13 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   /**
    * Schedules a draft to send when the undo window closes, or at a later time. The draft stays in
    * Drafts, as it is, until the host accepts it. The window opened when the member pressed Send,
-   * `waited` milliseconds before the device asked, and never further back than its own length.
+   * `waited` milliseconds before the device asked, counted from when the request reached the
+   * Worker, and never further back than its own length.
    *
    * Send may carry the message's last save in place of a draft, which is filed first, so a device
-   * that closes once it has asked still sends. Then the press names the send by `id`, so asking
-   * again answers with the same send, and an Undo while the save is filed keeps it as a draft.
+   * that closes once it has asked still sends. `id` names the press, which the Outbox keeps for a
+   * week, so asking again answers as the first ask did: with the send, as it stands or as it went,
+   * or refused once it was undone. A press older than that is refused, since it may have gone.
    */
   async send(
     draft: MessageRef | LastUpload,
@@ -747,49 +753,74 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     waited?: number,
     id?: string,
   ): Promise<Outgoing> {
-    const arrived = Date.now();
+    const arrived = Math.min(calling.getStore()?.received ?? Date.now(), Date.now());
     const sent = input.sentOf(draft);
     const when = input.optional(at, input.instantOf);
-    const since = Math.min(input.optional(waited, input.waitedOf) ?? 0, UNDO_SECONDS * 1000);
+    const ago = input.optional(waited, input.waitedOf) ?? 0;
     const press = input.optional(id, input.sendOf);
-    const opened = new Date(arrived - since).toISOString();
+    const opened = new Date(arrived - Math.min(ago, UNDO_SECONDS * 1000)).toISOString();
     if (press !== undefined) {
-      const named = this.sending.list().find((held) => held.id === press);
-      if (named) return this.placed(named);
       const handing = this.handing.get(press);
       if (handing) return handing.sent;
+      const known = this.sending.pressed(press);
+      if (known?.send) return this.placed(known.send);
+      if (known?.came) {
+        if ('sent' in known.came) return this.placed(known.came.sent);
+        throw new Error('The send was undone.');
+      }
+      // A press the Outbox no longer keeps may have gone. One it keeps unanswered was cut short by
+      // a restart, before it scheduled anything, and is taken again.
+      if (!known && ago >= PRESS_KEPT_MS) {
+        throw new Error('Send was pressed over a week ago, so it wasn’t sent.');
+      }
+      this.sending.press(press, new Date(arrived).toISOString());
     }
     if ('save' in sent) {
       if (press === undefined) throw new TypeError('A send that carries its save needs an id.');
       return this.sendLastSave(sent, when, opened, press);
     }
-    if (!this.book.get(sent.account)) throw new Error('There is no such account.');
-    if (this.store.reads.role(sent) !== 'drafts') throw new Error('Only a draft can be sent.');
-    const addressing = await this.addressing(sent);
-    const outgoing = this.sending.send(
-      { draft: sent, ...addressing },
-      new Date().toISOString(),
-      when,
-      opened,
-      press,
-    );
-    await this.wakeBy(Date.parse(outgoing.sendAt));
-    return this.placed(outgoing);
+    try {
+      if (!this.book.get(sent.account)) throw new Error('There is no such account.');
+      if (this.store.reads.role(sent) !== 'drafts') throw new Error('Only a draft can be sent.');
+      const addressing = await this.addressing(sent);
+      const outgoing = this.sending.send(
+        { draft: sent, ...addressing },
+        new Date().toISOString(),
+        when,
+        opened,
+        press,
+      );
+      await this.wakeBy(Date.parse(outgoing.sendAt));
+      return this.placed(outgoing);
+    } catch (error) {
+      if (press !== undefined) this.sending.unpress(press);
+      throw error;
+    }
   }
 
   /**
-   * Undo. A send whose last save is still being filed is never scheduled, and its draft is returned
-   * once it is saved, while its window is open.
+   * Undo, for a press or the send it scheduled. A send whose last save is still being filed is
+   * never scheduled, and its draft is returned once it is saved, while its window is open. A press
+   * the Mailroom has yet to take never will be, and returns no draft. Asked again, it answers as it
+   * did.
    */
-  async cancelSend(id: string): Promise<MessageRef> {
+  async cancelSend(id: string): Promise<MessageRef | undefined> {
     const press = input.sendOf(id);
+    const now = new Date().toISOString();
+    const known = this.sending.pressed(press);
+    if (known?.send) return this.sending.cancel(known.send.id, now);
     const handing = this.handing.get(press);
-    if (!handing || this.sending.list().some((held) => held.id === press)) {
-      return this.sending.cancel(press, new Date().toISOString());
+    if (handing) {
+      if (Date.now() >= handing.closes) throw new Error('It is being sent, so it can’t be undone.');
+      handing.isUndone = true;
+      return (await handing.filing).saved;
     }
-    if (Date.now() >= handing.closes) throw new Error('It is being sent, so it can’t be undone.');
-    handing.isUndone = true;
-    return (await handing.filing).saved;
+    if (known?.came) {
+      if ('sent' in known.came) throw new Error('It has been sent.');
+      return known.came.undone ?? undefined;
+    }
+    this.sending.undone(press, now);
+    return undefined;
   }
 
   /** Files a send's last save, then schedules the draft it made, unless the send was undone. */
@@ -802,8 +833,12 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     const filing = this.fileDraft(save, replaces);
     const handing = { closes: closesAfterPress(Date.parse(opened), when), isUndone: false, filing };
     const sent = (async () => {
-      const filed = await filing;
+      const filed = await filing.catch((error: unknown) => {
+        this.sending.unpress(id);
+        throw error;
+      });
       if (handing.isUndone) {
+        this.sending.undone(id, new Date().toISOString(), filed.saved);
         await this.keepFiled(filed);
         throw new Error('The send was undone.');
       }
@@ -1939,10 +1974,11 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 const CALLABLE: ReadonlySet<string> = new Set([...QUERIES, ...COMMANDS]);
 
 /**
- * Where the time of the browser's call running now went on its mail servers, by part. Calls
- * interleave at each wait, so each keeps its own, and the wake's work, which no call runs, none.
+ * The browser's call running now: where its time went on its mail servers, by part, and when its
+ * request reached the Worker. Calls interleave at each wait, so each keeps its own, and the wake's
+ * work, which no call runs, none.
  */
-const spending = new AsyncLocalStorage<Map<ImapPart, number>>();
+const calling = new AsyncLocalStorage<{ spent: Map<ImapPart, number>; received?: number }>();
 const IMAP_PARTS: readonly ImapPart[] = ['connect', 'imap', 'folder'];
 
 /** The IMAP provider for an account, over workerd's sockets. */
@@ -1956,7 +1992,6 @@ function imapOver(
   return code.imapProvider({ ...imapAccount(account, connection, secret), authServers }, network);
 }
 
-/** A password, or what gives each connection an access token from the account's vendor. */
 /** What Send may carry in place of a draft: the message's last save. */
 type LastUpload = { save: DraftUpload; replaces?: MessageRef };
 
@@ -1976,6 +2011,7 @@ type Handing = {
   sent: Promise<Outgoing>;
 };
 
+/** A password, or what gives each connection an access token from the account's vendor. */
 type Secret = { pass: string } | { accessToken: () => Promise<string> };
 
 function imapAccount(
@@ -2054,7 +2090,7 @@ function loadImapCode(): Promise<ImapCode> {
           ),
         ),
         spent: (part, ms) => {
-          const spent = spending.getStore();
+          const spent = calling.getStore()?.spent;
           spent?.set(part, (spent.get(part) ?? 0) + ms);
         },
       },

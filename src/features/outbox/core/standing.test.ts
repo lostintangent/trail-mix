@@ -14,6 +14,8 @@ import {
   isUnderWay,
   standingOf,
   standingOfFollowed,
+  standingOfPress,
+  standingOfWait,
 } from './standing.ts';
 
 const T0 = Date.parse('2026-11-10T09:00:00.000Z');
@@ -70,6 +72,28 @@ test('a failure shows the server’s reason, and whether it will try again on it
   const failed: Outgoing = submitted(begin(pressed), refused, iso(10.5));
   expect(standingOf(failed, closes, at(20))).toEqual({ is: 'failed', error: refused.error });
   expect(isUndoable(standingOf(failed, closes, at(20)))).toBe(false);
+});
+
+test('a press the Mailroom can’t be reached for says why, and offers Undo while its window is open', () => {
+  const waiting = standingOfWait(new Date(closes).toISOString(), closes, at(8));
+  expect(standingOfPress(waiting, undefined)).toEqual({ is: 'counting', seconds: 2 });
+  const unreached = standingOfPress(waiting, 'This device is offline.');
+  expect(unreached).toEqual({ is: 'unreached', error: 'This device is offline.', isWaiting: true });
+  expect(isUndoable(unreached)).toBe(true);
+  // Airmail stays, and stands still, since nothing is on its way.
+  expect(isLeaving(unreached)).toBe(true);
+  expect(isOnItsWay(unreached)).toBe(false);
+
+  const closed = standingOfPress(
+    standingOfWait(new Date(closes).toISOString(), closes, at(12)),
+    'No answer came: Load failed',
+  );
+  expect(closed).toEqual({
+    is: 'unreached',
+    error: 'No answer came: Load failed.',
+    isWaiting: false,
+  });
+  expect(isUndoable(closed)).toBe(false);
 });
 
 test('a followed send seen begun and then gone has gone', () => {

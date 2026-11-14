@@ -10,7 +10,7 @@ import {
 import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
 import * as stylex from '@stylexjs/stylex';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Check, CircleAlert, Clock, Send, Undo2, X, type LucideIcon } from 'lucide-react';
+import { Check, CircleAlert, Clock, CloudOff, Send, Undo2, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react';
 import { tooltipOf, UNDO_COMMAND, useCommands } from '../../commands/index.ts';
 import type { Address } from '../../mail/core/index.ts';
@@ -24,6 +24,7 @@ import {
   isOnItsWay,
   isUndoable,
   standingOfFollowed,
+  standingOfPress,
   standingOfWait,
   type Followed,
   type Standing,
@@ -31,7 +32,7 @@ import {
 import { media } from '../../../app/theme/tokens.stylex.ts';
 import { ToastRule } from '../../../shared/ToastRule.tsx';
 import { Airmail } from './Airmail.tsx';
-import { useAsked } from './asked.ts';
+import { unreachedOf, useAsked } from './asked.ts';
 import { undo as undoSend } from './undo.ts';
 import { offerUndo } from './undoable.ts';
 
@@ -118,18 +119,24 @@ export default function LeavingToast({
         ),
     );
 
+  // Until the Outbox shows the send, this device may still be asking the Mailroom for it.
   const standing: Standing =
     undo === 'done'
       ? { is: 'undone' }
       : seen
         ? standingOfFollowed(seen, closes, now, isInSent)
-        : standingOfWait(new Date(closes).toISOString(), closes, now);
+        : standingOfPress(
+            standingOfWait(new Date(closes).toISOString(), closes, now),
+            unreachedOf(hand),
+          );
 
+  const isTicking =
+    standing.is === 'counting' || (standing.is === 'unreached' && standing.isWaiting);
   useEffect(() => {
-    if (standing.is !== 'counting') return;
+    if (!isTicking) return;
     const timer = setInterval(() => setNow(Date.now()), TICK_MS);
     return () => clearInterval(timer);
-  }, [standing.is]);
+  }, [isTicking]);
   const linger = isAwaitingCopy && standing.is === 'sending' ? GONE_MS : LINGER_MS[standing.is];
   const leave = useEffectEvent(dismiss);
   useEffect(() => {
@@ -239,6 +246,11 @@ export function said(standing: Standing, who: string): { icon: LucideIcon; text:
       return { icon: CircleAlert, text: `Couldn’t send to ${who}. ${standing.error}` };
     case 'undone':
       return { icon: Undo2, text: `Undone. Nothing was sent to ${who}.` };
+    case 'unreached':
+      return {
+        icon: CloudOff,
+        text: `Can’t reach Trail Mix to send to ${who}. ${standing.error} Trying again.`,
+      };
   }
 }
 

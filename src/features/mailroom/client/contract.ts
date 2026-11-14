@@ -117,14 +117,17 @@ export interface Commands {
    * milliseconds before the call, while any save already on its way finished, and is now if not
    * given. A message with changes still unsaved carries its last save, which the Mailroom files
    * before it schedules the send, so the press needs this one request. `id` names the press, and
-   * the send it schedules, so asking again returns that send.
+   * the send it schedules. The Mailroom keeps a press for a week, so asking again answers as the
+   * first ask did, with the send as it stands or as it went, and is refused once it was undone.
    */
   send(draft: MessageRef | LastSave, at?: string, waited?: number, id?: string): Promise<Outgoing>;
   /**
-   * Returns the draft, untouched. Refused once the send is due, unless it failed. A send whose last
-   * save is still being filed is never scheduled, and returns the draft once that save is.
+   * Undo, by a press or its send. Returns the draft, untouched. Refused once the send is due,
+   * unless it failed. A send whose last save is still being filed is never scheduled, and returns
+   * the draft once that save is. A press the Mailroom has yet to take never will be, and returns no
+   * draft. Asked again, it answers alike.
    */
-  cancelSend(id: string): Promise<MessageRef>;
+  cancelSend(id: string): Promise<MessageRef | undefined>;
   /** A failed send, tried again now. */
   retrySend(id: string): Promise<Outgoing>;
   /**
@@ -289,9 +292,14 @@ export type Mailroom = Queries &
     ): Promise<Outgoing>;
     /**
      * Runs a query or command a browser sent, which is how the Worker asks for every one, and says
-     * how long it took. `sentAt` is when the Worker sent it, by the Worker's clock.
+     * how long it took. `sentAt` is when the Worker sent it, and `received` when its request reached
+     * the Worker, before its body had, both by the Worker's clock.
      */
-    answer(call: Call<QueryName | CommandName>, sentAt: number): Promise<Answered>;
+    answer(
+      call: Call<QueryName | CommandName>,
+      sentAt: number,
+      received?: number,
+    ): Promise<Answered>;
     fetch(request: Request): Promise<Response>;
     closeDevices(): Promise<void>;
   };
@@ -331,6 +339,8 @@ declare module '@tanstack/react-start' {
         mailroom: () => Mailroom;
         members: Members;
         timing: Timed[];
+        /** When the request reached the Worker, before its body had, by the Worker's clock. */
+        received: number;
         waitUntil: (work: Promise<unknown>) => void;
       };
     };

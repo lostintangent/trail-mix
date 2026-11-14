@@ -209,6 +209,17 @@ test('a send pressed while a save is on its way waits for it, and leaves when th
   await toast(page, /^Undone\. Nothing was sent to Jonas\.$/).waitFor();
 }, 60_000);
 
+/** Writes a new message from the keyboard, to someone other than the member, ready to send. */
+async function write(page: Page, subject: string) {
+  await page.keyboard.press('c');
+  await page.getByRole('combobox', { name: 'To' }).fill('ari@example.com');
+  await page.getByRole('textbox', { name: 'Subject' }).fill(subject);
+  await page.getByRole('textbox', { name: 'Message' }).click();
+  await page.keyboard.type('Bring the map.');
+}
+
+const isSend = (body: string | null) => !!body?.includes('"send"');
+
 test('Send carries what was written since the last save in one request, and goes though the page closes before the answer', async () => {
   const page = await open({ ...PHONE, colorScheme: 'light' });
   const subject = `Gone at once ${Date.now()}`;
@@ -223,11 +234,7 @@ test('Send carries what was written since the last save in one request, and goes
     answered.resolve(route.fetch());
     return Promise.resolve();
   });
-  await page.keyboard.press('c');
-  await page.getByRole('combobox', { name: 'To' }).fill('sam@trailmix.test');
-  await page.getByRole('textbox', { name: 'Subject' }).fill(subject);
-  await page.getByRole('textbox', { name: 'Message' }).click();
-  await page.keyboard.type('Bring the map.');
+  await write(page, subject);
   await send(page).click();
   await answered.promise;
   await page.close();
@@ -243,6 +250,71 @@ test('Send carries what was written since the last save in one request, and goes
     .getByRole('button', { name: /^Sent( \d+)?$/ })
     .click();
   await again.getByRole('option', { name: new RegExp(subject) }).waitFor({ timeout: 30_000 });
+}, 60_000);
+
+test('a Send whose answer is lost asks again under its press, and goes once, with no composer back', async () => {
+  const page = await open({ ...DESKTOP, colorScheme: 'dark' });
+  const subject = `Asked again ${Date.now()}`;
+  let asks = 0;
+  // The Mailroom has the first ask, and its answer is lost on the way back.
+  await page.route('**/_serverFn/**', async (route) => {
+    if (!isSend(route.request().postData())) return route.fallback();
+    if (asks++ > 0) return route.continue();
+    await route.fetch();
+    await route.abort('failed');
+  });
+  await write(page, subject);
+  await send(page).click();
+  await toast(page, /^Sent to ari@example\.com$/).waitFor({ timeout: 30_000 });
+  expect(asks).toBe(2);
+  // Nothing was brought back to write again.
+  await expect(send(page).count()).resolves.toBe(0);
+
+  await page
+    .getByRole('navigation', { name: 'Mailboxes' })
+    .getByRole('region', { name: 'Personal' })
+    .getByRole('button', { name: /^Sent( \d+)?$/ })
+    .click();
+  await page.getByRole('option', { name: new RegExp(subject) }).click({ timeout: 30_000 });
+  const reader = page.getByRole('region', { name: 'Reader' });
+  await reader.getByRole('heading', { level: 1, name: subject }).waitFor();
+  await reader.getByRole('article').first().waitFor();
+  await expect(reader.getByRole('article').count()).resolves.toBe(1);
+  await goTo(page, 'Drafts');
+  await expect(page.getByRole('option', { name: new RegExp(subject) }).count()).resolves.toBe(0);
+}, 60_000);
+
+test('an Undo that reaches the Mailroom before its Send stops the send there, and nothing goes', async () => {
+  const page = await open({ ...PHONE, colorScheme: 'light' });
+  const subject = `Overtaken ${Date.now()}`;
+  // The Send reaches the Mailroom only once the Undo has been answered.
+  const undone = Promise.withResolvers<void>();
+  let asks = 0;
+  await page.route('**/_serverFn/**', async (route) => {
+    if (!isSend(route.request().postData())) return route.fallback();
+    asks++;
+    await undone.promise;
+    await route.continue();
+  });
+  await write(page, subject);
+  await send(page).click();
+  await toast(page, /^Sending to ari@example\.com in \d+s$/).waitFor();
+  const cancelled = page.waitForResponse(
+    (response) => !!response.request().postData()?.includes('"cancelSend"'),
+  );
+  await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
+  expect((await cancelled).ok()).toBe(true);
+  await toast(page, /^Undone\. Nothing was sent to ari@example\.com\.$/).waitFor();
+  await expect(page.getByRole('textbox', { name: 'Subject' }).inputValue()).resolves.toBe(subject);
+
+  const refused = page.waitForResponse((response) => isSend(response.request().postData()));
+  undone.resolve();
+  expect(await (await refused).text()).toContain('The send was undone.');
+  // The refusal is the Undo's own, so the message stays as it was, and isn't asked for again.
+  await page.waitForTimeout(1_500);
+  expect(asks).toBe(1);
+  await expect(page.getByText(/Couldn’t send/).count()).resolves.toBe(0);
+  await expect(page.getByRole('textbox', { name: 'Subject' }).inputValue()).resolves.toBe(subject);
 }, 60_000);
 
 test('a send straight after a cold load counts down, though toasts and their theme load only then', async () => {

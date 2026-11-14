@@ -16,6 +16,10 @@ import { WAKE } from './sync.ts';
  * stored before the next step reaches a mail server, so a wake cut short anywhere resumes from the
  * last change, and every change hints the member's devices.
  *
+ * It keeps each press of Send it has taken for a week, with the send the press scheduled and what
+ * came of it, so a press asked again answers as its first ask did, and an Undo that comes before a
+ * press keeps it from ever being sent. A send scheduled without a press is its own.
+ *
  * A Mailroom calls `recover` once as it starts, before anything else can begin a send, so a send it
  * finds mid-submit was cut short by the restart.
  */
@@ -30,6 +34,18 @@ export type Sending = {
   /** Runs once the host has accepted a message, before the Outbox records it. Tests stop here. */
   accepted?: () => void;
 };
+
+/** What came of a press: its send, as the host accepted it, or its Undo, with the draft it kept. */
+export type Came = { sent: Outgoing } | { undone: MessageRef | null };
+
+/** A press the Mailroom has taken: its send, while the Outbox holds it, and what came of it. */
+export type Pressed = { send?: Outgoing; came?: Came };
+
+/**
+ * How long a press is kept from when it was taken, and for as long as its send waits after that, so
+ * it answers alike when asked again.
+ */
+export const PRESS_KEPT_MS = 7 * 24 * 60 * 60 * 1000;
 
 export function outboxQueue(sending: Sending) {
   const { sql, hint } = sending;
@@ -49,6 +65,21 @@ export function outboxQueue(sending: Sending) {
       JSON.stringify(outgoing),
     );
   const changed = () => hint({ changed: 'outbox' });
+  /** Notes what came of the presses that scheduled a send. */
+  const came = (send: string, what: Came) =>
+    sql.run(`UPDATE presses SET came = ? WHERE send = ?`, JSON.stringify(what), send);
+  const pressed = (id: string): Pressed | undefined => {
+    const [row] = sql.all<{ send: string | null; came: string | null }>(
+      `SELECT send, came FROM presses WHERE id = ?`,
+      id,
+    );
+    if (!row) return undefined;
+    const send = row.send === null ? undefined : get(row.send);
+    return {
+      ...(send && { send }),
+      ...(row.came !== null && { came: JSON.parse(row.came) as Came }),
+    };
+  };
   const owned = (id: string) => {
     const held = get(id);
     if (!held) throw new Error('There is no such send.');
@@ -81,6 +112,7 @@ export function outboxQueue(sending: Sending) {
     } else {
       const result = outbox.filed(held, outcome as outbox.Filed, now());
       if (result === 'done') {
+        came(id, { sent: held });
         sql.run(`DELETE FROM outbox WHERE id = ?`, id);
         sending.sent(due.outgoing);
       } else {
@@ -99,8 +131,9 @@ export function outboxQueue(sending: Sending) {
 
     /**
      * Schedules a draft, to go when the undo window that opened at the press, `opened`, closes, or
-     * at `at` if later, as the send `id` names, or a new one. Sending a draft that is already on its
-     * way returns that send, as it was scheduled. A failed one starts over.
+     * at `at` if later, as the press `id` names, or a new one. Sending a draft that is already on
+     * its way returns that send, as it was scheduled. A failed one starts over. A press that has
+     * come to something already answers with that, so one undone while it was taken is never sent.
      */
     send(
       draft: Pick<Outgoing, 'draft' | 'messageId' | 'to' | 'subject'>,
@@ -109,27 +142,72 @@ export function outboxQueue(sending: Sending) {
       opened?: string,
       id?: string,
     ): Outgoing {
+      const was = id === undefined ? undefined : pressed(id);
+      if (was?.send) return was.send;
+      if (was?.came) {
+        if ('sent' in was.came) return was.came.sent;
+        throw new Error('The send was undone.');
+      }
       const held = all().find((entry) => sameRef(entry.draft, draft.draft));
-      if (held && held.state !== 'failed') return held;
       // An id another send already has never takes its place.
       const named = id !== undefined && !get(id) ? id : undefined;
-      const scheduled = outbox.schedule(
-        { id: held?.id ?? named ?? crypto.randomUUID(), ...draft },
-        now,
-        at,
-        opened,
+      const outgoing =
+        held && held.state !== 'failed'
+          ? held
+          : outbox.schedule(
+              { id: held?.id ?? named ?? crypto.randomUUID(), ...draft },
+              now,
+              at,
+              opened,
+            );
+      sql.run(
+        `INSERT INTO presses (id, at, send) VALUES (?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET send = excluded.send`,
+        id ?? outgoing.id,
+        Date.parse(now),
+        outgoing.id,
       );
-      put(scheduled);
-      changed();
-      return scheduled;
+      if (outgoing !== held) {
+        put(outgoing);
+        changed();
+      }
+      return outgoing;
     },
 
     /** Undo: the send is gone and its draft, untouched, is returned. */
     cancel(id: string, now: string): MessageRef {
       const draft = outbox.cancel(owned(id), now);
+      came(id, { undone: draft });
       sql.run(`DELETE FROM outbox WHERE id = ?`, id);
       changed();
       return draft;
+    },
+
+    /** A press, as the Mailroom has taken it, if it has. */
+    pressed,
+
+    /** Notes a press the Mailroom has begun to take, before it files or schedules anything. */
+    press(id: string, now: string) {
+      sql.run(`INSERT OR IGNORE INTO presses (id, at) VALUES (?, ?)`, id, Date.parse(now));
+    },
+
+    /** Forgets a press whose taking failed before it scheduled a send, so it may be asked again. */
+    unpress(id: string) {
+      sql.run(`DELETE FROM presses WHERE id = ? AND send IS NULL AND came IS NULL`, id);
+    },
+
+    /**
+     * Notes a press undone before it scheduled a send, with the draft its last save left, so
+     * nothing the press asks for is sent.
+     */
+    undone(id: string, now: string, draft?: MessageRef) {
+      sql.run(
+        `INSERT INTO presses (id, at, came) VALUES (?, ?, ?)
+         ON CONFLICT (id) DO UPDATE SET came = excluded.came`,
+        id,
+        Date.parse(now),
+        JSON.stringify({ undone: draft ?? null } satisfies Came),
+      );
     },
 
     /** The member's Retry. */
@@ -153,12 +231,20 @@ export function outboxQueue(sending: Sending) {
       const failed = all().filter(
         (entry) => sameRef(entry.draft, draft) && entry.state === 'failed',
       );
-      for (const { id } of failed) sql.run(`DELETE FROM outbox WHERE id = ?`, id);
+      for (const { id } of failed) {
+        came(id, { undone: null });
+        sql.run(`DELETE FROM outbox WHERE id = ?`, id);
+      }
       if (failed.length) changed();
     },
 
-    /** Forgets an account's sends, as removing the account does. */
+    /** Forgets an account's sends, as removing the account does, which undoes their presses. */
     forget(account: AccountId) {
+      sql.run(
+        `UPDATE presses SET came = ? WHERE send IN (SELECT id FROM outbox WHERE account = ?)`,
+        JSON.stringify({ undone: null } satisfies Came),
+        account,
+      );
       sql.run(`DELETE FROM outbox WHERE account = ?`, account);
       changed();
     },
@@ -188,6 +274,10 @@ export function outboxQueue(sending: Sending) {
     async run(now: () => string, budget = WAKE.steps): Promise<number> {
       if (running) return 0;
       running = true;
+      sql.run(
+        `DELETE FROM presses WHERE at < ? AND (send IS NULL OR send NOT IN (SELECT id FROM outbox))`,
+        Date.parse(now()) - PRESS_KEPT_MS,
+      );
       let steps = 0;
       const resting = new Set<AccountId>();
       try {

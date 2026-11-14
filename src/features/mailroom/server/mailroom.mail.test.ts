@@ -1622,6 +1622,65 @@ for (const profile of ['full', 'outlook'] as const satisfies Profile[]) {
       expect(await whereIs('Late')).toEqual({ delivered: 1, sent: 1, drafts: 0 });
     }, 90_000);
 
+    test('a press asked again answers as its first ask did, once it went and once it was undone', async () => {
+      const saved = await drafted('Asked twice');
+      const press = crypto.randomUUID();
+      const sending = await cal.call<Outgoing>('send', saved, undefined, 0, press);
+      expect(await cal.call<Outgoing>('send', saved, undefined, 0, press)).toEqual(sending);
+      await cal.until(async () => (await outbox()).length === 0, 60_000);
+      // The device never heard, and asks again once the draft has gone from Drafts.
+      expect(await cal.call<Outgoing>('send', saved, undefined, 30_000, press)).toMatchObject({
+        id: press,
+        draft: saved,
+      });
+      expect(await outbox()).toEqual([]);
+      expect(await whereIs('Asked twice')).toEqual({ delivered: 1, sent: 1, drafts: 0 });
+
+      const kept = await drafted('Undone twice');
+      const undone = crypto.randomUUID();
+      await cal.call('send', kept, undefined, 0, undone);
+      expect(await cal.call<MessageRef>('cancelSend', undone)).toEqual(kept);
+      expect(await cal.call<MessageRef>('cancelSend', undone)).toEqual(kept);
+      await expect(cal.call('send', kept, undefined, 0, undone)).rejects.toThrow(
+        'The send was undone.',
+      );
+      expect(await outbox()).toEqual([]);
+    }, 90_000);
+
+    test('an Undo that reaches the Mailroom before its press keeps it from ever going', async () => {
+      const saved = await drafted('Overtaken');
+      const press = crypto.randomUUID();
+      expect(await cal.call('cancelSend', press)).toBeNull();
+      await expect(cal.call('send', saved, undefined, 0, press)).rejects.toThrow(
+        'The send was undone.',
+      );
+      // A press carrying its last save files nothing.
+      const carried = crypto.randomUUID();
+      await cal.call('cancelSend', carried);
+      await expect(
+        cal.call(
+          'send',
+          { save: draftOf('Overtaken, saved'), replaces: saved },
+          undefined,
+          0,
+          carried,
+        ),
+      ).rejects.toThrow('The send was undone.');
+      expect(await outbox()).toEqual([]);
+      await Bun.sleep(UNDO_SECONDS * 1000 + 2000);
+      expect(await whereIs('Overtaken')).toEqual({ delivered: 0, sent: 0, drafts: 1 });
+      expect(await whereIs('Overtaken, saved')).toEqual({ delivered: 0, sent: 0, drafts: 0 });
+    }, 60_000);
+
+    test('a press the Mailroom never took, pressed over a week ago, is refused, since it may have gone', async () => {
+      const saved = await drafted('Stale');
+      const week = 7 * 24 * 60 * 60 * 1000;
+      await expect(cal.call('send', saved, undefined, week, crypto.randomUUID())).rejects.toThrow(
+        'Send was pressed over a week ago, so it wasn’t sent.',
+      );
+      expect(await outbox()).toEqual([]);
+    }, 30_000);
+
     test('a send scheduled ahead goes at its time, with no device open', async () => {
       const saved = await drafted('Scheduled');
       const at = new Date(Date.now() + 20_000).toISOString();

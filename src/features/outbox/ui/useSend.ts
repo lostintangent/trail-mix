@@ -8,7 +8,9 @@ import { handed, pressed } from './asked.ts';
 
 /**
  * A press of Send. The composer has closed, and the message goes to the Mailroom in one request,
- * carrying its last save if it has changes unsaved, so the undo window counts from the press.
+ * carrying its last save if it has changes unsaved, so the undo window counts from the press. A
+ * request that gets no answer asks again under the press, so the message comes back only once the
+ * Mailroom has refused it or Undo has taken it back.
  */
 export type Press = {
   id: string;
@@ -52,6 +54,7 @@ export function useSend(): Send {
       pressed(press.id, {
         closes: closesAfterPress(press.pressedAt, press.at),
         onUndone: press.onUndone,
+        onFailed: press.onFailed,
         stop: () => handOff.abort(),
       });
       loadSending().then(

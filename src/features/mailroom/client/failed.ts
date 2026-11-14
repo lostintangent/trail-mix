@@ -24,3 +24,17 @@ export function whatFailed(
 }
 
 const REASON_LENGTH = 160;
+
+/**
+ * Whether the answer that came back for a failed call refused it, so that asking again would only
+ * be refused again. The Mailroom's refusal comes whole, as the plain error the server function's
+ * answer carries, and so does the Worker's, as when it turns away a call from another origin.
+ * Nothing else says whether the call ran: no answer at all, one whose body never came whole, a
+ * platform's error page, or the Worker's 503, which it answers when Cloudflare failed the call in a
+ * way that may pass. A 429 asks to be asked again later, as the demo's limit on changes does.
+ */
+export function isRefusal(response: Pick<Response, 'status'> | undefined, error: unknown): boolean {
+  if (!response || response.status >= 500 || response.status === 429) return false;
+  // What the browser throws reading a body that never came whole is a TypeError or a SyntaxError.
+  return error instanceof Error && Object.getPrototypeOf(error) === Error.prototype;
+}

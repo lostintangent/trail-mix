@@ -194,6 +194,8 @@ function when(standing: Standing): string {
       return 'Not sent';
     case 'undone':
       return '';
+    case 'unreached':
+      return 'Not sent yet';
   }
 }
 

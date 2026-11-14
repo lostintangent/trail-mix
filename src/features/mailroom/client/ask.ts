@@ -18,13 +18,13 @@ import {
  * asked again, since that would only add to its load.
  */
 export async function ask(
-  { mailroom, timing }: { mailroom: () => Mailroom; timing: Timed[] },
+  { mailroom, timing, received }: { mailroom: () => Mailroom; timing: Timed[]; received?: number },
   call: Call<QueryName | CommandName>,
   wait: (ms: number) => Promise<void> = (ms) => new Promise((done) => setTimeout(done, ms)),
 ): Promise<unknown> {
   for (let attempt = 0; ; attempt++) {
     try {
-      return await once(mailroom(), call, timing);
+      return await once(mailroom(), call, timing, received);
     } catch (error) {
       const delay = RETRY_WAITS_MS[attempt];
       if (delay === undefined || !isPassing(error) || !REPEATABLE.has(call.name)) throw error;
@@ -48,16 +48,30 @@ const REPEATABLE: ReadonlySet<string> = new Set<QueryName | CommandName>([
   // A sender asked again to unsubscribe the same address is left as the first ask left it.
   'unsubscribe',
   'setFlags',
+  // A press asked again answers as its first ask did, and so does its Undo.
   'send',
+  'cancelSend',
   'deleteFolder',
   'eraseEverything',
 ]);
 
 /** Whether Cloudflare says a failure may pass, and that asking again won't add to a load. */
 function isPassing(error: unknown): boolean {
-  if (typeof error !== 'object' || error === null) return false;
-  const { retryable, overloaded } = error as { retryable?: unknown; overloaded?: unknown };
+  const { retryable, overloaded } = marksOf(error);
   return retryable === true && overloaded !== true;
+}
+
+/**
+ * Whether Cloudflare failed a call, rather than the Mailroom refusing it: a failure it marks as
+ * passing or overloaded, which says nothing of what the call would have answered.
+ */
+export function isCloudflareFailure(error: unknown): boolean {
+  const { retryable, overloaded } = marksOf(error);
+  return retryable === true || overloaded === true;
+}
+
+function marksOf(error: unknown): { retryable?: unknown; overloaded?: unknown } {
+  return typeof error === 'object' && error !== null ? error : {};
 }
 
 /**
@@ -67,12 +81,17 @@ function isPassing(error: unknown): boolean {
  * Mailroom holds until what it wrote is safely stored, as Cloudflare holds every answer a Durable
  * Object sends. Names and times only, never what a call carried.
  */
-async function once(mailroom: Mailroom, call: Call<QueryName | CommandName>, timing: Timed[]) {
+async function once(
+  mailroom: Mailroom,
+  call: Call<QueryName | CommandName>,
+  timing: Timed[],
+  received: number | undefined,
+) {
   const sent = Date.now();
   const at = performance.now();
   const noted = timing.length;
   try {
-    const { value, reached, ran, spent, cold } = await mailroom.answer(call, sent);
+    const { value, reached, ran, spent, cold } = await mailroom.answer(call, sent, received);
     const took = performance.now() - at;
     timing.push(
       { name: 'reached', ms: Math.max(0, reached) },

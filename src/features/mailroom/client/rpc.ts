@@ -1,5 +1,6 @@
 import { createServerFn } from '@tanstack/react-start';
-import { ask } from './ask.ts';
+import { ask, isCloudflareFailure } from './ask.ts';
+import { isRefusal } from './failed.ts';
 import {
   COMMANDS,
   QUERIES,
@@ -19,7 +20,7 @@ import {
  */
 const query = createServerFn({ method: 'GET', strict: { output: false } })
   .validator((input: Call<string>) => readCall(QUERIES, input))
-  .handler(({ data, context }) => ask(context, data));
+  .handler(({ data, context }) => answering(ask(context, data)));
 
 const command = createServerFn({ method: 'POST', strict: { output: false } })
   // Either a call as JSON or, carrying files, as form data. `receivedCall` reads both.
@@ -29,8 +30,23 @@ const command = createServerFn({ method: 'POST', strict: { output: false } })
     // answers, as a phone put away straight after Send does.
     const answer = ask(context, data);
     context.waitUntil(answer.catch(() => {}));
-    return answer;
+    return answering(answer);
   });
+
+/**
+ * A call's answer, which says when it failed whether the Mailroom refused it. The server function
+ * answers a refusal 200, with the error's message alone, so a failure of Cloudflare's, which leaves
+ * open whether the call ran, goes instead as a 503 of its own, with its message.
+ */
+async function answering(answer: Promise<unknown>): Promise<unknown> {
+  try {
+    return await answer;
+  } catch (error) {
+    if (!isCloudflareFailure(error)) throw error;
+    // eslint-disable-next-line @typescript-eslint/only-throw-error -- Start answers with a thrown Response.
+    throw new Response(error instanceof Error ? error.message : '', { status: 503 });
+  }
+}
 
 /**
  * The browser's Mailroom: every query and command, typed as the contract has them. A call that
@@ -47,22 +63,27 @@ export const mailroom = Object.fromEntries([
   ]),
 ]) as unknown as Queries & Commands;
 
-/** A call that failed, with the status of the Worker's answer if one came. */
-export type Unanswered = Error & { status?: number };
+/**
+ * A call that failed, with the status of the Worker's answer if one came, and whether that answer
+ * refused it, so that asking again would only be refused again.
+ */
+export type Unanswered = Error & { status?: number; isRefused?: boolean };
 
-/** Makes a call, noting the status of a failed answer on the error it brings. */
+/** Makes a call, noting on the error a failed one brings what answer came back for it. */
 async function answered<T>(
   call: (fetch: (...args: Parameters<typeof globalThis.fetch>) => Promise<Response>) => Promise<T>,
 ): Promise<T> {
-  let status: number | undefined;
+  let response: Response | undefined;
   try {
-    return await call(async (...args) => {
-      const response = await fetch(...args);
-      if (!response.ok) status = response.status;
-      return response;
-    });
-  } catch (error) {
-    if (error instanceof Error && status !== undefined) Object.assign(error, { status });
+    return await call(async (...args) => (response = await fetch(...args)));
+  } catch (thrown) {
+    // A 503 of the Worker's own comes as the response itself.
+    const error =
+      thrown instanceof Response ? new Error(await thrown.text().catch(() => '')) : thrown;
+    if (error instanceof Error && response) {
+      if (!response.ok) Object.assign(error, { status: response.status });
+      Object.assign(error, { isRefused: isRefusal(response, error) });
+    }
     throw error;
   }
 }

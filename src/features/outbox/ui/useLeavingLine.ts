@@ -4,8 +4,8 @@ import { useCommands } from '../../commands/index.ts';
 import { standingOfLeaving, type Leaving } from '../core/leaving.ts';
 import { formatAhead } from '../core/later.ts';
 import { UNDO_SECONDS } from '../core/outbox.ts';
-import { isUndoable, type Standing } from '../core/standing.ts';
-import { isAsked, useAskedVersion } from './asked.ts';
+import { isUndoable, standingOfPress, type Standing } from '../core/standing.ts';
+import { isAsked, unreachedOf, useAsked, useAskedVersion } from './asked.ts';
 import { takeBack, undo as undoPress } from './undo.ts';
 import { offerUndo } from './undoable.ts';
 
@@ -87,6 +87,11 @@ function saidOf(standing: Standing): { said: string; reason?: string } {
       return { said: 'Couldn’t send', reason: standing.error };
     case 'undone':
       return { said: 'Undone' };
+    case 'unreached':
+      return {
+        said: 'Not sent yet',
+        reason: `Can’t reach Trail Mix. ${standing.error} Trying again.`,
+      };
   }
 }
 
@@ -107,10 +112,12 @@ function useTold(standing: Standing, reason: string | undefined): string {
 
 /**
  * Where a send followed stands, now: its countdown turns over each second on time, and a wait for a
- * later time ends when its countdown begins. The rest come with the Outbox's snapshots.
+ * later time ends when its countdown begins. The rest come with the Outbox's snapshots, and until
+ * the Outbox shows it, from this device's asking the Mailroom for it.
  */
 function useLeavingStanding(leaving: Leaving): Standing {
   const [now, setNow] = useState(Date.now);
+  const hand = useAsked(leaving.id)?.hand;
   const standing = standingOfLeaving(leaving, now);
   const isWaiting = standing.is === 'scheduled';
   const isCounting = standing.is === 'counting';
@@ -125,7 +132,7 @@ function useLeavingStanding(leaving: Leaving): Standing {
     const timer = setInterval(() => setNow(Date.now()), TICK_MS);
     return () => clearInterval(timer);
   }, [isCounting]);
-  return standing;
+  return leaving.seen ? standing : standingOfPress(standing, unreachedOf(hand));
 }
 
 /** How often a countdown looks at the clock, so each second turns over on time. */

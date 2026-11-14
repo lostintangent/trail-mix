@@ -358,6 +358,7 @@ type Env = MailroomEnv & { MAILROOM: DurableObjectNamespace<TestMailroom> };
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
+    const received = Date.now();
     const url = new URL(request.url);
     const [, member, action] = url.pathname.split('/');
     if (!member) return new Response('The Mailroom, for tests.');
@@ -380,7 +381,8 @@ export default {
         (COMMANDS as readonly string[]).includes(name);
       try {
         const value = isAsked
-          ? ((await methods.answer!({ name, args }, Date.now())) as { value: unknown }).value
+          ? ((await methods.answer!({ name, args }, Date.now(), received)) as { value: unknown })
+              .value
           : await methods[name]!(...args);
         return Response.json({ value: value ?? null });
       } catch (error) {

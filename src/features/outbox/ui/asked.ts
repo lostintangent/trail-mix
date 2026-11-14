@@ -16,23 +16,38 @@ export type Asked = {
    * draft the Mailroom kept, if it filed one.
    */
   onUndone: (draft?: MessageRef) => void;
-  /** Stops the hand-off before it asks the Mailroom. */
+  /** Brings the message back to a composer, once the Mailroom has refused it, and says why. */
+  onFailed: (reason: string) => void;
+  /** Stops the hand-off, which then asks the Mailroom nothing more. */
   stop: () => void;
 };
 
 /**
  * How a press reaches the Mailroom: any save of its message already on its way, then the asking,
- * which carries the last save, then the send the Mailroom scheduled. Undo stops it while it waits
- * for the save, asks the Mailroom to stop it while it's asked, and takes back the send once it is.
+ * which carries the last save and asks again until the Mailroom answers, then the send the Mailroom
+ * scheduled. Undo stops it while it waits for the save, asks the Mailroom to stop it while it's
+ * asked, and takes back the send once it is. While asking goes unanswered for a while, `unreached`
+ * says what failed last.
  */
 export type Hand =
   | { is: 'saving' }
-  | { is: 'asking'; answer: Promise<Outgoing | undefined> }
-  /** Undo asked the Mailroom to stop a send it was still being asked for. */
-  | { is: 'undoing'; answer: Promise<Outgoing | undefined> }
+  | { is: 'asking'; answer: Promise<Answer | undefined>; unreached?: string }
+  /**
+   * Undo asked the Mailroom to stop a send it was still being asked for, which is asked for no more
+   * until the Mailroom has `settled` that.
+   */
+  | {
+      is: 'undoing';
+      answer: Promise<Answer | undefined>;
+      settled: Promise<void>;
+      unreached?: string;
+    }
   | { is: 'asked'; send: Outgoing }
   | { is: 'stopped' }
   | { is: 'failed' };
+
+/** What the Mailroom answered a press: the send it scheduled, or why it refused. */
+export type Answer = { send: Outgoing } | { refused: string };
 
 let asked: ReadonlyMap<string, Asked> = new Map();
 const listeners = new Set<() => void>();
@@ -43,11 +58,28 @@ export function pressed(id: string, press: Omit<Asked, 'hand'>) {
   change(id, { ...press, hand: { is: 'saving' } });
 }
 
-/** How a press's hand-off has gone on. */
+/** How a press's hand-off has gone on. One stopped asks the Mailroom nothing more. */
 export function handed(id: string, hand: Hand) {
   const was = asked.get(id);
-  if (was) change(id, { ...was, hand });
+  if (!was) return;
+  change(id, { ...was, hand });
+  if (hand.is === 'stopped') was.stop();
 }
+
+/**
+ * What failed when a press last went unanswered, while it's still being asked for, or that an ask
+ * has landed.
+ */
+export function unreached(id: string, failed: string | undefined) {
+  const was = asked.get(id);
+  if (!was || (was.hand.is !== 'asking' && was.hand.is !== 'undoing')) return;
+  if (was.hand.unreached !== failed)
+    change(id, { ...was, hand: { ...was.hand, unreached: failed } });
+}
+
+/** What failed when a press still being asked for last went unanswered, if it has for a while. */
+export const unreachedOf = (hand: Hand | undefined) =>
+  hand?.is === 'asking' || hand?.is === 'undoing' ? hand.unreached : undefined;
 
 export const isAsked = (id: string) => asked.has(id);
 

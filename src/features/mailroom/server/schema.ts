@@ -3,9 +3,9 @@
  * Each version is applied once, in order, when a Mailroom wakes. Versions are only ever appended,
  * so any Mailroom moves forward from whatever version it last ran.
  *
- * Only `accounts`, `credentials`, `demo`, `outbox` and `devices` hold what Trail Mix owns. Every
- * other table is the envelope index, which sync rebuilds from the mail servers, or a note that
- * costs nothing to lose.
+ * Only `accounts`, `credentials`, `demo`, `outbox`, `presses` and `devices` hold what Trail Mix
+ * owns. Every other table is the envelope index, which sync rebuilds from the mail servers, or a
+ * note that costs nothing to lose.
  */
 
 /** What a Mailroom reads and writes through, on either runtime. */
@@ -444,6 +444,16 @@ export const versions: readonly (readonly string[])[] = [
       WHERE inbox = 1 AND bundle IS NULL AND unread = 1`,
     `CREATE INDEX placements_unread_by_date ON placements (account, path, date DESC, conversation DESC)
       WHERE bundle IS NULL AND unread = 1`,
+  ],
+  [
+    // The presses of Send the Mailroom has taken, for a week, so a press asked again answers as
+    // the first ask did: `at` when it was first taken, `send` the Outbox entry it scheduled, and
+    // `came`, once it has gone or been undone, what came of it. Every send already waiting has its
+    // own press.
+    `CREATE TABLE presses (id TEXT PRIMARY KEY, at INTEGER NOT NULL, send TEXT, came TEXT)`,
+    `CREATE INDEX presses_by_send ON presses (send)`,
+    `INSERT INTO presses (id, at, send)
+      SELECT id, CAST((julianday('now') - 2440587.5) * 86400000 AS INTEGER), id FROM outbox`,
   ],
 ];
 

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { whatFailed } from './failed.ts';
+import { isRefusal, whatFailed } from './failed.ts';
 
 test('a failed call says the status the Worker answered with, and its reason', () => {
   const reset = Object.assign(new Error('Durable Object reset because its code was updated.'), {
@@ -31,4 +31,24 @@ test('an error page is cut down to the start of its words', () => {
   expect(said).toStartWith('Trail Mix answered 500: Worker threw exception Error 1101 x x');
   expect(said).not.toContain('<');
   expect(said.length).toBeLessThanOrEqual('Trail Mix answered 500: '.length + 160);
+});
+
+test('a failed call was refused when the Mailroom or the Worker answered it so', () => {
+  // The server function answers the Mailroom's refusal 200, with the error it threw.
+  expect(isRefusal({ status: 200 }, new Error('There is no such send.'))).toBe(true);
+  // The Worker turned it away, as a command from another origin.
+  expect(isRefusal({ status: 403 }, new Error('Forbidden'))).toBe(true);
+});
+
+test('a failed call that may not have run, or whose answer was lost, is no refusal', () => {
+  // No answer came at all.
+  expect(isRefusal(undefined, new TypeError('Load failed'))).toBe(false);
+  // An answer came, but its body never came whole.
+  expect(isRefusal({ status: 200 }, new TypeError('network error'))).toBe(false);
+  expect(isRefusal({ status: 200 }, new SyntaxError('Unexpected end of JSON input'))).toBe(false);
+  // Cloudflare failed it, as when a deploy restarts the Mailroom, or a platform's page answered.
+  expect(isRefusal({ status: 503 }, new Error('Network connection lost.'))).toBe(false);
+  expect(isRefusal({ status: 502 }, new Error('<html>Bad gateway</html>'))).toBe(false);
+  // The demo's limit on changes, which asks to be asked again later.
+  expect(isRefusal({ status: 429 }, new Error('Too many changes for now.'))).toBe(false);
 });

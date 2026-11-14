@@ -50,6 +50,7 @@ let started = false;
  */
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+    const received = Date.now();
     const begun = performance.now();
     const isFirst = !started;
     started = true;
@@ -99,6 +100,7 @@ export default {
         mailroom,
         members: membersOf(env, member),
         timing,
+        received,
         waitUntil: (work) => ctx.waitUntil(work),
       },
     });

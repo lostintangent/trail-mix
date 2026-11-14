@@ -17,6 +17,7 @@ export type {
   Unsubscribed,
 } from './contract.ts';
 export { MATCHES_LISTED, PAGE_SIZE, PEOPLE_LISTED } from './contract.ts';
+export { untilAnswered } from './again.ts';
 export { whatFailed } from './failed.ts';
 export { useHints, useIsCaughtUp } from './hints.ts';
 export {

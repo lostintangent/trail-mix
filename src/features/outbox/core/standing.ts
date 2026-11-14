@@ -20,7 +20,12 @@ export type Standing =
   /** It waits for the member's Retry. */
   | { is: 'failed'; error: string }
   /** It left the Outbox before its time, so someone undid it. */
-  | { is: 'undone' };
+  | { is: 'undone' }
+  /**
+   * This device has yet to hand it to the Mailroom, which it couldn't reach for what `error` says,
+   * and keeps trying. Its window, or its wait for a later time, may still be open here.
+   */
+  | { is: 'unreached'; error: string; isWaiting: boolean };
 
 /**
  * When a send's undo window closes, in milliseconds on this device's clock, or when it is due, for
@@ -113,9 +118,25 @@ export const isUnderWay = (seen: Followed, closes: number, now: number): boolean
   seen.last.error !== undefined ||
   now >= closes;
 
-/** Whether a send that stands so can still be undone. */
+/**
+ * Where a press stands while this device keeps asking the Mailroom to take it: as it would, until
+ * asking again has failed for a while, and then unreached, for what failed last, until an ask
+ * lands. Only a press the Mailroom hasn't shown in its Outbox.
+ */
+export function standingOfPress(standing: Standing, unreached: string | undefined): Standing {
+  if (unreached === undefined) return standing;
+  const error = /[.!?…]$/.test(unreached) ? unreached : `${unreached}.`;
+  return { is: 'unreached', error, isWaiting: isUndoable(standing) };
+}
+
+/**
+ * Whether a send that stands so can still be undone: while its window, or its wait for a later
+ * time, is open on this device's clock.
+ */
 export const isUndoable = (standing: Standing) =>
-  standing.is === 'counting' || standing.is === 'scheduled';
+  standing.is === 'counting' ||
+  standing.is === 'scheduled' ||
+  (standing.is === 'unreached' && standing.isWaiting);
 
 /** Whether a send that stands so is leaving, which the airmail stripe marks. */
 export const isLeaving = (standing: Standing) =>

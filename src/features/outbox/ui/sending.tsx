@@ -3,10 +3,16 @@ import { Suspense } from 'react';
 import { reasonOf } from '../../../shared/reasons.ts';
 import { toast } from '../../../shared/toasts.tsx';
 import type { MessageRef, Outgoing } from '../../mail/core/index.ts';
-import { mailroom, outboxQuery, type LastSave } from '../../mailroom/client/index.ts';
+import {
+  mailroom,
+  outboxQuery,
+  untilAnswered,
+  whatFailed,
+  type LastSave,
+} from '../../mailroom/client/index.ts';
 import type { Leaving } from '../core/leaving.ts';
 import { briefly, type Standing } from '../core/standing.ts';
-import { askedFor, handed } from './asked.ts';
+import { askedFor, handed, unreached, type Answer } from './asked.ts';
 import LeavingToast, { said } from './LeavingToast.tsx';
 import type { Press } from './useSend.ts';
 
@@ -18,10 +24,11 @@ import type { Press } from './useSend.ts';
 
 /**
  * Hands a press to the Mailroom in one request, which carries its message's last save if it has
- * changes unsaved, asking for the undo window to count from the press. A save already on its way
- * answers first. Once the Mailroom has the send, the Outbox shows it, and this device follows it as
- * one it asked for. A send the Mailroom refuses says why to the press. Undo stops it while it waits
- * for the save, and asks the Mailroom to stop it while it's asked.
+ * changes unsaved, asking for the undo window to count from the press, and asks again under the
+ * press until the Mailroom answers. A save already on its way answers first. Once the Mailroom has
+ * the send, the Outbox shows it, and this device follows it as one it asked for. A send the
+ * Mailroom refuses says why to the press. Undo stops it while it waits for the save, and asks the
+ * Mailroom to stop it while it's asked.
  */
 export async function handOff(queryClient: QueryClient, press: Press, signal: AbortSignal) {
   let last: MessageRef | LastSave;
@@ -32,32 +39,47 @@ export async function handOff(queryClient: QueryClient, press: Press, signal: Ab
     return;
   }
   if (signal.aborted) return;
-  const answer = ask(queryClient, press, last);
+  const answer = ask(queryClient, press, last, signal);
   handed(press.id, { is: 'asking', answer });
   await answer;
 }
 
+/**
+ * Asks the Mailroom for a press's send until it answers, under the press, which it answers alike
+ * however often it's asked. Each ask counts the undo window from the press.
+ */
 async function ask(
   queryClient: QueryClient,
   press: Press,
   last: MessageRef | LastSave,
-): Promise<Outgoing | undefined> {
+  signal: AbortSignal,
+): Promise<Answer | undefined> {
   let outgoing: Outgoing;
   try {
-    const waited = Math.max(0, Date.now() - press.pressedAt);
-    outgoing = await mailroom.send(last, press.at, waited, press.id);
+    outgoing = await untilAnswered(
+      async () => {
+        // While Undo asks the Mailroom to stop the press, asking for it again would race the Undo.
+        const hand = askedFor(press.id)?.hand;
+        if (hand?.is === 'undoing') await hand.settled;
+        signal.throwIfAborted();
+        return mailroom.send(last, press.at, Math.max(0, Date.now() - press.pressedAt), press.id);
+      },
+      { signal, onUnreached: (error) => unreached(press.id, whatFailed(error)) },
+    );
   } catch (error) {
-    // Undo stopped it, or is stopping it, and says what came of that.
     const hand = askedFor(press.id)?.hand.is;
-    if (hand !== 'undoing' && hand !== 'stopped') fail(press, error);
-    return undefined;
+    if (signal.aborted || hand === 'stopped') return undefined;
+    // Undo is stopping it, and says what came of that.
+    if (hand !== 'undoing') fail(press, error);
+    return { refused: reasonOf(error) };
   }
+  unreached(press.id, undefined);
   const hand = askedFor(press.id)?.hand.is;
   // Undo stopped it while the answer was on its way, and brought the message back.
   if (hand === 'stopped') return undefined;
   press.onSent(outgoing.draft);
   // Undo is stopping it, and takes it back if the Mailroom has scheduled it.
-  if (hand === 'undoing') return outgoing;
+  if (hand === 'undoing') return { send: outgoing };
   handed(press.id, { is: 'asked', send: outgoing });
   // A snapshot asked for before the Mailroom had the send would take it out of the Outbox again.
   await queryClient.cancelQueries({ queryKey: outboxQuery.queryKey });
@@ -65,7 +87,12 @@ async function ask(
     ...held.filter(({ id }) => id !== outgoing.id),
     outgoing,
   ]);
-  return outgoing;
+  // Asked again, the Mailroom may answer with a send as it last stood before it went, so this
+  // device follows it there, and then as the Outbox has it now.
+  if (outgoing.state === 'accepted') {
+    void queryClient.invalidateQueries({ queryKey: outboxQuery.queryKey });
+  }
+  return { send: outgoing };
 }
 
 function fail(press: Press, error: unknown) {
