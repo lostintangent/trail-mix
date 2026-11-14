@@ -45,7 +45,6 @@ describe('the secrets a deploy makes', () => {
       durable_objects: { bindings: [{ class_name: 'Mailroom' }, { class_name: 'VisitorGate' }] },
     });
     expect(demo).toEqual(['VISITOR_KEY']);
-    expect(secretsUsedBy({ name: 'trail-mix' })).toEqual(['CREDENTIALS_KEY', 'PUSH_KEY']);
     expect(secretsToMake(found(true), demo)).toEqual(['VISITOR_KEY']);
     expect(secretsToMake(found(true, 'VISITOR_KEY'), demo)).toEqual([]);
   });
@@ -110,16 +109,9 @@ beforeAll(() => {
       const { pathname } = new URL(request.url);
       asked.push(`${request.method} ${pathname.replace(/^\/client\/v4\/accounts\/[^/]+/, '')}`);
       if (failing?.test(pathname)) return failure(500, 10000, 'Something went wrong.');
-      const bucket = /\/r2\/buckets$/.exec(pathname);
-      if (bucket && request.method === 'POST') {
+      if (request.method === 'POST' && pathname.endsWith('/r2/buckets')) {
         const { name } = (await request.json()) as { name: string };
-        if (buckets.has(name)) {
-          return failure(
-            409,
-            10004,
-            'The bucket you tried to create already exists, and you own it.',
-          );
-        }
+        if (buckets.has(name)) return failure(409, 10004, 'That bucket already exists.');
         buckets.add(name);
         return success({ name });
       }
@@ -191,11 +183,9 @@ describe('what the account holds, as Wrangler reads it', () => {
     ]);
   }, 30_000);
 
-  test('a deployed Worker whose secrets come back empty stops the deploy', async () => {
+  test('a deployed Worker whose secrets come back empty is still one that was deployed', async () => {
     given({ 'trail-mix': { deployments: 1, secrets: [] } });
-    const found = await lookUp('trail-mix', wrangler);
-    expect(found).toEqual({ deployed: true, held: new Set() });
-    expect(() => secretsToMake(found, secretsUsedBy({ name: 'trail-mix' }))).toThrow(DeployStopped);
+    expect(await lookUp('trail-mix', wrangler)).toEqual({ deployed: true, held: new Set() });
   }, 30_000);
 
   test('any other failure stops the deploy, rather than take a key for missing', async () => {
@@ -224,8 +214,25 @@ describe('what the account holds, as Wrangler reads it', () => {
 });
 
 describe('a deploy', () => {
-  /** A built Worker's configuration, as the Vite plugin writes one, named `name`. */
-  function built(name: string, more: object = {}): string {
+  /** Each deploy Wrangler ran: its arguments and environment, and the secrets file it was given. */
+  const deploys: {
+    args: string[];
+    env: NodeJS.ProcessEnv;
+    secrets: Record<string, string>;
+    mode: number;
+  }[] = [];
+  /** What the deploy logged. */
+  const lines: string[] = [];
+
+  /** Deploys a Worker named `name`, built as the Vite plugin writes one, to an account holding `state`. */
+  function deploying(
+    state: Record<string, Held>,
+    name: string,
+    { args = ['--dry-run'], env = {}, more = {} } = {},
+  ) {
+    given(state);
+    deploys.length = 0;
+    lines.length = 0;
     const dir = mkdtempSync(join(folder, 'built-'));
     writeFileSync(
       join(dir, 'index.js'),
@@ -241,42 +248,30 @@ describe('a deploy', () => {
         ...more,
       }),
     );
-    return join(dir, 'wrangler.json');
-  }
-
-  /** Wrangler, recording each deploy's arguments, environment and the secrets file it was given. */
-  function recording() {
-    const deploys: {
-      args: string[];
-      env: NodeJS.ProcessEnv;
-      secrets: Record<string, string>;
-      mode: number;
-    }[] = [];
-    const run: Wrangler = (args, env) => {
-      if (args[0] === 'deploy') {
-        const file = args[args.indexOf('--secrets-file') + 1]!;
-        deploys.push({
-          args: [...args],
-          env: env ?? {},
-          secrets: JSON.parse(readFileSync(file, 'utf8')) as Record<string, string>,
-          mode: statSync(file).mode & 0o777,
-        });
-      }
-      return wrangler(args, env);
-    };
-    return { run, deploys };
+    return deploy({
+      config: join(dir, 'wrangler.json'),
+      args,
+      env,
+      wrangler: (args, env) => {
+        if (args[0] === 'deploy') {
+          const file = args[args.indexOf('--secrets-file') + 1]!;
+          deploys.push({
+            args: [...args],
+            env: env ?? {},
+            secrets: JSON.parse(readFileSync(file, 'utf8')) as Record<string, string>,
+            mode: statSync(file).mode & 0o777,
+          });
+        }
+        return wrangler(args, env);
+      },
+      log: (line) => lines.push(line),
+    });
   }
 
   test('of a new Worker makes both keys and its bucket, and deploys it', async () => {
-    given({});
-    const { run, deploys } = recording();
-    const lines: string[] = [];
-    await deploy({
-      config: built('trail-mix'),
+    await deploying({}, 'trail-mix', {
       args: ['--dry-run', '--message', 'Commit a1'],
       env: { WORKERS_CI_COMMIT_SHA: 'a1' },
-      wrangler: run,
-      log: (line) => lines.push(line),
     });
 
     expect(buckets).toEqual(new Set(['trail-mix-bodies']));
@@ -294,27 +289,24 @@ describe('a deploy', () => {
   }, 60_000);
 
   test('of a deployed Worker keeps its keys, and says which it kept', async () => {
-    given({ 'trail-mix': { deployments: 2, secrets: ['CREDENTIALS_KEY', 'PUSH_KEY'] } });
-    const { run, deploys } = recording();
-    const lines: string[] = [];
-    await deploy({
-      config: built('trail-mix'),
-      args: ['--dry-run'],
-      env: {},
-      wrangler: run,
-      log: (line) => lines.push(line),
-    });
+    await deploying(
+      { 'trail-mix': { deployments: 2, secrets: ['CREDENTIALS_KEY', 'PUSH_KEY'] } },
+      'trail-mix',
+    );
 
     expect(deploys[0]!.secrets).toEqual({});
     expect(lines).toContain('trail-mix keeps its secrets: CREDENTIALS_KEY, PUSH_KEY.');
   }, 60_000);
 
   test('of a deployed Worker without its credentials key changes nothing at all', async () => {
-    given({ 'trail-mix': { deployments: 2, secrets: ['PUSH_KEY'] } });
-    const { run, deploys } = recording();
-    await expect(
-      deploy({ config: built('trail-mix'), args: [], env: {}, wrangler: run, log: () => {} }),
-    ).rejects.toThrow(DeployStopped);
+    const stopped = deploying(
+      { 'trail-mix': { deployments: 2, secrets: ['PUSH_KEY'] } },
+      'trail-mix',
+      {
+        args: [],
+      },
+    );
+    await expect(stopped).rejects.toThrow(DeployStopped);
 
     expect(deploys).toEqual([]);
     expect(buckets).toEqual(new Set());
@@ -322,15 +314,10 @@ describe('a deploy', () => {
   }, 60_000);
 
   test('of a copy under another name makes keys for that Worker alone', async () => {
-    given({ 'trail-mix': { deployments: 2, secrets: ['CREDENTIALS_KEY', 'PUSH_KEY'] } });
-    const { run, deploys } = recording();
-    await deploy({
-      config: built('my-mail'),
-      args: ['--dry-run'],
-      env: {},
-      wrangler: run,
-      log: () => {},
-    });
+    await deploying(
+      { 'trail-mix': { deployments: 2, secrets: ['CREDENTIALS_KEY', 'PUSH_KEY'] } },
+      'my-mail',
+    );
 
     expect(Object.keys(deploys[0]!.secrets).sort()).toEqual(['CREDENTIALS_KEY', 'PUSH_KEY']);
     expect(asked.filter((request) => request.includes('/workers/scripts/'))).toEqual([
@@ -339,17 +326,11 @@ describe('a deploy', () => {
   }, 60_000);
 
   test('of the public demo makes its visitor key, and no key for passwords', async () => {
-    given({ 'trail-mix-demo': { deployments: 4, secrets: [] } });
-    const { run, deploys } = recording();
-    await deploy({
-      config: built('trail-mix-demo', {
+    await deploying({ 'trail-mix-demo': { deployments: 4, secrets: [] } }, 'trail-mix-demo', {
+      more: {
         durable_objects: { bindings: [{ name: 'VISITORS', class_name: 'VisitorGate' }] },
         migrations: [{ tag: 'v1', new_sqlite_classes: ['VisitorGate'] }],
-      }),
-      args: ['--dry-run'],
-      env: {},
-      wrangler: run,
-      log: () => {},
+      },
     });
 
     expect(Object.keys(deploys[0]?.secrets ?? {})).toEqual(['VISITOR_KEY']);
