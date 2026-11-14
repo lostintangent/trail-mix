@@ -30,27 +30,13 @@ export function kindIconOf({
   state,
   outcome,
 }: Pick<GitHubThread, 'kind' | 'state' | 'outcome'>): LucideIcon {
-  switch (kind) {
-    case 'pull':
-      return state === 'merged'
-        ? GitMerge
-        : state === 'closed'
-          ? GitPullRequestClosed
-          : GitPullRequest;
-    case 'issue':
-      return CircleDot;
-    case 'discussion':
-      return MessagesSquare;
-    case 'run':
-      return outcome === 'failed'
-        ? CircleX
-        : outcome === 'passed'
-          ? CircleCheck
-          : outcome === 'cancelled'
-            ? CircleSlash
-            : CircleDashed;
-  }
+  if (kind === 'pull') return state ? PULL_ENDED[state] : GitPullRequest;
+  if (kind === 'run') return outcome ? RUN_ENDED[outcome] : CircleDashed;
+  return { issue: CircleDot, discussion: MessagesSquare }[kind];
 }
+
+const PULL_ENDED = { merged: GitMerge, closed: GitPullRequestClosed };
+const RUN_ENDED = { passed: CircleCheck, failed: CircleX, cancelled: CircleSlash };
 
 /**
  * One fact about a GitHub thread, as a small pill. One that asks something of the member is set in
