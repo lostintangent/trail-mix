@@ -10,10 +10,11 @@ export const OutboxList = lazy(async () => ({
   default: (await import('./OutboxList.tsx')).OutboxList,
 }));
 
-/** Send loads ahead with the composer, so its buttons are there the frame the composer is. */
-export const { Component: SendActions, preload: preloadSendButtons } = preloadable(
-  async () => (await import('./SendActions.tsx')).SendActions,
-);
-
-/** Loads Send's buttons and its commands, ahead of a composer. */
-export const preloadSendActions = () => Promise.all([preloadSendButtons(), preloadSendCommands()]);
+/**
+ * Send's buttons, and the commands they draw, load ahead with the composer. Until both are in, Send
+ * suspends the composer it lies in, so its buttons are there the frame the composer is.
+ */
+export const { Component: SendActions, preload: preloadSendActions } = preloadable(async () => {
+  const [{ SendActions }] = await Promise.all([import('./SendActions.tsx'), preloadSendCommands()]);
+  return SendActions;
+});

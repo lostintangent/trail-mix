@@ -1189,10 +1189,9 @@ export function Workbench({
             onSend={sendWritten}
             sender={sender}
             onSendable={setSendable}
+            // Send has no boundary of its own, so the composer shows only once Send can.
             sendActions={
-              <Suspense>
-                <SendActions commands={writingCommands} onPick={(at) => sender.current?.(at)} />
-              </Suspense>
+              <SendActions commands={writingCommands} onPick={(at) => sender.current?.(at)} />
             }
             isSheet={isPhone}
             onClose={closeComposer}

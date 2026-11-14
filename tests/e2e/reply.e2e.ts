@@ -208,6 +208,59 @@ for (const [size, options] of Object.entries(SIZES)) {
       );
     }, 60_000);
 
+    test('a reply shows with Send in its place from its first frame, however late Send’s code comes', async () => {
+      // What Send draws comes only once the test lets it, past any worker that keeps it, while the
+      // composer's own code is in.
+      let letCome = () => {};
+      const comes = new Promise<void>((resolve) => (letCome = resolve));
+      const page = await inbox('dark', { serviceWorkers: 'block' }, async (page) => {
+        await page.route('**/assets/sendCommands-*.js', async (route) => {
+          await comes;
+          await route.fallback();
+        });
+      });
+      await open(page);
+      await codeLoaded(page, ['Composer-']);
+      await page.evaluate(() => {
+        const seen = { moved: [] as string[], withoutSend: 0 };
+        (window as unknown as { seen: typeof seen }).seen = seen;
+        new PerformanceObserver((list) => {
+          for (const entry of list.getEntries() as unknown as {
+            sources?: { node?: Node | null }[];
+          }[]) {
+            for (const { node } of entry.sources ?? []) {
+              const element = node instanceof Element ? node : node?.parentElement;
+              seen.moved.push(element?.outerHTML.slice(0, 120) ?? 'something');
+            }
+          }
+        }).observe({ type: 'layout-shift' });
+        const look = () => {
+          const reply = document.querySelector('section[aria-label="Reply"]');
+          const buttons = [...(reply?.querySelectorAll('button') ?? [])];
+          if (reply && !buttons.some(({ textContent }) => textContent.trim() === 'Send')) {
+            seen.withoutSend++;
+          }
+          requestAnimationFrame(look);
+        };
+        requestAnimationFrame(look);
+      });
+      await page.keyboard.press('r');
+      await page.locator('section[aria-label="Reply"], section[aria-label="Message"]').waitFor();
+      await page.keyboard.type('Count me in.');
+      await painted(page);
+      letCome();
+      const reply = composer(page);
+      await reply.getByRole('button', { name: 'Send', exact: true }).waitFor();
+      const editor = reply.getByRole('textbox', { name: 'Reply' });
+      await until(async () => (await editor.innerText()).trim() !== '', 5000);
+      expect(await editor.innerText()).toBe('Count me in.');
+      await painted(page);
+      expect(await page.evaluate(() => (window as unknown as { seen: unknown }).seen)).toEqual({
+        moved: [],
+        withoutSend: 0,
+      });
+    }, 60_000);
+
     test('whom the member chose a reply is to stays chosen when the parent’s Reply-To comes', async () => {
       const page = await inbox('dark');
       await slowBodies(page);
@@ -649,14 +702,30 @@ function onPaper(element: Element): boolean {
  * Waits until the composer and its Send have loaded, as they have once a member has read for a
  * moment before replying.
  */
-const composerLoaded = (page: Page) =>
-  page.waitForFunction(() =>
-    ['Composer-', 'SendActions-'].every((chunk) =>
-      performance
-        .getEntriesByType('resource')
-        .some(({ name }) => name.includes(`/assets/${chunk}`)),
-    ),
+const composerLoaded = (page: Page) => codeLoaded(page, ['Composer-', 'SendActions-']);
+
+/**
+ * Waits until the page has asked for each of these chunks and run them, with all they import, as
+ * the page's own imports of them have then too.
+ */
+async function codeLoaded(page: Page, chunks: string[]) {
+  await page.waitForFunction(
+    (chunks) =>
+      chunks.every((chunk) =>
+        performance
+          .getEntriesByType('resource')
+          .some(({ name }) => name.includes(`/assets/${chunk}`)),
+      ),
+    chunks,
   );
+  await page.evaluate(async (chunks) => {
+    const asked = performance.getEntriesByType('resource').map(({ name }) => name);
+    await Promise.all(
+      chunks.map((chunk) => import(asked.find((name) => name.includes(`/assets/${chunk}`))!)),
+    );
+  }, chunks);
+  await painted(page);
+}
 
 /** Waits for two more frames to paint, and for what they report to be delivered. */
 const painted = (page: Page) =>
