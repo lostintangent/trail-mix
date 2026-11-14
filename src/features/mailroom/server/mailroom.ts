@@ -96,7 +96,15 @@ import {
   type ThisDevice,
   type Unsubscribed,
 } from '../client/contract.ts';
-import { erasesAt, idlenessOf, isWorthNoting, windDownOf, type WindDown } from '../core/idle.ts';
+import {
+  erasesAt,
+  idlenessOf,
+  isWorthNoting,
+  NOTIFYING_CHECKING_MS,
+  scheduleOf,
+  windDownOf,
+  type WindDown,
+} from '../core/idle.ts';
 import {
   avatarCandidates,
   namedMessages,
@@ -203,24 +211,10 @@ const VENDOR_PATIENCE_MS = 15_000;
 
 /** How far back mail is indexed. Older mail stays on the server. */
 const WINDOW_DAYS = 365;
-/** While a device is open, the alarm keeps the Mailroom awake and its watchers alive. */
-const WATCHING_MS = 60_000;
-/** Every account is checked this often, whether or not a device is open. */
-const CHECKING_MS = 5 * 60_000;
 
 /** Why a visitor's Mailroom keeps what it holds. */
 const VISITORS_KEEP =
   'The demo keeps its two accounts, and erases itself a day after your last visit.';
-/**
- * How often while any device is notified, so mail that lands just after a check still reaches it
- * within five minutes, with the sync and the push service's share of the time.
- */
-const NOTIFYING_CHECKING_MS = 4 * 60_000;
-/**
- * How early an alarm may come by this instance's clock, since a Durable Object may wake on another
- * machine, so a check it is due doesn't slip a whole interval.
- */
-const ALARM_SLACK_MS = 1_000;
 /** How many refs of messages the member moved into an Inbox are held, oldest dropped first. */
 const MOVED_IN_HELD = 1_000;
 /** The most domains and senders one wake looks up pictures for. */
@@ -1194,16 +1188,18 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     }
     const open = this.devices() > 0;
     const now = Date.now();
-    const checking = this.notifying.isAnyNotified() ? NOTIFYING_CHECKING_MS : CHECKING_MS;
-    // A visitor's Mailroom checks only while they have it open, or as it first fills, and otherwise
-    // sleeps until its erase.
-    const isChecking = open || !this.isVisitors || this.checkedAt === 0;
+    const { pollAt: poll, isCheckDue } = scheduleOf(
+      {
+        now,
+        isWatched: open,
+        isNotifying: this.notifying.isAnyNotified(),
+        isVisitors: this.isVisitors,
+        checkedAt: this.checkedAt,
+        openedAt: this.openedAt,
+      },
+      this.windDown,
+    );
     // If this wake ends early, as an eviction would end it, the next one is already set.
-    const poll = open
-      ? now + WATCHING_MS
-      : isChecking
-        ? now + checking
-        : erasesAt(this.openedAt, this.windDown);
     await this.ctx.storage.setAlarm(
       Math.min(poll, this.sending.nextWake() ?? poll, this.signInWake() ?? poll),
     );
@@ -1212,7 +1208,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     // And so do the drafts newer versions replaced, so sync finds only the newest.
     const failing = await this.discardReplaced();
     // Timed from the wake's start, as the next alarm is, so the wake it sets always checks.
-    if (isChecking && now - this.checkedAt >= checking - ALARM_SLACK_MS) this.checkAll(now);
+    if (isCheckDue) this.checkAll(now);
     await this.watchAll(open);
     const landed = await this.queue.run();
     await this.tellNews();

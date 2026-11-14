@@ -1,5 +1,13 @@
-import { expect, test } from 'bun:test';
-import { erasesAt, idlenessOf, isWorthNoting, MEMBER_WIND_DOWN, windDownOf } from './idle.ts';
+import { describe, expect, test } from 'bun:test';
+import {
+  erasesAt,
+  idlenessOf,
+  isWorthNoting,
+  MEMBER_WIND_DOWN,
+  scheduleOf,
+  windDownOf,
+  type Waking,
+} from './idle.ts';
 
 const opened = Date.UTC(2026, 10, 10);
 const DAY = 24 * 60 * 60_000;
@@ -41,4 +49,55 @@ test('an opening is written down at most once an hour', () => {
   expect(isWorthNoting(opened, opened)).toBe(false);
   expect(isWorthNoting(opened, opened + 60 * 60_000 - 1)).toBe(false);
   expect(isWorthNoting(opened, opened + 60 * 60_000)).toBe(true);
+});
+
+describe('the wake schedule', () => {
+  const now = opened + DAY;
+  const MINUTE = 60_000;
+  /** A member's Mailroom, closed, last checked five minutes ago. */
+  const waking = (change: Partial<Waking> = {}): Waking => ({
+    now,
+    isWatched: false,
+    isNotifying: false,
+    isVisitors: false,
+    checkedAt: now - 5 * MINUTE,
+    openedAt: opened,
+    ...change,
+  });
+  const scheduled = (change: Partial<Waking> = {}) => scheduleOf(waking(change), MEMBER_WIND_DOWN);
+
+  test('while a device is open, the alarm comes every minute, and each account is checked every five', () => {
+    expect(scheduled({ isWatched: true })).toEqual({ pollAt: now + MINUTE, isCheckDue: true });
+    expect(scheduled({ isWatched: true, checkedAt: now - MINUTE })).toEqual({
+      pollAt: now + MINUTE,
+      isCheckDue: false,
+    });
+  });
+
+  test('with no device open, a member’s Mailroom checks every five minutes, or every four while one is notified', () => {
+    expect(scheduled()).toEqual({ pollAt: now + 5 * MINUTE, isCheckDue: true });
+    expect(scheduled({ checkedAt: now - 4 * MINUTE }).isCheckDue).toBe(false);
+    expect(scheduled({ isNotifying: true, checkedAt: now - 4 * MINUTE })).toEqual({
+      pollAt: now + 4 * MINUTE,
+      isCheckDue: true,
+    });
+  });
+
+  test('a check is due up to a second early, since an alarm may come by another machine’s clock', () => {
+    expect(scheduled({ checkedAt: now - 5 * MINUTE + 1000 }).isCheckDue).toBe(true);
+    expect(scheduled({ checkedAt: now - 5 * MINUTE + 1001 }).isCheckDue).toBe(false);
+  });
+
+  test('a visitor’s Mailroom checks as it first fills and while it is open, and otherwise sleeps until its erase', () => {
+    const demo = windDownOf('1', '1');
+    const visited = now - 60 * MINUTE;
+    const visitor = (change: Partial<Waking>) =>
+      scheduleOf(waking({ isVisitors: true, openedAt: visited, ...change }), demo);
+    expect(visitor({ checkedAt: 0 })).toEqual({ pollAt: now + 5 * MINUTE, isCheckDue: true });
+    expect(visitor({ isWatched: true })).toEqual({ pollAt: now + MINUTE, isCheckDue: true });
+    expect(visitor({ checkedAt: now - 60 * MINUTE })).toEqual({
+      pollAt: visited + DAY,
+      isCheckDue: false,
+    });
+  });
 });
