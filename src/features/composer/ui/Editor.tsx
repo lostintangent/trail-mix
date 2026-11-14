@@ -197,6 +197,7 @@ const styles = stylex.create({
     flexGrow: 1,
     minHeight: 0,
     overflowY: 'auto',
+    scrollbarWidth: 'thin',
   },
   prose: {
     minHeight: '6lh',

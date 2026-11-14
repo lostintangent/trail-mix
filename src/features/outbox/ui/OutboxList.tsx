@@ -227,6 +227,7 @@ const styles = stylex.create({
     boxSizing: 'border-box',
     height: '100%',
     overflowY: 'auto',
+    scrollbarWidth: 'thin',
     overscrollBehavior: 'contain',
     margin: 0,
     paddingTop: spacingVars['--spacing-1'],

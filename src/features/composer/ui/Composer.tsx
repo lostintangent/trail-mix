@@ -835,6 +835,7 @@ const styles = stylex.create({
     flexGrow: 1,
     minHeight: 0,
     overflowY: 'auto',
+    scrollbarWidth: 'thin',
     overscrollBehavior: 'contain',
     display: 'flex',
     flexDirection: 'column',

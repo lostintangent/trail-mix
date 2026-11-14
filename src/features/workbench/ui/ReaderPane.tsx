@@ -574,6 +574,7 @@ const styles = stylex.create({
     flexGrow: 1,
     minHeight: 0,
     overflowY: 'auto',
+    scrollbarWidth: 'thin',
     overscrollBehavior: 'contain',
     paddingTop: { default: spacingVars['--spacing-6'], [media.phone]: spacingVars['--spacing-1'] },
   },

@@ -1574,6 +1574,10 @@ const styles = stylex.create({
   resizing: {
     transitionDuration: '0s',
   },
+  // Every scroller in a pane is thin, and inherits from the pane when its thumb shows: a thumb of
+  // quiet ink on no track while the pointer is over the pane or keys have put focus in it, and
+  // nothing at rest. A click alone shows nothing, since the list keeps focus while the member
+  // reads. A finger keeps the platform's own, and so do forced colors, where the browser sets them.
   pane: {
     position: 'relative',
     minWidth: 0,
@@ -1581,6 +1585,13 @@ const styles = stylex.create({
     height: '100%',
     flexBasis: { default: null, [media.phone]: 0 },
     flexGrow: { default: null, [media.phone]: 1 },
+    scrollbarColor: {
+      default: 'transparent transparent',
+      ':is(:hover, :has(:focus-visible))': `${colorVars['--color-border-emphasized']} transparent`,
+      [media.coarse]: 'auto',
+    },
+    transitionProperty: 'scrollbar-color',
+    transitionDuration: { default: durationVars['--duration-fast'], [media.reducedMotion]: '0s' },
   },
   reader: {
     marginInlineStart: { default: `calc(${tm.deskGap} - ${tm.sidebarMargin})`, [media.phone]: 0 },

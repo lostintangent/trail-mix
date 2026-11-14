@@ -337,6 +337,7 @@ const styles = stylex.create({
     flexGrow: 1,
     minHeight: 0,
     overflowY: 'auto',
+    scrollbarWidth: 'thin',
     padding: '1px',
     paddingTop: `calc(${spacingVars['--spacing-2']} + 1px)`,
     paddingBottom: `calc(${spacingVars['--spacing-4']} + 1px)`,

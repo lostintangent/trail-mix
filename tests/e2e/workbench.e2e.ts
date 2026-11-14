@@ -318,6 +318,59 @@ test('side panels resize by pointer and key, snap to a rail, and come back the s
   await context.close();
 }, 30_000);
 
+test('a pane shows its thin scrollbar only while the pointer is over it or keys move in it, and a finger keeps its own', async () => {
+  const { context, page } = await open(SIZES.desktop);
+  const list = page.locator('[role="listbox"][aria-multiselectable]');
+  await list.getByRole('option').first().waitFor();
+  const listBox = (await list.boundingBox())!;
+  const pointAt = async (x: number, y: number) => {
+    await page.mouse.move(x, y);
+    await atRest(page);
+    return scrollbarsShown(page);
+  };
+  const over = async (pane: Locator) => {
+    const box = (await pane.boundingBox())!;
+    return pointAt(box.x + box.width / 2, box.y + box.height / 2);
+  };
+  const onDesk = () => pointAt(listBox.x + listBox.width / 2, 1);
+  const NONE = { tree: 'hidden', list: 'hidden', reader: 'hidden' };
+
+  expect(await onDesk()).toEqual(NONE);
+  expect(await over(list)).toEqual({ ...NONE, list: 'thin' });
+  expect(await over(page.getByRole('navigation', { name: 'Mailboxes' }))).toEqual({
+    ...NONE,
+    tree: 'thin',
+  });
+  expect(await over(page.locator('section[aria-label="Reader"]'))).toEqual({
+    ...NONE,
+    reader: 'thin',
+  });
+
+  // A click leaves focus in the list while the member reads, and that alone shows nothing, but
+  // moving by key does.
+  await list.getByRole('option').nth(2).click();
+  expect(await onDesk()).toEqual(NONE);
+  await page.keyboard.press('j');
+  await atRest(page);
+  expect(await scrollbarsShown(page)).toEqual({ ...NONE, list: 'thin' });
+  await context.close();
+
+  const finger = await app.context({
+    viewport: { width: 1180, height: 820 },
+    isMobile: true,
+    hasTouch: true,
+  });
+  const tablet = await finger.newPage();
+  await tablet.goto(app.url);
+  await tablet.locator('[role="listbox"][aria-multiselectable] [role="option"]').first().waitFor();
+  expect(await scrollbarsShown(tablet)).toEqual({
+    tree: 'platform',
+    list: 'platform',
+    reader: 'platform',
+  });
+  await finger.close();
+});
+
 /** Holds the page's ask for its accounts until `release`, as a Mailroom slow to answer would. */
 async function holdAccounts(page: Page) {
   const { promise: released, resolve: release } = Promise.withResolvers<void>();
@@ -1304,6 +1357,33 @@ function rowsDrawn(page: Page) {
       };
     });
   });
+}
+
+/**
+ * How the folder tree's, the list's and the reader's scrollbars show now: `hidden`, `thin` while
+ * shown, or `platform` where the platform's colors draw them. It waits for the reader to have a
+ * scroller, since between two conversations it may briefly have none.
+ */
+async function scrollbarsShown(page: Page) {
+  const shown = await page.waitForFunction(() => {
+    const shown = (pane: string) => {
+      const root = document.querySelector(pane)!;
+      const scroller = [root, ...root.querySelectorAll('*')].find((element) =>
+        /auto|scroll/.test(getComputedStyle(element).overflowY),
+      );
+      if (!scroller) return undefined;
+      const { scrollbarColor, scrollbarWidth } = getComputedStyle(scroller);
+      if (scrollbarColor === 'auto') return 'platform';
+      return scrollbarColor === 'rgba(0, 0, 0, 0) rgba(0, 0, 0, 0)' ? 'hidden' : scrollbarWidth;
+    };
+    const panes = {
+      tree: shown('nav[aria-label="Mailboxes"]'),
+      list: shown('[role="listbox"][aria-multiselectable]'),
+      reader: shown('section[aria-label="Reader"]'),
+    };
+    return Object.values(panes).every(Boolean) && panes;
+  });
+  return shown.jsonValue();
 }
 
 /** Whether a control is in a pane on screen. A pane off a phone's screen is inert. */
