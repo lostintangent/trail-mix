@@ -11,7 +11,7 @@ export function useAccent(): [string | undefined, (color: string | undefined) =>
   useLayoutEffect(() => showAccent(accent), [accent]);
   // The copy prepaint replays is remade from the pick, in case the math behind it has changed, once
   // the first screen has settled.
-  useEffect(() => afterFirstScreen(() => void saveAccent(readAccent())), []);
+  useEffect(() => afterFirstScreen(() => saveAccent(readAccent())), []);
   return [accent, pick];
 }
 

@@ -63,7 +63,7 @@ export function useTriage(
     [],
   );
   // What carries a triage out loads once the first screen has settled, ready before the first one.
-  useEffect(() => afterFirstScreen(() => void loadCarrying()), []);
+  useEffect(() => afterFirstScreen(loadCarrying), []);
   // Read as a triage starts, so `triage` stays the same function as counts change, and every row
   // it's handed to doesn't draw again for a folder's count.
   const latestFolders = useRef(folders);

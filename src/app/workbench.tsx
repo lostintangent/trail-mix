@@ -148,7 +148,7 @@ const { Component: Settings, preload: preloadSettings } = preloadable(
 
 /** Loads `load` once the first screen has had its turn and the browser is idle. */
 function usePreloadWhenIdle(load: () => Promise<unknown>) {
-  useEffect(() => afterFirstScreen(() => void load().catch(() => {})), [load]);
+  useEffect(() => afterFirstScreen(load), [load]);
 }
 
 /** How long a device that doesn't know whether there's mail waits before saying it's opening. */

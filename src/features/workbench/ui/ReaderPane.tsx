@@ -479,7 +479,8 @@ function usePreloadedComposer(isWanted: boolean) {
     };
     const preload = () => {
       stop();
-      void Promise.all([preloadComposer(), preloadSendActions()]);
+      // One that fails, as offline, is loaded again when the composer opens.
+      void Promise.all([preloadComposer(), preloadSendActions()]).catch(() => {});
     };
     for (const move of MOVES) {
       window.addEventListener(move, settle, { capture: true, passive: true });
@@ -495,8 +496,8 @@ function usePreloadedReader(isWanted: boolean) {
     const timer = setTimeout(() => {
       // Safari has no idle callback.
       const load = () => {
-        void preloadReader();
-        void preloadTriageMenus();
+        // One that fails, as offline, is loaded again when a conversation opens.
+        void Promise.all([preloadReader(), preloadTriageMenus()]).catch(() => {});
       };
       if ('requestIdleCallback' in window) requestIdleCallback(load);
       else load();

@@ -280,6 +280,26 @@ test('archiving shows at once, reaches another open browser, and Undo brings it 
   await row(there, subject).waitFor({ timeout: ELSEWHERE_MS });
 }, 30_000);
 
+test('what carries out a triage, failing to load ahead as it does offline, throws nothing and loads for the triage', async () => {
+  const context = await app.context(SIZES.desktop);
+  const carrying = /\/assets\/carrying-[\w-]+\.js$/;
+  await context.route(carrying, (route) => route.abort('internetdisconnected'));
+  const here = await context.newPage();
+  const refused = here.waitForEvent('requestfailed', (request) => carrying.test(request.url()));
+  await here.goto(app.url);
+  await mailIsIn(here);
+  await refused;
+  await context.unroute(carrying);
+
+  const subject = /Invoice for October/;
+  await row(here, subject).click();
+  await bar(here).getByRole('button', { name: 'Archive' }).waitFor();
+  await here.keyboard.press('e');
+  await row(here, subject).waitFor({ state: 'detached', timeout: 1_000 });
+  await undoButton(here).click();
+  await row(here, subject).waitFor({ timeout: 1_000 });
+});
+
 test('the frame that shows a conversation archived from the reader bar keeps its place, its moves and its actions', async () => {
   const page = await inbox();
   // The second row, since the third and fourth are the demo's GitHub bundles, whose bar is the
