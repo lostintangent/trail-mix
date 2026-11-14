@@ -1,8 +1,9 @@
 import type { QueryClient } from '@tanstack/react-query';
+import { listeners } from './listeners.ts';
 
 /**
- * How long a change the Mailroom accepted waits for a snapshot to show it, before giving way anyway,
- * as when another device changed the same thing again.
+ * How long an accepted change waits for a snapshot to show it, before giving way anyway, as when
+ * another device changed the same thing again.
  */
 const SETTLED_MS = 10_000;
 
@@ -10,18 +11,15 @@ const SETTLED_MS = 10_000;
 export type Laid<T> = { change: T; expiry?: ReturnType<typeof setTimeout> };
 
 /**
- * The changes a browser lays over a snapshot while they reach the mail server. Each stays until a
- * fresh snapshot shows it, so one fetched before the Mailroom had the change can't undo it on
- * screen. A refused change is lifted at once, which is how what it changed returns.
+ * The changes a browser lays over a snapshot while their commands are carried out. Each stays until
+ * a fresh snapshot shows it, so one fetched before the change was accepted can't undo it on screen.
+ * A refused change is lifted at once, which is how what it changed returns.
  */
 export class Laying<T> {
   #laid: readonly Laid<T>[] = [];
-  readonly #listeners = new Set<() => void>();
+  readonly #listeners = listeners();
 
-  subscribe = (listener: () => void) => {
-    this.#listeners.add(listener);
-    return () => void this.#listeners.delete(listener);
-  };
+  subscribe = this.#listeners.subscribe;
 
   all = () => this.#laid;
 
@@ -36,7 +34,7 @@ export class Laying<T> {
     this.#set(this.#laid.filter((each) => each !== laid));
   }
 
-  /** The Mailroom accepted the command, so the change now only waits for a snapshot to show it. */
+  /** The command was accepted, so the change now only waits for a snapshot to show it. */
   settle(laid: Laid<T>) {
     laid.expiry = setTimeout(() => this.lift(laid), SETTLED_MS);
   }
@@ -50,7 +48,7 @@ export class Laying<T> {
 
   #set(laid: readonly Laid<T>[]) {
     this.#laid = laid;
-    for (const listener of this.#listeners) listener();
+    this.#listeners.tell();
   }
 }
 
