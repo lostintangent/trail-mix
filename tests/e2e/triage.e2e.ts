@@ -563,9 +563,9 @@ test("a toast's Undo is its icon alone, ruled off from the close, and its toolti
       };
     });
     expect(shape).toMatchObject({ words: '', close: 'Dismiss notification', ruled: true });
-    for (const side of shape.targets)
-      expect(side).toBeGreaterThanOrEqual(size === 'phone' ? 44 : 28);
+    // Under a finger, `unusable` holds both to 44 pixels.
     if (size === 'desktop') {
+      for (const side of shape.targets) expect(side).toBeGreaterThanOrEqual(28);
       await undo.hover();
       await here.getByRole('tooltip').filter({ hasText: 'Undo (Z)' }).waitFor();
     }
