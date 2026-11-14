@@ -12,24 +12,15 @@ import {
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { ChevronRight, Menu, type LucideIcon } from 'lucide-react';
-import { memo, useId, type ReactNode } from 'react';
+import { memo, useId, type ComponentProps, type ReactNode } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { PhoneIsland } from './PhoneIsland.tsx';
 import {
   ConversationList,
   ConversationListSkeleton,
   type Listed,
-  type SelectBy,
-  type Selection,
 } from '../../conversations/index.ts';
-import type {
-  Account,
-  ConversationId,
-  ListItem,
-  Marks,
-  StampColor,
-  View,
-} from '../../mail/core/index.ts';
+import type { Account, ListItem, View } from '../../mail/core/index.ts';
 import { StampDot } from '../../../app/theme/StampDot.tsx';
 
 /**
@@ -50,21 +41,9 @@ export function ListPane({
   list,
   viewIn,
   isUnreadOnly,
-  listKey,
   conversations,
-  isUpdating,
-  marks,
-  stamps,
-  selves,
-  selection,
-  isPicking,
-  onSelect,
-  onLongPress,
-  onPick,
-  onSwipe,
-  onAhead,
+  rows,
   picked,
-  onShown,
   isCollapsed,
   onExpand,
   onShowFolders,
@@ -92,30 +71,12 @@ export function ListPane({
   viewIn: View['in'];
   /** Whether the list shows only the view's unread mail, and the conversation open. */
   isUnreadOnly: boolean;
-  /** Names the view's list. Another list starts at its top. */
-  listKey: string;
   /** The view's whole list, with places not yet fetched empty. Nothing until its first page arrives. */
   conversations: Listed<ListItem> | undefined;
-  /** Whether newer rows are on their way. */
-  isUpdating: boolean;
-  /** What a search matched, marked in each row. */
-  marks: Marks;
-  /** Each account's stamp color, by account id, where the list mixes accounts. */
-  stamps: ReadonlyMap<string, StampColor> | undefined;
-  /** The member's own addresses, lowercased. */
-  selves: ReadonlySet<string>;
-  selection: Selection;
-  isPicking: boolean;
-  onSelect: (id: ConversationId, by: SelectBy) => void;
-  onLongPress: (id: ConversationId) => void;
-  onPick: (id: ConversationId) => void;
-  onSwipe: (id: ConversationId) => void;
-  /** Asks for a conversation the member is about to open, before the click. */
-  onAhead: (id: ConversationId, isPressed: boolean) => void;
+  /** Everything else the list takes, which the pane hands it as it is. */
+  rows: Omit<ComponentProps<typeof ConversationList>, 'label' | 'conversations'>;
   /** While picking on a phone, what the island offers for the conversations picked. */
   picked: ReactNode;
-  /** Says which rows the list shows, so the pages they lie on are fetched. */
-  onShown: (first: number, last: number, selected: number) => void;
   isCollapsed: boolean;
   onExpand: () => void;
   onShowFolders: () => void;
@@ -187,28 +148,12 @@ export function ListPane({
         ) : conversations?.length === 0 ? (
           <Empty viewIn={isUnreadOnly ? 'unread' : viewIn} icon={icon} title={title} />
         ) : conversations ? (
-          <ConversationList
-            label={title}
-            listKey={listKey}
-            conversations={conversations}
-            isUpdating={isUpdating}
-            marks={marks}
-            stamps={stamps}
-            selves={selves}
-            selection={selection}
-            isPicking={isPicking}
-            onSelect={onSelect}
-            onLongPress={onLongPress}
-            onPick={onPick}
-            onSwipe={onSwipe}
-            onAhead={onAhead}
-            onShown={onShown}
-          />
+          <ConversationList {...rows} label={title} conversations={conversations} />
         ) : (
           <ConversationListSkeleton label={title} />
         )}
       </div>
-      {isPicking ? (
+      {rows.isPicking ? (
         <PhoneIsland label="Picked conversations">{picked}</PhoneIsland>
       ) : (
         <PhoneIsland label="Mailbox actions" spans>

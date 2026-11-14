@@ -17,10 +17,10 @@ import {
 } from 'react';
 import { Pending } from '../../../app/theme/Pending.tsx';
 import { scrollFade, scrollFades, tm } from '../../../app/theme/tokens.stylex.ts';
-import type { ConversationId, ListItem, Marks, StampColor } from '../../mail/core/index.ts';
+import type { ConversationId, ListItem, StampColor } from '../../mail/core/index.ts';
 import type { Listed } from '../core/pages.ts';
 import type { SelectBy, Selection } from '../core/selection.ts';
-import { ConversationRow, RowRuler, RowSkeleton } from './ConversationRow.tsx';
+import { ConversationRow, RowRuler, RowSkeleton, type EveryRow } from './ConversationRow.tsx';
 import { useLatest } from '../../../shared/useLatest.ts';
 
 /** A row's height before the list is first laid out: three lines of text and the row's padding. */
@@ -52,51 +52,29 @@ export function ConversationList({
   label,
   listKey,
   conversations,
-  marks,
   isUpdating,
   stamps,
-  selves,
   selection,
-  isPicking,
   onSelect,
-  onLongPress,
-  onPick,
-  onSwipe,
-  onAhead,
   onShown,
+  ...row
 }: {
   label: string;
   /** Names the list shown. Another list starts at its top. */
   listKey: string;
   /** Every row in the list, with those whose page hasn't arrived yet empty. */
   conversations: Listed<ListItem>;
-  /** What a search matched, marked in each row. The same while the search stays the same. */
-  marks: Marks;
   /** Whether newer rows are on their way, as while a search is typed. */
   isUpdating: boolean;
   /** Each account's stamp color, by account id, where the list mixes accounts. Elsewhere none shows. */
   stamps: ReadonlyMap<string, StampColor> | undefined;
-  /** The member's own addresses, lowercased, whom a row passes over for the others in it. */
-  selves: ReadonlySet<string>;
   selection: Selection;
-  /** Whether a tap adds a row to the selection, as after a long press, instead of opening it. */
-  isPicking: boolean;
-  onSelect: (id: ConversationId, by: SelectBy) => void;
-  onLongPress: (id: ConversationId) => void;
-  /** Picks a row, or lets it go while picking, as a finger tapping its avatar does. */
-  onPick: (id: ConversationId) => void;
-  onSwipe: (id: ConversationId) => void;
-  /**
-   * Called as a conversation is about to be opened, ahead of the click: once the pointer rests on
-   * its row, and again with `isPressed` as a mouse or pen presses it. The same function each render.
-   */
-  onAhead: (id: ConversationId, isPressed: boolean) => void;
   /**
    * Says which rows the list shows: from the first to the last in sight, with some to spare either
    * side, and the selected one, which stays drawn out of sight.
    */
   onShown: (first: number, last: number, selected: number) => void;
-}) {
+} & EveryRow) {
   const scroller = useRef<HTMLDivElement>(null);
   const ruler = useRef<HTMLDivElement>(null);
   const [isKeyboardFocused, setKeyboardFocused] = useState(false);
@@ -258,22 +236,16 @@ export function ConversationList({
           return (
             <ConversationRow
               key={item.id}
+              {...row}
               id={optionId(index)}
               item={item}
-              marks={marks}
               stamp={stamps?.get(item.account)}
-              selves={selves}
               top={start}
               position={index + 1}
               size={conversations.length}
               isSelected={selected.has(item.id)}
               isKeyboardFocused={isKeyboardFocused && selectedIndex === index}
-              isPicking={isPicking}
               onSelect={onSelect}
-              onLongPress={onLongPress}
-              onPick={onPick}
-              onSwipe={onSwipe}
-              onAhead={onAhead}
             />
           );
         })}

@@ -33,6 +33,26 @@ import { BundleChips } from './github.tsx';
 import { Marked } from './search.tsx';
 import { SWIPE, useTouch } from './useTouch.ts';
 
+/** What a list hands every one of its rows alike. */
+export type EveryRow = {
+  /** What a search matched, marked in each row. The same while the search stays the same. */
+  marks: Marks;
+  /** The member's own addresses, lowercased, whom a row passes over for the others in it. */
+  selves: ReadonlySet<string>;
+  /** Whether a tap adds a row to the selection, as after a long press, instead of opening it. */
+  isPicking: boolean;
+  onSelect: (id: ConversationId, by: SelectBy) => void;
+  onLongPress: (id: ConversationId) => void;
+  /** Picks a row, or lets it go while picking, as a finger tapping its avatar does. */
+  onPick: (id: ConversationId) => void;
+  onSwipe: (id: ConversationId) => void;
+  /**
+   * Called as a conversation is about to be opened, ahead of the click: once the pointer rests on
+   * its row, and again with `isPressed` as a mouse or pen presses it. The same function each render.
+   */
+  onAhead: (id: ConversationId, isPressed: boolean) => void;
+};
+
 /**
  * One conversation, or a bundle. Memoized, so moving the selection redraws only the two rows it
  * touches.
@@ -57,21 +77,13 @@ export const ConversationRow = memo(function ConversationRow({
 }: {
   id: string;
   item: ListItem;
-  marks: Marks;
   stamp: StampColor | undefined;
-  selves: ReadonlySet<string>;
   top: number;
   position: number;
   size: number;
   isSelected: boolean;
   isKeyboardFocused: boolean;
-  isPicking: boolean;
-  onSelect: (id: ConversationId, by: SelectBy) => void;
-  onLongPress: (id: ConversationId) => void;
-  onPick: (id: ConversationId) => void;
-  onSwipe: (id: ConversationId) => void;
-  onAhead: (id: ConversationId, isPressed: boolean) => void;
-}) {
+} & EveryRow) {
   const people = isBundle(item) ? undefined : peopleOf(item, selves);
   // A bundle leads with GitHub's picture, which its newest conversation names.
   const name = people ? (people.face ? people.face.name || people.face.email : '') : 'GitHub';

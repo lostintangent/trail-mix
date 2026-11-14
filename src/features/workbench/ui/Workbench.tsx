@@ -976,29 +976,31 @@ export function Workbench({
                   )
                 }
                 viewIn={view.in}
-                listKey={hashKey([view])}
                 conversations={
                   (isFilling && conversations?.length === 0) || around.awaits
                     ? undefined
                     : conversations
                 }
-                isUpdating={isFetching}
-                marks={marks}
-                stamps={mixesAccounts ? stamps : undefined}
-                selves={selves}
-                selection={selection}
-                isPicking={isPicking}
-                onSelect={pick}
-                onLongPress={startPicking}
-                onPick={pickRow}
-                onSwipe={swipe}
-                onAhead={ahead}
+                rows={{
+                  listKey: hashKey([view]),
+                  isUpdating: isFetching,
+                  marks,
+                  stamps: mixesAccounts ? stamps : undefined,
+                  selves,
+                  selection,
+                  isPicking,
+                  onSelect: pick,
+                  onLongPress: startPicking,
+                  onPick: pickRow,
+                  onSwipe: swipe,
+                  onAhead: ahead,
+                  onShown: onListShown,
+                }}
                 picked={
                   <PickedActions count={selection.ids.length} onCancel={clearSelection}>
                     {selectionActions('island')}
                   </PickedActions>
                 }
-                onShown={onListShown}
                 isCollapsed={!isPhone && list.isCollapsed}
                 onExpand={() => setList({ ...list, isCollapsed: false })}
                 onShowFolders={showFolders}
