@@ -221,6 +221,12 @@ export async function importInbox(user: string, mbox: string) {
   await $`${doveadm} -c ${conf} import -u ${user} -p mail_inbox_path=${mbox} mbox:${dirname(mbox)} ${''} mailbox INBOX all`.quiet();
 }
 
+/** Puts one message in a user's Inbox, as delivery would. */
+export async function deliver(user: string, message: string) {
+  const { doveadm } = await dovecot();
+  await $`${doveadm} -c ${conf} save -u ${user} -m INBOX < ${Buffer.from(message)}`.quiet();
+}
+
 /** Expunges every message in one of a user's folders. */
 export async function emptyFolder(user: string, folder: string) {
   const { doveadm } = await dovecot();

@@ -3,69 +3,49 @@
 // from the first-run screen. A password the host refuses keeps nothing, and the screen says why. An
 // account's name, stamp, From name and signature change from its page, and removing it says what
 // goes first. Each is done at a desktop's size and a phone's, as a member of its own.
-import { afterEach, beforeAll, describe, expect } from 'bun:test';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import type { BrowserContextOptions, Locator, Page } from 'playwright';
+import { beforeAll, describe, expect } from 'bun:test';
+import type { BrowserContextOptions, Page } from 'playwright';
 import { PRESETS } from '../../src/features/providers/imap/core/index.ts';
-import { unusable } from '../e2e/usable.ts';
-import { suite } from '../e2e/suite.ts';
-import { caFile, count, empty, importInbox, ports, start, users } from '../mail-server/server.ts';
+import { expectUsable } from '../e2e/usable.ts';
+import { SIZES, suite } from '../e2e/suite.ts';
+import { caFile, count, deliver, empty, ports, start, users } from '../mail-server/server.ts';
+import { message } from '../message.ts';
 
 const { alice, bob } = users;
-const SIZES = {
-  desktop: { viewport: { width: 1440, height: 900 } },
-  phone: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
-} as const;
 const WRONG = 'not-alices-password';
-const SHOTS = join(import.meta.dir, '../../test-results');
 
 // The test mail server starts first, since it makes the certificate authority the app trusts.
 beforeAll(async () => {
   await start('full');
   await empty(alice.email);
-  const mbox = join(mkdtempSync(join(tmpdir(), 'accounts-')), 'inbox');
-  writeFileSync(
-    mbox,
-    [
-      `From ${bob.email} Tue Nov 10 09:00:00 2026`,
-      `From: Bob <${bob.email}>`,
-      `To: ${alice.email}`,
-      'Subject: The cabin keys',
-      'Message-ID: <keys@trailmix.test>',
-      `Date: ${new Date().toUTCString()}`,
-      '',
-      'They are under the blue pot.',
-      '',
-    ].join('\n'),
+  await deliver(
+    alice.email,
+    message({
+      id: 'keys',
+      from: `Bob <${bob.email}>`,
+      to: alice.email,
+      subject: 'The cabin keys',
+      text: 'They are under the blue pot.',
+    }),
   );
-  await importInbox(alice.email, mbox);
 }, 120_000);
-
-/** Every error a page threw during a test, which fails it. */
-const errors: string[] = [];
-afterEach(() => {
-  expect(errors.splice(0)).toEqual([]);
-});
 
 for (const [size, options] of Object.entries(SIZES)) {
   describe(`At a ${size}’s size`, () => {
     const app = suite({
       vars: { DEMO_MAILBOX: '', DEV_MEMBER: `accounts-${size}-${Date.now()}@trailmix.test` },
       env: { NODE_EXTRA_CA_CERTS: caFile },
+      scale: 2,
     });
     // A test that fails leaves a screenshot of each page and what it showed, for CI to keep.
     const { test } = app;
 
-    async function open(more: BrowserContextOptions = {}): Promise<Page> {
-      const page = await (
-        await app.context({ deviceScaleFactor: 2, ...options, ...more })
-      ).newPage();
-      page.on('pageerror', (error) => errors.push(error.message));
-      await page.goto(app.url);
-      return page;
-    }
+    /** Trail Mix at this size, once it shows its first-run screen or Alice's mail. */
+    const open = (more: BrowserContextOptions = {}) =>
+      app.open(
+        { ...options, ...more },
+        { ready: (page) => firstRun(page).or(cabinKeys(page)).waitFor() },
+      );
 
     /** The sidebar, which a phone slides to from the list. */
     async function sidebar(page: Page) {
@@ -87,11 +67,9 @@ for (const [size, options] of Object.entries(SIZES)) {
     test('a member with no accounts is welcomed, and a refused password keeps nothing', async () => {
       const page = await open({ colorScheme: 'light' });
       await firstRun(page).waitFor();
+      await expectUsable(page, `accounts-${size}-light-welcome`);
 
       await fillAlice(page, WRONG);
-      if (size === 'phone') {
-        expect(await smallTargets(page.getByRole('form', { name: 'Add an account' }))).toEqual([]);
-      }
       await page.getByRole('button', { name: 'Add account' }).click();
       const refusal = page.getByRole('alert').filter({ hasText: 'The account wasn’t added.' });
       await refusal.waitFor({ timeout: 15_000 });
@@ -99,7 +77,7 @@ for (const [size, options] of Object.entries(SIZES)) {
       expect(await refusal.textContent()).toContain(
         'localhost refused the password: [AUTHENTICATIONFAILED] Authentication failed.',
       );
-      await readable(page, size, 'light', 'refused');
+      await expectUsable(page, `accounts-${size}-light-refused`);
 
       // Nothing was kept, so the screen is the same after a reload.
       await page.reload();
@@ -142,7 +120,9 @@ for (const [size, options] of Object.entries(SIZES)) {
       const [page, elsewhere] = [await open({ colorScheme: 'dark' }), await open()];
       await firstRun(elsewhere).waitFor();
       await fillAlice(page, alice.password);
-      await readable(page, size, 'dark', 'first-run');
+      // On a phone the form runs past the screen, whose top the welcome's check saw.
+      await page.getByRole('button', { name: 'Add account' }).scrollIntoViewIfNeeded();
+      await expectUsable(page, `accounts-${size}-dark-first-run`);
       await page.getByRole('button', { name: 'Add account' }).click();
       await cabinKeys(page).waitFor({ timeout: 30_000 });
       await cabinKeys(elsewhere).waitFor({ timeout: 10_000 });
@@ -160,8 +140,7 @@ for (const [size, options] of Object.entries(SIZES)) {
       await form.getByRole('radio', { name: 'Teal' }).check();
       await form.getByRole('textbox', { name: 'From name' }).fill('Alice Liddell');
       await form.getByRole('textbox', { name: 'Signature' }).fill('Alice, down the hole');
-      if (size === 'phone') expect(await smallTargets(form)).toEqual([]);
-      await readable(page, size, 'light', 'edit');
+      await expectUsable(page, `accounts-${size}-light-edit`);
       await form.getByRole('button', { name: 'Save' }).click();
       await form.waitFor({ state: 'detached' });
       await (await sidebar(page)).getByRole('region', { name: 'Alice' }).waitFor();
@@ -198,7 +177,7 @@ for (const [size, options] of Object.entries(SIZES)) {
           exact: false,
         })
         .waitFor();
-      await readable(page, size, 'dark', 'remove');
+      await expectUsable(page, `accounts-${size}-dark-remove`);
       await question.getByRole('button', { name: 'Remove' }).click();
 
       await firstRun(page).waitFor();
@@ -250,28 +229,4 @@ async function passwordFound(page: Page): Promise<string[]> {
     if (heap.includes(password)) found.push(`${password} in the heap`);
   }
   return found;
-}
-
-/** The controls in a form that a finger can't be sure to hit, by name. */
-function smallTargets(within: Locator): Promise<string[]> {
-  return within.locator('input, button, textarea').evaluateAll((controls) =>
-    controls.flatMap((control) => {
-      // A field's whole box takes a tap and gives the field the focus.
-      const target =
-        control.closest('label') ??
-        (control.tagName === 'INPUT' ? control.parentElement : control) ??
-        control;
-      const box = target.getBoundingClientRect();
-      if (box.height === 0) return [];
-      return box.height < 44 || box.width < 44
-        ? [control.getAttribute('aria-label') ?? control.textContent?.trim() ?? control.tagName]
-        : [];
-    }),
-  );
-}
-
-/** Saves the screen, and fails if any of its text falls under 4.5:1. */
-async function readable(page: Page, size: string, scheme: string, screen: string) {
-  await page.screenshot({ path: join(SHOTS, `accounts-${size}-${scheme}-${screen}.png`) });
-  expect({ screen, unusable: await unusable(page) }).toEqual({ screen, unusable: [] });
 }
