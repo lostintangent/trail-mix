@@ -3,6 +3,8 @@ import {
   type FetchMessageObject,
   type ImapFlowOptions,
   type ImapTransport,
+  type ListResponse,
+  type Logger,
   type MailboxObject,
 } from 'imapflow';
 import { connect as tcp, type Socket } from 'node:net';
@@ -200,19 +202,39 @@ export function imapProvider(account: ImapAccount, network: Network): MailProvid
     );
   }
 
-  /** The UIDs of these refs that still name messages in their folder, grouped by folder. */
-  function byFolder(refs: MessageRef[]) {
-    const groups = new Map<string, MessageRef[]>();
-    for (const ref of refs) {
-      if (ref.account !== id) continue;
-      groups.set(ref.path, [...(groups.get(ref.path) ?? []), ref]);
-    }
-    return groups;
-  }
+  /** This account's refs, grouped by folder. */
+  const byFolder = (refs: MessageRef[]) =>
+    Map.groupBy(
+      refs.filter((ref) => ref.account === id),
+      (ref) => ref.path,
+    );
+  /** The UIDs of these refs that still name messages in the folder selected. */
   const current = (refs: MessageRef[], mailbox: MailboxObject) =>
     refs
       .filter((ref) => BigInt(ref.uidValidity) === BigInt(mailbox.uidValidity))
       .map((ref) => ref.uid);
+
+  /** Runs `use` on the UIDs of these refs, all in one folder, that still name messages there. */
+  function onHeld(
+    path: string,
+    refs: MessageRef[],
+    use: (connection: ImapFlow, range: string) => Promise<unknown>,
+  ) {
+    return inFolder(path, async (connection, mailbox) => {
+      const uids = current(refs, mailbox);
+      if (uids.length) await use(connection, rangeOf(uids));
+    });
+  }
+
+  /** The message with this Message-ID in the folder that has this role, if it holds one. */
+  async function heldIn(role: FolderRole, messageId: string | undefined) {
+    if (!messageId) return undefined;
+    const path = await folderFor(role);
+    return inFresh(path, async (connection, mailbox) => {
+      const uid = await heldUid(connection, mailbox, messageId);
+      return uid === undefined ? undefined : refIn(path, mailbox.uidValidity, uid);
+    });
+  }
 
   async function folderFor(role: FolderRole): Promise<string> {
     roles ??= new Map(
@@ -314,7 +336,7 @@ export function imapProvider(account: ImapAccount, network: Network): MailProvid
         const bytes = message.bodyParts?.get(part) ?? message.bodyParts?.get(part.toLowerCase());
         if (!bytes) continue;
         // The part's bytes under a header that names their type and encoding parse as a message.
-        const parsed = await PostalMime.parse(concat(new TextEncoder().encode(header), bytes));
+        const parsed = await PostalMime.parse(Buffer.concat([Buffer.from(header), bytes]));
         starts.set(message.uid, (html ? parsed.html : parsed.text) ?? '');
       }
     }
@@ -381,13 +403,7 @@ export function imapProvider(account: ImapAccount, network: Network): MailProvid
   }
 
   /** Whether Sent holds a message with this Message-ID, by search or among its newest. */
-  async function inSent(messageId: string) {
-    if (!messageId) return false;
-    return inFresh(
-      await folderFor('sent'),
-      async (connection, mailbox) => (await heldUid(connection, mailbox, messageId)) !== undefined,
-    );
-  }
+  const inSent = async (messageId: string) => (await heldIn('sent', messageId)) !== undefined;
 
   const provider: MailProvider = {
     async folders(): Promise<Folder[]> {
@@ -442,31 +458,17 @@ export function imapProvider(account: ImapAccount, network: Network): MailProvid
     },
 
     async setFlags(refs: MessageRef[], change: Partial<Flags>) {
-      const names = {
-        seen: '\\Seen',
-        flagged: '\\Flagged',
-        answered: '\\Answered',
-        draft: '\\Draft',
-      } as const;
-      const add = Object.entries(change)
-        .filter(([, on]) => on === true)
-        .map(([flag]) => names[flag as keyof Flags]);
-      const remove = Object.entries(change)
-        .filter(([, on]) => on === false)
-        .map(([flag]) => names[flag as keyof Flags]);
       for (const [path, group] of byFolder(refs)) {
-        await inFolder(path, async (connection, mailbox) => {
-          const uids = current(group, mailbox);
-          if (!uids.length) return;
-          const range = rangeOf(uids);
-          if (add.length) {
-            await unlessRefused(connection, 'change those flags', () =>
-              connection.messageFlagsAdd(range, add, { uid: true }),
+        await onHeld(path, group, async (connection, range) => {
+          for (const on of [true, false]) {
+            // Each flag is the system flag of its name: seen is \Seen.
+            const flags = Object.entries(change).flatMap(([flag, value]) =>
+              value === on ? [`\\${flag[0]!.toUpperCase()}${flag.slice(1)}`] : [],
             );
-          }
-          if (remove.length) {
+            if (!flags.length) continue;
+            const command = on ? 'messageFlagsAdd' : 'messageFlagsRemove';
             await unlessRefused(connection, 'change those flags', () =>
-              connection.messageFlagsRemove(range, remove, { uid: true }),
+              connection[command](range, flags, { uid: true }),
             );
           }
         });
@@ -492,27 +494,22 @@ export function imapProvider(account: ImapAccount, network: Network): MailProvid
           return { uidplus, ids, result };
         });
         if (!done) continue;
-        const from = (uid: number) => group.find((ref) => ref.uid === uid);
         const { uidMap, uidValidity } = done.result;
-        if (done.uidplus && uidMap && uidValidity !== undefined) {
-          for (const [was, landed] of uidMap) {
-            const ref = from(was);
-            if (ref) moved.push({ from: ref, to: refIn(to, uidValidity, landed) });
-          }
-          continue;
+        const landing =
+          done.uidplus && uidMap && uidValidity !== undefined
+            ? { uidValidity, uids: uidMap }
+            : await inFresh(to, async (connection, mailbox) => {
+                const uids = new Map<number, number>();
+                for (const [was, messageId] of done.ids) {
+                  const landed = await heldUid(connection, mailbox, messageId);
+                  if (landed !== undefined) uids.set(was, landed);
+                }
+                return { uidValidity: mailbox.uidValidity, uids };
+              });
+        for (const [was, landed] of landing.uids) {
+          const ref = group.find((each) => each.uid === was);
+          if (ref) moved.push({ from: ref, to: refIn(to, landing.uidValidity, landed) });
         }
-        const found = await inFresh(to, async (connection, mailbox) => {
-          const pairs: Moved[] = [];
-          for (const [was, messageId] of done.ids) {
-            const ref = from(was);
-            const landed = await uidOf(connection, messageId);
-            if (ref && landed !== undefined) {
-              pairs.push({ from: ref, to: refIn(to, mailbox.uidValidity, landed) });
-            }
-          }
-          return pairs;
-        });
-        moved.push(...found);
       }
       return moved;
     },
@@ -527,22 +524,12 @@ export function imapProvider(account: ImapAccount, network: Network): MailProvid
       const filed =
         uidplus && appended && appended.uid !== undefined && appended.uidValidity !== undefined
           ? refIn(drafts, appended.uidValidity, appended.uid)
-          : await inFresh(drafts, async (connection, mailbox) => {
-              const messageId = (await PostalMime.parse(message)).messageId;
-              const uid = messageId ? await heldUid(connection, mailbox, messageId) : undefined;
-              return uid === undefined ? undefined : refIn(drafts, mailbox.uidValidity, uid);
-            });
+          : await heldIn('drafts', (await PostalMime.parse(message)).messageId);
       if (!filed) throw new Error('The server did not say where it filed the draft');
       return filed;
     },
 
-    async findDraft(messageId: string) {
-      const drafts = await folderFor('drafts');
-      return inFresh(drafts, async (connection, mailbox) => {
-        const uid = await heldUid(connection, mailbox, messageId);
-        return uid === undefined ? undefined : refIn(drafts, mailbox.uidValidity, uid);
-      });
-    },
+    findDraft: (messageId: string) => heldIn('drafts', messageId),
 
     async discardDraft(draft: MessageRef) {
       if (draft.path === (await folderFor('drafts'))) await remove(draft);
@@ -640,26 +627,19 @@ export function imapProvider(account: ImapAccount, network: Network): MailProvid
       };
     },
 
-    async createFolder(path: string) {
-      await connected(async (connection) => {
-        if ((await connection.list()).some((folder) => folder.path === path)) return;
-        await connection.mailboxCreate(path);
-      });
-      roles = undefined;
-    },
+    createFolder: (path: string) =>
+      reshape(async (connection, listed) => {
+        if (!listed.some((folder) => folder.path === path)) await connection.mailboxCreate(path);
+      }),
 
-    async renameFolder(path: string, to: string) {
-      await connected(async (connection) => {
-        const paths = new Set((await connection.list()).map((folder) => folder.path));
-        if (!paths.has(path) && paths.has(to)) return;
-        await connection.mailboxRename(path, to);
-      });
-      roles = undefined;
-    },
+    renameFolder: (path: string, to: string) =>
+      reshape(async (connection, listed) => {
+        const paths = new Set(listed.map((folder) => folder.path));
+        if (paths.has(path) || !paths.has(to)) await connection.mailboxRename(path, to);
+      }),
 
-    async deleteFolder(path: string) {
-      await connected(async (connection) => {
-        const listed = await connection.list();
+    deleteFolder: (path: string) =>
+      reshape(async (connection, listed) => {
         const delimiter = listed.find((folder) => folder.path === path)?.delimiter;
         for (const doomed of subtree(listed, path, delimiter))
           await connection.mailboxDelete(doomed);
@@ -669,9 +649,7 @@ export function imapProvider(account: ImapAccount, network: Network): MailProvid
         if (left !== undefined) {
           throw new Error(`The server still has “${left}”, so “${path}” wasn’t deleted.`);
         }
-      });
-      roles = undefined;
-    },
+      }),
 
     async close() {
       closed = true;
@@ -691,14 +669,17 @@ export function imapProvider(account: ImapAccount, network: Network): MailProvid
   });
 
   /** Removes one message for good. Its folder may have no Trash to move it to. */
-  async function remove(ref: MessageRef) {
-    await inFolder(ref.path, async (connection, mailbox) => {
-      const uids = current([ref], mailbox);
-      if (!uids.length) return;
-      await unlessRefused(connection, 'remove that message', () =>
-        connection.messageDelete(rangeOf(uids), { uid: true }),
-      );
-    });
+  const remove = (ref: MessageRef) =>
+    onHeld(ref.path, [ref], (connection, range) =>
+      unlessRefused(connection, 'remove that message', () =>
+        connection.messageDelete(range, { uid: true }),
+      ),
+    );
+
+  /** Changes the server's folders as they're listed now, after which their roles are read again. */
+  async function reshape(change: (connection: ImapFlow, listed: ListResponse[]) => Promise<void>) {
+    await connected(async (connection) => change(connection, await connection.list()));
+    roles = undefined;
   }
 
   return provider;
@@ -732,41 +713,44 @@ export async function checkSignIn(account: ImapAccount, network: Network): Promi
         };
   // Only the reason leaves, never the client's error, which may carry what was sent. A token that
   // can't be had is not a host's refusal, so it rejects as it was.
-  const refusal = (endpoint: Endpoint) => (error: SignInError) =>
-    signInFailure(error, endpoint, sent);
+  const signIn = async (endpoint: Endpoint, attempt: Promise<unknown>, stop: () => void) => {
+    const refused = await inTime(attempt, stop).then(
+      () => undefined,
+      (error: SignInError) => signInFailure(error, endpoint, sent),
+    );
+    if (refused) throw new Error(refused);
+  };
 
   const connection = await imapConnection(signingIn, network);
-  const imap = await inTime(connection.connect(), () => connection.close()).then(
-    () => undefined,
-    refusal(account.imap),
-  );
-  if (imap) throw new Error(imap);
+  await signIn(account.imap, connection.connect(), () => connection.close());
   await connection.logout().catch(() => connection.close());
 
   const sockets: Socket[] = [];
   const patient = { ...network, patience: SIGN_IN_PATIENCE_MS };
   const transport = await smtpTransport(signingIn, patient, {}, (socket) => sockets.push(socket));
-  const smtp = await inTime(transport.verify(), () => {
+  await signIn(account.smtp, transport.verify(), () => {
     for (const socket of sockets) socket.destroy();
-  }).then(() => undefined, refusal(account.smtp));
-  transport.close();
-  if (smtp) throw new Error(smtp);
+  }).finally(() => transport.close());
 }
 
 /** How long a host has to connect, greet and take a password, when an account is added. */
 export const SIGN_IN_PATIENCE_MS = 15_000;
 
 /**
- * `attempt`, unless it outlasts a sign-in's patience. Then `stop` ends it, and it fails as a host
- * that never answered.
+ * `attempt`, unless it outlasts `patience`, a sign-in's unless said. Then `stop` ends it, and it
+ * fails as a host that never answered.
  */
-async function inTime<T>(attempt: Promise<T>, stop: () => void): Promise<T> {
+async function inTime<T>(
+  attempt: Promise<T>,
+  stop: () => void,
+  patience = SIGN_IN_PATIENCE_MS,
+): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<never>((_, reject) => {
     timer = setTimeout(() => {
       stop();
       reject(Object.assign(new Error('It didn’t answer.'), { code: 'ETIMEDOUT' }));
-    }, SIGN_IN_PATIENCE_MS);
+    }, patience);
   });
   try {
     return await Promise.race([attempt, late]);
@@ -799,7 +783,7 @@ async function smtpTransport(
     connectionTimeout: patience,
     greetingTimeout: patience,
     socketTimeout: patience,
-    ...(network.ca ? { tls: { ca: [toText(network.ca)] } } : {}),
+    ...trusted(network),
     ...log,
   });
 }
@@ -810,27 +794,21 @@ function smtpSocket(
   patience: number,
   opened?: (socket: Socket) => void,
 ): SMTPTransportGetSocket {
-  const ca = network.ca ? { ca: [toText(network.ca)] } : {};
   return (_options, callback) => {
     // Opened by host name, so the certificate is checked against the name on every runtime.
-    const socket = secure ? tls({ host, port, servername: host, ...ca }) : tcp({ host, port });
+    const options = { host, port, servername: host, ...trusted(network).tls };
+    const socket = secure ? tls(options) : tcp({ host, port });
     opened?.(socket);
-    // It calls back once. Later errors are the connection's, which nodemailer hears itself.
-    let answered = false;
-    const answer = (error?: Error) => {
-      if (answered) return;
-      answered = true;
-      clearTimeout(quiet);
-      if (error) callback(error);
-      else callback(null, { connection: socket, secured: secure });
-    };
+    // Later errors are the connection's, which nodemailer hears itself.
+    const open = new Promise<void>((resolve, reject) => {
+      socket.once(secure ? 'secureConnect' : 'connect', resolve);
+      socket.once('error', reject);
+    });
     // nodemailer times nothing until this calls back, so a host that never answers is timed here.
-    const quiet = setTimeout(() => {
-      socket.destroy();
-      answer(Object.assign(new Error('It didn’t answer.'), { code: 'ETIMEDOUT' }));
-    }, patience);
-    socket.once(secure ? 'secureConnect' : 'connect', () => answer());
-    socket.once('error', answer);
+    inTime(open, () => socket.destroy(), patience).then(
+      () => callback(null, { connection: socket, secured: secure }),
+      (error: Error) => callback(error),
+    );
   };
 }
 
@@ -866,10 +844,10 @@ async function imapConnection(
         const said = entry.err?.response;
         if (typeof said === 'string' && said) refusals.set(connection, said);
       },
-    } as Partial<ImapLogger> as ImapLogger,
+    } as Partial<Logger> as Logger,
     ...options,
     ...(network.imapTransport ? { transport: network.imapTransport } : {}),
-    ...(network.ca ? { tls: { ca: [toText(network.ca)] } } : {}),
+    ...trusted(network),
   });
   // A dropped connection surfaces as a failed command, and the next command reconnects.
   connection.on('error', () => {});
@@ -885,11 +863,6 @@ const ROLES: Record<string, FolderRole> = {
   '\\Junk': 'junk',
 };
 const roleOf = (specialUse: string | undefined) => (specialUse ? ROLES[specialUse] : undefined);
-
-type ImapLogger = Exclude<
-  NonNullable<NonNullable<ConstructorParameters<typeof ImapFlow>[0]>['logger']>,
-  false
->;
 
 /** What each connection's server said when it last refused a command. */
 const refusals = new WeakMap<ImapFlow, string>();
@@ -921,23 +894,19 @@ async function messageIdsOf(connection: ImapFlow, uids: number[]): Promise<Map<n
   return ids;
 }
 
-/** The UID of the message with this Message-ID in the selected folder, the newest if several. */
-async function uidOf(connection: ImapFlow, messageId: string): Promise<number | undefined> {
-  const found = await connection.search({ header: { 'message-id': messageId } }, { uid: true });
-  return Array.isArray(found) && found.length ? Math.max(...found) : undefined;
-}
-
 /**
- * The UID of the message with this Message-ID in the folder selected, found through the host's
- * search or else among the folder's newest messages, which a search may not yet know.
+ * The UID of the message with this Message-ID in the folder selected, the newest if several, found
+ * through the host's search or else among the folder's newest messages, which a search may not yet
+ * know.
  */
 async function heldUid(
   connection: ImapFlow,
   mailbox: MailboxObject,
   messageId: string,
 ): Promise<number | undefined> {
-  const found = await uidOf(connection, messageId);
-  if (found !== undefined || !mailbox.exists) return found;
+  const found = await connection.search({ header: { 'message-id': messageId } }, { uid: true });
+  if (Array.isArray(found) && found.length) return Math.max(...found);
+  if (!mailbox.exists) return undefined;
   const newest = `${Math.max(1, mailbox.exists - NEWEST_READ + 1)}:*`;
   let held: number | undefined;
   for await (const message of connection.fetch(newest, { envelope: true, uid: true })) {
@@ -960,13 +929,6 @@ function rangeOf(uids: number[]): string {
   return runs.join(',');
 }
 
-function concat(a: Uint8Array, b: Uint8Array): Uint8Array {
-  const joined = new Uint8Array(a.length + b.length);
-  joined.set(a);
-  joined.set(b, a.length);
-  return joined;
-}
-
-function toText(ca: string | Uint8Array) {
-  return typeof ca === 'string' ? ca : new TextDecoder().decode(ca);
-}
+/** TLS options that trust the network's added certificate authority, when it has one. */
+const trusted = ({ ca }: Network): { tls?: { ca: string[] } } =>
+  ca ? { tls: { ca: [typeof ca === 'string' ? ca : new TextDecoder().decode(ca)] } } : {};
