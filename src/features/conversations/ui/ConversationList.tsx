@@ -79,8 +79,7 @@ export function ConversationList({
   const ruler = useRef<HTMLDivElement>(null);
   const [isKeyboardFocused, setKeyboardFocused] = useState(false);
   const listId = useId();
-  const rowHeight = useRowHeight(ruler);
-  const padding = useScrollPadding(scroller, rowHeight);
+  const { rowHeight, padding } = useMeasures(ruler, scroller);
   // The row the keys move from and the list names as active: the last one picked, or the end of a
   // range that moved last.
   const selectedIndex = useMemo(() => {
@@ -272,51 +271,37 @@ export function ConversationListSkeleton({ label }: { label: string }) {
 const SKELETON_ROWS = 16;
 
 /**
- * Every row's height, as the ruler measures it, so the list places rows by arithmetic. It is read
- * before the list is first drawn, and again whenever the ruler's size changes. It is rounded up to a
- * whole pixel, so rows start on whole pixels and a scroll lands exactly where it was asked to.
+ * Every row's height, as the ruler measures it, so the list places rows by arithmetic, and the
+ * scroller's scroll padding, which the list keeps a row it scrolls to clear of. Both are read before
+ * the list is first drawn, and again whenever the ruler or the scroller resizes, as between a
+ * phone's layout and a desktop's, as a phone turns, or as a coarse pointer resizes a row and what
+ * floats over the list. The height is rounded up to a whole pixel, so rows start on whole pixels and
+ * a scroll lands exactly where it was asked to.
  */
-function useRowHeight(ruler: RefObject<HTMLDivElement | null>): number {
-  const [height, setHeight] = useState(FIRST_GUESS);
-  useLayoutEffect(() => {
-    const element = ruler.current;
-    if (!element) return;
-    setHeight(Math.ceil(element.getBoundingClientRect().height));
-    const observer = new ResizeObserver(([entry]) => {
-      const size = entry?.borderBoxSize[0]?.blockSize;
-      if (size !== undefined) setHeight(Math.ceil(size));
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [ruler]);
-  return height;
-}
-
-/**
- * The scroller's scroll padding, in pixels, which the list keeps a row it scrolls to clear of. It is
- * read again as the scroller's size changes, as between a phone's layout and a desktop's or as a
- * phone turns, and as the row height does, since a coarse pointer resizes what floats over the list.
- */
-function useScrollPadding(
+function useMeasures(
+  ruler: RefObject<HTMLDivElement | null>,
   scroller: RefObject<HTMLDivElement | null>,
-  rowHeight: number,
-): { start: number; end: number } {
+) {
+  const [rowHeight, setRowHeight] = useState(FIRST_GUESS);
   const [padding, setPadding] = useState({ start: 0, end: 0 });
   useLayoutEffect(() => {
-    const element = scroller.current;
-    if (!element) return;
+    const row = ruler.current;
+    const list = scroller.current;
+    if (!row || !list) return;
     const read = () => {
-      const style = getComputedStyle(element);
+      setRowHeight(Math.ceil(row.getBoundingClientRect().height));
+      const style = getComputedStyle(list);
       const start = parseFloat(style.scrollPaddingBlockStart) || 0;
       const end = parseFloat(style.scrollPaddingBlockEnd) || 0;
       setPadding((was) => (was.start === start && was.end === end ? was : { start, end }));
     };
     read();
     const observer = new ResizeObserver(read);
-    observer.observe(element);
+    observer.observe(row);
+    observer.observe(list);
     return () => observer.disconnect();
-  }, [scroller, rowHeight]);
-  return padding;
+  }, [ruler, scroller]);
+  return { rowHeight, padding };
 }
 
 /** Only a browser that can drive an animation by scrolling fades the list's ends. */
