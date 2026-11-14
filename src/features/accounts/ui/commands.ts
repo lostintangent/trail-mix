@@ -19,7 +19,7 @@ export const isAccountCommand = ({ id }: Command, account: Account) =>
  */
 export function accountCommands({
   accounts,
-  keeps = false,
+  keeps,
   add,
   edit,
   remove,
@@ -27,7 +27,7 @@ export function accountCommands({
   erase,
 }: {
   accounts: readonly Account[];
-  keeps?: boolean;
+  keeps: boolean;
   add: () => void;
   edit: (account: Account) => void;
   remove: (account: Account) => void;
