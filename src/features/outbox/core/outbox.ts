@@ -210,9 +210,7 @@ function delay(attempts: number): number {
 
 /** How long the retries after `attempts` failures wait in all, in minutes. */
 function waited(attempts: number): number {
-  let total = 0;
-  for (let attempt = 1; attempt <= attempts; attempt++) total += delay(attempt);
-  return total;
+  return Array.from({ length: attempts }, (_, n) => delay(n + 1)).reduce((sum, m) => sum + m, 0);
 }
 
 function later(now: string, attempts: number): string {

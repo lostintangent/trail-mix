@@ -57,22 +57,14 @@ test('a list’s pages go stale together, wherever they lie in it', () => {
   expect(isStale(keys.page({ in: 'folder', folder: archive }, 50), hint)).toBe(false);
 });
 
-test('accounts, folders and the Outbox each refetch only what shows them', () => {
+test('accounts, folders, the Outbox and senders’ pictures each refetch only what shows them', () => {
   // A sign-in's every change is an accounts change: it starts, stops, or becomes an account.
   expect(staleAfter({ changed: 'accounts' })).toEqual(['accounts', 'sign-ins']);
   expect(staleAfter({ changed: 'folders', account: 'personal' })).toEqual(['folders']);
   expect(staleAfter({ changed: 'outbox' })).toEqual(['outbox']);
-});
-
-test('a body never changes, so no hint but an erase refetches one', () => {
-  const hints: Hint[] = [
-    { changed: 'accounts' },
-    { changed: 'folders', account: 'personal' },
-    { changed: 'conversations', folder: inbox },
-    { changed: 'outbox' },
-  ];
-
-  for (const hint of hints) expect(staleAfter(hint)).not.toContain('body');
+  // Every list and conversation names its senders' pictures, and a body never does.
+  const named = snapshots.map(([name]) => name).filter((name) => /^list|conversation/.test(name));
+  expect(staleAfter({ changed: 'avatars' })).toEqual(named);
 });
 
 test('after an erase, every snapshot refetches', () => {

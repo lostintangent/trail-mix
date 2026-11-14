@@ -11,7 +11,7 @@ import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
 import * as stylex from '@stylexjs/stylex';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, CircleAlert, Clock, CloudOff, Send, Undo2, X, type LucideIcon } from 'lucide-react';
-import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useEffectEvent, useState } from 'react';
 import { tooltipOf, UNDO_COMMAND, useCommands } from '../../commands/index.ts';
 import type { Address } from '../../mail/core/index.ts';
 import { conversationQuery } from '../../mailroom/client/index.ts';
@@ -19,6 +19,7 @@ import { formatAhead } from '../core/later.ts';
 import { GONE_MS, holdsCopy } from '../core/leaving.ts';
 import {
   briefly,
+  byStanding,
   isLeaving,
   isOnItsWay,
   isUndoable,
@@ -29,8 +30,10 @@ import {
 } from '../core/standing.ts';
 import { media } from '../../../app/theme/tokens.stylex.ts';
 import { ToastRule } from '../../../shared/ToastRule.tsx';
+import { useLatest } from '../../../shared/useLatest.ts';
 import { Airmail } from './Airmail.tsx';
 import { unreachedOf, useAsked } from './asked.ts';
+import { useTicking } from './clock.ts';
 import { undo as undoSend } from './undo.ts';
 import { offerUndo } from './undoable.ts';
 
@@ -42,8 +45,6 @@ const LINGER_MS: Partial<Record<Standing['is'], number>> = {
 };
 /** How often the toast asks for the conversation while it waits for the send's copy in Sent. */
 const CHECK_MS = 2_000;
-/** How often the countdown looks at the clock, so each second turns over on time. */
-const TICK_MS = 250;
 
 /**
  * The toast that follows a send from the device that asked for it, while the member is away from
@@ -94,13 +95,10 @@ export default function LeavingToast({
             unreachedOf(hand),
           );
 
-  const isTicking =
-    standing.is === 'counting' || (standing.is === 'unreached' && standing.isWaiting);
-  useEffect(() => {
-    if (!isTicking) return;
-    const timer = setInterval(() => setNow(Date.now()), TICK_MS);
-    return () => clearInterval(timer);
-  }, [isTicking]);
+  useTicking(
+    standing.is === 'counting' || (standing.is === 'unreached' && standing.isWaiting),
+    setNow,
+  );
   const linger = isUnsureItWent && standing.is === 'sending' ? GONE_MS : LINGER_MS[standing.is];
   const leave = useEffectEvent(dismiss);
   useEffect(() => {
@@ -120,15 +118,12 @@ export default function LeavingToast({
   };
 
   // While it counts, Undo in the registry, and its key, take this send back too.
-  const latestTakeBack = useRef(takeBack);
-  useLayoutEffect(() => {
-    latestTakeBack.current = takeBack;
-  });
+  const latestTakeBack = useLatest(takeBack);
   const canTakeBack = isUndoable(standing) && undo === 'idle';
   useEffect(() => {
     if (!canTakeBack) return;
     return offerUndo({ id, takeBack: () => void latestTakeBack.current() });
-  }, [canTakeBack, id]);
+  }, [canTakeBack, id, latestTakeBack]);
   const commands = useCommands();
   const goToOutbox = commands.find(({ id }) => id === 'go.outbox');
   const undoCommand = commands.find(({ id }) => id === UNDO_COMMAND);
@@ -138,6 +133,29 @@ export default function LeavingToast({
   const { icon, text: status } = said(standing, who);
   // A refused Undo stays said, as the send goes on to whatever it comes to.
   const text = refused ? `${refused} ${status}` : status;
+  const action =
+    isUndoable(standing) && undo !== 'done' ? (
+      <IconButton
+        label="Undo"
+        tooltip={undoCommand ? tooltipOf(undoCommand) : 'Undo'}
+        icon={<Icon icon={Undo2} size="sm" color="inherit" />}
+        variant="ghost"
+        size="sm"
+        isLoading={undo === 'asking'}
+        onClick={() => void takeBack()}
+      />
+    ) : goToOutbox && (standing.is === 'failed' || standing.is === 'retrying') ? (
+      <Button
+        label="Open Outbox"
+        variant="ghost"
+        size="sm"
+        onClick={() => {
+          dismiss();
+          void goToOutbox.run();
+        }}
+        xstyle={styles.action}
+      />
+    ) : null;
   return (
     <div {...stylex.props(styles.card)}>
       {isLeaving(standing) && <Airmail isRunning={isOnItsWay(standing)} />}
@@ -151,34 +169,12 @@ export default function LeavingToast({
           {standing.is === 'counting' || standing.is === 'scheduled' ? '' : text}
         </VisuallyHidden>
         <div {...stylex.props(styles.actions)}>
-          {isUndoable(standing) && undo !== 'done' ? (
+          {action && (
             <>
-              <IconButton
-                label="Undo"
-                tooltip={undoCommand ? tooltipOf(undoCommand) : 'Undo'}
-                icon={<Icon icon={Undo2} size="sm" color="inherit" />}
-                variant="ghost"
-                size="sm"
-                isLoading={undo === 'asking'}
-                onClick={() => void takeBack()}
-              />
+              {action}
               <ToastRule />
             </>
-          ) : goToOutbox && (standing.is === 'failed' || standing.is === 'retrying') ? (
-            <>
-              <Button
-                label="Open Outbox"
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  dismiss();
-                  void goToOutbox.run();
-                }}
-                xstyle={styles.action}
-              />
-              <ToastRule />
-            </>
-          ) : null}
+          )}
           <Button
             label="Dismiss"
             icon={<Icon icon={X} size="sm" color="inherit" />}
@@ -194,29 +190,26 @@ export default function LeavingToast({
 }
 
 /** What the toast says, and the icon beside it, for where the send stands. */
-export function said(standing: Standing, who: string): { icon: LucideIcon; text: string } {
-  switch (standing.is) {
-    case 'counting':
-      return { icon: Send, text: `Sending to ${who} in ${standing.seconds}s` };
-    case 'scheduled':
-      return { icon: Clock, text: `Sending to ${who} ${formatAhead(standing.at)}` };
-    case 'sending':
-      return { icon: Send, text: `Sending to ${who}…` };
-    case 'sent':
-      return { icon: Check, text: `Sent to ${who}` };
-    case 'retrying':
-      return { icon: CircleAlert, text: `Not sent to ${who} yet. ${standing.error} Trying again.` };
-    case 'failed':
-      return { icon: CircleAlert, text: `Couldn’t send to ${who}. ${standing.error}` };
-    case 'undone':
-      return { icon: Undo2, text: `Undone. Nothing was sent to ${who}.` };
-    case 'unreached':
-      return {
+export const said = (standing: Standing, who: string) =>
+  byStanding<{ icon: LucideIcon; text: string }>(
+    {
+      counting: ({ seconds }) => ({ icon: Send, text: `Sending to ${who} in ${seconds}s` }),
+      scheduled: ({ at }) => ({ icon: Clock, text: `Sending to ${who} ${formatAhead(at)}` }),
+      sending: () => ({ icon: Send, text: `Sending to ${who}…` }),
+      sent: () => ({ icon: Check, text: `Sent to ${who}` }),
+      retrying: ({ error }) => ({
+        icon: CircleAlert,
+        text: `Not sent to ${who} yet. ${error} Trying again.`,
+      }),
+      failed: ({ error }) => ({ icon: CircleAlert, text: `Couldn’t send to ${who}. ${error}` }),
+      undone: () => ({ icon: Undo2, text: `Undone. Nothing was sent to ${who}.` }),
+      unreached: ({ error }) => ({
         icon: CloudOff,
-        text: `Can’t reach Trail Mix to send to ${who}. ${standing.error} Trying again.`,
-      };
-  }
-}
+        text: `Can’t reach Trail Mix to send to ${who}. ${error} Trying again.`,
+      }),
+    },
+    standing,
+  );
 
 const styles = stylex.create({
   // The card's own padding gives way to the stripe, which runs edge to edge under its corners.

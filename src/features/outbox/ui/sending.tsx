@@ -12,7 +12,7 @@ import {
 } from '../../mailroom/client/index.ts';
 import type { Leaving } from '../core/leaving.ts';
 import { briefly, type Standing } from '../core/standing.ts';
-import { askedFor, handed, unreached, type Answer, type Press } from './asked.ts';
+import { askedFor, fail, handed, unreached, type Answer, type Press } from './asked.ts';
 import LeavingToast, { said } from './LeavingToast.tsx';
 
 /**
@@ -94,17 +94,13 @@ async function ask(
   return { send: outgoing };
 }
 
-function fail(press: Press, error: unknown) {
-  handed(press.id, { is: 'failed' });
-  press.onFailed(reasonOf(error));
-}
-
 /**
  * The toasts following the sends this device asked for, by press. One put away, as the member comes
  * to the send's conversation, can show again. One that ended, once it had nothing more to say or
  * the member dismissed it, never does.
  */
-const toasts = new Map<string, { isShown: boolean; hasEnded: boolean; dismiss?: () => void }>();
+const toasts = new Map<string, Following>();
+type Following = { isShown: boolean; hasEnded: boolean; dismiss?: () => void };
 
 /**
  * Shows the toast that follows a send, as it stands now: from the press, a countdown with Undo
@@ -115,10 +111,7 @@ export function showLeavingToast(leaving: Leaving, standing: Standing) {
   const { id, seen, closes } = leaving;
   const was = toasts.get(id);
   if (was?.isShown || was?.hasEnded) return;
-  const following: { isShown: boolean; hasEnded: boolean; dismiss?: () => void } = {
-    isShown: true,
-    hasEnded: false,
-  };
+  const following: Following = { isShown: true, hasEnded: false };
   toasts.set(id, following);
   const to = seen?.last.to ?? leaving.to ?? [];
   const who = briefly(to);

@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { MessageRef, Outgoing } from '../../mail/core/index.ts';
 import { outboxQuery } from '../../mailroom/client/index.ts';
 import {
@@ -12,8 +12,10 @@ import {
   press,
   standingOfLeaving,
   type Leaving,
+  type Pressed,
 } from '../core/leaving.ts';
 import { closesFor, saw } from './asked.ts';
+import { useWakeAt } from './clock.ts';
 
 /** How often the Outbox is asked again while a send is under way, in case a hint is lost. */
 const CHECK_MS = 2_000;
@@ -49,38 +51,22 @@ export function useLeaving() {
   }, [observed]);
 
   // A send gone from the Outbox waits only so long for its copy.
-  useEffect(() => {
-    const ends = nextExpiry(all);
-    if (ends === undefined) return;
-    const timer = setTimeout(
-      () => {
-        const now = Date.now();
-        setHeld((was) => ({ ...was, all: expire(was.all, now) }));
-      },
-      Math.max(0, ends - Date.now()) + 1,
-    );
-    return () => clearTimeout(timer);
-  }, [all]);
+  useWakeAt(nextExpiry(all), (now) => setHeld((was) => ({ ...was, all: expire(was.all, now) })));
 
-  /** A press of Send, with the draft its message was last saved as, if it has been. */
-  const pressed = useCallback(
-    (sent: Parameters<typeof press>[1]) =>
-      setHeld((was) => ({ ...was, all: press(was.all, sent) })),
-    [],
-  );
-  /** A press's message, saved again on its way to the Mailroom. */
-  const named = useCallback(
-    (id: string, draft: MessageRef) =>
-      setHeld((was) => ({ ...was, all: nameDraft(was.all, id, draft) })),
-    [],
-  );
-  /** Stops following a press, as when its send failed or this device took it back. */
-  const forgotten = useCallback(
-    (id: string) => setHeld((was) => ({ ...was, all: forget(was.all, id) })),
-    [],
-  );
+  const changes = useMemo(() => {
+    const change = (to: (all: readonly Leaving[]) => readonly Leaving[]) =>
+      setHeld((was) => ({ ...was, all: to(was.all) }));
+    return {
+      /** A press of Send, with the draft its message was last saved as, if it has been. */
+      pressed: (sent: Pressed) => change((all) => press(all, sent)),
+      /** A press's message, saved again on its way to the Mailroom. */
+      named: (id: string, draft: MessageRef) => change((all) => nameDraft(all, id, draft)),
+      /** Stops following a press, as when its send failed or this device took it back. */
+      forgotten: (id: string) => change((all) => forget(all, id)),
+    };
+  }, []);
   const drafts = useMemo(() => draftsLeaving(all), [all]);
-  return { all, drafts, pressed, named, forgotten };
+  return { all, drafts, ...changes };
 }
 
 /**
@@ -90,11 +76,7 @@ export function useLeaving() {
 function useIsUnderWay(all: readonly Leaving[]): boolean {
   const [now, setNow] = useState(Date.now);
   const next = Math.min(...all.map(({ closes }) => closes).filter((closes) => closes > now));
-  useEffect(() => {
-    if (!Number.isFinite(next)) return;
-    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, next - Date.now()) + 1);
-    return () => clearTimeout(timer);
-  }, [next]);
+  useWakeAt(Number.isFinite(next) ? next : undefined, setNow);
   return all.some(
     (leaving) =>
       leaving.seen?.goneAt === undefined &&

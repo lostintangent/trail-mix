@@ -19,7 +19,6 @@ import { ChevronDown, Send } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
 import { focusRing, media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { isApple, primaryShortcut, shortcutLabel, type Command } from '../../commands/index.ts';
-import { instantOf } from '../core/later.ts';
 import { SEND, SEND_LATER } from './sendCommands.ts';
 import { loadSending } from './useSend.ts';
 
@@ -111,7 +110,8 @@ function PickTime({ onPick, onClose }: { onPick: (at: string) => void; onClose: 
         {...stylex.props(styles.form)}
         onSubmit={(event) => {
           event.preventDefault();
-          if (value) onPick(instantOf(value));
+          // The field's local date and time, as an instant.
+          if (value) onPick(new Date(value).toISOString());
         }}
       >
         <span {...stylex.props(styles.field)}>
@@ -144,11 +144,8 @@ function nextHour(): Date {
 }
 
 /** A date as a local date and time field holds it: "2026-11-10T17:00". */
-function localInput(date: Date): string {
-  const two = (n: number) => String(n).padStart(2, '0');
-  const day = `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}`;
-  return `${day}T${two(date.getHours())}:${two(date.getMinutes())}`;
-}
+const localInput = (date: Date) =>
+  new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 
 const styles = stylex.create({
   actions: {

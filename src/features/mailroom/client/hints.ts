@@ -124,10 +124,8 @@ export function listen(queryClient: QueryClient): () => void {
 /** One hint per message, as JSON. Anything else is ignored. */
 function readHint(data: unknown): Hint | undefined {
   try {
-    const hint: unknown = JSON.parse(String(data));
-    return typeof hint === 'object' && hint !== null && 'changed' in hint
-      ? (hint as Hint)
-      : undefined;
+    const hint = JSON.parse(String(data)) as Partial<Hint> | null;
+    return hint?.changed ? (hint as Hint) : undefined;
   } catch {
     return undefined;
   }

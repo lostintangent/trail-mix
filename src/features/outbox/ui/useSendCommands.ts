@@ -1,5 +1,6 @@
 import { useEffect, useSyncExternalStore } from 'react';
 import type { Command } from '../../commands/index.ts';
+import { listeners } from '../../../shared/listeners.ts';
 
 type Made = (typeof import('./sendCommands.ts'))['sendCommands'];
 type Options = Parameters<Made>[0];
@@ -22,7 +23,7 @@ export function preloadSendCommands(): Promise<void> {
   loading ??= import('./sendCommands.ts').then(
     (module) => {
       made = module.sendCommands;
-      for (const listener of listeners) listener();
+      tell();
     },
     () => {
       // Writing asks again next time.
@@ -35,9 +36,4 @@ export function preloadSendCommands(): Promise<void> {
 const NONE: Command[] = [];
 let made: Made | undefined;
 let loading: Promise<void> | undefined;
-const listeners = new Set<() => void>();
-
-function subscribe(listener: () => void) {
-  listeners.add(listener);
-  return () => void listeners.delete(listener);
-}
+const { subscribe, tell } = listeners();

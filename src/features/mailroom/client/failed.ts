@@ -11,10 +11,7 @@ export function whatFailed(
   isOffline = typeof navigator !== 'undefined' && navigator.onLine === false,
 ): string {
   if (isOffline && isUnreached(error)) return 'This device is offline.';
-  const { status, message } = (typeof error === 'object' && error !== null ? error : {}) as {
-    status?: unknown;
-    message?: unknown;
-  };
+  const { status, message } = (error ?? {}) as { status?: unknown; message?: unknown };
   // An error page arrives whole as the message, so only its words are kept, and only the first.
   const words = typeof message === 'string' ? message.replace(/<[^>]*>/g, ' ') : '';
   const said = words.replace(/\s+/g, ' ').trim();

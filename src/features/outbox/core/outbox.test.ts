@@ -1,10 +1,8 @@
 import { expect, test } from 'bun:test';
 import type { MessageRef, Outgoing } from '../../mail/core/index.ts';
 import {
-  HOST_FILING_SECONDS,
   MISSING,
   RESTARTED,
-  UNDO_SECONDS,
   begin,
   cancel,
   due,
@@ -65,7 +63,6 @@ test('a send waits for its time, then submits, files, and leaves the Outbox', ()
 });
 
 test('Send waits out a ten-second undo window before it goes', () => {
-  expect(UNDO_SECONDS).toBe(10);
   expect(schedule(entry('now'), at(0))).toEqual({
     ...entry('now'),
     sendAt: at(10 / 60),
@@ -192,7 +189,6 @@ test('filing that fails retries on its own however long it takes, and never subm
 });
 
 test('filing leaves Sent to the host for two minutes, looking for its copy at 2, 4, 8, 16, 32 and 64 seconds', () => {
-  expect(HOST_FILING_SECONDS).toBe(120);
   let outgoing = submitted(begin(send()), 'sent', at(0));
   const looks: number[] = [];
   for (;;) {

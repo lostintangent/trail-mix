@@ -61,8 +61,3 @@ export function formatAhead(iso: string, now = new Date()): string {
   }[aheadOf(at, now)]();
   return `${day} ${time.format(at)}`;
 }
-
-/** A time picked in a local date and time field, such as "2026-11-10T17:00", as an instant. */
-export function instantOf(local: string): string {
-  return new Date(local).toISOString();
-}

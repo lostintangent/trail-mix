@@ -27,6 +27,15 @@ export type Standing =
    */
   | { is: 'unreached'; error: string; isWaiting: boolean };
 
+/** Something for every way a send can stand, from what that standing holds. */
+export type ByStanding<T> = {
+  [Is in Standing['is']]: (standing: Extract<Standing, { is: Is }>) => T;
+};
+
+/** What a table holds for where a send stands. */
+export const byStanding = <T>(table: ByStanding<T>, standing: Standing): T =>
+  (table[standing.is] as (standing: Standing) => T)(standing);
+
 /**
  * When a send's undo window closes, in milliseconds on this device's clock, or when it is due, for
  * a send at a later time. The Mailroom's clock may differ, so a device that asked for a send counts

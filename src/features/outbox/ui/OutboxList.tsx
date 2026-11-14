@@ -20,11 +20,13 @@ import { outboxQuery } from '../../mailroom/client/index.ts';
 import { formatAhead } from '../core/later.ts';
 import { UNDO_SECONDS } from '../core/outbox.ts';
 import {
+  byStanding,
   fully,
   isLeaving,
   isOnItsWay,
   isUndoable,
   standingOf,
+  type ByStanding,
   type Standing,
 } from '../core/standing.ts';
 import { Airmail } from './Airmail.tsx';
@@ -134,7 +136,7 @@ function Row({
         <span {...stylex.props(styles.top)}>
           <span {...stylex.props(styles.to, styles.clip)}>To {fully(to)}</span>
           <span {...stylex.props(styles.when, standing.is === 'failed' && styles.danger)}>
-            {when(standing)}
+            {byStanding(WHEN, standing)}
           </span>
         </span>
         <span {...stylex.props(styles.clip)}>{subject || '(no subject)'}</span>
@@ -150,16 +152,12 @@ function Row({
         )}
         {error !== undefined && (
           <>
-            {isLapsed ? (
-              <Button label="Sign in again" variant="secondary" size="sm" onClick={onSignIn} />
-            ) : (
-              <Button
-                label="Retry"
-                variant="secondary"
-                size="sm"
-                onClick={() => void act.retry(outgoing)}
-              />
-            )}
+            <Button
+              label={isLapsed ? 'Sign in again' : 'Retry'}
+              variant="secondary"
+              size="sm"
+              onClick={isLapsed ? onSignIn : () => void act.retry(outgoing)}
+            />
             <Button
               label="Edit"
               variant="ghost"
@@ -178,26 +176,16 @@ function Row({
 }
 
 /** When a row's send goes, or how it went. */
-function when(standing: Standing): string {
-  switch (standing.is) {
-    case 'counting':
-      return `in ${standing.seconds}s`;
-    case 'scheduled':
-      return formatAhead(standing.at);
-    case 'sending':
-      return 'Sending…';
-    case 'sent':
-      return 'Sent';
-    case 'retrying':
-      return `Trying again ${formatAhead(standing.at)}`;
-    case 'failed':
-      return 'Not sent';
-    case 'undone':
-      return '';
-    case 'unreached':
-      return 'Not sent yet';
-  }
-}
+const WHEN: ByStanding<string> = {
+  counting: ({ seconds }) => `in ${seconds}s`,
+  scheduled: ({ at }) => formatAhead(at),
+  sending: () => 'Sending…',
+  sent: () => 'Sent',
+  retrying: ({ at }) => `Trying again ${formatAhead(at)}`,
+  failed: () => 'Not sent',
+  undone: () => '',
+  unreached: () => 'Not sent yet',
+};
 
 /**
  * The time rows are drawn at. It moves on when a row's words would change by time alone: each

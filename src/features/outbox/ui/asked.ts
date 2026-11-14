@@ -2,6 +2,8 @@ import { useSyncExternalStore } from 'react';
 import type { Address, MessageRef, Outgoing } from '../../mail/core/index.ts';
 import type { LastSave } from '../../mailroom/client/index.ts';
 import { closesAfterPress, closesAt, type Followed } from '../core/standing.ts';
+import { listeners } from '../../../shared/listeners.ts';
+import { reasonOf } from '../../../shared/reasons.ts';
 
 /**
  * A press of Send. The composer has closed, and the message goes to the Mailroom in one request,
@@ -70,7 +72,7 @@ export type Hand =
 export type Answer = { send: Outgoing } | { refused: string };
 
 let asked: ReadonlyMap<string, HandOff> = new Map();
-const listeners = new Set<() => void>();
+const { subscribe, tell } = listeners();
 
 /** A press of Send, followed from the moment it's pressed, while its message's last save runs. */
 export function pressed(press: Press, stop: () => void) {
@@ -83,6 +85,12 @@ export function handed(id: string, hand: Hand) {
   if (!was) return;
   change(id, { ...was, hand });
   if (hand.is === 'stopped') was.stop();
+}
+
+/** A hand-off that failed, which gives the press's message back with why. */
+export function fail(press: Press, error: unknown) {
+  handed(press.id, { is: 'failed' });
+  press.onFailed(reasonOf(error));
 }
 
 /**
@@ -127,11 +135,6 @@ export function closesFor(outgoing: Outgoing): number {
   return press ? closesAfterPress(press.pressedAt, press.at) : closesAt(outgoing);
 }
 
-const subscribe = (listener: () => void) => {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-};
-
 /**
  * Every press, by its id, anew whenever this device asks for a send, which can be after a snapshot
  * of the Outbox has already brought it, as when the Mailroom's hint outruns its answer.
@@ -156,10 +159,8 @@ export function pressOf(outgoing: Outgoing): HandOff | undefined {
 
 function change(id: string, handOff: HandOff) {
   asked = new Map(asked).set(id, handOff);
-  holdPage(
-    [...asked.values()].some(({ hand }) => ['saving', 'asking', 'undoing'].includes(hand.is)),
-  );
-  for (const listener of listeners) listener();
+  holdPage([...asked.values()].some(({ hand }) => mayGoUnanswered(hand)));
+  tell();
 }
 
 /**

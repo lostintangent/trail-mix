@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { listeners } from '../../../shared/listeners.ts';
 
 /**
  * The send this device can still take back, offered by whatever counts it down on screen, its line
@@ -8,7 +9,7 @@ import { useSyncExternalStore } from 'react';
 type Undoable = { id: string; takeBack: () => void };
 
 let offers: readonly Undoable[] = [];
-const listeners = new Set<() => void>();
+const { subscribe, tell } = listeners();
 
 /** Offers a send to Undo, until the returned function withdraws this offer alone. */
 export function offerUndo(undoable: Undoable): () => void {
@@ -19,15 +20,6 @@ export function offerUndo(undoable: Undoable): () => void {
     tell();
   };
 }
-
-function tell() {
-  for (const listener of listeners) listener();
-}
-
-const subscribe = (listener: () => void) => {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-};
 
 const latest = () => offers.at(-1);
 

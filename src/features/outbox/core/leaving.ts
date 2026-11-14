@@ -54,31 +54,25 @@ export type Leaving = {
  */
 export const GONE_MS = 30_000;
 
+/** A press of Send, for `at` if later than the undo window, from the draft last saved, if any. */
+export type Pressed = {
+  id: string;
+  draft: MessageRef | undefined;
+  pressedIn: ConversationId | undefined;
+  /** The Markdown the member wrote. */
+  written: string;
+  to: readonly Address[];
+  pressedAt: number;
+  at: string | undefined;
+};
+
 /**
- * A press of Send, for `at` if later than the undo window: the reply is on its way at once, from
- * the draft the message was last saved as, if it has been. A press of the same draft replaces the
- * one before.
+ * A press of Send: the reply is on its way at once. A press of the same draft replaces the one
+ * before.
  */
 export function press(
   all: readonly Leaving[],
-  {
-    id,
-    draft,
-    pressedIn,
-    written,
-    to,
-    pressedAt,
-    at,
-  }: {
-    id: string;
-    draft: MessageRef | undefined;
-    pressedIn: ConversationId | undefined;
-    /** The Markdown the member wrote. */
-    written: string;
-    to: readonly Address[];
-    pressedAt: number;
-    at: string | undefined;
-  },
+  { id, draft, pressedIn, written, to, pressedAt, at }: Pressed,
 ): readonly Leaving[] {
   const others = all.filter(
     (leaving) => leaving.id !== id && !(draft && leaving.drafts.some((was) => sameRef(was, draft))),

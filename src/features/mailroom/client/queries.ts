@@ -37,21 +37,9 @@ export const keys = {
   people: (typed: string) => ['people', typed] as const,
 } as const;
 
-export type Key =
-  | typeof keys.accounts
-  | typeof keys.signIns
-  | typeof keys.signInPresets
-  | typeof keys.thisDevice
-  | ReturnType<typeof keys.notified>
-  | typeof keys.folders
-  | typeof keys.outbox
-  | ReturnType<typeof keys.conversations>
-  | ReturnType<typeof keys.page>
-  | ReturnType<typeof keys.bundle>
-  | ReturnType<typeof keys.bundlePage>
-  | ReturnType<typeof keys.conversation>
-  | ReturnType<typeof keys.body>
-  | ReturnType<typeof keys.people>;
+/** Every key a snapshot is cached under: each of `keys`, or what each of its functions makes. */
+export type Key = Made<(typeof keys)[keyof typeof keys]>;
+type Made<K> = K extends (...args: never[]) => infer Made ? Made : K;
 
 /**
  * Whether a hint leaves a snapshot out of date. A change to a folder's mail changes its counts and
@@ -63,29 +51,24 @@ export type Key =
  * message, so no hint but an erase touches one.
  */
 export function isStale(key: Key, hint: Hint): boolean {
-  switch (hint.changed) {
-    case 'accounts':
-      return key[0] === 'accounts' || key[0] === 'people';
-    case 'folders':
-      return key[0] === 'folders';
-    case 'outbox':
-      return key[0] === 'outbox';
-    case 'avatars':
-      return key[0] === 'conversations' || key[0] === 'bundle' || key[0] === 'conversation';
-    case 'everything':
-      return true;
-    case 'conversations':
-      return (
-        key[0] === 'folders' ||
-        key[0] === 'conversation' ||
-        key[0] === 'people' ||
-        key[0] === 'outbox' ||
-        (key[0] === 'bundle' && bundlePartsOf(key[1])?.account === hint.folder.account) ||
-        (key[0] === 'conversations' &&
-          (key[1].in !== 'folder' || isSameFolder(key[1].folder, hint.folder)))
-      );
-  }
+  if (hint.changed === 'everything' || STALE[hint.changed].includes(key[0])) return true;
+  return (
+    hint.changed === 'conversations' &&
+    ((key[0] === 'bundle' && bundlePartsOf(key[1])?.account === hint.folder.account) ||
+      (key[0] === 'conversations' &&
+        (key[1].in !== 'folder' || isSameFolder(key[1].folder, hint.folder))))
+  );
 }
+
+/** What each hint leaves out of date whatever it names, by the name its key starts with. */
+const STALE: Record<Exclude<Hint['changed'], 'everything'>, readonly Key[0][]> = {
+  accounts: ['accounts', 'people'],
+  folders: ['folders'],
+  outbox: ['outbox'],
+  avatars: ['conversations', 'bundle', 'conversation'],
+  // And the folder's list, the views across accounts and the account's bundles, as above.
+  conversations: ['folders', 'conversation', 'people', 'outbox'],
+};
 
 const isSameFolder = (a: FolderRef, b: FolderRef) => a.account === b.account && a.path === b.path;
 

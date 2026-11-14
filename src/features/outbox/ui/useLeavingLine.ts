@@ -1,11 +1,19 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useCommands } from '../../commands/index.ts';
+import { useLatest } from '../../../shared/useLatest.ts';
 import { standingOfLeaving, type Leaving } from '../core/leaving.ts';
 import { formatAhead } from '../core/later.ts';
 import { UNDO_SECONDS } from '../core/outbox.ts';
-import { isUndoable, standingOfPress, type Standing } from '../core/standing.ts';
+import {
+  byStanding,
+  isUndoable,
+  standingOfPress,
+  type ByStanding,
+  type Standing,
+} from '../core/standing.ts';
 import { unreachedOf, useAsked } from './asked.ts';
+import { useTicking, useWakeAt } from './clock.ts';
 import { takeBack, undo as undoPress } from './undo.ts';
 import { offerUndo } from './undoable.ts';
 
@@ -47,18 +55,15 @@ export function useLeavingLine(leaving: Leaving): LeavingLine {
 
   const isMine = useAsked(leaving.id) !== undefined;
   const canTakeBack = isUndoable(standing) && undo === 'idle';
-  const latestPress = useRef(press);
-  useLayoutEffect(() => {
-    latestPress.current = press;
-  });
+  const latestPress = useLatest(press);
   useEffect(() => {
     if (!canTakeBack || !isMine) return;
     return offerUndo({ id: leaving.id, takeBack: () => void latestPress.current() });
-  }, [canTakeBack, isMine, leaving.id]);
+  }, [canTakeBack, isMine, leaving.id, latestPress]);
 
   const goToOutbox = useCommands().find((command) => command.id === 'go.outbox');
   const refused = typeof undo === 'object' ? undo.refused : undefined;
-  const { said, reason: why } = saidOf(standing);
+  const { said, reason: why } = byStanding(SAID, standing);
   const reason = [refused, why].filter(Boolean).join(' ') || undefined;
   const action: LeavingLine['action'] = isUndoable(standing)
     ? { label: 'Undo', run: () => void press(), isBusy: undo === 'asking' }
@@ -70,29 +75,19 @@ export function useLeavingLine(leaving: Leaving): LeavingLine {
 }
 
 /** What a line says for where its send stands, and why it hasn't gone, if it hasn't. */
-function saidOf(standing: Standing): { said: string; reason?: string } {
-  switch (standing.is) {
-    case 'counting':
-      return { said: `Sending in ${standing.seconds}s` };
-    case 'scheduled':
-      return { said: formatAhead(standing.at) };
-    case 'sending':
-      return { said: 'Sending…' };
-    case 'sent':
-      return { said: 'Sent' };
-    case 'retrying':
-      return { said: 'Not sent yet', reason: `${standing.error} Trying again.` };
-    case 'failed':
-      return { said: 'Couldn’t send', reason: standing.error };
-    case 'undone':
-      return { said: 'Undone' };
-    case 'unreached':
-      return {
-        said: 'Not sent yet',
-        reason: `Can’t reach Trail Mix. ${standing.error} Trying again.`,
-      };
-  }
-}
+const SAID: ByStanding<{ said: string; reason?: string }> = {
+  counting: ({ seconds }) => ({ said: `Sending in ${seconds}s` }),
+  scheduled: ({ at }) => ({ said: formatAhead(at) }),
+  sending: () => ({ said: 'Sending…' }),
+  sent: () => ({ said: 'Sent' }),
+  retrying: ({ error }) => ({ said: 'Not sent yet', reason: `${error} Trying again.` }),
+  failed: ({ error }) => ({ said: 'Couldn’t send', reason: error }),
+  undone: () => ({ said: 'Undone' }),
+  unreached: ({ error }) => ({
+    said: 'Not sent yet',
+    reason: `Can’t reach Trail Mix. ${error} Trying again.`,
+  }),
+};
 
 /**
  * What a line announces, once for each change in where its send stands or why: a countdown as it
@@ -103,7 +98,7 @@ function useTold(standing: Standing, reason: string | undefined): string {
   const text =
     standing.is === 'counting'
       ? `Sending in ${standing.seconds} seconds.`
-      : [`${saidOf(standing).said}.`, reason].filter(Boolean).join(' ');
+      : [`${byStanding(SAID, standing).said}.`, reason].filter(Boolean).join(' ');
   const [told, setTold] = useState({ key, text });
   if (told.key !== key) setTold({ key, text });
   return told.text;
@@ -118,21 +113,7 @@ function useLeavingStanding(leaving: Leaving): Standing {
   const [now, setNow] = useState(Date.now);
   const hand = useAsked(leaving.id)?.hand;
   const standing = standingOfLeaving(leaving, now);
-  const isWaiting = standing.is === 'scheduled';
-  const isCounting = standing.is === 'counting';
-  useEffect(() => {
-    if (!isWaiting) return;
-    const counts = leaving.closes - UNDO_SECONDS * 1000;
-    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, counts - Date.now()) + 1);
-    return () => clearTimeout(timer);
-  }, [isWaiting, leaving.closes]);
-  useEffect(() => {
-    if (!isCounting) return;
-    const timer = setInterval(() => setNow(Date.now()), TICK_MS);
-    return () => clearInterval(timer);
-  }, [isCounting]);
+  useWakeAt(standing.is === 'scheduled' ? leaving.closes - UNDO_SECONDS * 1000 : undefined, setNow);
+  useTicking(standing.is === 'counting', setNow);
   return leaving.seen ? standing : standingOfPress(standing, unreachedOf(hand));
 }
-
-/** How often a countdown looks at the clock, so each second turns over on time. */
-const TICK_MS = 250;

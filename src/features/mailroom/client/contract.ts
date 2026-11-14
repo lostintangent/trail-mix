@@ -71,7 +71,8 @@ export interface Queries {
  */
 export type ThisDevice = { cache: string; pushKey?: string; notified: boolean; visitor?: true };
 
-export interface Commands {
+/** `F` is a new file as the call carries it: a browser's `File`, or its bytes in the Mailroom. */
+export interface Commands<F = File> {
   /** The only call that carries a secret. */
   addAccount(setup: AccountSetup): Promise<Account>;
   /**
@@ -114,7 +115,7 @@ export interface Commands {
    * lost may have filed it. Asked again, it answers with the draft it filed, and files no other.
    */
   saveDraft(
-    draft: DraftInput,
+    draft: DraftInput<F>,
     replaces: MessageRef | undefined,
     id: string,
     isAgain: boolean,
@@ -128,7 +129,7 @@ export interface Commands {
    * send as it stands or as it went, and is refused once it was undone.
    */
   send(
-    draft: MessageRef | LastSave,
+    draft: MessageRef | LastSave<F>,
     at: string | undefined,
     waited: number,
     id: string,
@@ -254,7 +255,7 @@ export type SignIn = {
 } & ({ state: 'waiting' } | { state: 'checking' } | { state: 'refused'; reason: string });
 
 /** What the composer saves. The Mailroom writes it as MIME and files it in the account's Drafts. */
-type DraftInput = {
+type DraftInput<F = File> = {
   /** The From. */
   account: AccountId;
   to: Address[];
@@ -272,11 +273,11 @@ type DraftInput = {
    * the Markdown shows it by as `cid:`, which the browser mints with `contentIdFor`, and stored
    * bytes keep theirs.
    */
-  attachments: ({ file: File; contentId?: string } | { in: MessageRef; id: string })[];
+  attachments: ({ file: F; contentId?: string } | { in: MessageRef; id: string })[];
 };
 
 /** A message's last save, as Send carries it: what it holds, and the draft it replaces, if any. */
-export type LastSave = { save: DraftInput; replaces?: MessageRef };
+export type LastSave<F = File> = { save: DraftInput<F>; replaces?: MessageRef };
 
 /**
  * A browser's file as it reaches the Mailroom. A Durable Object takes no `File`, so the Worker reads
@@ -285,30 +286,16 @@ export type LastSave = { save: DraftInput; replaces?: MessageRef };
 export type FileBytes = { name: string; type: string; content: Uint8Array };
 
 /** A `DraftInput` as it reaches the Mailroom, with its new files read into bytes. */
-export type DraftUpload = Omit<DraftInput, 'attachments'> & {
-  attachments: ({ file: FileBytes; contentId?: string } | { in: MessageRef; id: string })[];
-};
+export type DraftUpload = DraftInput<FileBytes>;
 
 /** A `LastSave` as it reaches the Mailroom, with its new files read into bytes. */
-export type LastUpload = { save: DraftUpload; replaces?: MessageRef };
+export type LastUpload = LastSave<FileBytes>;
 
 /**
  * The Mailroom as the Worker reaches it: its queries and commands, and the hint socket by `fetch`.
  */
 export type Mailroom = Queries &
-  Omit<Commands, 'saveDraft' | 'send'> & {
-    saveDraft(
-      draft: DraftUpload,
-      replaces: MessageRef | undefined,
-      id: string,
-      isAgain: boolean,
-    ): Promise<MessageRef>;
-    send(
-      draft: MessageRef | LastUpload,
-      at: string | undefined,
-      waited: number,
-      id: string,
-    ): Promise<Outgoing>;
+  Commands<FileBytes> & {
     /**
      * Runs a query or command a browser sent, which is how the Worker asks for every one, and says
      * how long it took. `sentAt` is when the Worker sent it, and `received` when its request reached

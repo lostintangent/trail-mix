@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
-import { aheadOf, laterTimes } from './later.ts';
+import { aheadOf, formatAhead, laterTimes } from './later.ts';
 
 // A zone with daylight saving, which moves a day's length off 24 hours twice a year.
 const zone = process.env.TZ;
@@ -57,4 +57,14 @@ test('a time ahead reads as today, tomorrow, this week, then a date, by calendar
   expect(aheadOf(local('2026-11-11', '00:01'), now)).toBe('tomorrow');
   expect(aheadOf(local('2026-11-16', '08:00'), now)).toBe('week');
   expect(aheadOf(local('2026-11-17', '08:00'), now)).toBe('later');
+});
+
+test('a time ahead says Today or Tomorrow, else its weekday, else its date, then its time', () => {
+  const now = local('2026-11-10', '09:00');
+  const said = (day: string) => formatAhead(local(day, '12:00').toISOString(), now);
+  expect(said('2026-11-10')).toStartWith('Today ');
+  expect(said('2026-11-11')).toStartWith('Tomorrow ');
+  // Weekdays and dates read in the device's language and its first zone, so only shape is sure.
+  expect(said('2026-11-16')).toMatch(/^[A-Z][a-z]{2} \d+:00/);
+  expect(said('2026-11-17')).toMatch(/^[A-Z][a-z]{2} \d+ \d+:00/);
 });

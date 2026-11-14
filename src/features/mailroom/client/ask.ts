@@ -57,7 +57,7 @@ const REPEATABLE: ReadonlySet<string> = new Set<QueryName | CommandName>([
 
 /** Whether Cloudflare says a failure may pass, and that asking again won't add to a load. */
 function isPassing(error: unknown): boolean {
-  const { retryable, overloaded } = marksOf(error);
+  const { retryable, overloaded } = (error ?? {}) as Marks;
   return retryable === true && overloaded !== true;
 }
 
@@ -66,13 +66,11 @@ function isPassing(error: unknown): boolean {
  * passing or overloaded, which says nothing of what the call would have answered.
  */
 export function isCloudflareFailure(error: unknown): boolean {
-  const { retryable, overloaded } = marksOf(error);
+  const { retryable, overloaded } = (error ?? {}) as Marks;
   return retryable === true || overloaded === true;
 }
 
-function marksOf(error: unknown): { retryable?: unknown; overloaded?: unknown } {
-  return typeof error === 'object' && error !== null ? error : {};
-}
+type Marks = { retryable?: unknown; overloaded?: unknown };
 
 /**
  * Asks once, and notes for the response's Server-Timing how long the Mailroom took as the Worker

@@ -1,7 +1,6 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback } from 'react';
-import { reasonOf } from '../../../shared/reasons.ts';
-import { handed, pressed, type Press } from './asked.ts';
+import { fail, pressed, type Press } from './asked.ts';
 
 type Send = (press: Press) => void;
 
@@ -22,10 +21,7 @@ export function useSend(): Send {
       pressed(press, () => handOff.abort());
       loadSending().then(
         (sending) => sending.handOff(queryClient, press, handOff.signal),
-        (error: unknown) => {
-          handed(press.id, { is: 'failed' });
-          press.onFailed(reasonOf(error));
-        },
+        (error: unknown) => fail(press, error),
       );
     },
     [queryClient],
