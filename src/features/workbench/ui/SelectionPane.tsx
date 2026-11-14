@@ -32,7 +32,7 @@ export function SelectionPane({
     <section aria-label="Selection" {...stylex.props(styles.sheet)}>
       <div {...stylex.props(styles.middle)}>
         <Heading level={1} xstyle={styles.count}>
-          {count} conversations selected
+          {count} conversation{count === 1 ? '' : 's'} selected
         </Heading>
         <div role="toolbar" aria-label="Selected conversations" {...stylex.props(styles.bar)}>
           {children}

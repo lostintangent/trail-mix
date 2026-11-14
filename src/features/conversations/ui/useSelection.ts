@@ -18,8 +18,10 @@ const NO_PLACES: ReadonlyMap<ConversationId, number> = new Map();
 
 /**
  * The conversations a member has selected in a list, and whether they are picking several. One
- * selected is the one open in the reader. Several wait for an action together. A conversation that
- * leaves the list gives way to the next, and a triage the server refuses brings the selection back.
+ * selected is the one open in the reader. Several, or any picked, wait for an action together, so
+ * picking opens nothing, and reads nothing, until a conversation opened on its own ends it. A
+ * conversation that leaves the list gives way to the next, and a triage the server refuses brings
+ * the selection back.
  */
 export function useSelection(
   conversations: Listed<ListItem> | undefined,
@@ -30,7 +32,7 @@ export function useSelection(
   const [isPicking, setPicking] = useState(false);
   // Picking ends with the last conversation picked.
   if (isPicking && selection.ids.length === 0) setPicking(false);
-  const selected = selection.ids.length === 1 ? selection.ids[0] : undefined;
+  const selected = !isPicking && selection.ids.length === 1 ? selection.ids[0] : undefined;
   // The conversation leaving the list, and where it was, until the selection has moved on from it.
   // Meanwhile it stays picked, and the moves either side of it and the reader's place count from
   // where it was, so the commands and what shows them don't change in the frame that shows it gone.
@@ -95,6 +97,7 @@ export function useSelection(
   /** A pick in the list, in its order. */
   const selectBy = useCallback(
     (id: ConversationId, by: SelectBy) => {
+      if (by === 'only') setPicking(false);
       setSelection((current) => select(current, id, by, by === 'only' ? [] : idsIn(order.current)));
     },
     [order],
@@ -104,7 +107,10 @@ export function useSelection(
     setSelection(selectOnly(id));
   }, []);
   /** Selects only this conversation, or nothing. */
-  const only = useCallback((id: ConversationId | undefined) => setSelection(selectOnly(id)), []);
+  const only = useCallback((id: ConversationId | undefined) => {
+    setPicking(false);
+    setSelection(selectOnly(id));
+  }, []);
   /** Selects this conversation, unless the member has selected one of their own in the meantime. */
   const selectIfNone = useCallback((id: ConversationId) => {
     setSelection((current) => (current.ids.length > 0 ? current : selectOnly(id)));
@@ -132,7 +138,7 @@ export function useSelection(
   return {
     selection,
     isPicking,
-    /** The one conversation selected, if only one is. */
+    /** The one conversation selected, if only one is and it wasn't picked. */
     selected,
     isMany: selection.ids.length > 1,
     vacating,

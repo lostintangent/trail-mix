@@ -1,6 +1,7 @@
 import { expect } from 'bun:test';
 import { join } from 'node:path';
 import type { Page, Request, Route } from 'playwright';
+import { DWELL_MS } from '../../src/features/workbench/ui/useReadMark.ts';
 import { bodiesShown, goTo, hold, reader, shownSubject } from './helpers.ts';
 import { unusable } from './usable.ts';
 import { RESULTS, SIZES, suite } from './suite.ts';
@@ -325,22 +326,28 @@ test('on a phone, a long press starts picking, a tap adds, and the island acts o
   const here = await inbox(SIZES.phone);
   const hand = await finger(here);
   const options = here.getByRole('option');
-  const picked = await Promise.all([1, 2].map((at) => options.nth(at).textContent()));
-  const first = await centerOf(here, 1);
-  await hand.press(first.x, first.y, 700);
-  const second = await centerOf(here, 2);
-  await hand.press(second.x, second.y, 40);
+  // Two rows still unread, as the tests before may have read the newest.
+  const unread = options.filter({ has: here.getByText('Unread', { exact: true }) });
+  const picked = await Promise.all([0, 1].map((at) => unread.nth(at).textContent()));
+  const rows = picked.map((text) => options.filter({ hasText: text ?? '' }));
+  for (const [at, row] of rows.entries()) {
+    const box = (await row.boundingBox())!;
+    await hand.press(box.x + box.width / 2, box.y + box.height / 2, at === 0 ? 700 : 40);
+  }
 
   const island = here.getByRole('toolbar', { name: 'Picked conversations' });
   await expect(island.textContent()).resolves.toContain('2');
-  // Picking keeps the list on screen rather than opening a conversation.
-  await expect(options.nth(1).getAttribute('aria-selected')).resolves.toBe('true');
-  await expect(options.nth(2).getAttribute('aria-selected')).resolves.toBe('true');
+  // Picking keeps the list on screen rather than opening a conversation, and reads neither, however
+  // long they stay picked.
+  await here.waitForTimeout(DWELL_MS + 500);
+  for (const row of rows) {
+    await expect(row.getAttribute('aria-selected')).resolves.toBe('true');
+    await expect(row.getByText('Unread', { exact: true }).count()).resolves.toBe(1);
+  }
+  expect(new URL(here.url()).searchParams.has('open')).toBe(false);
 
   await island.getByRole('button', { name: 'Archive' }).click();
-  for (const text of picked) {
-    await options.filter({ hasText: text ?? '' }).waitFor({ state: 'detached', timeout: 1_000 });
-  }
+  for (const row of rows) await row.waitFor({ state: 'detached', timeout: 1_000 });
   // With nothing picked, the island offers the folders again.
   await here.getByRole('button', { name: 'Folders', exact: true }).waitFor();
 
@@ -349,7 +356,7 @@ test('on a phone, a long press starts picking, a tap adds, and the island acts o
   const undone = here.waitForResponse((response) => response.request().method() === 'POST');
   await undoButton(here).click();
   expect((await undone).ok()).toBe(true);
-  for (const text of picked) await options.filter({ hasText: text ?? '' }).waitFor();
+  for (const row of rows) await row.waitFor();
 }, 30_000);
 
 test('on a phone, a row swiped far enough left is archived, and a short swipe slides back', async () => {

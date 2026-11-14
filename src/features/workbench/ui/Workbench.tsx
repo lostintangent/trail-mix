@@ -675,7 +675,7 @@ export function Workbench({
     () => (threadRow !== undefined ? [threadRow] : picked),
     [threadRow, picked],
   );
-  // What's selected, as commands: the selection's own while several are picked, else the open one's.
+  // What's selected, as commands: the selection's own while it opens nothing, else the open one's.
   const selectedCommands =
     pickedRows.length === 0
       ? []
@@ -686,10 +686,10 @@ export function Workbench({
           isUnread: pickedRows.some(({ unread }) => unread > 0),
           // One leaving the list is done with, until the selection has moved on from it.
           onTriage: (action) =>
-            selected !== undefined && selected === vacating?.row.id
-              ? undefined
-              : isMany || isPicking || selected === undefined
-                ? triageSelection(action)
+            selected === undefined
+              ? triageSelection(action)
+              : selected === vacating?.row.id
+                ? undefined
                 : triageShown(action, thread ?? selected),
         });
   const outbox = useOutboxCommands();
@@ -731,7 +731,7 @@ export function Workbench({
   const { isOverReader, isBehindComposer, inView, openInView } = readerCover({
     composer: composerPlace,
     isReplyOnItsWay,
-    open: isMany ? undefined : opened,
+    open: opened,
   });
   // A send on its way says where it stands on its line in its conversation while that's on screen,
   // and in a toast while the member is elsewhere.
@@ -770,7 +770,7 @@ export function Workbench({
     isComposing: compose !== undefined,
     isThreadOpen: thread !== undefined,
     phonePane: isPhone ? phonePane : undefined,
-    isMany,
+    isMany: isMany || isPicking,
   });
   const commands = useSteadyCommands([
     ...(isBehindComposer ? [] : selectedCommands),
@@ -804,7 +804,7 @@ export function Workbench({
       write,
       reply: openInView === undefined ? undefined : (all) => void composing.reply(all),
     }),
-    gitHubCommand(isBehindComposer || isMany ? undefined : openRow),
+    gitHubCommand(isBehindComposer ? undefined : openRow),
     sourceCommand(
       openInView === undefined
         ? undefined
@@ -1014,7 +1014,7 @@ export function Workbench({
               />
             </div>
             <div inert={isOffscreen('reader')} {...stylex.props(styles.pane, styles.reader)}>
-              {isMany && !isPhone ? (
+              {(isMany || isPicking) && !isPhone ? (
                 <SelectionPane count={selection.ids.length} onClear={clearSelection}>
                   <Suspense>
                     <TriageActions commands={selectedCommands} />
