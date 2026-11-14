@@ -1,8 +1,6 @@
 import { expect, mock, spyOn, test } from 'bun:test';
 import { generateKeyPair, SignJWT } from 'jose';
-import type { Mailroom, Timed } from '../features/mailroom/client/contract.ts';
-import type { AvatarBytes } from './routes/avatars.ts';
-import type { MessageBytes } from './routes/messages.ts';
+import type { Timed } from '../features/mailroom/client/contract.ts';
 
 /**
  * The Worker's gate, with Start standing in as a handler that records what reached the app. The
@@ -39,8 +37,8 @@ await mock.module('cloudflare:workers', () => ({ DurableObject: class {} }));
 const { default: entry } = await import('./entry.ts');
 /** The Worker as Cloudflare calls it. Nothing here keeps work running past its response. */
 const worker = {
-  fetch: (request: Request, env: Parameters<typeof entry.fetch>[1]) =>
-    entry.fetch(request, env, { waitUntil() {} } as unknown as ExecutionContext),
+  fetch: (request: Request, env: { [Name in keyof Cloudflare.Env]?: unknown }) =>
+    entry.fetch(request, env as Cloudflare.Env, { waitUntil() {} } as unknown as ExecutionContext),
 };
 
 /** The key of a picture a Mailroom's Avatar cache holds. */
@@ -55,8 +53,7 @@ function mailrooms() {
   /** What the Worker did to a Mailroom beyond opening it. */
   const did: [member: string, what: string][] = [];
   const MAILROOM = {
-    idFromName: (name: string) => ({ name }),
-    get({ name }: { name: string }) {
+    getByName(name: string) {
       opened.push(name);
       return {
         name,
@@ -82,7 +79,7 @@ function mailrooms() {
             ? Promise.reject(new Error('That message is no longer in this mailbox.'))
             : Promise.resolve({ value: undefined, reached: 0, ran: 0, spent: [], cold: false });
         },
-      } as unknown as Mailroom & MessageBytes & AvatarBytes;
+      };
     },
   };
   return { MAILROOM, opened, sockets, sources, avatars, did };
@@ -443,8 +440,7 @@ function demo(open = true, changes = Infinity) {
     },
   };
   const VISITORS = {
-    idFromName: (name: string) => name,
-    get: () => ({
+    getByName: () => ({
       admit: (visitor: string) => {
         asked.push(visitor);
         return Promise.resolve(open ? Date.now() : undefined);

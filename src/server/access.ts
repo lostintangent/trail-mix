@@ -7,24 +7,11 @@ import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from 'jose';
  * public demo by a cookie the demo signs, or the one development member on a developer's machine.
  */
 
-/** What a deployment's configuration says about sign-in. Every value is the operator's. */
-export type SignInConfig = {
-  /** The Cloudflare Access team domain, such as `example.cloudflareaccess.com`. */
-  ACCESS_TEAM_DOMAIN?: string;
-  /** The audience tag of the Access application in front of Trail Mix. */
-  ACCESS_AUD?: string;
-  /** The one development member, set only in the local `.dev.vars` file. */
-  DEV_MEMBER?: string;
-  /**
-   * The key the public demo signs each visitor's cookie with, a secret only the demo holds. It
-   * signs visitors in only where the deployment serves nothing but the demo mailbox, and has a gate.
-   */
-  VISITOR_KEY?: string;
-  /** Set where the deployment serves only the demo mailbox, as previews and the demo do. */
-  DEMO_MAILBOX?: string;
-  /** The demo's gate, which says whether a visitor may come in. */
-  VISITOR_GATE?: VisitorGate;
-};
+/** What a deployment's configuration says about sign-in, with the demo's gate where it has one. */
+export type SignInConfig = Pick<
+  Cloudflare.Env,
+  'ACCESS_TEAM_DOMAIN' | 'ACCESS_AUD' | 'DEV_MEMBER' | 'VISITOR_KEY' | 'DEMO_MAILBOX'
+> & { VISITOR_GATE?: VisitorGate };
 
 /**
  * Says whether a visitor may come in, by their id and the network they come from: when it let them

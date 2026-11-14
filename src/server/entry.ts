@@ -1,36 +1,16 @@
 import start from '@tanstack/react-start/server-entry';
 import type { Mailroom, Timed } from '../features/mailroom/client/contract.ts';
 import { readAvatarPath, readMessagePath } from '../features/mailroom/client/urls.ts';
-import { signInFor, type SignInConfig } from './access.ts';
+import { signInFor } from './access.ts';
 import { demoImages, proxyImage } from './routes/images.ts';
-import { serveAvatar, type AvatarBytes } from './routes/avatars.ts';
-import { serveMessageBytes, type MessageBytes } from './routes/messages.ts';
+import { serveAvatar } from './routes/avatars.ts';
+import { serveMessageBytes } from './routes/messages.ts';
 import { act } from './routes/notifications.ts';
 import { updates } from './routes/updates.ts';
-import {
-  gateOf,
-  isChangeAllowed,
-  tooManyChanges,
-  type RateLimit,
-  type VisitorGateEnv,
-} from './visitors.ts';
+import { gateOf, isChangeAllowed, tooManyChanges } from './visitors.ts';
 
 export { Mailroom } from '../features/mailroom/server/index.ts';
 export { VisitorGate } from './visitors.ts';
-
-type Env = Omit<SignInConfig, 'VISITOR_GATE'> &
-  VisitorGateEnv & {
-    /** One Mailroom per member, named by their verified email address. */
-    MAILROOM: {
-      idFromName(name: string): unknown;
-      get(id: unknown): Mailroom & MessageBytes & AvatarBytes;
-    };
-    /** The commit this deployment runs. */
-    VERSION?: string;
-    /** The public demo's visitor gate, and its limit on each network's changes. Only the demo has them. */
-    VISITORS?: Parameters<typeof gateOf>[0];
-    VISITOR_CHANGES?: RateLimit;
-  };
 
 /** Whether this isolate has served a request yet. Its first one paid for starting it. */
 let started = false;
@@ -41,7 +21,7 @@ let started = false;
  * named by the verified sign-in alone, and the app and the routes get the Mailroom, not the name.
  */
 export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Cloudflare.Env, ctx: ExecutionContext): Promise<Response> {
     const received = Date.now();
     const begun = performance.now();
     const isFirst = !started;
@@ -79,7 +59,7 @@ export default {
     // gate hasn't let in reaches none, so no route, however it is reached, makes a Mailroom past it.
     const mailroom = () => {
       if (!isLetIn) throw new Error('The demo’s gate hasn’t let this visitor in.');
-      return env.MAILROOM.get(env.MAILROOM.idFromName(member));
+      return env.MAILROOM.getByName(member);
     };
     if (url.pathname === '/updates') return answer(await updates(request, mailroom()));
     if (message) return answer(await serveMessageBytes(message, mailroom()));
@@ -90,7 +70,9 @@ export default {
     if (url.pathname === '/notifications/act') return answer(await act(request, mailroom()));
     const response = await start.fetch(request, {
       context: {
-        mailroom,
+        // Workers' RPC types widen tuples, such as a body's headers, to arrays, though each arrives
+        // as sent, so the app takes the stub as the contract says.
+        mailroom: mailroom as unknown as () => Mailroom,
         timing,
         received,
         waitUntil: (work) => ctx.waitUntil(work),

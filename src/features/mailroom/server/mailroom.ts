@@ -84,64 +84,6 @@ import { report } from './report.ts';
 import { syncQueue, WAKE, type SyncQueue } from './sync.ts';
 import { oneClick, type OneClick } from './unsubscribe.ts';
 
-export type MailroomEnv = {
-  /** The body cache: raw messages, by member, account and ref. */
-  BODIES: R2Bucket;
-  /** The Worker secret each member's credentials key is derived from. */
-  CREDENTIALS_KEY?: string;
-  /**
-   * Enables the demo mailbox, and gives every new Mailroom its two accounts: Personal with this
-   * many messages in its Inbox, and Work with a tenth as many.
-   */
-  DEMO_MAILBOX?: string;
-  /** Fixes the demo accounts' creation time, an ISO 8601 instant, so their dates never move. */
-  DEMO_MAILBOX_AT?: string;
-  /**
-   * `true` has the demo's mail server file its own copy of what it accepts in Sent, a moment late,
-   * as Zoho's does, so the Outbox waits for it.
-   */
-  DEMO_HOST_FILES_SENT?: string;
-  /**
-   * The deployment's Web Push key, a P-256 private key in PKCS #8 PEM. With `OPERATOR_EMAIL`, whom
-   * push services contact about its pushes, it turns notifications on.
-   */
-  PUSH_KEY?: string;
-  OPERATOR_EMAIL?: string;
-  /** The app the operator registered with Microsoft, which Outlook accounts sign in through. */
-  MICROSOFT_CLIENT_ID?: string;
-  /** Whole days unopened before a Mailroom rests, and before it erases itself: 30 and 90 unset. */
-  REST_AFTER_DAYS?: string;
-  ERASE_AFTER_DAYS?: string;
-  /**
-   * Set only on the public demo, where the Worker signs visitors in with it. Its presence tells a
-   * visitor's Mailroom, which holds only the demo mailbox, to check mail only while they have it
-   * open, since nothing reaches the demo mailbox from outside, and to keep both demo accounts, since
-   * filling one again writes thousands of rows.
-   */
-  VISITOR_KEY?: string;
-  /**
-   * A test's stand-in for Outlook, as JSON: Microsoft's sign-in and the hosts. Honored only when
-   * every address in it names this machine.
-   */
-  OUTLOOK_STAND_IN?: string;
-  /**
-   * A test's names for the servers on this machine that sign Authentication-Results, as JSON from
-   * host to names. Honored for hosts on this machine alone.
-   */
-  AUTH_SERVERS_STAND_IN?: string;
-  /**
-   * A test's stand-in for where avatars are looked up, as one origin: DNS over HTTPS at
-   * `/dns-query`, answering as Cloudflare's does, Gravatar at `/gravatar/` and each domain's site
-   * at `/sites/<domain>/`. Honored only when it names this machine.
-   */
-  AVATARS_STAND_IN?: string;
-  /**
-   * A test's stand-in for the senders' servers a one-click unsubscribe posts to, as one origin.
-   * Honored only when it names this machine.
-   */
-  UNSUBSCRIBE_STAND_IN?: string;
-};
-
 /** Why a visitor's Mailroom keeps what it holds. */
 const VISITORS_KEEP =
   'The demo keeps its two accounts, and erases itself a day after your last visit.';
@@ -161,7 +103,7 @@ const PEOPLE_FILLED = 2_000;
  * Every wake is a cold start. Nothing held in memory is needed again: providers reconnect, sync
  * resumes from the cursors in storage, and watching starts again on the next alarm.
  */
-export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
+export class Mailroom extends DurableObject implements Contract {
   protected readonly sql: Sql;
   protected readonly store: EnvelopeIndex;
   private readonly book: AccountBook;
@@ -192,7 +134,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
    */
   private readonly isVisitors: boolean;
 
-  constructor(ctx: DurableObjectState, env: MailroomEnv) {
+  constructor(ctx: DurableObjectState, env: Cloudflare.Env) {
     super(ctx, env);
     this.demo = demoSettings(env.DEMO_MAILBOX, env.DEMO_MAILBOX_AT, env.DEMO_HOST_FILES_SENT);
     this.windDown = windDownOf(env.REST_AFTER_DAYS, env.ERASE_AFTER_DAYS);

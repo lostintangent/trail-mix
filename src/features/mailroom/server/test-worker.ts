@@ -2,7 +2,7 @@ import { COMMANDS, QUERIES, receivedCall } from '../client/contract.ts';
 import type { MessageRef } from '../../mail/core/index.ts';
 import { HOST_FILING_SECONDS } from '../../outbox/core/index.ts';
 import type { MailProvider, Preset, PresetName } from '../../providers/index.ts';
-import { Mailroom, type MailroomEnv } from './mailroom.ts';
+import { Mailroom } from './mailroom.ts';
 import { REREAD, SWEEP_BODIES } from './schema.ts';
 
 /**
@@ -400,7 +400,7 @@ export type Wake = {
   accounts: { name: string; status: string; messages: number }[];
 };
 
-type Env = MailroomEnv & { MAILROOM: DurableObjectNamespace<TestMailroom> };
+type Env = Omit<Cloudflare.Env, 'MAILROOM'> & { MAILROOM: DurableObjectNamespace<TestMailroom> };
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
@@ -408,7 +408,7 @@ export default {
     const url = new URL(request.url);
     const [, member, action] = url.pathname.split('/');
     if (!member) return new Response('The Mailroom, for tests.');
-    const mailroom = env.MAILROOM.get(env.MAILROOM.idFromName(member));
+    const mailroom = env.MAILROOM.getByName(member);
     if (action === 'updates') {
       return mailroom.fetch(new Request(url, { headers: { Upgrade: 'websocket' } }));
     }

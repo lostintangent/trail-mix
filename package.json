@@ -19,7 +19,7 @@
     "test:mail": "bun tests/mail-server/server.ts prepare && bun test --path-ignore-patterns=node_modules/** tests/mail-server tests/workerd.mail.test.ts tests/mail-check tests/contract tests/reader/demo.mail.test.ts tests/mail-clients tests/accounts src/features/mailroom",
     "mail-server": "bun tests/mail-server/server.ts",
     "mail-check": "bun tests/mail-check/check.ts",
-    "types": "node node_modules/wrangler/bin/wrangler.js types --include-env=false",
+    "types": "node node_modules/wrangler/bin/wrangler.js types --env-file /dev/null --strict-vars=false",
     "theme": "bun --bun astryx theme build src/app/theme/trail-mix.ts --out src/app/theme/built/trail-mix.css",
     "icons": "bun src/app/icons.ts",
     "bench": "bun tests/bench/run.ts",

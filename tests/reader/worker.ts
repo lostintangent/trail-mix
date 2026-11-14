@@ -16,6 +16,6 @@ export default {
     const [, member, ...rest] = url.pathname.split('/');
     const message = readMessagePath(`/${rest.join('/')}`);
     if (!member || !message) return testWorker.fetch(request, env);
-    return serveMessageBytes(message, env.MAILROOM.get(env.MAILROOM.idFromName(member)));
+    return serveMessageBytes(message, env.MAILROOM.getByName(member));
   },
 };

@@ -86,9 +86,10 @@ jobs:
         with:
           node-version: 24
 
-      # The Workers runtime's types follow the compatibility date and flags. `bun run types` makes them.
+      # The runtime's types and the bindings' follow wrangler.jsonc. `bun run types` makes them, and
+      # the check reruns the command the file records.
       - name: Check the runtime types are current
-        run: node node_modules/wrangler/bin/wrangler.js types --include-env=false --check
+        run: node node_modules/wrangler/bin/wrangler.js types --check
 
       # Builds the exact upload without an account, so a Worker that would not deploy fails here.
       - name: Check the Worker deploys

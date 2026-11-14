@@ -42,7 +42,7 @@ function gate(aDay: string, aMinute = Infinity) {
     },
   };
   const env = { NEW_VISITORS_A_DAY: aDay, NEW_VISITORS };
-  return { gate: new VisitorGate(ctx as never, env), stored, counted };
+  return { gate: new VisitorGate(ctx as never, env as never), stored, counted };
 }
 
 afterEach(() => setSystemTime());

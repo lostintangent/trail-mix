@@ -181,6 +181,7 @@ src/
     accounts/          core/ reads the add-account form, ui/ is the first-run screen and each account's page
   server/
     entry.ts           the Worker entry
+    env.d.ts           the secrets and variables Wrangler can't see, added to the Env it generates
     access.ts          the sign-in seam
     visitors.ts        the public demo's visitor gate, and its limit on each network's changes
     routes/            what is not a server function: hint socket, message bytes, image proxy, avatars, notification buttons
@@ -242,7 +243,7 @@ Great code pursues simplicity by placing a rich domain model at the center, deco
 - **Setup.** `bun install`, copy `dev.vars.example` to `.dev.vars`, then `bun run dev`.
 - **Dependencies are exact versions.** `bun add` pins what it installs, CI installs from the frozen lockfile, and an upgrade is a deliberate edit.
 - **One Markdown.** `marked` is pinned to the version `@tiptap/markdown` resolves to, so the composer's editor and the renderer of its HTML part read Markdown alike. Upgrade the two together.
-- **The Workers runtime's types** are `worker-configuration.d.ts`, which `bun run types` generates from the compatibility date and flags. Regenerate it with any change to either, since CI fails when it is stale.
+- **The Workers runtime's types** are `worker-configuration.d.ts`, which `bun run types` generates from `wrangler.jsonc`: the runtime's from the compatibility date and flags, and `Cloudflare.Env` from the bindings and variables it declares, reading no `.dev.vars`, so every machine makes the same file. `src/server/env.d.ts` adds the rest to `Cloudflare.Env`, and Worker code reads that, not the global `Env`, which doesn't take the additions. Regenerate the file with any change to `wrangler.jsonc`, since CI fails when it is stale.
 - **Two type programs.** `bun check` checks the browser and the Worker against their own globals: `tsconfig.browser.json` checks the app and its tests against the DOM, and `tsconfig.worker.json` checks the Worker, each feature's `server`, the providers and the tests that drive them against `worker-configuration.d.ts`, with no DOM. A module both import has to check in each, so Worker code reads the client contract from `mailroom/client/contract.ts`, not `client/index.ts`, and the Outbox's state machine from `outbox/core/index.ts`, not `outbox/index.ts`, which carries its views.
 - **Lint is strict.** Type-aware rules are on and a warning fails the run. To relax a rule, change `bunfig.toml` or add an `eslint-disable-next-line` comment, and say why in either place.
 

@@ -10,28 +10,16 @@ import { networkOf, VISITOR_SECONDS, type VisitorGate as Gate } from './access.t
  * they do. Once in, a network's visitors make only so many changes a minute.
  */
 
-/** A Cloudflare Rate Limiting binding, which counts each key's calls in its period. */
-export type RateLimit = { limit(options: { key: string }): Promise<{ success: boolean }> };
-
-export type VisitorGateEnv = {
-  /**
-   * How many times the demo lets a visitor in a day, in all. The day's admissions are one stored
-   * value, which holds about 2,000 at most, so a larger ceiling needs them kept as rows.
-   */
-  NEW_VISITORS_A_DAY?: string;
-  /** How many new visitors one network may become a minute, as Cloudflare counts it. */
-  NEW_VISITORS?: RateLimit;
-};
-
 /**
  * Today's admissions: the UTC day, how many times the gate has let a visitor in during it, and when
- * it last let in each visitor, in milliseconds since the epoch.
+ * it last let in each visitor, in milliseconds since the epoch. They are one stored value, which
+ * holds about 2,000 visitors at most, so a larger `NEW_VISITORS_A_DAY` needs them kept as rows.
  */
 type Today = { day: string; count: number; letIn: Record<string, number> };
 
 const TODAY = 'admissions';
 
-export class VisitorGate extends DurableObject<VisitorGateEnv> {
+export class VisitorGate extends DurableObject {
   /**
    * Whether a visitor may come in, and when they were let in. One let in within `VISITOR_SECONDS`
    * gets the time they were let in, as their first requests ask at once. Anyone else is let in now,
@@ -60,14 +48,8 @@ export class VisitorGate extends DurableObject<VisitorGateEnv> {
 }
 
 /** The demo's one gate, as the Worker asks it. */
-export function gateOf(namespace: {
-  idFromName(name: string): unknown;
-  get(id: unknown): Gate;
-}): Gate {
-  return {
-    admit: (visitor, network) =>
-      namespace.get(namespace.idFromName('gate')).admit(visitor, network),
-  };
+export function gateOf(namespace: DurableObjectNamespace<VisitorGate>): Gate {
+  return { admit: (visitor, network) => namespace.getByName('gate').admit(visitor, network) };
 }
 
 /** How many new visitors a day the configuration allows. Anything but a whole number lets none in. */
