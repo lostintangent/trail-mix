@@ -48,6 +48,16 @@ const shows = (page: Page, text: string) =>
 /** The thread sheets the bundle's reader shows, each opened by its title. */
 const threadTitles = (page: Page) => reader(page).locator('article > div > button');
 const undoButton = (page: Page) => page.getByRole('button', { name: 'Undo', exact: true });
+/**
+ * The thread the address opens, once the selection has rested and written it, other than `before`.
+ */
+const openedOnceRested = async (page: Page, before?: string) =>
+  (await (
+    await page.waitForFunction((before) => {
+      const open = new URL(location.href).searchParams.get('open');
+      return open !== null && open !== before ? open : undefined;
+    }, before)
+  ).jsonValue()) as string;
 
 test('each Inbox lists one row for each repository, and a search or a folder lists its threads', async () => {
   const page = await open(DESKTOP);
@@ -108,6 +118,8 @@ test('a bundle opens its threads unread, and a thread opens under it, steps by J
   await shows(page, title);
   const threads = Number(/of (\d+)/.exec((await place.textContent())!)![1]);
   expect(threads).toBeGreaterThan(50);
+  // The thread reaches the address once the selection has rested, and J's step would take its place.
+  const newest = await openedOnceRested(page);
   await page.keyboard.press('j');
   await place.getByText(`2 of ${threads}`).waitFor();
   const second = (await (
@@ -118,7 +130,8 @@ test('a bundle opens its threads unread, and a thread opens under it, steps by J
   ).jsonValue()) as string;
 
   // The address keeps the bundle and its thread, and the crumb steps back to the bundle.
-  await page.waitForFunction(() => new URL(location.href).searchParams.has('bundle'));
+  await openedOnceRested(page, newest);
+  expect(new URL(page.url()).searchParams.has('bundle')).toBe(true);
   await page.reload();
   await place.getByText(`2 of ${threads}`).waitFor();
   await shows(page, second);
