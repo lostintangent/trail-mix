@@ -114,11 +114,23 @@ test('each message answers and shows the source of its own, and the palette the 
   await earlier.getByRole('button', { name: 'Reply', exact: true }).click();
   const earlierTo = await answered();
   expect(earlierTo).toContain(earlierName);
-  // Only the newest message's Reply teaches R, the key that answers it.
+  // Only the newest message's Reply teaches R, the key that answers it. The earlier message's body
+  // arrives after it opens and moves the newest down, which takes a Reply out from under a pointer
+  // that reached it first, so the pointer waits for every body and goes to Reply again if it must.
+  await bodies(page);
   const tooltip = async (article: typeof earlier) => {
-    await article.getByRole('button', { name: 'Reply', exact: true }).hover();
+    const reply = article.getByRole('button', { name: 'Reply', exact: true });
     const shown = page.getByRole('tooltip').filter({ hasText: /^Reply/ });
-    await shown.waitFor();
+    for (let tries = 1; ; tries++) {
+      await reply.hover();
+      try {
+        await shown.waitFor({ timeout: 3_000 });
+        break;
+      } catch (error) {
+        if (tries === 3) throw error;
+        await page.mouse.move(0, 0);
+      }
+    }
     const text = await shown.textContent();
     await page.mouse.move(0, 0);
     await shown.waitFor({ state: 'detached' });
