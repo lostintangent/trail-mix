@@ -3,7 +3,13 @@
 // host itself. A provider passes when the index it feeds would mirror the mailbox.
 import { afterAll, beforeEach, describe, expect, test } from 'bun:test';
 import { AsyncLocalStorage } from 'node:async_hooks';
-import type { Envelope, MessageRef, SyncEvent } from '../../src/features/mail/core/index.ts';
+import {
+  refKey,
+  refOf,
+  type Envelope,
+  type MessageRef,
+  type SyncEvent,
+} from '../../src/features/mail/core/index.ts';
 import {
   FIRST_SYNC_BATCH,
   SEARCH_LIMIT,
@@ -200,20 +206,15 @@ export function describeContract(
       await world().deliver(message({ id: 'flag-me', subject: 'Flag me' }));
       const first = await syncAll('INBOX');
       const ref = refOf(arrived(first.events)[0]!);
+      const flags = { seen: true, flagged: true, answered: false, draft: false };
       await provider.setFlags([ref], { seen: true, flagged: true });
       const second = await syncAll('INBOX', first.cursor);
-      expect(second.events).toEqual([
-        { type: 'flags', ref, flags: { seen: true, flagged: true, answered: false, draft: false } },
-      ]);
+      expect(second.events).toEqual([{ type: 'flags', ref, flags }]);
       await provider.setFlags([ref], { seen: true, flagged: true });
       expect((await syncAll('INBOX', second.cursor)).events).toEqual([]);
       await provider.setFlags([ref], { flagged: false });
       expect((await syncAll('INBOX', second.cursor)).events).toEqual([
-        {
-          type: 'flags',
-          ref,
-          flags: { seen: true, flagged: false, answered: false, draft: false },
-        },
+        { type: 'flags', ref, flags: { ...flags, flagged: false } },
       ]);
     });
 
@@ -257,14 +258,11 @@ export function describeContract(
       await world().deliver(message({ id: 'one', subject: 'One', minutesAgo: 1 }));
       await world().deliver(message({ id: 'two', subject: 'Two' }));
       const archive = await role('archive');
-      const listed = async () => ({
-        inbox: arrived((await syncAll('INBOX')).events)
+      const ids = async (path: string) =>
+        arrived((await syncAll(path)).events)
           .map((e) => e.messageId)
-          .sort(),
-        archive: arrived((await syncAll(archive)).events)
-          .map((e) => e.messageId)
-          .sort(),
-      });
+          .sort();
+      const listed = async () => ({ inbox: await ids('INBOX'), archive: await ids(archive) });
       const before = await listed();
       const chosen = arrived((await syncAll('INBOX')).events)
         .filter((e) => e.subject !== 'Keep')
@@ -563,15 +561,7 @@ export function describeContract(
 }
 
 /** Refs as comparable keys, in one order. */
-const keys = (refs: MessageRef[]) =>
-  refs.map(({ path, uidValidity, uid }) => `${path} ${uidValidity} ${uid}`).sort();
-
-const refOf = ({ account, path, uidValidity, uid }: MessageRef): MessageRef => ({
-  account,
-  path,
-  uidValidity,
-  uid,
-});
+const keys = (refs: MessageRef[]) => refs.map(refKey).sort();
 const bytes = (raw: string) => new TextEncoder().encode(raw);
 
 async function until(done: () => boolean, ms = 5000) {
@@ -611,42 +601,34 @@ export function message(fields: {
     ...(fields.list ? [`List-Id: News <${fields.list}>`] : []),
     'MIME-Version: 1.0',
   ];
-  const text = fields.text ?? `This is ${fields.subject}.`;
-  if (fields.html !== undefined) {
-    return [
-      ...headers,
-      'Content-Type: multipart/alternative; boundary="part"',
-      '',
-      '--part',
-      'Content-Type: text/plain; charset=utf-8',
-      '',
-      text,
-      '--part',
-      'Content-Type: text/html; charset=utf-8',
-      '',
-      fields.html,
-      '--part--',
-      '',
-    ].join('\r\n');
-  }
-  if (!fields.attachment) {
-    return [...headers, 'Content-Type: text/plain; charset=utf-8', '', text, ''].join('\r\n');
-  }
-  return [
-    ...headers,
-    'Content-Type: multipart/mixed; boundary="part"',
-    '',
-    '--part',
+  const text = [
     'Content-Type: text/plain; charset=utf-8',
     '',
-    text,
-    '--part',
+    fields.text ?? `This is ${fields.subject}.`,
+  ];
+  const html = fields.html !== undefined && [
+    'Content-Type: text/html; charset=utf-8',
+    '',
+    fields.html,
+  ];
+  const file = fields.attachment && [
     'Content-Type: application/pdf; name="plan.pdf"',
     'Content-Disposition: attachment; filename="plan.pdf"',
     'Content-Transfer-Encoding: base64',
     '',
     btoa('%PDF-1.4 a plan'),
-    '--part--',
-    '',
-  ].join('\r\n');
+  ];
+  const second = html || file;
+  const body = second
+    ? [
+        `Content-Type: multipart/${html ? 'alternative' : 'mixed'}; boundary="part"`,
+        '',
+        '--part',
+        ...text,
+        '--part',
+        ...second,
+        '--part--',
+      ]
+    : text;
+  return [...headers, ...body, ''].join('\r\n');
 }

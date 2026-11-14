@@ -7,7 +7,12 @@ import { createServer, connect, type AddressInfo, type Socket } from 'node:net';
 import { ImapFlow } from 'imapflow';
 import nodemailer from 'nodemailer';
 import { SendFailure } from '../../src/features/providers/index.ts';
-import { checkSignIn, imapProvider } from '../../src/features/providers/imap/provider.ts';
+import {
+  checkSignIn,
+  imapProvider,
+  type ImapAccount,
+  type Network,
+} from '../../src/features/providers/imap/provider.ts';
 import {
   DROP_AFTER_DATA_HEADER,
   caFile,
@@ -30,21 +35,26 @@ import { describeContract, message, type Harness } from './contract.ts';
 
 const { alice } = users;
 const auth = { user: alice.email, pass: alice.password };
+const ca = () => readFileSync(caFile, 'utf8');
+const bytes = (raw: string) => new TextEncoder().encode(raw);
 afterAll(stop);
 
-async function harness(profile: Profile): Promise<Harness> {
-  await start(profile);
-  const ca = readFileSync(caFile, 'utf8');
-  const provider = imapProvider(
+/** The IMAP provider, signed in as alice at the test mail server, with what a case changes. */
+const aliceAt = (account: Partial<ImapAccount> = {}, network: Network = {}) =>
+  imapProvider(
     {
       account: 'test',
       imap: { host: 'localhost', port: ports.imaps, secure: true },
       smtp: { host: 'localhost', port: ports.submissions, secure: true },
       auth,
-      filesSent: profiles[profile].filesSent,
+      ...account,
     },
-    { ca },
+    { ca: ca(), ...network },
   );
+
+async function harness(profile: Profile): Promise<Harness> {
+  await start(profile);
+  const provider = aliceAt({ filesSent: profiles[profile].filesSent });
 
   // Another client of the same mailbox, for what happens elsewhere. A UIDVALIDITY reset makes the
   // server end every session, so it reconnects when it has to.
@@ -56,7 +66,7 @@ async function harness(profile: Profile): Promise<Harness> {
       port: ports.imaps,
       secure: true,
       auth,
-      tls: { ca: [ca] },
+      tls: { ca: [ca()] },
       logger: false,
     });
     other.on('error', () => {});
@@ -102,7 +112,7 @@ async function harness(profile: Profile): Promise<Harness> {
         port: ports.submissions,
         secure: true,
         auth,
-        tls: { ca: [ca] },
+        tls: { ca: [ca()] },
       });
       await transport.sendMail({ envelope: { from: alice.email, to: [alice.email] }, raw });
       transport.close();
@@ -123,22 +133,17 @@ for (const profile of Object.keys(profiles) as Profile[]) {
 }
 
 describe('The IMAP provider', () => {
-  const bytes = (raw: string) => new TextEncoder().encode(raw);
-  const provider = (smtpPort = ports.submissions) =>
-    imapProvider(
-      {
-        account: 'test',
-        imap: { host: 'localhost', port: ports.imaps, secure: true },
-        smtp: { host: 'localhost', port: smtpPort, secure: true },
-        auth,
-      },
-      { ca: readFileSync(caFile, 'utf8') },
-    );
-  /** Saves a draft, submits it, and says how the submit failed and how often it arrived. */
-  async function failedSubmit(fields: { id: string; to?: string; extra?: string }, port?: number) {
+  const smtpAt = (port: number, secure = true) => ({ smtp: { host: 'localhost', port, secure } });
+  /**
+   * Saves a draft and submits it through `sending`, which fails. Says how it failed, how long the
+   * submit took, and how often the message arrived.
+   */
+  async function failedSubmit(
+    fields: { id: string; to?: string; extra?: string },
+    sending = aliceAt(),
+  ) {
     await start('full');
     await empty(alice.email);
-    const sending = provider(port);
     const raw = message({
       id: fields.id,
       subject: fields.id,
@@ -146,13 +151,16 @@ describe('The IMAP provider', () => {
       to: fields.to ?? alice.email,
     });
     const draft = await sending.saveDraft(bytes(fields.extra ? `${fields.extra}\r\n${raw}` : raw));
-    const failure = await sending.submit(draft, `<${fields.id}@example.com>`).then(
-      () => undefined,
-      (error: unknown) => error,
-    );
+    const started = Date.now();
+    const failure = await sending
+      .submit(draft, `<${fields.id}@example.com>`)
+      .catch((e: unknown) => e);
+    const took = Date.now() - started;
     await sending.close();
+    expect(failure).toBeInstanceOf(SendFailure);
     return {
-      failure,
+      failure: failure as SendFailure,
+      took,
       delivered: await count(alice.email, 'INBOX'),
       drafts: await count(alice.email, 'Drafts'),
     };
@@ -163,17 +171,16 @@ describe('The IMAP provider', () => {
       id: 'refused',
       to: 'someone@example.com',
     });
-    expect(failure).toBeInstanceOf(SendFailure);
-    expect(failure).toMatchObject({ passing: false });
-    expect((failure as SendFailure).message).toMatch(/^localhost refused it: 550 /);
+    expect(failure.passing).toBe(false);
+    expect(failure.message).toMatch(/^localhost refused it: 550 /);
     expect({ delivered, drafts }).toEqual({ delivered: 0, drafts: 1 });
   }, 30_000);
 
   test('a submit that cannot reach the host fails for now, and delivers nothing', async () => {
-    const { failure, delivered } = await failedSubmit({ id: 'unreachable' }, ports.lmtp + 1);
-    expect(failure).toBeInstanceOf(SendFailure);
-    expect(failure).toMatchObject({ passing: true });
-    expect((failure as SendFailure).message).toMatch(/^Couldn’t reach localhost: /);
+    const unreachable = aliceAt(smtpAt(ports.lmtp + 1));
+    const { failure, delivered } = await failedSubmit({ id: 'unreachable' }, unreachable);
+    expect(failure.passing).toBe(true);
+    expect(failure.message).toMatch(/^Couldn’t reach localhost: /);
     expect(delivered).toBe(0);
   }, 30_000);
 
@@ -183,8 +190,6 @@ describe('The IMAP provider', () => {
     ['after its greeting', { secure: false, greets: true }],
   ] as const) {
     test(`a submit to a host that goes quiet ${quiet} fails for now, after a while`, async () => {
-      await start('full');
-      await empty(alice.email);
       const host = Bun.listen({
         hostname: 'localhost',
         port: 0,
@@ -193,26 +198,13 @@ describe('The IMAP provider', () => {
           data() {},
         },
       });
-      const sending = imapProvider(
-        {
-          account: 'test',
-          imap: { host: 'localhost', port: ports.imaps, secure: true },
-          smtp: { host: 'localhost', port: host.port, secure: smtp.secure },
-          auth,
-        },
-        { ca: readFileSync(caFile, 'utf8'), patience: 1000 },
-      );
       try {
-        const raw = message({ id: 'quiet', subject: 'quiet', from: alice.email, to: alice.email });
-        const draft = await sending.saveDraft(bytes(raw));
-        const started = Date.now();
-        const failure = await sending.submit(draft, '<quiet@example.com>').catch((e: unknown) => e);
-        expect(Date.now() - started).toBeLessThan(5000);
-        expect(failure).toBeInstanceOf(SendFailure);
-        expect(failure).toMatchObject({ passing: true });
-        expect((failure as SendFailure).message).toMatch(/^Couldn’t reach localhost: /);
+        const quietHost = aliceAt(smtpAt(host.port, smtp.secure), { patience: 1000 });
+        const { failure, took } = await failedSubmit({ id: 'quiet' }, quietHost);
+        expect(took).toBeLessThan(5000);
+        expect(failure.passing).toBe(true);
+        expect(failure.message).toMatch(/^Couldn’t reach localhost: /);
       } finally {
-        await sending.close();
         host.stop(true);
       }
     }, 30_000);
@@ -223,9 +215,8 @@ describe('The IMAP provider', () => {
       id: 'dropped',
       extra: DROP_AFTER_DATA_HEADER,
     });
-    expect(failure).toBeInstanceOf(SendFailure);
-    expect(failure).toMatchObject({ passing: false });
-    expect((failure as SendFailure).message).toContain('so it may have been delivered');
+    expect(failure.passing).toBe(false);
+    expect(failure.message).toContain('so it may have been delivered');
     expect(delivered).toBe(1);
   }, 30_000);
 
@@ -233,14 +224,9 @@ describe('The IMAP provider', () => {
     await start('full');
     await empty(alice.email);
     const relay = quietable(ports.imaps);
-    const reading = imapProvider(
-      {
-        account: 'test',
-        imap: { host: 'localhost', port: await relay.port, secure: true },
-        smtp: { host: 'localhost', port: ports.submissions, secure: true },
-        auth,
-      },
-      { ca: readFileSync(caFile, 'utf8'), patience: 1000 },
+    const reading = aliceAt(
+      { imap: { host: 'localhost', port: await relay.port, secure: true } },
+      { patience: 1000 },
     );
     try {
       const raw = message({
@@ -265,15 +251,7 @@ describe('The IMAP provider', () => {
   test('watches again after the server drops it, and reports what it may have missed', async () => {
     await start('full');
     await empty(alice.email);
-    const provider = imapProvider(
-      {
-        account: 'test',
-        imap: { host: 'localhost', port: ports.imaps, secure: true },
-        smtp: { host: 'localhost', port: ports.submissions, secure: true },
-        auth,
-      },
-      { ca: readFileSync(caFile, 'utf8') },
-    );
+    const provider = aliceAt();
     let changes = 0;
     const stop = provider.watch('INBOX', () => changes++);
     await Bun.sleep(1000);
@@ -297,7 +275,6 @@ describe('The IMAP provider, signed in with a token', () => {
     auth: { user, accessToken },
     filesSent: true,
   });
-  const network = () => ({ ca: readFileSync(caFile, 'utf8') });
 
   test('asks for a token for each new connection, so one that ran out costs only a reconnect', async () => {
     await start('outlook');
@@ -309,7 +286,7 @@ describe('The IMAP provider, signed in with a token', () => {
         asked.push(await tokens.fresh());
         return asked.at(-1)!;
       }),
-      network(),
+      { ca: ca() },
     );
     try {
       expect((await provider.folders()).length).toBeGreaterThan(0);
@@ -321,7 +298,7 @@ describe('The IMAP provider, signed in with a token', () => {
       expect(asked).toHaveLength(2);
 
       const raw = message({ id: 'token', subject: 'token', from: alice.email, to: alice.email });
-      const draft = await provider.saveDraft(new TextEncoder().encode(raw));
+      const draft = await provider.saveDraft(bytes(raw));
       await provider.submit(draft, '<token@example.com>');
       expect(asked).toHaveLength(3);
       await settled();
@@ -334,7 +311,7 @@ describe('The IMAP provider, signed in with a token', () => {
   test('checking the sign-in takes a good token, and refuses another person’s without repeating it', async () => {
     await start('outlook');
     const alices = await signedIn(identity.origin, alice.email);
-    await checkSignIn(outlook(alices.fresh), network());
+    await checkSignIn(outlook(alices.fresh), { ca: ca() });
 
     const bobs = await signedIn(identity.origin, bob.email);
     const given: string[] = [];
@@ -343,7 +320,7 @@ describe('The IMAP provider, signed in with a token', () => {
         given.push(await bobs.fresh());
         return given.at(-1)!;
       }),
-      network(),
+      { ca: ca() },
     ).then(
       () => 'kept',
       (error: Error) => error.message,
@@ -358,7 +335,7 @@ describe('The IMAP provider, signed in with a token', () => {
     const lapsed = new Error('The sign-in has lapsed.');
     const failed = await checkSignIn(
       outlook(() => Promise.reject(lapsed)),
-      network(),
+      { ca: ca() },
     ).catch((error: unknown) => error);
     expect(failed).toBe(lapsed);
   }, 30_000);
