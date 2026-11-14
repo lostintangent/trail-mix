@@ -572,7 +572,7 @@ test('Delete and Backspace delete an open conversation from the list and message
   }
 }, 60_000);
 
-test('Delete and Backspace delete the whole selection together, and Undo restores it', async () => {
+test('Delete and Backspace delete the whole selection together, and Undo restores all of it at once', async () => {
   for (const key of ['Delete', 'Backspace']) {
     const here = await inbox();
     const options = here.getByRole('option');
@@ -589,8 +589,16 @@ test('Delete and Backspace delete the whole selection together, and Undo restore
       await listedSummary(here, text).waitFor({ state: 'detached', timeout: 1_000 });
     }
     await undoButton(here).waitFor();
+    // The picked rows come from both accounts, so Undo moves each account's back. It asks for
+    // every move before any answers, so a page closed as soon as it shows them back loses none.
+    const undoing: string[] = [];
+    const isMove = (request: Request) => request.postData()?.includes('"move"') ?? false;
+    here.on('request', (request) => isMove(request) && undoing.push('asked'));
+    here.on('response', (response) => isMove(response.request()) && undoing.push('answered'));
     await here.keyboard.press('z');
     for (const text of picked) await listedSummary(here, text).waitFor({ timeout: ELSEWHERE_MS });
+    await until(() => Promise.resolve(undoing.length === 4), ELSEWHERE_MS);
+    expect(undoing).toEqual(['asked', 'asked', 'answered', 'answered']);
     await here.context().close();
   }
 }, 30_000);

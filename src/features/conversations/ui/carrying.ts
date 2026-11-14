@@ -102,9 +102,10 @@ export async function carryOut({
     // The refs from before a move are retired, so a move back waits for the refs it gives.
     if (done.some(({ command }) => 'setFlags' in command)) restoreMessages();
     try {
-      for (const { command, moved } of done) {
-        for (const step of undoOf(command, moved)) await carry(step);
-      }
+      // Every step leaves at once, since each moves its own messages, so a page that closes the
+      // moment it shows them back has already asked for all of them.
+      const steps = done.flatMap(({ command, moved }) => undoOf(command, moved));
+      await Promise.all(steps.map(carry));
       overlays.settle(back);
     } catch (error) {
       overlays.lift(back);
