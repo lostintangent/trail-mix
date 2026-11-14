@@ -2,7 +2,7 @@ import { expect } from 'bun:test';
 import { join } from 'node:path';
 import type { BrowserContextOptions, Page } from 'playwright';
 import { atRest } from '../atRest.ts';
-import { bodiesShown, shownSubject } from './helpers.ts';
+import { bodiesShown, hold, shownSubject } from './helpers.ts';
 import { RESULTS, SIZES, suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 
@@ -37,9 +37,18 @@ const HEADER_OFFLINE = {
 const NEVER_OPENED = /Trip photos/;
 
 // install.test.ts holds every icon to its size, and installing fetches the manifest's.
-test('Chromium can install Trail Mix, and asks for its manifest with the member’s cookie, and an iPhone finds its touch icon', async () => {
+test('a browser tab keeps nothing, Chromium can install Trail Mix from it with the member’s cookie on its manifest, and an iPhone finds its touch icon', async () => {
   const context = await app.context();
   await context.addCookies([{ name: 'CF_Authorization', value: 'member', url: app.url }]);
+  await context.addInitScript(() => {
+    const { prototype } = ServiceWorkerContainer;
+    const register = Object.getOwnPropertyDescriptor(prototype, 'register')!
+      .value as typeof prototype.register;
+    prototype.register = function (this: ServiceWorkerContainer, ...args) {
+      Object.assign(window, { isWorkerAskedFor: true });
+      return register.apply(this, args);
+    };
+  });
   const page = await context.newPage();
   const asked = page.waitForRequest(/\/manifest\.webmanifest$/);
   await page.goto(app.url, { waitUntil: 'networkidle' });
@@ -54,6 +63,12 @@ test('Chromium can install Trail Mix, and asks for its manifest with the member�
   expect(touch).toBe('/icons/apple-touch-icon.png');
   const response = await page.request.get(new URL(touch!, app.url).href);
   expect(response.headers()['content-type']).toBe('image/png');
+
+  // An installed app's page asks for its worker in a timer it sets once loaded, which has run once
+  // one set now has.
+  await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  expect(await page.evaluate(() => 'isWorkerAskedFor' in window)).toBe(false);
+  expect(await page.evaluate(() => navigator.serviceWorker.getRegistrations())).toHaveLength(0);
 });
 
 test('the installed app with nothing kept opens offline, and says at once it can’t reach the mail', async () => {
@@ -357,11 +372,8 @@ test('what a device kept of another Mailroom never shows, and goes', async () =>
       );
       if (owner === 'another') localStorage.setItem('trail-mix.cache', 'another Mailroom');
     }, owner);
-    // The network's accounts come late, so only kept ones could show before them.
-    await page.route(/accounts/, async (route) => {
-      await new Promise((resolve) => setTimeout(resolve, 1_500));
-      await route.continue();
-    });
+    // The network's accounts are held, so only kept ones could show before them.
+    const accounts = await hold(page, 'accounts');
     // Whether a stranger's name ever shows, until the network's accounts do.
     await page.addInitScript(() => {
       const watching = new MutationObserver(() => {
@@ -372,32 +384,17 @@ test('what a device kept of another Mailroom never shows, and goes', async () =>
       watching.observe(document, { subtree: true, childList: true, characterData: true });
     });
     await page.reload();
+    // Ours shows what it kept. Another's is cleared, then this Mailroom is named its owner.
+    await (owner === 'ours'
+      ? page.getByRole('region', { name: 'Mallory' }).first().waitFor()
+      : page.waitForFunction(() => localStorage.getItem('trail-mix.cache') !== 'another Mailroom'));
+    await accounts.release();
     await page.getByRole('region', { name: 'Personal' }).waitFor();
     const shown = await page.evaluate(() => 'isStrangerShown' in window);
     expect({ owner, shown }).toEqual({ owner, shown: owner === 'ours' });
     await context.close();
   }
 }, 60_000);
-
-test('a browser tab keeps nothing, and its page loads as it always has', async () => {
-  const context = await app.context();
-  await context.addInitScript(() => {
-    const { prototype } = ServiceWorkerContainer;
-    const register = Object.getOwnPropertyDescriptor(prototype, 'register')!
-      .value as typeof prototype.register;
-    prototype.register = function (this: ServiceWorkerContainer, ...args) {
-      Object.assign(window, { isWorkerAskedFor: true });
-      return register.apply(this, args);
-    };
-  });
-  const page = await context.newPage();
-  await page.goto(app.url, { waitUntil: 'networkidle' });
-  // An installed app's page asks for its worker in a timer it sets once loaded, which has run once
-  // one set now has.
-  await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
-  expect(await page.evaluate(() => 'isWorkerAskedFor' in window)).toBe(false);
-  expect(await page.evaluate(() => navigator.serviceWorker.getRegistrations())).toHaveLength(0);
-});
 
 /** A page of Trail Mix run as an installed app, once its worker has kept the build. */
 async function installed(options: BrowserContextOptions = SIZES.desktop) {

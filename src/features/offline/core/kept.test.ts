@@ -1,20 +1,8 @@
 import { describe, expect, test } from 'bun:test';
+import { keys } from '../../mailroom/client/index.ts';
 import { BODY_LIMITS, evictions, isKept, keptOf, type Held, type Persisted } from './kept.ts';
 
-// The query keys the Mailroom's client gives its snapshots.
-const ref = { account: 'a', path: 'INBOX', validity: 1, uid: 1 };
-const keys = {
-  accounts: ['accounts'],
-  signIns: ['accounts', 'sign-ins'],
-  signInPresets: ['sign-in-presets'],
-  thisDevice: ['this-device'],
-  folders: ['folders'],
-  outbox: ['outbox'],
-  page: (view: unknown, at: number) => ['conversations', view, at],
-  bundlePage: (id: string, at: number) => ['bundle', id, at],
-  conversation: (id: string) => ['conversation', id],
-  body: (message: typeof ref) => ['body', message],
-};
+const ref = { account: 'a', path: 'INBOX', uidValidity: 1, uid: 1 };
 
 const persisted = (queryKey: readonly unknown[], data: unknown): Persisted => ({
   queryKey,
@@ -36,11 +24,11 @@ describe('what is kept', () => {
       keys.body(ref),
     ];
     expect(kept(showing)).toEqual(showing);
-    expect(kept([keys.signIns, keys.signInPresets, keys.thisDevice])).toEqual([]);
+    expect(kept([keys.signIns, keys.signInPresets, keys.notified(undefined)])).toEqual([]);
   });
 
   test('a list or a bundle keeps its first page, which is what opens first, and no page further down', () => {
-    const inbox = { in: 'inbox' };
+    const inbox = { in: 'inbox' } as const;
     const first = [keys.page(inbox, 0), keys.bundlePage(bundle, 0)];
     const further = [keys.page(inbox, 50), keys.page(inbox, 100), keys.bundlePage(bundle, 50)];
     expect(kept([...first, ...further])).toEqual(first);

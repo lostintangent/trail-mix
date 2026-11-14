@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { BrowserContext, BrowserContextOptions, Locator, Page } from 'playwright';
 import { PAGE_SIZE } from '../../src/features/mailroom/client/contract.ts';
 import { RESULTS, SIZES, suite } from './suite.ts';
-import { goTo, problems } from './helpers.ts';
+import { goTo, problems, shownSubject } from './helpers.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 
 /**
@@ -40,7 +40,7 @@ async function open(
   return { context, page, problems: met };
 }
 
-test('a list dragged far down asks only for where it stops, and mail that arrives there moves nothing in sight, but leads it at the top', async () => {
+test('a list dragged far down asks only for where it stops, and rows that go or come above move nothing in sight, but show at the top', async () => {
   const { page, problems } = await open();
   const list = page.locator('[role="listbox"][aria-multiselectable]');
   const length = async () =>
@@ -94,43 +94,29 @@ test('a list dragged far down asks only for where it stops, and mail that arrive
   const seen = await inSight();
   expect(seen.length).toBeGreaterThan(5);
 
-  // The demo delivers what Sam sends Sam to Sam's Inbox once its send goes.
-  const subject = `Arrived while scrolled down ${Date.now()}`;
-  await page.keyboard.press('c');
-  const composer = page.locator('section[aria-label="New message"]');
-  await composer.getByRole('combobox', { name: 'To' }).fill('sam@trailmix.test');
-  await composer.getByRole('textbox', { name: 'Subject' }).fill(subject);
-  await page.getByRole('status').filter({ hasText: 'Saved to Drafts' }).waitFor();
-  await page.getByRole('button', { name: 'Send', exact: true }).filter({ visible: true }).click();
-  await page.waitForFunction(
-    (before) =>
-      Number(document.querySelector('[role="option"]')?.getAttribute('aria-setsize')) > before,
-    before,
-    { timeout: 30_000 },
-  );
-
-  expect(await length()).toBe(before + 1);
-  expect(await inSight()).toEqual(seen);
+  // Another device archives the second row and takes it back, so a row goes above and comes back.
+  const there = await (await app.context(SIZES.desktop)).newPage();
+  await there.goto(app.url);
+  await mailIsIn(there);
+  await there.locator('[role="option"][aria-posinset="2"]').click();
+  const subject = await shownSubject(there);
+  for (const [key, shown] of [
+    ['e', before - 1],
+    ['z', before],
+  ] as const) {
+    await there.keyboard.press(key);
+    await list.locator(`[role="option"][aria-setsize="${shown}"]`).first().waitFor();
+    expect(await inSight()).toEqual(seen);
+  }
   await list.evaluate((list) => (list.scrollTop = 0));
-  await list.getByRole('option').first().filter({ hasText: subject }).waitFor({ timeout: 5_000 });
+  await list
+    .locator('[role="option"][aria-posinset="2"]')
+    .filter({ hasText: subject })
+    .waitFor({ timeout: 5_000 });
   expect(problems).toEqual([]);
 }, 60_000);
 
-test('End selects the last conversation once its page arrives', async () => {
-  const { page, problems } = await open();
-  const list = page.locator('[role="listbox"][aria-multiselectable]');
-  const length = Number(await list.getByRole('option').first().getAttribute('aria-setsize'));
-  expect(length).toBeGreaterThan(PAGE_SIZE);
-
-  await list.focus();
-  await page.keyboard.press('End');
-  await list
-    .locator(`[role="option"][aria-selected="true"][aria-posinset="${length}"]`)
-    .waitFor({ timeout: 5_000 });
-  expect(problems).toEqual([]);
-}, 30_000);
-
-test('Shift and an arrow key grow or shrink a selection at the end that moves, while the other end stays', async () => {
+test('Shift and an arrow key grow or shrink a selection at the end that moves, and End selects the last conversation once its page arrives', async () => {
   const { page, problems } = await open();
   const list = page.locator('[role="listbox"][aria-multiselectable]');
   /** The rows selected and the one the list names as active, by their places in the list. */
@@ -163,6 +149,13 @@ test('Shift and an arrow key grow or shrink a selection at the end that moves, w
   await press('Shift+ArrowUp', { selected: [1, 2], active: 1 });
   // An arrow alone moves on from the end that moved last.
   await press('ArrowDown', { selected: [2], active: 2 });
+
+  const length = Number(await list.getByRole('option').first().getAttribute('aria-setsize'));
+  expect(length).toBeGreaterThan(PAGE_SIZE);
+  await page.keyboard.press('End');
+  await list
+    .locator(`[role="option"][aria-selected="true"][aria-posinset="${length}"]`)
+    .waitFor({ timeout: 5_000 });
   expect(problems).toEqual([]);
 }, 30_000);
 
@@ -487,7 +480,8 @@ test('a conversation only the member wrote names whom it went to, and leads with
   ).resolves.toBeGreaterThan(0);
   expect(await avatarOf(page, 'To Rae Holm').textContent()).toBe('RH');
 
-  // A draft addressed to nobody yet says so, in the muted ink of a row's preview.
+  // A draft addressed to nobody yet says so, in the muted ink of a row's preview, and with no
+  // preview of its own it stands as tall as every row.
   const subject = `Nobody yet ${Date.now()}`;
   await page.keyboard.press('c');
   await page
@@ -499,6 +493,8 @@ test('a conversation only the member wrote names whom it went to, and leads with
   await nobody.waitFor({ timeout: 10_000 });
   const inkOf = (text: Locator) => text.evaluate((element) => getComputedStyle(element).color);
   expect(await inkOf(nobody)).toBe(await inkOf(row(page, 'To Rae Holm').getByText(/^Hi Rae/)));
+  const heightOf = (row: Locator) => row.evaluate((row) => row.getBoundingClientRect().height);
+  expect(await heightOf(row(page, subject))).toBe(await heightOf(row(page, 'To Rae Holm')));
   expect(problems).toEqual([]);
 }, 60_000);
 

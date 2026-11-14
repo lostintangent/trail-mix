@@ -59,34 +59,17 @@ describe('The first-run screen', () => {
     }
   }, 60_000);
 
-  test('a Mailroom that can’t be reached says so, and Try again comes back to it', async () => {
-    const page = await (await app.context(SIZES.desktop)).newPage();
-    // Every query fails, as when the network is down or a sign-in has run out.
+  test('a Mailroom that can’t be reached says what failed, and comes back by Try again or once the tab is seen', async () => {
+    const newPage = async () => (await app.context(SIZES.desktop)).newPage();
+    const [lost, refused] = await Promise.all([newPage(), newPage()]);
+    // Every query fails for one, as when the network is down or a sign-in has run out.
     const asked: number[] = [];
-    await page.route('**/_serverFn/**', (route) => {
+    await lost.route('**/_serverFn/**', (route) => {
       if (route.request().url().includes('%22accounts%22')) asked.push(Date.now());
       return route.request().method() === 'GET' ? route.abort() : route.fallback();
     });
-    await page.goto(app.url);
-    // Once its tries are spent: the browser says it's online, so the request it lost is asked
-    // again, three times over seven seconds.
-    await page
-      .getByRole('heading', { name: 'Trail Mix can’t reach your mail' })
-      .waitFor({ timeout: 15_000 });
-    const waited = (asked.at(-1) ?? 0) - (asked[0] ?? 0);
-    expect({ asks: asked.length, isSpread: waited > 5_000 }).toEqual({ asks: 4, isSpread: true });
-    // Online, the browser's own words are the only clue to what went wrong.
-    await page.getByText('No answer came: Failed to fetch', { exact: true }).waitFor();
-    await page.screenshot({ path: join(RESULTS, 'desktop-light-unreachable.png') });
-    await page.unroute('**/_serverFn/**');
-    await page.getByRole('button', { name: 'Try again' }).click();
-    await page.getByRole('heading', { name: 'Welcome to Trail Mix' }).waitFor();
-  }, 30_000);
-
-  test('a Mailroom that answered with an error says what failed, and comes back once the tab is seen', async () => {
-    const page = await (await app.context(SIZES.desktop)).newPage();
-    // Every query is answered with an error, as when a deploy restarts the Mailroom.
-    await page.route('**/_serverFn/**', (route) =>
+    // Every query is answered with an error for the other, as when a deploy restarts the Mailroom.
+    await refused.route('**/_serverFn/**', (route) =>
       route.request().method() === 'GET'
         ? route.fulfill({
             status: 503,
@@ -95,15 +78,31 @@ describe('The first-run screen', () => {
           })
         : route.fallback(),
     );
-    await page.goto(app.url);
-    await page
-      .getByRole('heading', { name: 'Trail Mix can’t reach your mail' })
-      .waitFor({ timeout: 15_000 });
-    await page.getByText('Trail Mix answered 503: The Mailroom is restarting.').waitFor();
-    await page.unroute('**/_serverFn/**');
+    await Promise.all(
+      [lost, refused].map(async (page) => {
+        await page.goto(app.url);
+        await page
+          .getByRole('heading', { name: 'Trail Mix can’t reach your mail' })
+          .waitFor({ timeout: 15_000 });
+      }),
+    );
+
+    // Once its tries are spent: the browser says it's online, so the request it lost is asked
+    // again, three times over seven seconds.
+    const waited = (asked.at(-1) ?? 0) - (asked[0] ?? 0);
+    expect({ asks: asked.length, isSpread: waited > 5_000 }).toEqual({ asks: 4, isSpread: true });
+    // Online, the browser's own words are the only clue to what went wrong.
+    await lost.getByText('No answer came: Failed to fetch', { exact: true }).waitFor();
+    await lost.screenshot({ path: join(RESULTS, 'desktop-light-unreachable.png') });
+    await lost.unroute('**/_serverFn/**');
+    await lost.getByRole('button', { name: 'Try again' }).click();
+    await lost.getByRole('heading', { name: 'Welcome to Trail Mix' }).waitFor();
+
+    await refused.getByText('Trail Mix answered 503: The Mailroom is restarting.').waitFor();
+    await refused.unroute('**/_serverFn/**');
     // Coming back to the tab asks again, with no button pressed.
-    await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
-    await page.getByRole('heading', { name: 'Welcome to Trail Mix' }).waitFor();
+    await refused.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await refused.getByRole('heading', { name: 'Welcome to Trail Mix' }).waitFor();
   }, 30_000);
 });
 

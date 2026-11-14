@@ -1,10 +1,9 @@
 import { expect } from 'bun:test';
-import { join } from 'node:path';
 import type { Page, Request, Route } from 'playwright';
 import { DWELL_MS } from '../../src/features/workbench/ui/useReadMark.ts';
 import { bodiesShown, goTo, hold, reader, shownSubject } from './helpers.ts';
-import { unusable } from './usable.ts';
-import { RESULTS, SIZES, suite } from './suite.ts';
+import { expectUsable } from './usable.ts';
+import { SIZES, suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 import { atRest } from '../atRest.ts';
 import { until } from '../until.ts';
@@ -31,32 +30,6 @@ async function inbox(
   await page.goto(app.url);
   await mailIsIn(page);
   return page;
-}
-
-/**
- * Holds every command this browser sends for a second, so what it shows before then can only be
- * its own doing, and the Mailroom's answer and hints come after. The release lets the held
- * commands through, then stops holding. Each request goes on to any route the test set before,
- * so a browser kept from hearing something stays deaf to it while commands are held.
- */
-async function slowCommands(page: Page): Promise<() => Promise<void>> {
-  const held: Promise<void>[] = [];
-  const hold = (route: Route) => {
-    const through = (async () => {
-      if (route.request().method() === 'POST') await new Promise((done) => setTimeout(done, 1_000));
-      // A fetch the app gave up on meanwhile, as a superseded refetch is, is already handled.
-      await route.fallback().catch((error: unknown) => {
-        if (!String(error).includes('already handled')) throw error;
-      });
-    })();
-    held.push(through);
-    return through;
-  };
-  await page.route('**/_serverFn/**', hold);
-  return async () => {
-    await Promise.all(held);
-    await page.unroute('**/_serverFn/**', hold);
-  };
 }
 
 /** A finger on the screen, through the browser's own touch input, as a phone's would come. */
@@ -88,18 +61,6 @@ async function finger(page: Page) {
 async function centerOf(page: Page, at: number) {
   const box = (await page.getByRole('option').nth(at).boundingBox())!;
   return { x: box.x + box.width / 2, y: box.y + box.height / 2, width: box.width };
-}
-
-/** Waits until the reader shows `count` messages' HTML, each in its frame. */
-async function framesShown(page: Page, count: number) {
-  await page.waitForFunction(
-    (count) =>
-      [
-        ...document.querySelectorAll<HTMLIFrameElement>('section[aria-label="Reader"] iframe'),
-      ].filter((frame) => frame.style.visibility === 'visible').length === count,
-    count,
-    { timeout: ELSEWHERE_MS },
-  );
 }
 
 const row = (page: Page, subject: RegExp) => page.getByRole('option').filter({ hasText: subject });
@@ -195,9 +156,9 @@ test('archiving shows at once, reaches another open browser, and Undo brings it 
   await expect(shownSubject(here)).resolves.toBe('Invoice for October');
   await bar(here).getByRole('button', { name: 'Archive' }).waitFor();
 
-  const release = await slowCommands(here);
+  const commands = await hold(here, (request) => request.method() === 'POST');
   expect(await msUntilGone(here, 'Archive', 'Invoice for October')).toBeLessThan(50);
-  await release();
+  await commands.release();
   await expect(textAt(here, place - 1)).resolves.toBe(above);
   await row(there, subject).waitFor({ state: 'detached', timeout: ELSEWHERE_MS });
 
@@ -306,10 +267,10 @@ test('a flag and a read mark show at once and in the other browser, and Undo tak
   const flagged = (page: Page) => row(page, subject).getByRole('img', { name: 'Flagged' });
   await row(here, subject).click();
 
-  const release = await slowCommands(here);
+  const commands = await hold(here, (request) => request.method() === 'POST');
   await bar(here).getByRole('button', { name: 'Flag', exact: true }).click();
   await flagged(here).waitFor({ timeout: 500 });
-  await release();
+  await commands.release();
   await flagged(there).waitFor({ timeout: ELSEWHERE_MS });
   await undoButton(here).click();
   await flagged(here).waitFor({ state: 'detached', timeout: 1_000 });
@@ -391,7 +352,7 @@ test('keys run the registry’s commands inside a message, and ? lists them', as
   await goTo(here, 'Toy Box', 'Personal');
   await options.first().click();
   await shownSubject(here);
-  await framesShown(here, 1);
+  await bodiesShown(here);
   // Its heading is its GitHub thread's title, which the thread's earlier numbers share, so its row
   // is known by all the row says.
   const framed = options.filter({ hasText: (await textAt(here, 1)) ?? '' });
@@ -495,12 +456,7 @@ test("a toast's Undo is its icon alone, ruled off from the close, and its toolti
       await undo.hover();
       await here.getByRole('tooltip').filter({ hasText: 'Undo (Z)' }).waitFor();
     }
-    await here.screenshot({ path: join(RESULTS, `toast-undo-${size}-${colorScheme}.png`) });
-    expect({ colorScheme, size, unusable: await unusable(here) }).toEqual({
-      colorScheme,
-      size,
-      unusable: [],
-    });
+    await expectUsable(here, `toast-undo-${size}-${colorScheme}`);
     await undo.click();
     await target.waitFor({ timeout: ELSEWHERE_MS });
     await here.context().close();
@@ -630,10 +586,10 @@ test('folders are created, renamed and deleted, and a move to one deleted elsewh
 
   await bar(here).getByRole('button', { name: 'Move to' }).click();
   // The command is held a moment, so the row is seen gone before the refusal brings it back.
-  const release = await slowCommands(here);
+  const commands = await hold(here, (request) => request.method() === 'POST');
   await here.getByRole('menuitem', { name: 'Journeys' }).click();
   await until(async () => (await textAt(here, 1)) === below, 1_000);
-  await release();
+  await commands.release();
   // The server refuses, so the conversation comes back and a toast says why.
   await until(async () => (await textAt(here, 1)) === moving, ELSEWHERE_MS);
   // The toast and its announcement both say it.

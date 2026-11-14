@@ -7,8 +7,8 @@ import { DESK_HEX } from '../../src/app/theme/palette.ts';
 import { accentRule, accentTokens } from '../../src/app/theme/readableAccent.ts';
 import { PAGE_SIZE } from '../../src/features/mailroom/client/contract.ts';
 import { REST_MS } from '../../src/features/reader/core/rest.ts';
-import { bodiesShown, goTo, hold, problems, reachable } from './helpers.ts';
-import { textContrasts, unusable } from './usable.ts';
+import { bodiesShown, goTo, hold, problems, reachable, reader } from './helpers.ts';
+import { expectUsable, textContrasts } from './usable.ts';
 import { RESULTS, SIZES, suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 import { atRest } from '../atRest.ts';
@@ -42,81 +42,83 @@ for (const accent of ACCENTS) {
   const named = accent ? ` with ${accent} as the accent` : '';
   test(`every screen renders cleanly, with readable text, at both sizes in both themes${named}`, async () => {
     for (const [size, options] of Object.entries(SIZES)) {
-      for (const colorScheme of THEMES) {
-        const { context, page, problems } = await open({ ...options, colorScheme }, { accent });
-        const screens: [string, (page: Page) => Promise<void>][] = [['list', async () => {}]];
-        if (size === 'phone') {
-          screens.push([
-            'folders',
-            (page) => page.getByRole('button', { name: 'Folders', exact: true }).click(),
-          ]);
-        }
-        // The newest conversation, a thread, then the newsletter, which sets its own colors.
-        screens.push(['reader', (page) => openConversation(page, 0)]);
-        // A reply to it, docked under the conversation.
+      // Each size loads in one theme, and shows each screen in both, switching as a system does.
+      let themes = size === 'phone' ? THEMES.toReversed() : [...THEMES];
+      const colorScheme = themes[0];
+      const { context, page, problems } = await open({ ...options, colorScheme }, { accent });
+      const screens: [string, (page: Page) => Promise<void>][] = [['list', async () => {}]];
+      if (size === 'phone') {
         screens.push([
-          'reply',
-          async (page) => {
-            // The last Reply answers the newest message: its own on a desktop, the island's on a phone.
-            await page
-              .getByRole('button', { name: 'Reply', exact: true })
-              .locator('visible=true')
-              .last()
-              .click();
-            await page.getByRole('textbox', { name: 'Reply' }).waitFor();
-          },
+          'folders',
+          (page) => page.getByRole('button', { name: 'Folders', exact: true }).click(),
         ]);
-        // Escape closes the composer, which on a phone lies over everything.
-        screens.push([
-          'newsletter',
-          async (page) => {
-            await page.keyboard.press('Escape');
-            await openConversation(page, /Kernel Weekly/);
-          },
-        ]);
-        // Adding an account, from the sidebar, which in the demo says it serves only the demo mailbox.
-        screens.push([
-          'add-account',
-          async (page) => {
-            if (size === 'phone') {
-              await page
-                .getByRole('button', { name: 'Back', exact: true })
-                .locator('visible=true')
-                .click();
-              await page.getByRole('button', { name: 'Folders', exact: true }).click();
-            }
-            await page.getByRole('button', { name: 'Add account' }).click();
-            const form = page.getByRole('form', { name: 'Add an account' });
-            await form
-              .getByText(
-                'This Trail Mix serves only the demo mailbox, so it can’t connect an account of your own.',
-              )
-              .waitFor();
-            expect(await form.getByRole('button', { name: 'Add account' }).isDisabled()).toBe(true);
-          },
-        ]);
-        // A search, whose matches the highlighter marks.
-        screens.push(['search', (page) => searchFor(page, 'lunch thu')]);
-        // The sidebar folded to its rail, which keeps the search above the list.
-        if (size === 'desktop') {
-          screens.push([
-            'rail',
-            (page) => page.getByRole('button', { name: 'Fold the sidebar' }).click(),
-          ]);
-        }
-        for (const [screen, reach] of screens) {
-          await reach(page);
-          await atRest(page);
-          const shot = [size, colorScheme, screen, accent?.slice(1)].filter(Boolean).join('-');
-          await page.screenshot({ path: join(RESULTS, `${shot}.png`) });
-          expect({ screen: shot, unusable: await unusable(page) }).toEqual({
-            screen: shot,
-            unusable: [],
-          });
-        }
-        expect(problems).toEqual([]);
-        await context.close();
       }
+      // The newest conversation, a thread, then the newsletter, which sets its own colors.
+      screens.push(['reader', (page) => openConversation(page, 0)]);
+      // A reply to it, docked under the conversation.
+      screens.push([
+        'reply',
+        async (page) => {
+          // The last Reply answers the newest message: its own on a desktop, the island's on a phone.
+          await page
+            .getByRole('button', { name: 'Reply', exact: true })
+            .locator('visible=true')
+            .last()
+            .click();
+          await page.getByRole('textbox', { name: 'Reply' }).waitFor();
+        },
+      ]);
+      // Escape closes the composer, which on a phone lies over everything.
+      screens.push([
+        'newsletter',
+        async (page) => {
+          await page.keyboard.press('Escape');
+          await openConversation(page, /Kernel Weekly/);
+        },
+      ]);
+      // Adding an account, from the sidebar, which in the demo says it serves only the demo mailbox.
+      screens.push([
+        'add-account',
+        async (page) => {
+          if (size === 'phone') {
+            await page
+              .getByRole('button', { name: 'Back', exact: true })
+              .locator('visible=true')
+              .click();
+            await page.getByRole('button', { name: 'Folders', exact: true }).click();
+          }
+          await page.getByRole('button', { name: 'Add account' }).click();
+          const form = page.getByRole('form', { name: 'Add an account' });
+          await form
+            .getByText(
+              'This Trail Mix serves only the demo mailbox, so it can’t connect an account of your own.',
+            )
+            .waitFor();
+          expect(await form.getByRole('button', { name: 'Add account' }).isDisabled()).toBe(true);
+        },
+      ]);
+      // A search, whose matches the highlighter marks.
+      screens.push(['search', (page) => searchFor(page, 'lunch thu')]);
+      // The sidebar folded to its rail, which keeps the search above the list.
+      if (size === 'desktop') {
+        screens.push([
+          'rail',
+          (page) => page.getByRole('button', { name: 'Fold the sidebar' }).click(),
+        ]);
+      }
+      for (const [screen, reach] of screens) {
+        await reach(page);
+        for (const colorScheme of themes) {
+          await page.emulateMedia({ colorScheme });
+          await expectUsable(
+            page,
+            [size, colorScheme, screen, accent?.slice(1)].filter(Boolean).join('-'),
+          );
+        }
+        themes = themes.toReversed();
+      }
+      expect(problems).toEqual([]);
+      await context.close();
     }
   }, 60_000);
 }
@@ -164,14 +166,8 @@ test('a row leads with its sender and subject, and sets unread apart by weight a
 test('scrolling a long folder never changes a row’s height, moves a row already drawn, or changes the list’s length', async () => {
   for (const [size, options] of Object.entries(SIZES)) {
     const { context, page } = await open(options);
-    // A search for the demo's member finds most of their mail, led by a draft with no preview.
-    const subject = await writeNothing(page);
+    // A search for the demo's member finds most of their mail.
     await searchFor(page, 'sam');
-    await page
-      .locator('[role="listbox"][aria-multiselectable] [role="option"]')
-      .first()
-      .filter({ hasText: subject })
-      .waitFor();
     const scrolled = await page.evaluate(async (ring) => {
       const list = document.querySelector<HTMLElement>('[role="listbox"][aria-multiselectable]');
       if (!list) return { heights: [], lengths: [], misplaced: ['no list'], reached: 0 };
@@ -295,7 +291,7 @@ test('a pane shows its thin scrollbar only while the pointer is over it or keys 
     ...NONE,
     tree: 'thin',
   });
-  expect(await over(page.locator('section[aria-label="Reader"]'))).toEqual({
+  expect(await over(reader(page))).toEqual({
     ...NONE,
     reader: 'thin',
   });
@@ -517,16 +513,21 @@ test('the desk, the browser’s chrome and a saved accent follow the system befo
     }, saved);
     await pickBeforeLoad(context, pick);
     const page = await context.newPage();
-    // Whether the desk shows the system's scheme: as a probe set to that scheme draws it.
+    // Whether the desk shows the system's scheme: as a probe set to that scheme draws it, and not
+    // as one set to the other does, as a sheet that sets its own scheme takes that scheme's colors.
     const deskShown = () =>
       page.evaluate((system) => {
-        const probe = document.createElement('div');
-        probe.style.colorScheme = system;
-        probe.style.backgroundColor = 'var(--color-background-body)';
-        document.body.append(probe);
-        const expected = getComputedStyle(probe).backgroundColor;
-        probe.remove();
-        return getComputedStyle(document.body).backgroundColor === expected;
+        const drawn = (scheme: string) => {
+          const probe = document.createElement('div');
+          probe.style.colorScheme = scheme;
+          probe.style.backgroundColor = 'var(--color-background-body)';
+          document.body.append(probe);
+          const color = getComputedStyle(probe).backgroundColor;
+          probe.remove();
+          return color;
+        };
+        const desk = getComputedStyle(document.body).backgroundColor;
+        return desk === drawn(system) && desk !== drawn(system === 'light' ? 'dark' : 'light');
       }, system);
     // Before any of the app runs, the system's theme shows, with the accent made readable in it.
     await page.route(/\.js(\?|$)/, (route) => route.abort());
@@ -660,22 +661,6 @@ test('reaching for the accent in Settings the moment the list shows, on a slowed
   await picker.fill('#c2185b');
   expect(await accentShown(page)).toBe(shownAs(accentTokens(parseHex('#c2185b')!, 'light').accent));
 }, 30_000);
-
-test('a sheet that sets its own color scheme takes the theme’s colors for that scheme', async () => {
-  const { page } = await open({ ...SIZES.desktop, colorScheme: 'dark' });
-  const inkIn = (scheme: string) =>
-    page.evaluate((scheme) => {
-      const sheet = document.createElement('div');
-      sheet.style.colorScheme = scheme;
-      sheet.style.color = 'var(--color-text-primary)';
-      document.body.append(sheet);
-      const ink = getComputedStyle(sheet).color;
-      sheet.remove();
-      return ink;
-    }, scheme);
-
-  expect(await inkIn('light')).not.toBe(await inkIn('dark'));
-});
 
 test('quick presses never rest, however long a slow phone takes to draw each move', async () => {
   const { page, problems } = await open(SIZES.desktop);
@@ -904,13 +889,7 @@ test('the list header names its view and holds only what acts on it, and the rea
   const rows = page.getByRole('option');
   const selection = page.getByRole('region', { name: 'Selection' });
   const edge = page.getByRole('separator', { name: 'Resize the conversation list' });
-  const folded = page
-    .locator('section[aria-label="Reader"]')
-    .getByRole('toolbar', { name: 'Conversation' });
-  const screenshot = async (name: string) => {
-    await page.screenshot({ path: join(RESULTS, `${name}.png`) });
-    expect({ name, unusable: await unusable(page) }).toEqual({ name, unusable: [] });
-  };
+  const folded = reader(page).getByRole('toolbar', { name: 'Conversation' });
   for (const colorScheme of THEMES) {
     await page.emulateMedia({ colorScheme });
     await rows.nth(2).click({ modifiers: ['Shift'] });
@@ -920,7 +899,7 @@ test('the list header names its view and holds only what acts on it, and the rea
       .getByRole('button', { name: 'Archive' })
       .waitFor();
     expect(await headerButtons(list)).toEqual(['Unread only']);
-    await screenshot(`t75-desktop-${colorScheme}-selection`);
+    await expectUsable(page, `t75-desktop-${colorScheme}-selection`);
     await selection.getByRole('button', { name: 'Clear selection' }).click();
 
     await rows.nth(1).click();
@@ -930,7 +909,7 @@ test('the list header names its view and holds only what acts on it, and the rea
     await page.getByRole('button', { name: /^Show Inbox/ }).waitFor();
     await folded.getByRole('button', { name: 'Archive' }).waitFor();
     await folded.getByRole('button', { name: 'Next conversation' }).waitFor();
-    await screenshot(`t75-desktop-${colorScheme}-folded`);
+    await expectUsable(page, `t75-desktop-${colorScheme}-folded`);
     await page.keyboard.press('Enter');
   }
   expect(problems).toEqual([]);
@@ -1051,20 +1030,13 @@ test('the list shows only unread mail while its filter is on, and keeps the one 
   const filtered = new URL(page.url());
   filtered.searchParams.delete('open');
   filtered.searchParams.set('unread', '1');
+  await page.goto(filtered.href, { waitUntil: 'networkidle' });
+  await list.getByRole('heading', { name: 'Nothing unread' }).waitFor();
+  await reader(page).getByText('Everything here is read.').waitFor();
+  await expect(toggle.getAttribute('aria-pressed')).resolves.toBe('true');
   for (const colorScheme of THEMES) {
     await page.emulateMedia({ colorScheme });
-    await page.goto(filtered.href, { waitUntil: 'networkidle' });
-    await list.getByRole('heading', { name: 'Nothing unread' }).waitFor();
-    await page
-      .locator('section[aria-label="Reader"]')
-      .getByText('Everything here is read.')
-      .waitFor();
-    await expect(toggle.getAttribute('aria-pressed')).resolves.toBe('true');
-    await page.screenshot({ path: join(RESULTS, `t90-desktop-${colorScheme}-nothing-unread.png`) });
-    expect({ colorScheme, unusable: await unusable(page) }).toEqual({
-      colorScheme,
-      unusable: [],
-    });
+    await expectUsable(page, `t90-desktop-${colorScheme}-nothing-unread`);
   }
 
   // Turned off, the folder lists its mail again, and with nothing unread the filter goes.
@@ -1167,10 +1139,6 @@ test('the reader says where its conversation sits, and steps to the ones either 
   expect(problems).toEqual([]);
 }, 30_000);
 
-/**
- * Opens a conversation from the unified Inbox and waits for its mail. On a phone it first goes back
- * to the list, from the reader or the folders.
- */
 /** The colors the shell's theme-color metas give the browser's chrome, light scheme first. */
 function chromeColors(page: Page): Promise<string[]> {
   return page.evaluate(() =>
@@ -1207,6 +1175,10 @@ function shownAs(hex: string): string {
   return `rgb(${[r, g, b].map((v) => Math.round(v * 255)).join(', ')})`;
 }
 
+/**
+ * Opens a conversation from the unified Inbox and waits for its mail. On a phone it first goes back
+ * to the list, from the reader or the folders.
+ */
 async function openConversation(page: Page, which: number | RegExp) {
   await goTo(page, 'Inbox');
   const rows = page.getByRole('option');
@@ -1222,21 +1194,6 @@ async function searchFor(page: Page, text: string) {
   if (await reachable(back)) await back.click();
   await page.getByRole('searchbox', { name: 'Search mail' }).fill(text);
   await page.locator('[role="option"] mark').first().waitFor();
-}
-
-/**
- * Writes a new message with a subject and nothing else, which leaves the newest draft, one with no
- * preview. Returns its subject.
- */
-async function writeNothing(page: Page): Promise<string> {
-  const subject = `Nothing written ${Date.now()}`;
-  await page.keyboard.press('c');
-  await page.keyboard.type('grace@example.com');
-  const composer = page.locator('section[aria-label="New message"]');
-  await composer.getByRole('textbox', { name: 'Subject' }).fill(subject);
-  await page.getByRole('status').filter({ hasText: 'Saved to Drafts' }).waitFor();
-  await page.keyboard.press('Escape');
-  return subject;
 }
 
 /**

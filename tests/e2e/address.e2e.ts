@@ -1,7 +1,7 @@
 import { expect } from 'bun:test';
 import type { BrowserContextOptions, Page } from 'playwright';
 import { DWELL_MS } from '../../src/features/workbench/ui/useReadMark.ts';
-import { goTo, shownSubject } from './helpers.ts';
+import { goTo, hold, reader, shownSubject } from './helpers.ts';
 import { SIZES, suite } from './suite.ts';
 
 /**
@@ -53,7 +53,7 @@ async function openRow(page: Page, row: number) {
   return shownSubject(page);
 }
 
-test('a folder and its open conversation come back on a reload', async () => {
+test('a folder and its open conversation come back on a reload, and an address whose conversation or folder has gone opens what remains, coming to name only that', async () => {
   const page = await open(SIZES.desktop);
   await goTo(page, 'Archive', 'Personal');
   await heading(page).filter({ hasText: 'Archive' }).waitFor();
@@ -73,6 +73,22 @@ test('a folder and its open conversation come back on a reload', async () => {
   await heading(page).filter({ hasText: 'Archive' }).waitFor();
   await expect(subject(page).textContent()).resolves.toBe(shown);
   await expect(selectedRow(page).textContent()).resolves.toContain(shown.replace(/^Re: /, ''));
+
+  const gone = new URL('/', app.url);
+  gone.searchParams.set('in', 'flagged');
+  gone.searchParams.set('open', opened(page)!.replace(/:[^:]*$/, ':%3Cgone%40example.com%3E'));
+  await page.goto(gone.href);
+  await heading(page).filter({ hasText: 'Flagged' }).waitFor();
+  await page.waitForFunction(() => location.search === '?in=flagged');
+  await expect(selectedRow(page).count()).resolves.toBe(0);
+
+  // A folder gone opens the Inbox, which, naming no conversation, opens at its newest.
+  await page.goto(new URL('/?account=gone&folder=Nowhere', app.url).href);
+  await heading(page).filter({ hasText: 'Inbox' }).waitFor();
+  await page.waitForFunction(() => {
+    const address = new URL(location.href).searchParams;
+    return !address.has('folder') && !address.has('account');
+  });
 }, 60_000);
 
 test('a conversation deep in its list opens at its page, its row in sight, and J moves on from it', async () => {
@@ -124,16 +140,9 @@ test('a conversation deep in its list opens at its page, its row in sight, and J
 
   // Back before the page holding the row arrives still waits for it, and then shows the row.
   const early = await (await app.context(SIZES.phone)).newPage();
-  let release = () => {};
-  const held = new Promise<void>((resolve) => (release = resolve));
-  let asked = 0;
-  await early.route('**/_serverFn/**', async (route) => {
-    if (decodeURIComponent(route.request().url()).includes('"around"')) {
-      asked += 1;
-      await held;
-    }
-    await route.fallback();
-  });
+  const around = await hold(early, (request) =>
+    decodeURIComponent(request.url()).includes('"around"'),
+  );
   await watchTop(early);
   await early.goto(deep);
   await subject(early).waitFor();
@@ -150,9 +159,8 @@ test('a conversation deep in its list opens at its page, its row in sight, and J
   );
   await expect(back.count()).resolves.toBe(0);
   await expect(sawTop(early)).resolves.toBe(false);
-  expect(asked).toBeGreaterThan(0);
-  release();
-  await early.unrouteAll({ behavior: 'wait' });
+  await around.requested;
+  await around.release();
   const cameFrom = back.locator('[role="option"][aria-posinset="70"]');
   await cameFrom.waitFor();
   const [came, from] = await Promise.all([cameFrom.boundingBox(), back.boundingBox()]);
@@ -234,32 +242,9 @@ test('Back and Forward step between views, and moving by key adds no history', a
   await expect(selectedRow(page).getAttribute('aria-posinset')).resolves.toBe('2');
 }, 60_000);
 
-test('an address whose conversation or folder has gone opens what remains, and comes to name only that', async () => {
-  const page = await open(SIZES.desktop);
-  await page.getByRole('option').nth(1).click();
-  await addressNaming(page, 'open');
-  const opened = new URL(page.url()).searchParams.get('open')!;
-  const gone = new URL(page.url());
-  gone.searchParams.set('in', 'flagged');
-  gone.searchParams.set('open', opened.replace(/:[^:]*$/, ':%3Cgone%40example.com%3E'));
-  await page.goto(gone.href);
-  await heading(page).filter({ hasText: 'Flagged' }).waitFor();
-  await page.waitForFunction(() => location.search === '?in=flagged');
-  await expect(selectedRow(page).count()).resolves.toBe(0);
-
-  // A folder gone opens the Inbox, which, naming no conversation, opens at its newest.
-  await page.goto(new URL('/?account=gone&folder=Nowhere', app.url).href);
-  await heading(page).filter({ hasText: 'Inbox' }).waitFor();
-  await page.waitForFunction(() => {
-    const address = new URL(location.href).searchParams;
-    return !address.has('folder') && !address.has('account');
-  });
-}, 60_000);
-
-test('on a phone, a conversation opens on its own address, Back slides to the list, and a reload opens it again with no slide', async () => {
+test('on a phone, a view opens on its list, a conversation on its own address, Back slides to the list, and a reload opens it again with no slide', async () => {
   const page = await open(SIZES.phone);
-  const reader = page.locator('section[aria-label="Reader"]');
-  const isShown = () => reader.evaluate((element) => !element.closest('[inert]'));
+  const isShown = () => reader(page).evaluate((element) => !element.closest('[inert]'));
   const before = await historyLength(page);
   await page.getByRole('option').nth(1).click();
   await subject(page).waitFor();
@@ -287,9 +272,20 @@ test('on a phone, a conversation opens on its own address, Back slides to the li
   await page.getByRole('button', { name: 'Back', exact: true }).locator('visible=true').click();
   await page.waitForFunction(() => location.search === '');
   await expect(isShown()).resolves.toBe(false);
+
+  await page.getByRole('button', { name: 'Folders', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: 'Mailboxes' })
+    .getByRole('button', { name: /^Drafts/ })
+    .first()
+    .click();
+  await heading(page).filter({ hasText: 'Drafts' }).waitFor();
+  await page.getByRole('option').first().waitFor();
+  await expect(selectedRow(page).count()).resolves.toBe(0);
+  await expect(isShown()).resolves.toBe(false);
 }, 60_000);
 
-test('choosing a view opens its newest, read only once it has stayed open two seconds', async () => {
+test('choosing a view opens its newest, read only once it has stayed open two seconds, or the empty reader when it has none', async () => {
   const page = await open(SIZES.desktop);
   const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
   const choose = (name: RegExp) => sidebar.getByRole('button', { name }).first().click();
@@ -309,12 +305,7 @@ test('choosing a view opens its newest, read only once it has stayed open two se
   const newestOpen = async (title: string) => {
     await heading(page).filter({ hasText: title }).waitFor();
     await expect(selectedRow(page).getAttribute('aria-posinset')).resolves.toBe('1');
-    // The reader shows the row's conversation.
-    await page.waitForFunction(() => {
-      const row = document.querySelector('[role="option"][aria-selected="true"]')?.textContent;
-      const shown = document.querySelector('section[aria-label="Reader"] h1')?.textContent;
-      return Boolean(row && shown && row.includes(shown));
-    });
+    await shownSubject(page);
     return (await selectedRow(page).textContent()) ?? '';
   };
   // The Inbox's newest starts unread, whatever came before, and is left before it's read again.
@@ -404,10 +395,7 @@ test('choosing a view opens its newest, read only once it has stayed open two se
   await newestOpen('Inbox');
   await page.goBack();
   await newestOpen('Flagged');
-}, 60_000);
 
-test('an empty view opens on the empty reader, and on a phone a view opens on its list', async () => {
-  const page = await open(SIZES.desktop);
   await page.getByRole('button', { name: 'More for Work' }).click();
   await page.getByRole('menuitem', { name: 'New folder in Work' }).click();
   const field = page.getByRole('textbox', { name: 'Name of the new folder in Work' });
@@ -415,53 +403,26 @@ test('an empty view opens on the empty reader, and on a phone a view opens on it
   await field.press('Enter');
   await goTo(page, 'Empty', 'Work');
   await heading(page).filter({ hasText: 'Empty' }).waitFor();
-  await page
-    .locator('section[aria-label="Reader"]')
-    .getByText('No conversation open')
-    .first()
-    .waitFor();
+  await reader(page).getByText('No conversation open').first().waitFor();
   await expect(selectedRow(page).count()).resolves.toBe(0);
-
-  const phone = await open(SIZES.phone);
-  await page.close();
-  await phone.getByRole('button', { name: 'Folders', exact: true }).click();
-  await phone
-    .getByRole('navigation', { name: 'Mailboxes' })
-    .getByRole('button', { name: /^Drafts/ })
-    .first()
-    .click();
-  await heading(phone).filter({ hasText: 'Drafts' }).waitFor();
-  await phone.getByRole('option').first().waitFor();
-  await expect(selectedRow(phone).count()).resolves.toBe(0);
-  await expect(
-    phone.locator('section[aria-label="Reader"]').evaluate((reader) => !reader.closest('[inert]')),
-  ).resolves.toBe(false);
 }, 60_000);
 
 test('the member’s own choice wins over the view’s newest, however late its list comes', async () => {
   const page = await open(SIZES.desktop);
-  /** Holds the view's first page until the returned function lets it through. */
-  const hold = async (view: string) => {
-    let release = () => {};
-    const held = new Promise<void>((resolve) => (release = resolve));
-    await page.route('**/_serverFn/**', async (route) => {
-      const asked = decodeURIComponent(route.request().url());
-      if (asked.includes('"conversations"') && asked.includes(view)) await held;
-      await route.fallback();
+  /** Holds the view's first page until released. */
+  const list = (view: string) =>
+    hold(page, (request) => {
+      const asked = decodeURIComponent(request.url());
+      return asked.includes('"conversations"') && asked.includes(view);
     });
-    return async () => {
-      release();
-      await page.unrouteAll({ behavior: 'wait' });
-    };
-  };
 
   // A new message begun while Drafts' list is on its way stays open once the list comes.
-  let release = await hold('drafts');
+  let held = await list('drafts');
   await goTo(page, 'Drafts');
   await page.keyboard.press('c');
   const composer = page.locator('section[aria-label="New message"]');
   await composer.waitFor();
-  await release();
+  await held.release();
   await page.getByRole('option').first().waitFor();
   // Proves the newest doesn't take the new message's place: a view opens its newest before the frame
   // that draws its rows, so two frames on it would have.
@@ -474,7 +435,7 @@ test('the member’s own choice wins over the view’s newest, however late its 
   await composer.waitFor({ state: 'detached' });
 
   // A row picked the moment the folder's rows arrive is the one that opens.
-  release = await hold('Archive');
+  held = await list('Archive');
   await goTo(page, 'Archive', 'Personal');
   await page.evaluate(() =>
     new MutationObserver((_, watching) => {
@@ -484,7 +445,7 @@ test('the member’s own choice wins over the view’s newest, however late its 
       second.click();
     }).observe(document.body, { subtree: true, childList: true }),
   );
-  await release();
+  await held.release();
   await heading(page).filter({ hasText: 'Archive' }).waitFor();
   await page.waitForFunction(() => {
     const row = document.querySelector('[role="option"][aria-selected="true"]');

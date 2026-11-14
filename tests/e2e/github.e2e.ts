@@ -1,8 +1,8 @@
 import { expect } from 'bun:test';
-import type { BrowserContextOptions, Page } from 'playwright';
+import type { Page } from 'playwright';
 import { DWELL_MS } from '../../src/features/workbench/ui/useReadMark.ts';
 import { mailIsIn } from '../mailIsIn.ts';
-import { goTo, reader } from './helpers.ts';
+import { goTo, hold, reader } from './helpers.ts';
 import { SIZES, suite } from './suite.ts';
 
 /**
@@ -15,13 +15,6 @@ import { SIZES, suite } from './suite.ts';
 
 const app = suite({ vars: { DEV_MEMBER: `github-${Date.now()}@trailmix.test` } });
 const { test } = app;
-
-async function open(options: BrowserContextOptions, path = '/'): Promise<Page> {
-  const page = await (await app.context(options)).newPage();
-  await page.goto(new URL(path, app.url).href);
-  await mailIsIn(page);
-  return page;
-}
 
 /** The demo's two repositories, Personal's and Work's. */
 const TOY_BOX = 'trailmix-demo/toy-box';
@@ -51,7 +44,7 @@ const openedOnceRested = async (page: Page, before?: string) =>
   ).jsonValue()) as string;
 
 test('each Inbox lists one row for each repository, and a search or a folder lists its threads', async () => {
-  const page = await open(SIZES.desktop);
+  const page = await app.open(SIZES.desktop);
   for (const repository of [TOY_BOX, PIXELS]) {
     await expect(bundleRow(page, repository).count()).resolves.toBe(1);
     await expect(threadRows(page, repository).count()).resolves.toBe(0);
@@ -77,8 +70,8 @@ test('each Inbox lists one row for each repository, and a search or a folder lis
   await expect(bundleRow(page, TOY_BOX).count()).resolves.toBe(0);
 }, 60_000);
 
-test('a bundle opens its threads unread, and a thread opens under it and links to GitHub', async () => {
-  const page = await open(SIZES.desktop);
+test('a bundle opens its threads unread, a thread opens under it and links to GitHub, and the bundle’s actions act on every thread in it, which Undo brings back', async () => {
+  const page = await app.open(SIZES.desktop);
   const row = bundleRow(page, TOY_BOX);
   await row.click();
   await shows(page, TOY_BOX);
@@ -102,10 +95,39 @@ test('a bundle opens its threads unread, and a thread opens under it and links t
   const place = page.getByRole('toolbar', { name: 'Conversation' });
   await place.getByText(/^1 of \d+$/).waitFor();
   await shows(page, title);
+  await reader(page).getByRole('button', { name: TOY_BOX, exact: true }).click();
+  await shows(page, TOY_BOX);
+
+  // Shift+I reads every thread, and Undo leaves them unread again.
+  await row.getByText('Unread', { exact: true }).waitFor();
+  await page.keyboard.press('Shift+I');
+  await row.getByText('Unread', { exact: true }).waitFor({ state: 'detached' });
+  // The row changes at once, and its threads once the Mailroom has carried the bundle's command.
+  await threadTitles(page)
+    .getByRole('img', { name: 'Unread' })
+    .first()
+    .waitFor({ state: 'detached' });
+  await undoButton(page).click();
+  await row.getByText('Unread', { exact: true }).waitFor();
+  // A toast keeps its Undo until it has finished leaving, so the next Undo is Archive's alone.
+  await undoButton(page).waitFor({ state: 'detached' });
+
+  await page
+    .getByRole('toolbar', { name: 'Repository' })
+    .getByRole('button', { name: 'Archive' })
+    .click();
+  await row.waitFor({ state: 'detached', timeout: 1_000 });
+  // Archive lists what went, each thread a conversation of its own.
+  await undoButton(page).click();
+  await row.waitFor({ timeout: 5_000 });
+  await page.reload();
+  await mailIsIn(page);
+  await expect(row.count()).resolves.toBe(1);
+  await expect(threadRows(page, TOY_BOX).count()).resolves.toBe(0);
 }, 60_000);
 
 test('a thread deep in its bundle opens at its place on a reload, and J moves on from it', async () => {
-  const page = await open(SIZES.desktop);
+  const page = await app.open(SIZES.desktop);
   await bundleRow(page, TOY_BOX).click();
   await shows(page, TOY_BOX);
   // The bundle's sheet scrolls past its first page to the 56th thread.
@@ -136,25 +158,17 @@ test('a thread deep in its bundle opens at its place on a reload, and J moves on
   // Closing it before the page holding it arrives waits for that page, and the bundle opens with
   // the thread in sight rather than at its top.
   const early = await (await app.context(SIZES.desktop)).newPage();
-  let release = () => {};
-  const held = new Promise<void>((resolve) => (release = resolve));
-  let asked = 0;
-  await early.route('**/_serverFn/**', async (route) => {
-    if (decodeURIComponent(route.request().url()).includes('"around"')) {
-      asked += 1;
-      await held;
-    }
-    await route.fallback();
-  });
+  const around = await hold(early, (request) =>
+    decodeURIComponent(request.url()).includes('"around"'),
+  );
   await early.goto(address);
   await shows(early, title);
   await reader(early).getByRole('button', { name: TOY_BOX, exact: true }).click();
   await shows(early, TOY_BOX);
   await reader(early).getByRole('status').filter({ hasText: 'Opening the repository' }).waitFor();
   await expect(reader(early).locator('[data-index]').count()).resolves.toBe(0);
-  expect(asked).toBeGreaterThan(0);
-  release();
-  await early.unrouteAll({ behavior: 'wait' });
+  await around.requested;
+  await around.release();
   const sheet = reader(early).locator('[data-index="56"]');
   await sheet.waitFor();
   const [came, sight] = await Promise.all([sheet.boundingBox(), reader(early).boundingBox()]);
@@ -162,41 +176,8 @@ test('a thread deep in its bundle opens at its place on a reload, and J moves on
   expect(came!.y + came!.height).toBeLessThanOrEqual(sight!.y + sight!.height);
 }, 60_000);
 
-test("a bundle's actions act on every thread in it, and Undo brings them all back", async () => {
-  const page = await open(SIZES.desktop);
-  const row = bundleRow(page, TOY_BOX);
-  await row.click();
-  await shows(page, TOY_BOX);
-
-  // Shift+I reads every thread, and Undo leaves them unread again.
-  await page.keyboard.press('Shift+I');
-  await row.getByText('Unread', { exact: true }).waitFor({ state: 'detached' });
-  // The row changes at once, and its threads once the Mailroom has carried the bundle's command.
-  await threadTitles(page)
-    .first()
-    .getByRole('img', { name: 'Unread' })
-    .waitFor({ state: 'detached' });
-  await undoButton(page).click();
-  await row.getByText('Unread', { exact: true }).waitFor();
-  // A toast keeps its Undo until it has finished leaving, so the next Undo is Archive's alone.
-  await undoButton(page).waitFor({ state: 'detached' });
-
-  await page
-    .getByRole('toolbar', { name: 'Repository' })
-    .getByRole('button', { name: 'Archive' })
-    .click();
-  await row.waitFor({ state: 'detached', timeout: 1_000 });
-  // Archive lists what went, each thread a conversation of its own.
-  await undoButton(page).click();
-  await row.waitFor({ timeout: 5_000 });
-  await page.reload();
-  await mailIsIn(page);
-  await expect(row.count()).resolves.toBe(1);
-  await expect(threadRows(page, TOY_BOX).count()).resolves.toBe(0);
-}, 60_000);
-
 test('on a phone, a bundle opens as a sheet whose island archives it, and a thread steps back to it', async () => {
-  const page = await open(SIZES.phone);
+  const page = await app.open(SIZES.phone);
   await bundleRow(page, TOY_BOX).click();
   await shows(page, TOY_BOX);
   const island = page.getByRole('toolbar', { name: 'Repository' });
