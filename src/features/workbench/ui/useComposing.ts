@@ -131,12 +131,7 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
     [started, editing],
   );
   const saved = useCallback(
-    (id: string) =>
-      setSending((was) => {
-        const left = new Map(was);
-        left.delete(id);
-        return left;
-      }),
+    (id: string) => setSending((was) => new Map([...was].filter(([each]) => each !== id))),
     [],
   );
   // A save can land after its composer has closed, and then only what it replaced matters. A

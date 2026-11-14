@@ -110,7 +110,7 @@ import { useComposing } from './useComposing.ts';
 import { useOpensNewest } from './useOpensNewest.ts';
 import { useSendWritten } from './useSendWritten.ts';
 
-import { useReach, type Reach } from '../../offline/index.ts';
+import { useReach } from '../../offline/index.ts';
 import {
   CREATE,
   Sidebar,
@@ -157,12 +157,6 @@ const NEW_MESSAGE = <RegisteredCommandButton id="message.new" isAccent />;
 
 /** The Settings gear at the foot of the sidebar, drawn from its command. */
 const SETTINGS_GEAR = <RegisteredCommandButton id={OPEN_SETTINGS} />;
-
-/** What a list says beside its title while the device can't reach its Mailroom. */
-const OFFLINE: Record<Exclude<Reach, 'online'>, { said: string; more?: string }> = {
-  offline: { said: 'Offline' },
-  'offline-kept': { said: 'Offline', more: 'kept mail' },
-};
 
 /** The button that folds a desktop's sidebar to its rail and back. */
 const FOLD = <FoldToggle />;
@@ -698,9 +692,6 @@ export function Workbench({
                 ? triageSelection(action)
                 : triageShown(action, thread ?? selected),
         });
-  const selectionActions = (place: 'bar' | 'island') => (
-    <TriageActions commands={selectedCommands} isCompact={place === 'island'} />
-  );
   const outbox = useOutboxCommands();
 
   const sending = useSendWritten({
@@ -934,7 +925,7 @@ export function Workbench({
                 icon={viewIcon(view, folders)}
                 title={title}
                 unread={unread}
-                offline={reach === 'online' ? undefined : OFFLINE[reach]}
+                reach={reach}
                 scope={scope}
                 below={
                   <>
@@ -986,7 +977,7 @@ export function Workbench({
                 }}
                 picked={
                   <PickedActions count={selection.ids.length} onCancel={clearSelection}>
-                    {selectionActions('island')}
+                    <TriageActions commands={selectedCommands} isCompact />
                   </PickedActions>
                 }
                 isCollapsed={!isPhone && list.isCollapsed}
@@ -1025,7 +1016,9 @@ export function Workbench({
             <div inert={isOffscreen('reader')} {...stylex.props(styles.pane, styles.reader)}>
               {isMany && !isPhone ? (
                 <SelectionPane count={selection.ids.length} onClear={clearSelection}>
-                  <Suspense>{selectionActions('bar')}</Suspense>
+                  <Suspense>
+                    <TriageActions commands={selectedCommands} />
+                  </Suspense>
                 </SelectionPane>
               ) : (
                 <ReaderPane

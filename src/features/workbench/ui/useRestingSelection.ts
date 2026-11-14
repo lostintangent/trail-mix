@@ -52,15 +52,12 @@ export function useRestingSelection(selected: ConversationId | undefined) {
 function useLastPress() {
   const pressedAt = useRef(-Infinity);
   useEffect(() => {
-    const note = (event: Event) => {
-      pressedAt.current = event.timeStamp;
-    };
-    window.addEventListener('keydown', note, { capture: true });
-    window.addEventListener('pointerdown', note, { capture: true });
-    return () => {
-      window.removeEventListener('keydown', note, { capture: true });
-      window.removeEventListener('pointerdown', note, { capture: true });
-    };
+    const presses = new AbortController();
+    const listening = { capture: true, signal: presses.signal };
+    const note = (event: Event) => void (pressedAt.current = event.timeStamp);
+    window.addEventListener('keydown', note, listening);
+    window.addEventListener('pointerdown', note, listening);
+    return () => presses.abort();
   }, []);
   return pressedAt;
 }

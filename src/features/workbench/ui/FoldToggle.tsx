@@ -5,13 +5,7 @@ import * as stylex from '@stylexjs/stylex';
 import { PanelLeftClose, PanelLeftOpen } from 'lucide-react';
 import { memo } from 'react';
 import { media } from '../../../app/theme/tokens.stylex.ts';
-import {
-  isApple,
-  primaryShortcut,
-  shortcutLabel,
-  useCommands,
-  type Command,
-} from '../../commands/index.ts';
+import { tooltipOf, useCommands, type Command } from '../../commands/index.ts';
 import { FOLD_SIDEBAR } from './commands.ts';
 
 /**
@@ -29,11 +23,7 @@ const Toggle = memo(function Toggle({ command }: { command: Command }) {
   return (
     <IconButton
       label={command.title}
-      tooltip={
-        command.shortcut
-          ? `${command.title} (${shortcutLabel(primaryShortcut(command.shortcut), isApple)})`
-          : command.title
-      }
+      tooltip={tooltipOf(command)}
       icon={
         <span {...stylex.props(styles.icons)}>
           <Icon icon={PanelLeftClose} xstyle={[styles.icon, !isUnfolded && styles.gone]} />

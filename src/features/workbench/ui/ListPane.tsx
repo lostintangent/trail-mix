@@ -21,6 +21,7 @@ import {
   type Listed,
 } from '../../conversations/index.ts';
 import type { Account, ListItem, View } from '../../mail/core/index.ts';
+import type { Reach } from '../../offline/index.ts';
 import { StampDot } from '../../../app/theme/StampDot.tsx';
 
 /**
@@ -35,7 +36,7 @@ export function ListPane({
   icon,
   title,
   unread,
-  offline,
+  reach,
   scope,
   below,
   list,
@@ -56,11 +57,12 @@ export function ListPane({
   title: string;
   unread: number | undefined;
   /**
-   * What the list says in place of the unread count while the device has no network, as mail read
-   * then may be old: a word, and more where there's room. The title matters more, so they give way
-   * before it does, the more first, though the status still says all of them.
+   * Whether the device reaches its Mailroom. While it doesn't, the list says so in place of the
+   * unread count, as mail read then may be old, and that it shows the mail it kept where there's
+   * room. The title matters more, so they give way before it does, the more first, though the
+   * status still says all of them.
    */
-  offline: { said: string; more?: string } | undefined;
+  reach: Reach;
   /** The one account the view holds, or nothing when it gathers every account. */
   scope: Account | undefined;
   /** What sits under the title, such as the search field on a phone and what a search covers. */
@@ -108,16 +110,16 @@ export function ListPane({
         <Heading level={2} id={titleId} xstyle={styles.title}>
           {title}
         </Heading>
-        {offline && (
+        {reach !== 'online' && (
           // Each part wraps whole to a second line its box hides, the last first, where they can't
           // all fit beside the title.
           <span role="status" {...stylex.props(styles.aside)}>
             <span {...stylex.props(styles.offlineDot)} />
-            <span {...stylex.props(styles.whole)}>{offline.said}</span>
-            {offline.more && <span {...stylex.props(styles.whole)}>{`: ${offline.more}`}</span>}
+            <span {...stylex.props(styles.whole)}>Offline</span>
+            {reach === 'offline-kept' && <span {...stylex.props(styles.whole)}>: kept mail</span>}
           </span>
         )}
-        {unread && !offline ? (
+        {unread && reach === 'online' ? (
           // Where the count can't fit whole, it moves past a break to a second line its box hides,
           // so it goes before the title gives up a letter. A list that says it's offline says
           // nothing else beside its title.
