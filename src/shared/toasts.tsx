@@ -1,15 +1,13 @@
 import type { ToastDismissFn, ToastViewportProps } from '@astryxdesign/core/Toast';
 import type { LucideIcon } from 'lucide-react';
 import { lazy, memo, Suspense, useEffect, useState, type ReactNode } from 'react';
+import { afterFirstScreen } from './afterFirstScreen.ts';
 
 /**
  * Toasts, kept off the first load. Astryx's toasts carry their own layers and gestures, which the
  * first screen never needs, so they load once it has had its turn and the browser is idle, or
  * sooner if a toast is shown before then. `toast` shows one wherever `Toasts` is mounted.
  */
-
-/** How long after `Toasts` mounts they start loading, leaving the first screen the network. */
-const LOAD_AFTER_MS = 1_000;
 
 /** A toast: what it says, whether it reports an error, and the one thing it offers to do. */
 export type Toast = {
@@ -53,12 +51,10 @@ export const Toasts = memo(function Toasts({ layerInset }: Pick<ToastViewportPro
     if (isWanted) return;
     const now = () => setWanted(true);
     wanters.add(now);
-    // Safari has no idle callback.
-    const whenIdle = () => ('requestIdleCallback' in window ? requestIdleCallback(want) : want());
-    const timer = setTimeout(whenIdle, LOAD_AFTER_MS);
+    const callOff = afterFirstScreen(want);
     return () => {
       wanters.delete(now);
-      clearTimeout(timer);
+      callOff();
     };
   }, [isWanted]);
   return isWanted ? (

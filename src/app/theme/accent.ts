@@ -1,3 +1,5 @@
+import { deviceStorage } from '../../shared/deviceStorage.ts';
+
 /**
  * The accent this device shows: ink blue by default, or a color the member picked, saved here.
  *
@@ -23,12 +25,7 @@ export function readAccent(): string | undefined {
 
 /** The pick and the rule saved with it. */
 function savedAccent(): SavedAccent | undefined {
-  try {
-    return parse(localStorage.getItem(ACCENT_STORAGE_KEY));
-  } catch {
-    // Without storage, as in some private windows, a pick lasts until the page reloads.
-    return unsaved;
-  }
+  return parse(deviceStorage().getItem(ACCENT_STORAGE_KEY));
 }
 
 type AccentMath = typeof import('./readableAccent.ts');
@@ -45,15 +42,11 @@ export const preloadAccentMath = () => void loadMath();
  */
 export async function saveAccent(color: string | undefined): Promise<void> {
   const css = color === undefined ? undefined : (math ?? (await loadMath())).accentRule(color);
-  unsaved = css && color ? { color: color.toLowerCase(), css } : undefined;
-  try {
-    if (unsaved) localStorage.setItem(ACCENT_STORAGE_KEY, JSON.stringify(unsaved));
-    else localStorage.removeItem(ACCENT_STORAGE_KEY);
-  } catch {
-    // `unsaved` holds it instead.
-  }
+  const saved = css && color ? { color: color.toLowerCase(), css } : undefined;
+  if (saved) deviceStorage().setItem(ACCENT_STORAGE_KEY, JSON.stringify(saved));
+  else deviceStorage().removeItem(ACCENT_STORAGE_KEY);
   // A remade rule shows at once, though the pick it was made from is the same.
-  showAccent(unsaved?.color);
+  showAccent(saved?.color);
   for (const listener of listeners) listener();
 }
 
@@ -102,5 +95,4 @@ function parse(saved: string | null): SavedAccent | undefined {
 /** A color as `#rrggbb`, the only way a pick is saved. */
 const HEX = /^#[0-9a-f]{6}$/i;
 
-let unsaved: SavedAccent | undefined;
 const listeners = new Set<() => void>();
