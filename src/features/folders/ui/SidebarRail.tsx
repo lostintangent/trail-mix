@@ -1,13 +1,14 @@
 import { Icon } from '@astryxdesign/core/Icon';
-import { colorVars, radiusVars, spacingVars } from '@astryxdesign/core/theme/tokens.stylex';
+import { colorVars, spacingVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { MailPlus } from 'lucide-react';
-import { memo, useRef, type ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 import { LaterTooltip } from '../../../shared/LaterTooltip.tsx';
 import { StampDot } from '../../../app/theme/StampDot.tsx';
-import { focusRing, media, tm } from '../../../app/theme/tokens.stylex.ts';
+import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, Folder, View } from '../../mail/core/index.ts';
-import { lift, troubleOf } from './TreeLine.tsx';
+import { control, lift } from './controls.ts';
+import { troubleOf } from './TreeLine.tsx';
 import { UNIFIED_VIEWS, type ViewCounts } from './views.ts';
 
 /**
@@ -15,8 +16,7 @@ import { UNIFIED_VIEWS, type ViewCounts } from './views.ts';
  * account's stamp, then Add account and New message over a rule and the gear, so folding gives up
  * the tree without taking anything the member needs. Each shows its name as a tooltip, a stamp
  * opens its account's Inbox, and an account that needs the member marks its stamp. The fold button
- * and the gear are the sidebar's, pinned over both layouts. Each button is drawn again only as what
- * it shows changes, so a count changing redraws only the buttons it changes.
+ * and the gear are the sidebar's, pinned over both layouts.
  */
 export function RailContent({
   compose,
@@ -38,103 +38,63 @@ export function RailContent({
   return (
     <>
       {/* Where the pinned fold button lands. */}
-      <span {...stylex.props(styles.foldRoom)} />
+      <span {...stylex.props(control.target)} />
       <span {...stylex.props(styles.rule)} />
       <div {...stylex.props(styles.railScroll)}>
-        {UNIFIED_VIEWS.map((unified) => (
-          <RailView
-            key={unified.in}
-            unified={unified}
-            unread={unified.in === 'inbox' ? counts.inbox : undefined}
-            isSelected={view.in === unified.in}
-            onSelect={onSelect}
-          />
-        ))}
+        {UNIFIED_VIEWS.map(({ in: unified, label, icon }) => {
+          // Only Inbox's button is marked for its unread mail.
+          const unread = unified === 'inbox' ? counts.inbox : undefined;
+          return (
+            <RailButton
+              key={unified}
+              label={unread ? `${label}, ${unread} unread` : label}
+              isSelected={view.in === unified}
+              hasDot={Boolean(unread)}
+              onSelect={() => onSelect({ in: unified })}
+            >
+              <Icon icon={icon} size="sm" />
+            </RailButton>
+          );
+        })}
         {accounts.length > 0 && <span {...stylex.props(styles.rule)} />}
-        {accounts.map((account) => (
-          <RailAccount
-            key={account.id}
-            account={account}
-            inbox={
-              folders.find((folder) => folder.account === account.id && folder.role === 'inbox') ??
-              folders.find((folder) => folder.account === account.id)
-            }
-            isSelected={view.in === 'folder' && view.folder.account === account.id}
-            onSelect={onSelect}
-          />
-        ))}
+        {accounts.map((account) => {
+          // A stamp opens its account's Inbox, or its first folder where none has the role.
+          const own = folders.filter((folder) => folder.account === account.id);
+          const inbox = own.find((folder) => folder.role === 'inbox') ?? own[0];
+          const trouble = troubleOf(account);
+          return (
+            <RailButton
+              key={account.id}
+              label={[account.name, trouble, inbox?.unread && `${inbox.unread} unread`]
+                .filter(Boolean)
+                .join(', ')}
+              isSelected={view.in === 'folder' && view.folder.account === account.id}
+              hasDot={Boolean(inbox?.unread)}
+              isTroubled={trouble !== undefined}
+              onSelect={() =>
+                inbox &&
+                onSelect({ in: 'folder', folder: { account: inbox.account, path: inbox.path } })
+              }
+            >
+              <StampDot stamp={account.stamp} isLarge />
+            </RailButton>
+          );
+        })}
       </div>
       {onAddAccount && (
         <RailButton label="Add account" onSelect={onAddAccount}>
-          {ADD_ACCOUNT_ICON}
+          <Icon icon={MailPlus} size="sm" />
         </RailButton>
       )}
       {compose}
       <span {...stylex.props(styles.rule)} />
       {/* Where the pinned gear lands. */}
-      <span {...stylex.props(styles.foldRoom)} />
+      <span {...stylex.props(control.target)} />
     </>
   );
 }
 
-const ADD_ACCOUNT_ICON = <Icon icon={MailPlus} size="sm" />;
-
-const RailView = memo(function RailView({
-  unified: { in: unified, label, icon },
-  unread,
-  isSelected,
-  onSelect,
-}: {
-  unified: (typeof UNIFIED_VIEWS)[number];
-  /** The unread mail its button is marked for, which only Inbox's is. */
-  unread: number | undefined;
-  isSelected: boolean;
-  onSelect: (view: View) => void;
-}) {
-  return (
-    <RailButton
-      label={unread ? `${label}, ${unread} unread` : label}
-      isSelected={isSelected}
-      hasDot={Boolean(unread)}
-      onSelect={() => onSelect({ in: unified })}
-    >
-      <Icon icon={icon} size="sm" />
-    </RailButton>
-  );
-});
-
-/** An account's stamp, which opens its Inbox. */
-const RailAccount = memo(function RailAccount({
-  account,
-  inbox,
-  isSelected,
-  onSelect,
-}: {
-  account: Account;
-  /** Its Inbox, or its first folder where none has the role, or nothing before they're listed. */
-  inbox: Folder | undefined;
-  isSelected: boolean;
-  onSelect: (view: View) => void;
-}) {
-  const trouble = troubleOf(account);
-  return (
-    <RailButton
-      label={[account.name, trouble, inbox?.unread && `${inbox.unread} unread`]
-        .filter(Boolean)
-        .join(', ')}
-      isSelected={isSelected}
-      hasDot={Boolean(inbox?.unread)}
-      isTroubled={trouble !== undefined}
-      onSelect={() =>
-        inbox && onSelect({ in: 'folder', folder: { account: inbox.account, path: inbox.path } })
-      }
-    >
-      <StampDot stamp={account.stamp} isLarge />
-    </RailButton>
-  );
-});
-
-const RailButton = memo(function RailButton({
+function RailButton({
   label,
   isSelected = false,
   hasDot = false,
@@ -160,7 +120,12 @@ const RailButton = memo(function RailButton({
         aria-label={label}
         aria-current={isSelected ? 'page' : undefined}
         onClick={onSelect}
-        {...stylex.props(styles.railButton, isSelected && lift.selected)}
+        {...stylex.props(
+          control.bare,
+          control.target,
+          styles.railButton,
+          isSelected && lift.selected,
+        )}
       >
         {children}
         {hasDot && <span {...stylex.props(styles.dot)} />}
@@ -169,14 +134,9 @@ const RailButton = memo(function RailButton({
       <LaterTooltip anchor={button} content={label} placement="end" />
     </>
   );
-});
+}
 
 const styles = stylex.create({
-  foldRoom: {
-    flexShrink: 0,
-    width: tm.target,
-    height: tm.target,
-  },
   railScroll: {
     flexGrow: 1,
     minHeight: 0,
@@ -191,25 +151,7 @@ const styles = stylex.create({
   },
   railButton: {
     position: 'relative',
-    display: 'grid',
-    placeItems: 'center',
-    flexShrink: 0,
-    width: tm.target,
-    height: tm.target,
-    padding: 0,
-    borderWidth: 0,
-    borderRadius: radiusVars['--radius-element'],
-    backgroundColor: {
-      default: 'transparent',
-      ':hover': { default: null, '@media (hover: hover)': colorVars['--color-overlay-hover'] },
-    },
     color: colorVars['--color-text-secondary'],
-    cursor: 'pointer',
-    outline: {
-      default: null,
-      ':focus-visible': focusRing.line,
-    },
-    outlineOffset: focusRing.inside,
   },
   // Unread mail waits behind it: a dot of the accent at the icon's corner.
   dot: {

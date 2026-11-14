@@ -4,7 +4,6 @@ import { memo, Suspense, type ReactNode } from 'react';
 import { media } from '../../../app/theme/tokens.stylex.ts';
 import type { Command } from '../../commands/index.ts';
 import type { Account, Folder, View } from '../../mail/core/index.ts';
-import type { FolderEdit } from './commands.ts';
 import type { Foldable } from './folds.ts';
 import { NameField } from './lazy.ts';
 import { folderName } from './name.ts';
@@ -16,7 +15,7 @@ import {
   type FolderNode,
   type TreeState,
 } from './tree.ts';
-import { AccountLine, FolderLine, FolderSkeletons, ViewLine } from './TreeLine.tsx';
+import { AccountLine, FolderLine, FolderSkeletons, Row } from './TreeLine.tsx';
 import { UNIFIED_VIEWS, type ViewCounts } from './views.ts';
 
 /**
@@ -41,20 +40,30 @@ export const ViewRows = memo(function ViewRows({
 }) {
   return (
     <ul {...stylex.props(styles.rows)}>
-      {UNIFIED_VIEWS.map((unified, at) => (
-        <li key={unified.in}>
-          <ViewLine
-            unified={unified}
-            count={counts[unified.in]}
-            isSelected={view.in === unified.in}
-            isStop={view.in === unified.in || (!isViewHere && at === 0)}
-            onSelect={onSelect}
+      {UNIFIED_VIEWS.map(({ in: unified, label, icon }, at) => (
+        <li key={unified}>
+          <Row
+            label={label}
+            icon={icon}
+            count={counts[unified]}
+            isCountUnread={unified === 'inbox'}
+            isSelected={view.in === unified}
+            isStop={view.in === unified || (!isViewHere && at === 0)}
+            onSelect={() => onSelect({ in: unified })}
           />
         </li>
       ))}
     </ul>
   );
 });
+
+/** What an account's lines show from, and how each tells what the member does to it. */
+type TreeProps = TreeState & {
+  onSelect: (view: View) => void;
+  onFold: (what: Foldable) => void;
+  onEdited: (name: string | undefined) => void;
+  folderActions: (folder: Folder) => readonly Command[];
+};
 
 /**
  * An account: its stamp and name, which fold its folders away and back, with its menu at the end.
@@ -63,46 +72,27 @@ export const ViewRows = memo(function ViewRows({
 export const AccountSection = memo(function AccountSection({
   account,
   folders,
-  view,
-  onSelect,
-  folds,
-  onFold,
-  editing,
-  onEdited,
-  folderActions,
   accountActions,
-}: {
+  ...tree
+}: TreeProps & {
   account: Account;
   folders: readonly Folder[];
-  view: View;
-  onSelect: (view: View) => void;
-  folds: ReadonlySet<string>;
-  onFold: (what: Foldable) => void;
-  editing: FolderEdit | undefined;
-  onEdited: (name: string | undefined) => void;
-  folderActions: (folder: Folder) => readonly Command[];
   accountActions: (account: Account) => readonly Command[];
 }) {
   const own = folders.filter((folder) => folder.account === account.id);
   const nodes = folderTree(own);
-  const state = { view, folds, editing };
-  const { isListing, ...line } = accountLine(account, nodes, state);
+  const { isListing, ...line } = accountLine(account, nodes, tree);
   return (
     <section aria-label={account.name} {...stylex.props(styles.account)}>
-      <AccountLine {...line} account={account} onFold={onFold} accountActions={accountActions} />
+      <AccountLine
+        {...line}
+        account={account}
+        onFold={tree.onFold}
+        accountActions={accountActions}
+      />
       <Folding isOpen={line.isOpen}>
         {isListing && <FolderSkeletons account={account} />}
-        <FolderRows
-          nodes={nodes}
-          depth={0}
-          state={state}
-          onSelect={onSelect}
-          onFold={onFold}
-          folders={own}
-          onEdited={onEdited}
-          folderActions={folderActions}
-          account={account}
-        />
+        <FolderRows {...tree} nodes={nodes} depth={0} account={account} folders={own} />
       </Folding>
     </section>
   );
@@ -115,31 +105,21 @@ export const AccountSection = memo(function AccountSection({
 function FolderRows({
   nodes,
   depth,
-  state,
-  onSelect,
-  onFold,
-  folders,
-  onEdited,
-  folderActions,
-  account,
   parent,
-}: {
+  ...tree
+}: TreeProps & {
   nodes: FolderNode[];
   depth: number;
-  state: TreeState;
-  onSelect: (view: View) => void;
-  onFold: (what: Foldable) => void;
+  account: Account;
   /** The account's folders, whose names a new name can't take beside them. */
   folders: readonly Folder[];
-  onEdited: (name: string | undefined) => void;
-  folderActions: (folder: Folder) => readonly Command[];
-  account: Account;
   /** The folder these sit inside, if any. */
   parent?: Folder;
 }) {
+  const { account, folders, onEdited } = tree;
   const row = (node: FolderNode) => {
     const { folder, children } = node;
-    const { isRenaming, isNamingInside, ...line } = folderLine(node, state);
+    const { isRenaming, isNamingInside, ...line } = folderLine(node, tree);
     return (
       <li key={folder.path}>
         {isRenaming ? (
@@ -162,25 +142,14 @@ function FolderRows({
             {...line}
             folder={folder}
             depth={depth}
-            onSelect={onSelect}
-            onFold={onFold}
-            folderActions={folderActions}
+            onSelect={tree.onSelect}
+            onFold={tree.onFold}
+            folderActions={tree.folderActions}
           />
         )}
         {(line.canFold || isNamingInside) && (
           <Folding isOpen={line.isOpen}>
-            <FolderRows
-              nodes={children}
-              depth={depth + 1}
-              state={state}
-              onSelect={onSelect}
-              onFold={onFold}
-              folders={folders}
-              onEdited={onEdited}
-              folderActions={folderActions}
-              account={account}
-              parent={folder}
-            />
+            <FolderRows {...tree} nodes={children} depth={depth + 1} parent={folder} />
           </Folding>
         )}
       </li>
@@ -188,7 +157,7 @@ function FolderRows({
   };
   // One list of keyed lines, so a line keeps its place as the new folder's field comes and goes.
   const lines = nodes.map(row);
-  const fieldAt = newFolderAt(nodes, state.editing, account.id, parent);
+  const fieldAt = newFolderAt(nodes, tree.editing, account.id, parent);
   if (fieldAt !== undefined) {
     lines.splice(
       fieldAt,

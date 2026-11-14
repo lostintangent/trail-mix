@@ -1,9 +1,10 @@
 import { Icon } from '@astryxdesign/core/Icon';
-import { colorVars, durationVars, radiusVars } from '@astryxdesign/core/theme/tokens.stylex';
+import { colorVars, durationVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { Ellipsis } from 'lucide-react';
 import type { ComponentProps } from 'react';
-import { focusRing, media, tm } from '../../../app/theme/tokens.stylex.ts';
+import { media, tm } from '../../../app/theme/tokens.stylex.ts';
+import { control } from './controls.ts';
 
 /**
  * The `…` at the end of a sidebar row, always shown, in a quiet tone, so what can be done to the
@@ -18,7 +19,7 @@ export function MoreButton({ label, ...props }: { label: string } & ComponentPro
       aria-label={label}
       aria-haspopup="menu"
       {...props}
-      {...stylex.props(styles.more)}
+      {...stylex.props(control.bare, control.target, styles.more)}
     >
       <Icon icon={Ellipsis} size="sm" />
     </button>
@@ -26,15 +27,8 @@ export function MoreButton({ label, ...props }: { label: string } & ComponentPro
 }
 
 const styles = stylex.create({
+  // Tinted and brightened while its menu is open, too.
   more: {
-    display: 'grid',
-    placeItems: 'center',
-    flexShrink: 0,
-    width: tm.target,
-    height: tm.target,
-    padding: 0,
-    borderWidth: 0,
-    borderRadius: radiusVars['--radius-element'],
     backgroundColor: {
       default: 'transparent',
       ':hover': { default: null, '@media (hover: hover)': colorVars['--color-overlay-hover'] },
@@ -45,12 +39,6 @@ const styles = stylex.create({
       ':hover': { default: null, '@media (hover: hover)': colorVars['--color-text-primary'] },
       ':is([aria-expanded="true"])': colorVars['--color-text-primary'],
     },
-    cursor: 'pointer',
-    outline: {
-      default: null,
-      ':focus-visible': focusRing.line,
-    },
-    outlineOffset: focusRing.inside,
     transitionProperty: 'background-color, color',
     transitionDuration: {
       default: durationVars['--duration-fast'],

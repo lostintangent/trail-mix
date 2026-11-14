@@ -9,11 +9,12 @@ import {
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { MailPlus } from 'lucide-react';
-import { memo, useEffect, useState, type ReactNode } from 'react';
+import { memo, type ReactNode } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Command } from '../../commands/index.ts';
 import type { Account, Folder, View } from '../../mail/core/index.ts';
 import type { FolderEdit } from './commands.ts';
+import { control } from './controls.ts';
 import { useFolds } from './folds.ts';
 import { RailContent } from './SidebarRail.tsx';
 import { AccountSection, ViewRows } from './Tree.tsx';
@@ -104,7 +105,6 @@ export const Sidebar = memo(function Sidebar({
   const [folds, toggleFold] = useFolds();
   const canFold = fold !== undefined;
   const isRail = canFold && isCollapsed;
-  const { isDrawn: isRailDrawn, isShown: isRailShown } = useRail(isRail);
   // Whether a line of the tree lifts for the view, which a search's or a folder's on its way doesn't.
   const isViewHere =
     view.in === 'folder'
@@ -115,7 +115,7 @@ export const Sidebar = memo(function Sidebar({
   return (
     <nav id={id} aria-label="Mailboxes" aria-busy={isBusy} {...stylex.props(styles.sidebar)}>
       {/* First, as it reads: it heads both layouts. */}
-      {canFold && <div {...stylex.props(styles.pinned)}>{fold}</div>}
+      {canFold && <div {...stylex.props(styles.pinned, styles.pinnedHead)}>{fold}</div>}
       <div
         aria-hidden={isRail || undefined}
         inert={isRail}
@@ -129,7 +129,7 @@ export const Sidebar = memo(function Sidebar({
         {(canFold || search) && (
           <div {...stylex.props(styles.header)}>
             {/* Where the pinned fold button lands. */}
-            {canFold && <span {...stylex.props(styles.foldRoom)} />}
+            {canFold && <span {...stylex.props(control.target)} />}
             {search && <div {...stylex.props(styles.search)}>{search}</div>}
           </div>
         )}
@@ -165,43 +165,39 @@ export const Sidebar = memo(function Sidebar({
         {note && <p {...stylex.props(styles.note)}>{note}</p>}
         <div {...stylex.props(styles.footer)}>
           {/* Where the pinned gear lands, or the gear itself where the sidebar never folds. */}
-          {canFold ? <span {...stylex.props(styles.footRoom)} /> : settings}
+          {canFold ? <span {...stylex.props(control.target)} /> : settings}
           <span aria-hidden {...stylex.props(styles.footRule)} />
           <span {...stylex.props(styles.name)}>{NAME}</span>
           {/* Where the pinned New message lands. */}
-          {compose && (canFold ? <span {...stylex.props(styles.footRoom)} /> : compose)}
+          {compose && (canFold ? <span {...stylex.props(control.target)} /> : compose)}
         </div>
       </div>
       {canFold && (
         <>
-          {isRailDrawn && (
-            <div
-              aria-hidden={!isRailShown || undefined}
-              inert={!isRailShown}
-              {...stylex.props(
-                styles.layer,
-                styles.rail,
-                isRailShown ? styles.arriving : styles.leaving,
-              )}
-            >
-              <RailContent
-                compose={compose}
-                view={view}
-                onSelect={onSelect}
-                accounts={accounts}
-                folders={folders}
-                counts={counts}
-                onAddAccount={onAddAccount}
-              />
-            </div>
-          )}
+          <div
+            aria-hidden={!isRail || undefined}
+            inert={!isRail}
+            {...stylex.props(styles.layer, styles.rail, isRail ? styles.arriving : styles.leaving)}
+          >
+            <RailContent
+              compose={compose}
+              view={view}
+              onSelect={onSelect}
+              accounts={accounts}
+              folders={folders}
+              counts={counts}
+              onAddAccount={onAddAccount}
+            />
+          </div>
           {/* Last, as it reads: it ends both layouts. */}
-          <div {...stylex.props(styles.pinnedFoot)}>{settings}</div>
+          <div {...stylex.props(styles.pinned, styles.pinnedFoot)}>{settings}</div>
           {compose && (
             <div
               aria-hidden={isRail || undefined}
               inert={isRail}
               {...stylex.props(
+                styles.pinned,
+                styles.pinnedFoot,
                 styles.pinnedCompose,
                 expandedWidth !== undefined && styles.width(`${expandedWidth}px`),
                 isRail ? styles.leaving : styles.arriving,
@@ -215,23 +211,6 @@ export const Sidebar = memo(function Sidebar({
     </nav>
   );
 });
-
-/**
- * Whether the rail is drawn, and whether it shows. It's first drawn as the sidebar first folds,
- * hidden for a frame so that it fades in, and kept after that. A sidebar that never folds never
- * draws it.
- */
-function useRail(isRail: boolean): { isDrawn: boolean; isShown: boolean } {
-  const [isDrawn, setDrawn] = useState(isRail);
-  const [hasFrame, setHasFrame] = useState(isRail);
-  if (isRail && !isDrawn) setDrawn(true);
-  useEffect(() => {
-    if (!isDrawn || hasFrame) return;
-    const frame = requestAnimationFrame(() => setHasFrame(true));
-    return () => cancelAnimationFrame(frame);
-  }, [isDrawn, hasFrame]);
-  return { isDrawn, isShown: isRail && hasFrame };
-}
 
 const styles = stylex.create({
   sidebar: {
@@ -273,39 +252,25 @@ const styles = stylex.create({
     pointerEvents: 'none',
     transitionDuration: { default: durationVars['--duration-fast'], [media.reducedMotion]: '0s' },
   },
-  // The fold button, over both layouts, centered on the rail and level with the header's line.
+  // The fold button and the gear, over both layouts, centered on the rail and level with the
+  // header's line and the footer's.
   pinned: {
     position: 'absolute',
+    insetInlineStart: 0,
+    zIndex: 1,
+    display: 'flex',
+    justifyContent: 'center',
+    width: tm.sidebarRail,
+  },
+  pinnedHead: {
     top: `calc(${spacingVars['--spacing-2']} + 1px)`,
-    insetInlineStart: 0,
-    zIndex: 1,
-    display: 'flex',
-    justifyContent: 'center',
-    width: tm.sidebarRail,
   },
-  foldRoom: {
-    flexShrink: 0,
-    width: tm.target,
-    height: tm.target,
-  },
-  // The gear, over both layouts, centered on the rail and level with the footer's line.
   pinnedFoot: {
-    position: 'absolute',
     bottom: spacingVars['--spacing-2'],
-    insetInlineStart: 0,
-    zIndex: 1,
-    display: 'flex',
-    justifyContent: 'center',
-    width: tm.sidebarRail,
   },
   // New message, at the far end of the footer's line, as wide as the whole tree so it holds still
   // as the sidebar narrows, and fading with the tree. Only the button itself takes the pointer.
   pinnedCompose: {
-    position: 'absolute',
-    bottom: spacingVars['--spacing-2'],
-    insetInlineStart: 0,
-    zIndex: 1,
-    display: 'flex',
     justifyContent: 'flex-end',
     width: '100%',
     paddingInlineEnd: tm.sidebarInset,
@@ -360,11 +325,6 @@ const styles = stylex.create({
     borderTopWidth: '1px',
     borderTopStyle: 'solid',
     borderTopColor: colorVars['--color-border'],
-  },
-  footRoom: {
-    flexShrink: 0,
-    width: tm.target,
-    height: tm.target,
   },
   // The short upright rule between the gear and the name, the rail's rules stood on end. The gear's
   // target pads its icon, so the rule sits a little further from the name to look centered.

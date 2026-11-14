@@ -4,7 +4,6 @@ import {
   colorVars,
   durationVars,
   fontWeightVars,
-  radiusVars,
   spacingVars,
   typeScaleVars,
 } from '@astryxdesign/core/theme/tokens.stylex';
@@ -13,49 +12,23 @@ import { ChevronRight, type LucideIcon } from 'lucide-react';
 import { memo, Suspense, useReducer, useState, type ReactNode, type SyntheticEvent } from 'react';
 import { Pending, TextSkeleton } from '../../../app/theme/Pending.tsx';
 import { StampDot } from '../../../app/theme/StampDot.tsx';
-import { focusRing, media, tm } from '../../../app/theme/tokens.stylex.ts';
+import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Command } from '../../commands/index.ts';
 import type { Account, Folder, View } from '../../mail/core/index.ts';
+import { control, lift } from './controls.ts';
 import type { Foldable } from './folds.ts';
 import { ActionsMenu, preloadActionsMenu } from './lazy.ts';
 import { MoreButton } from './MoreButton.tsx';
 import { folderName } from './name.ts';
-import { folderIcon, type UNIFIED_VIEWS } from './views.ts';
+import { folderIcon } from './views.ts';
 
 /**
  * The lines of the sidebar's tree: a unified view's, an account's and a folder's, each drawn from
  * the state the tree gives it. Every line keeps room at its end for its menu, so counts line up
- * whether a line has one or not, and carries the marks `treeKeys.ts` moves by. Each is drawn again
- * only as what it shows changes, so a count changing redraws only the lines it changes. The rail
- * lifts its buttons and names an account's trouble as these lines do.
+ * whether a line has one or not, and carries the marks `treeKeys.ts` moves by. An account's and a
+ * folder's line is drawn again only as what it shows changes, so a count changing redraws only the
+ * folders it changes. The rail lifts its buttons and names an account's trouble as these lines do.
  */
-
-/** A unified view's line. */
-export const ViewLine = memo(function ViewLine({
-  unified: { in: unified, label, icon },
-  count,
-  isSelected,
-  isStop,
-  onSelect,
-}: {
-  unified: (typeof UNIFIED_VIEWS)[number];
-  count: number | undefined;
-  isSelected: boolean;
-  isStop: boolean;
-  onSelect: (view: View) => void;
-}) {
-  return (
-    <Row
-      label={label}
-      icon={icon}
-      count={count}
-      isCountUnread={unified === 'inbox'}
-      isSelected={isSelected}
-      isStop={isStop}
-      onSelect={() => onSelect({ in: unified })}
-    />
-  );
-});
 
 /** An account's own line: its stamp and name, which fold its folders away and back, and its menu. */
 export const AccountLine = memo(function AccountLine({
@@ -89,7 +62,7 @@ export const AccountLine = memo(function AccountLine({
           onClick={() => onFold({ account: account.id })}
           data-row={1}
           data-fold
-          {...stylex.props(styles.row, styles.accountRow, isHolding && lift.holding)}
+          {...stylex.props(control.bare, styles.row, styles.accountRow, isHolding && lift.holding)}
         >
           <Chevron isOpen={isOpen} />
           <span {...stylex.props(styles.stampBox)}>
@@ -181,7 +154,7 @@ export const FolderLine = memo(function FolderLine({
             aria-expanded={isOpen}
             onClick={() => onFold(folder)}
             data-fold
-            {...stylex.props(styles.fold, styles.foldAt(depth))}
+            {...stylex.props(control.bare, styles.fold, styles.foldAt(depth))}
           >
             <Chevron isOpen={isOpen} />
           </button>
@@ -290,7 +263,8 @@ function Count({ count, isUnread }: { count: number; isUnread: boolean }) {
   return <span {...stylex.props(styles.count, isUnread && styles.countUnread)}>{count}</span>;
 }
 
-function Row({
+/** A view's or a folder's line, which opens it. */
+export function Row({
   label,
   icon,
   depth,
@@ -324,6 +298,7 @@ function Row({
       // A unified view sits at the top, as an account does, and its folders a level in.
       data-row={depth === undefined ? 1 : depth + 2}
       {...stylex.props(
+        control.bare,
         styles.row,
         depth !== undefined && styles.folderRow(depth),
         isSelected && lift.selected,
@@ -364,22 +339,10 @@ const styles = stylex.create({
     margin: 0,
     paddingInlineStart: spacingVars['--spacing-2'],
     paddingInlineEnd: tm.target,
-    borderWidth: 0,
-    borderRadius: radiusVars['--radius-element'],
-    backgroundColor: {
-      default: 'transparent',
-      ':hover': { default: null, '@media (hover: hover)': colorVars['--color-overlay-hover'] },
-    },
     color: colorVars['--color-text-secondary'],
     font: 'inherit',
     fontSize: typeScaleVars['--text-body-size'],
     textAlign: 'start',
-    cursor: 'pointer',
-    outline: {
-      default: null,
-      ':focus-visible': focusRing.line,
-    },
-    outlineOffset: focusRing.inside,
   },
   // A folder's icon starts after the column its chevron takes, a step further in for each folder
   // it sits inside. Its line still spans the sidebar, so a selected one lifts as wide as the views.
@@ -402,19 +365,12 @@ const styles = stylex.create({
     },
     padding: 0,
     paddingInlineStart: spacingVars['--spacing-2'],
-    borderWidth: 0,
-    borderRadius: radiusVars['--radius-element'],
+    // Its chevron brightens under a pointer, without tinting the line's start.
     backgroundColor: 'transparent',
     color: {
       default: tm.textQuiet,
       ':hover': { default: null, '@media (hover: hover)': colorVars['--color-text-primary'] },
     },
-    cursor: 'pointer',
-    outline: {
-      default: null,
-      ':focus-visible': focusRing.line,
-    },
-    outlineOffset: focusRing.inside,
   },
   foldAt: (depth: number) => ({
     insetInlineStart: `calc(${depth} * ${STEP})`,
@@ -475,33 +431,5 @@ const styles = stylex.create({
   pending: {
     cursor: 'default',
     pointerEvents: 'none',
-  },
-});
-
-/** How a line rises from the desk onto a pane: as the view, or folded around it. */
-export const lift = stylex.create({
-  // Selection lifts instead of tinting: the current view rises from the desk onto a pane.
-  selected: {
-    backgroundColor: {
-      default: colorVars['--color-background-surface'],
-      ':hover': colorVars['--color-background-surface'],
-      [media.forcedColors]: 'Highlight',
-    },
-    boxShadow: `0 0 0 1px ${colorVars['--color-border']}`,
-    color: {
-      default: colorVars['--color-text-primary'],
-      [media.forcedColors]: 'HighlightText',
-    },
-    fontWeight: fontWeightVars['--font-weight-semibold'],
-    forcedColorAdjust: 'none',
-  },
-  // Folded around the view, a line rises with it, so the member still sees where they are.
-  holding: {
-    backgroundColor: {
-      default: colorVars['--color-background-surface'],
-      ':hover': colorVars['--color-background-surface'],
-    },
-    boxShadow: `0 0 0 1px ${colorVars['--color-border']}`,
-    color: colorVars['--color-text-primary'],
   },
 });
