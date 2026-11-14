@@ -1,9 +1,7 @@
-import { afterEach, beforeAll, expect } from 'bun:test';
-import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { expect } from 'bun:test';
 import type { BrowserContext, BrowserContextOptions, Locator, Page } from 'playwright';
-import { unusable } from './usable.ts';
-import { suite } from './suite.ts';
+import { expectUsable } from './usable.ts';
+import { SIZES, suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 import { atRest } from '../atRest.ts';
 import { PANELS } from '../../src/features/workbench/ui/panels.ts';
@@ -14,27 +12,12 @@ import { PANELS } from '../../src/features/workbench/ui/panels.ts';
  * its menu without a hover, and accounts and folders fold, as this device remembers.
  */
 
-const SHOTS = join(import.meta.dir, '../../test-results');
-const DESKTOP = { viewport: { width: 1440, height: 900 } };
-const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
-
 const app = suite({ vars: { DEV_MEMBER: `sidebar-${Date.now()}@trailmix.test` } });
 // A test that fails leaves a screenshot of each page and what it showed, for CI to keep.
 const { test } = app;
 
-beforeAll(() => {
-  mkdirSync(SHOTS, { recursive: true });
-});
-
-/** Every error a page threw during a test, which fails it. */
-const errors: string[] = [];
-afterEach(() => {
-  expect(errors.splice(0)).toEqual([]);
-});
-
 async function open(options: BrowserContextOptions): Promise<Page> {
   const page = await (await app.context({ deviceScaleFactor: 2, ...options })).newPage();
-  page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(app.url);
   await mailIsIn(page);
   return page;
@@ -150,13 +133,8 @@ function searchSays(page: Page) {
     });
 }
 
-async function readable(page: Page, screen: string) {
-  await page.screenshot({ path: join(SHOTS, `sidebar-${screen}.png`) });
-  expect({ screen, unusable: await unusable(page) }).toEqual({ screen, unusable: [] });
-}
-
 test('the sidebar folds to its rail and back by button and key, keeping every view, account and action in reach', async () => {
-  const page = await open({ ...DESKTOP, colorScheme: 'dark' });
+  const page = await open({ ...SIZES.desktop, colorScheme: 'dark' });
   const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
   const fold = sidebar.getByRole('button', { name: 'Fold the sidebar' });
   const unfold = sidebar.getByRole('button', { name: 'Unfold the sidebar' });
@@ -190,7 +168,7 @@ test('the sidebar folds to its rail and back by button and key, keeping every vi
   }
   // An account's stamp opens its Inbox.
   await atRest(page);
-  await readable(page, 'desktop-dark-rail');
+  await expectUsable(page, 'sidebar-desktop-dark-rail');
   await sidebar.getByRole('button', { name: /^Work/ }).click();
   await page.getByRole('heading', { name: 'Inbox', level: 2 }).waitFor();
   await expect(
@@ -223,7 +201,7 @@ test('the sidebar folds to its rail and back by button and key, keeping every vi
 test('the rail is centered on the tree’s icons, and holds each target whole, under a mouse or a finger', async () => {
   const TABLET = { viewport: { width: 1180, height: 820 }, isMobile: true, hasTouch: true };
   for (const [pointer, options, rail] of [
-    ['mouse', DESKTOP, 40],
+    ['mouse', SIZES.desktop, 40],
     ['finger', TABLET, 50],
   ] as const) {
     const page = await open(options);
@@ -269,15 +247,15 @@ test('the rail is centered on the tree’s icons, and holds each target whole, u
       whole: true,
     });
     expect(await middle(unfold)).toBe(column);
-    await readable(page, `rail-${pointer}`);
+    await expectUsable(page, `sidebar-rail-${pointer}`);
     await page.context().close();
   }
 }, 60_000);
 
 test('the foot holds the Settings gear, a rule and Trail Mix, and says nothing about the mail', async () => {
   for (const [size, options] of [
-    ['desktop', DESKTOP],
-    ['phone', PHONE],
+    ['desktop', SIZES.desktop],
+    ['phone', SIZES.phone],
   ] as const) {
     for (const colorScheme of ['light', 'dark'] as const) {
       const page = await open({ ...options, colorScheme });
@@ -336,7 +314,7 @@ test('the foot holds the Settings gear, a rule and Trail Mix, and says nothing a
       });
       expect((await sidebar.getByRole('status').allTextContents()).join('')).toBe('');
       expect(await page.getByText(/Up to date|Checking for mail/).count()).toBe(0);
-      await readable(page, `${size}-${colorScheme}-foot`);
+      await expectUsable(page, `sidebar-${size}-${colorScheme}-foot`);
       if (size === 'desktop') {
         // Folded, the rail keeps the gear where it was, with a rule over it and New message above
         // that, and a rule under the fold button at its head.
@@ -378,7 +356,7 @@ test('the foot holds the Settings gear, a rule and Trail Mix, and says nothing a
           }),
         ).toEqual({ isRuledUnderFold: true, isComposeOverAdd: true, isRuledOverGear: true });
         expect(await composeIsSmall(page)).toEqual(SMALL);
-        await readable(page, `${size}-${colorScheme}-rail-foot`);
+        await expectUsable(page, `sidebar-${size}-${colorScheme}-rail-foot`);
         await page.keyboard.press('ControlOrMeta+b');
         await sidebar.getByRole('button', { name: 'Fold the sidebar' }).waitFor();
       }
@@ -390,7 +368,7 @@ test('the foot holds the Settings gear, a rule and Trail Mix, and says nothing a
         .getByRole('heading', { name: 'Settings', level: 1 })
         .waitFor();
       await atRest(page);
-      await readable(page, `${size}-${colorScheme}-settings`);
+      await expectUsable(page, `sidebar-${size}-${colorScheme}-settings`);
 
       // A Tab onto the swatch rings the color, whole, within what Settings shows.
       const picker = page.getByLabel('Accent color');
@@ -416,7 +394,7 @@ test('the foot holds the Settings gear, a rule and Trail Mix, and says nothing a
           };
         }, settings),
       ).toEqual({ isFocusVisible: true, ring: 'solid 2px', isWhole: true });
-      await readable(page, `${size}-${colorScheme}-swatch-focus`);
+      await expectUsable(page, `sidebar-${size}-${colorScheme}-swatch-focus`);
       await page.context().close();
     }
   }
@@ -430,14 +408,13 @@ test('at its narrowest, the foot holds the gear, the rule, the name and New mess
     ['finger', { colorScheme: 'dark', hasTouch: true }, false],
     ['finger', { colorScheme: 'light', hasTouch: true }, true],
   ] as const) {
-    const context = await app.context({ ...DESKTOP, deviceScaleFactor: 2, ...options });
+    const context = await app.context({ ...SIZES.desktop, deviceScaleFactor: 2, ...options });
     await context.addInitScript(
       ([key, width]) => localStorage.setItem(key, JSON.stringify({ width, isCollapsed: false })),
       [PANELS.sidebar.key, PANELS.sidebar.min] as const,
     );
     if (isWide) await asLinux(context);
     const page = await context.newPage();
-    page.on('pageerror', (error) => errors.push(error.message));
     await page.goto(app.url);
     await mailIsIn(page);
     await atRest(page);
@@ -463,16 +440,16 @@ test('at its narrowest, the foot holds the gear, the rule, the name and New mess
         height: target,
       });
     }
-    await readable(
+    await expectUsable(
       page,
-      `desktop-${options.colorScheme}-narrowest-${pointer}${isWide ? '-wide' : ''}`,
+      `sidebar-desktop-${options.colorScheme}-narrowest-${pointer}${isWide ? '-wide' : ''}`,
     );
     await context.close();
   }
 }, 60_000);
 
 test('every folder and account has its menu without a hover, for itself rather than the view', async () => {
-  const page = await open({ ...DESKTOP, colorScheme: 'light' });
+  const page = await open({ ...SIZES.desktop, colorScheme: 'light' });
   const work = page.getByRole('region', { name: 'Work' });
   // The account's folders have arrived, so the rows and their menus are counted from the same tree.
   await work.getByRole('button', { name: /^Receipts/ }).waitFor();
@@ -503,11 +480,11 @@ test('every folder and account has its menu without a hover, for itself rather t
     'Edit the Work account',
     'Remove the Work account',
   ]);
-  await readable(page, 'desktop-light-account-menu');
+  await expectUsable(page, 'sidebar-desktop-light-account-menu');
 }, 60_000);
 
 test('the tree is one Tab stop, whose arrows move through it and fold it, and whose rows open their menus by key', async () => {
-  const page = await open({ ...DESKTOP, colorScheme: 'light' });
+  const page = await open({ ...SIZES.desktop, colorScheme: 'light' });
   await page
     .getByRole('region', { name: 'Work' })
     .getByRole('button', { name: /^Receipts/ })
@@ -631,9 +608,8 @@ test('the tree is one Tab stop, whose arrows move through it and fold it, and wh
 }, 60_000);
 
 test('an account whose folders are on their way shows lines in their shape, which its folders take', async () => {
-  const context = await app.context({ ...DESKTOP, deviceScaleFactor: 2 });
+  const context = await app.context({ ...SIZES.desktop, deviceScaleFactor: 2 });
   const page = await context.newPage();
-  page.on('pageerror', (error) => errors.push(error.message));
   let release = () => {};
   const held = new Promise<void>((resolve) => (release = resolve));
   await page.route('**/_serverFn/**', async (route) => {
@@ -654,7 +630,7 @@ test('an account whose folders are on their way shows lines in their shape, whic
 }, 60_000);
 
 test('accounts and folders fold by click and by key, count what’s unread inside, and stay folded', async () => {
-  const page = await open({ ...DESKTOP, colorScheme: 'dark' });
+  const page = await open({ ...SIZES.desktop, colorScheme: 'dark' });
   const count = async (name: string) =>
     Number((await folderRow(page, name).textContent())!.replace(/\D/g, '') || 0);
   const inside = (await count('Projects')) + (await count('Toy Box'));
@@ -663,7 +639,7 @@ test('accounts and folders fold by click and by key, count what’s unread insid
   await personal(page).getByRole('button', { name: 'Fold Projects' }).click();
   await folderRow(page, 'Toy Box').waitFor({ state: 'detached' });
   await expect(count('Projects')).resolves.toBe(inside);
-  await readable(page, 'desktop-dark-folded-folder');
+  await expectUsable(page, 'sidebar-desktop-dark-folded-folder');
 
   // The arrow keys on its row unfold and fold it again.
   await folderRow(page, 'Projects').focus();
@@ -689,10 +665,10 @@ test('accounts and folders fold by click and by key, count what’s unread insid
 }, 60_000);
 
 test('on a phone, the sidebar never folds', async () => {
-  const page = await open({ ...PHONE, colorScheme: 'light' });
+  const page = await open({ ...SIZES.phone, colorScheme: 'light' });
   await page.getByRole('button', { name: 'Folders', exact: true }).click();
   await expect(page.getByRole('button', { name: /the sidebar$/ }).count()).resolves.toBe(0);
   await personal(page).getByRole('button', { name: 'Fold Projects' }).click();
   await folderRow(page, 'Toy Box').waitFor({ state: 'detached' });
-  await readable(page, 'phone-light-folded');
+  await expectUsable(page, 'sidebar-phone-light-folded');
 }, 60_000);

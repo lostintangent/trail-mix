@@ -1,10 +1,9 @@
-import { afterEach, beforeAll, expect } from 'bun:test';
-import { mkdirSync } from 'node:fs';
+import { expect } from 'bun:test';
 import { join } from 'node:path';
 import { chromium, webkit, type Locator, type Page, type Route } from 'playwright';
 import { SAVE_AFTER_MS, SAVE_AT_LEAST_EVERY_MS } from '../../src/features/composer/core/session.ts';
 import { unusable } from './usable.ts';
-import { suite } from './suite.ts';
+import { RESULTS, SIZES, suite } from './suite.ts';
 import { atRest } from '../atRest.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 
@@ -17,32 +16,18 @@ import { mailIsIn } from '../mailIsIn.ts';
  * and contenteditable has the most quirks: `E2E_ENGINE=webkit E2E_SIZE=phone`.
  */
 
-const SHOTS = join(import.meta.dir, '../../test-results');
 const MEMBER = `composer-${Date.now()}@trailmix.test`;
 const IS_PHONE = process.env.E2E_SIZE === 'phone';
-const SIZE = IS_PHONE
-  ? { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true }
-  : { viewport: { width: 1440, height: 900 } };
+const SIZE = IS_PHONE ? SIZES.phone : SIZES.desktop;
 const ENGINE = process.env.E2E_ENGINE === 'webkit' ? webkit : chromium;
 
 const app = suite({ vars: { DEV_MEMBER: MEMBER }, engine: ENGINE });
 // A test that fails leaves a screenshot of each page and what it showed, for CI to keep.
 const { test } = app;
 
-beforeAll(() => {
-  mkdirSync(SHOTS, { recursive: true });
-});
-
-/** Every error a page threw during a test, which fails it. */
-const errors: string[] = [];
-afterEach(() => {
-  expect(errors.splice(0)).toEqual([]);
-});
-
 /** A browser on the unified Inbox, once the Mailroom has filled it. */
 async function inbox(): Promise<Page> {
   const page = await (await app.context(SIZE)).newPage();
-  page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(app.url);
   await mailIsIn(page);
   return page;
@@ -100,7 +85,7 @@ test('a reply is saved as it is written, opens again with its words and files, a
   await composer.getByText('agenda.txt').waitFor();
   await saved(page).waitFor({ timeout: 10_000 });
   await page.screenshot({
-    path: join(SHOTS, `composer-${ENGINE.name()}-${IS_PHONE ? 'phone' : 'desktop'}.png`),
+    path: join(RESULTS, `composer-${ENGINE.name()}-${IS_PHONE ? 'phone' : 'desktop'}.png`),
   });
   await leave(page, composer);
 

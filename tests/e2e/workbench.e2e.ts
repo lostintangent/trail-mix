@@ -1,5 +1,4 @@
-import { beforeAll, expect } from 'bun:test';
-import { mkdirSync } from 'node:fs';
+import { expect } from 'bun:test';
 import { join } from 'node:path';
 import type { BrowserContext, BrowserContextOptions, Locator, Page, Route } from 'playwright';
 import { ACCENT_STORAGE_KEY } from '../../src/app/theme/accent.ts';
@@ -9,7 +8,7 @@ import { accentRule, accentTokens } from '../../src/app/theme/readableAccent.ts'
 import { PAGE_SIZE } from '../../src/features/mailroom/client/contract.ts';
 import { REST_MS } from '../../src/features/reader/core/rest.ts';
 import { textContrasts, unusable } from './usable.ts';
-import { suite } from './suite.ts';
+import { RESULTS, SIZES, suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 import { atRest } from '../atRest.ts';
 
@@ -18,11 +17,6 @@ import { atRest } from '../atRest.ts';
  * size in both themes. Screenshots of every screen go to `test-results/`, which CI attaches.
  */
 
-const SHOTS = join(import.meta.dir, '../../test-results');
-const SIZES = {
-  desktop: { viewport: { width: 1440, height: 900 } },
-  phone: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
-} satisfies Record<string, BrowserContextOptions>;
 const THEMES = ['light', 'dark'] as const;
 /** The default, and the palest and the darkest accent a member can pick. */
 const ACCENTS = [undefined, '#ffffff', '#000000'] as const;
@@ -33,17 +27,12 @@ const app = suite();
 // A test that fails leaves a screenshot of each page and what it showed, for CI to keep.
 const { test } = app;
 
-beforeAll(() => {
-  mkdirSync(SHOTS, { recursive: true });
-});
-
 /** A page that records every console error and failed response, to assert there were none. */
 async function open(options: BrowserContextOptions, { path = '/', accent = '' } = {}) {
   const context = await app.context({ deviceScaleFactor: 2, ...options });
   if (accent) await pickBeforeLoad(context, accent);
   const page = await context.newPage();
   const problems: string[] = [];
-  page.on('pageerror', (error) => problems.push(`page error: ${error.message}`));
   page.on('console', (message) => {
     if (message.type() === 'error') problems.push(`console: ${message.text()}`);
   });
@@ -124,7 +113,7 @@ for (const accent of ACCENTS) {
           await reach(page);
           await atRest(page);
           const shot = [size, colorScheme, screen, accent?.slice(1)].filter(Boolean).join('-');
-          await page.screenshot({ path: join(SHOTS, `${shot}.png`) });
+          await page.screenshot({ path: join(RESULTS, `${shot}.png`) });
           expect({ screen: shot, unusable: await unusable(page) }).toEqual({
             screen: shot,
             unusable: [],
@@ -286,7 +275,6 @@ test('side panels resize by pointer and key, snap to a rail, and come back the s
       ];
     }),
   ).toEqual([`${start + moved - 16}px`, '52px']);
-  await context.close();
 }, 30_000);
 
 test('a pane shows its thin scrollbar only while the pointer is over it or keys move in it, and a finger keeps its own', async () => {
@@ -493,7 +481,6 @@ test('a reader bar menu reached before its code has come opens once the code is 
   expect(
     await focusing.menu('Move to').evaluate((button) => button === document.activeElement),
   ).toBe(true);
-  await context.close();
 }, 60_000);
 
 test('a device that last saw mail draws the workbench and its skeletons before the Mailroom answers', async () => {
@@ -513,11 +500,10 @@ test('a device that last saw mail draws the workbench and its skeletons before t
     .first()
     .waitFor();
   expect(await page.getByRole('region', { name: 'Personal' }).count()).toBe(0);
-  await page.screenshot({ path: join(SHOTS, 'desktop-light-opening-known.png') });
+  await page.screenshot({ path: join(RESULTS, 'desktop-light-opening-known.png') });
   release();
   await mailIsIn(page);
   await page.getByRole('option').first().waitFor();
-  await context.close();
 }, 60_000);
 
 test('a device that hasn’t seen mail waits on a quiet desk, and says it’s opening only after a moment', async () => {
@@ -542,11 +528,10 @@ test('a device that hasn’t seen mail waits on a quiet desk, and says it’s op
   const release = await holdAccounts(page);
   await page.goto(app.url);
   await page.getByText('Opening your mail…').waitFor();
-  await page.screenshot({ path: join(SHOTS, 'desktop-light-opening-unknown.png') });
+  await page.screenshot({ path: join(RESULTS, 'desktop-light-opening-unknown.png') });
   expect(await page.evaluate(() => (window as unknown as { early: string[] }).early)).toEqual([]);
   release();
   await page.getByRole('navigation', { name: 'Mailboxes' }).waitFor();
-  await context.close();
 }, 60_000);
 
 test('the desk, and the browser’s chrome, follow the system, whatever an earlier release saved', async () => {
@@ -603,7 +588,7 @@ test('a saved accent paints before any of the app runs, made readable in each th
 });
 
 test('an accent picked in Settings shows at once, outlasts a reload, and goes back to ink blue', async () => {
-  const { context, page, problems } = await open(SIZES.desktop);
+  const { page, problems } = await open(SIZES.desktop);
   const inkBlue = await accentShown(page);
   const picker = page.getByLabel('Accent color');
   const openSettings = () => page.getByRole('button', { name: 'Open settings' }).click();
@@ -657,7 +642,6 @@ test('an accent picked in Settings shows at once, outlasts a reload, and goes ba
   await page.reload({ waitUntil: 'networkidle' });
   expect(await accentShown(page)).toBe(inkBlue);
   expect(problems).toEqual([]);
-  await context.close();
 }, 30_000);
 
 test('offline, a desktop’s list says so beside its title, and going offline and back moves nothing', async () => {
@@ -679,7 +663,6 @@ test('offline, a desktop’s list says so beside its title, and going offline an
   await context.setOffline(false);
   await offline.waitFor({ state: 'detached' });
   expect(await places()).toEqual(online);
-  await context.close();
 });
 
 /** The least time a person takes to choose a color in the system's picker, once it opens. */
@@ -716,11 +699,10 @@ test('reaching for the accent in Settings the moment the list shows, on a slowed
   await page.waitForTimeout(CHOOSING_MS - loadedIn);
   await picker.fill('#c2185b');
   expect(await accentShown(page)).toBe(shownAs(accentTokens(parseHex('#c2185b')!, 'light').accent));
-  await context.close();
 }, 30_000);
 
 test('a sheet that sets its own color scheme takes the theme’s colors for that scheme', async () => {
-  const { context, page } = await open({ ...SIZES.desktop, colorScheme: 'dark' });
+  const { page } = await open({ ...SIZES.desktop, colorScheme: 'dark' });
   const inkIn = (scheme: string) =>
     page.evaluate((scheme) => {
       const sheet = document.createElement('div');
@@ -733,11 +715,10 @@ test('a sheet that sets its own color scheme takes the theme’s colors for that
     }, scheme);
 
   expect(await inkIn('light')).not.toBe(await inkIn('dark'));
-  await context.close();
 });
 
 test('the reader follows a move made after a rest at once, and waits while a key is held', async () => {
-  const { context, page, problems } = await open(SIZES.desktop);
+  const { page, problems } = await open(SIZES.desktop);
   await openConversation(page, 0);
   await preparedBelow(page);
 
@@ -781,11 +762,10 @@ test('the reader follows a move made after a rest at once, and waits while a key
   expect(shown.whileHeld).toHaveLength(1);
   expect(shown.last).toContain(shown.whileHeld[0] ?? '(none)');
   expect(problems).toEqual([]);
-  await context.close();
 }, 30_000);
 
 test('quick presses never rest, however long a slow phone takes to draw each move', async () => {
-  const { context, page, problems } = await open(SIZES.desktop);
+  const { page, problems } = await open(SIZES.desktop);
   const rows = page.getByRole('option');
   const heading = page.locator('section[aria-label="Reader"] h1');
   // Each conversation is opened once first, so one the reader shows later draws at once.
@@ -839,7 +819,6 @@ test('quick presses never rest, however long a slow phone takes to draw each mov
   expect(shown.seen).toHaveLength(2);
   expect(shown.last).toContain(shown.seen[1] ?? '(none)');
   expect(problems).toEqual([]);
-  await context.close();
 }, 30_000);
 
 test('the search field is the palette: ⌘K, a click or the phone’s island opens it, and Enter runs the best match', async () => {
@@ -858,7 +837,7 @@ test('the search field is the palette: ⌘K, a click or the phone’s island ope
   await expect(
     commands.getByRole('option', { name: /^Search and commands/ }).count(),
   ).resolves.toBe(0);
-  await page.screenshot({ path: join(SHOTS, 'desktop-light-palette.png') });
+  await page.screenshot({ path: join(RESULTS, 'desktop-light-palette.png') });
   await page.keyboard.type('go to drafts');
   await page.keyboard.press('Enter');
   await heading('Drafts').waitFor();
@@ -894,11 +873,10 @@ test('the search field is the palette: ⌘K, a click or the phone’s island ope
   await phone.page.keyboard.press('Enter');
   await phone.page.getByRole('heading', { name: 'Outbox', level: 2 }).waitFor();
   expect(phone.problems).toEqual([]);
-  await phone.context.close();
 });
 
 test('Enter runs the best match for what the field holds, even before the palette has drawn it', async () => {
-  const { context, page, problems } = await open(SIZES.desktop);
+  const { page, problems } = await open(SIZES.desktop);
   await page.getByRole('option').first().waitFor();
   const field = page.getByRole('searchbox', { name: 'Search mail' });
   await field.click();
@@ -916,11 +894,10 @@ test('Enter runs the best match for what the field holds, even before the palett
   await page.getByRole('heading', { name: 'Outbox', level: 2 }).waitFor({ timeout: 5_000 });
   await expect(field.inputValue()).resolves.toBe('');
   expect(problems).toEqual([]);
-  await context.close();
 });
 
 test('search finds mail as it is typed, marks what matched, and reads bodies only when asked', async () => {
-  const { context, page, problems } = await open(SIZES.desktop);
+  const { page, problems } = await open(SIZES.desktop);
   const field = page.getByRole('searchbox', { name: 'Search mail' });
   const marks = page.locator('[role="option"] mark');
 
@@ -945,11 +922,10 @@ test('search finds mail as it is typed, marks what matched, and reads bodies onl
   await field.fill('');
   await page.getByRole('heading', { name: 'Inbox', level: 2 }).waitFor();
   expect(problems).toEqual([]);
-  await context.close();
 }, 30_000);
 
 test('the list header names its view and holds only what acts on it, and the reader bar holds triage and place together', async () => {
-  const { context, page, problems } = await open(SIZES.desktop);
+  const { page, problems } = await open(SIZES.desktop);
   const list = page.locator('section[aria-labelledby]').first();
   const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
   // The header's icon is the one the sidebar shows for the view in it.
@@ -1037,11 +1013,10 @@ test('the list header names its view and holds only what acts on it, and the rea
   await folded.getByRole('button', { name: 'Next conversation' }).waitFor();
   await page.keyboard.press('Enter');
   expect(problems).toEqual([]);
-  await context.close();
 }, 30_000);
 
 test('the list shows only unread mail while its filter is on, and keeps the one open until the member leaves it', async () => {
-  const { context, page, problems } = await open(SIZES.desktop);
+  const { page, problems } = await open(SIZES.desktop);
   const list = page.locator('section[aria-labelledby]').first();
   const toggle = list.getByRole('button', { name: 'Unread only' });
   const rows = page.getByRole('option');
@@ -1075,7 +1050,7 @@ test('the list shows only unread mail while its filter is on, and keeps the one 
       ).length,
   );
   expect(drawnRead).toBe(0);
-  await page.screenshot({ path: join(SHOTS, 't90-desktop-light-unread.png') });
+  await page.screenshot({ path: join(RESULTS, 't90-desktop-light-unread.png') });
 
   // A conversation read under the filter stays listed, and the reader stays on it.
   const isRead = page.waitForResponse(
@@ -1149,11 +1124,10 @@ test('the list shows only unread mail while its filter is on, and keeps the one 
   await page.waitForURL((url) => url.searchParams.has('folder') && !isFiltered(url));
   await expect(toggle.getAttribute('aria-pressed')).resolves.toBe('false');
   expect(problems).toEqual([]);
-  await context.close();
 }, 60_000);
 
 test('a folder with nothing unread, listed only for its unread mail, says so in the list and the reader', async () => {
-  const { context, page, problems } = await open(SIZES.desktop);
+  const { page, problems } = await open(SIZES.desktop);
   const list = page.locator('section[aria-labelledby]').first();
   const toggle = list.getByRole('button', { name: 'Unread only' });
   await page
@@ -1176,7 +1150,7 @@ test('a folder with nothing unread, listed only for its unread mail, says so in 
       .getByText('Everything here is read.')
       .waitFor();
     await expect(toggle.getAttribute('aria-pressed')).resolves.toBe('true');
-    await page.screenshot({ path: join(SHOTS, `t90-desktop-${colorScheme}-nothing-unread.png`) });
+    await page.screenshot({ path: join(RESULTS, `t90-desktop-${colorScheme}-nothing-unread.png`) });
     expect({ colorScheme, unusable: await unusable(page) }).toEqual({
       colorScheme,
       unusable: [],
@@ -1188,12 +1162,11 @@ test('a folder with nothing unread, listed only for its unread mail, says so in 
   await page.getByRole('option').first().waitFor();
   await expect(toggle.count()).resolves.toBe(0);
   expect(problems).toEqual([]);
-  await context.close();
 }, 30_000);
 
 test('reader triage sits at the left of its bar, with place at the right, in both themes and panes', async () => {
   const screenshot = async (page: Page, name: string) => {
-    await page.screenshot({ path: join(SHOTS, `${name}.png`) });
+    await page.screenshot({ path: join(RESULTS, `${name}.png`) });
     expect({ name, unusable: await unusable(page) }).toEqual({ name, unusable: [] });
   };
   for (const colorScheme of THEMES) {
@@ -1279,7 +1252,7 @@ test('a narrow list’s header gives up its unread count, whole, before a letter
 }, 60_000);
 
 test('on a phone, the list’s header holds no triage, and the reader’s island files what’s open', async () => {
-  const { context, page, problems } = await open(SIZES.phone);
+  const { page, problems } = await open(SIZES.phone);
   await expect(page.getByRole('toolbar', { name: 'Conversation' }).count()).resolves.toBe(0);
   await openConversation(page, 1);
   await page
@@ -1287,11 +1260,10 @@ test('on a phone, the list’s header holds no triage, and the reader’s island
     .getByRole('button', { name: 'Archive' })
     .waitFor();
   expect(problems).toEqual([]);
-  await context.close();
 }, 30_000);
 
 test('the reader says where its conversation sits, and steps to the ones either side', async () => {
-  const { context, page, problems } = await open(SIZES.desktop);
+  const { page, problems } = await open(SIZES.desktop);
   // A bundle's row is a place like any other, and its sheet's bar says so as a conversation's does.
   const bar = page.getByRole('toolbar', { name: /^(Conversation|Repository)$/ });
   const rows = page.getByRole('option');
@@ -1336,7 +1308,6 @@ test('the reader says where its conversation sits, and steps to the ones either 
     .click();
   await page.getByRole('region', { name: 'New message' }).waitFor({ timeout: 5_000 });
   expect(problems).toEqual([]);
-  await context.close();
 }, 30_000);
 
 /**

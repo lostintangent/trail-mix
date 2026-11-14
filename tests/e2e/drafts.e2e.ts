@@ -1,9 +1,7 @@
-import { afterEach, beforeAll, expect } from 'bun:test';
-import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { expect } from 'bun:test';
 import type { BrowserContextOptions, Page, Route } from 'playwright';
-import { unusable } from './usable.ts';
-import { suite } from './suite.ts';
+import { expectUsable } from './usable.ts';
+import { SIZES, suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 import { atRest } from '../atRest.ts';
 
@@ -17,24 +15,10 @@ import { atRest } from '../atRest.ts';
  * snapshots fails the test, however brief.
  */
 
-const SHOTS = join(import.meta.dir, '../../test-results');
-const DESKTOP = { viewport: { width: 1440, height: 900 } };
-const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
-
 const app = suite({
   vars: { DEV_MEMBER: `drafts-${Date.now()}@trailmix.test`, DEMO_HOST_FILES_SENT: 'true' },
 });
 const { test } = app;
-
-beforeAll(() => {
-  mkdirSync(SHOTS, { recursive: true });
-});
-
-/** Every error a page threw during a test, which fails it. */
-const errors: string[] = [];
-afterEach(() => {
-  expect(errors.splice(0)).toEqual([]);
-});
 
 /** What a page drew at one moment: the Drafts and Outbox counts, and the subjects in the list. */
 type Drawn = { at: number; drafts: string; outbox: string; rows: string[] };
@@ -42,7 +26,6 @@ type Drawn = { at: number; drafts: string; outbox: string; rows: string[] };
 /** A browser on the unified Drafts, once the Mailroom has filled it, recording what it draws. */
 async function open(options: BrowserContextOptions): Promise<Page> {
   const page = await (await app.context({ deviceScaleFactor: 2, ...options })).newPage();
-  page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(app.url);
   await mailIsIn(page);
   await goTo(page, 'Drafts');
@@ -195,13 +178,8 @@ async function slow(page: Page, query: 'folders' | 'outbox', ms: number) {
   });
 }
 
-async function readable(page: Page, screen: string) {
-  await page.screenshot({ path: join(SHOTS, `drafts-${screen}.png`) });
-  expect({ screen, unusable: await unusable(page) }).toEqual({ screen, unusable: [] });
-}
-
 test('a send undone leaves Drafts at the press, and comes back to it as it was', async () => {
-  const page = await open({ ...DESKTOP, colorScheme: 'light' });
+  const page = await open({ ...SIZES.desktop, colorScheme: 'light' });
   const [drafts] = await counted(page, 'drafts');
   const outbox = outboxSnapshots(page);
   await sendDraft(page, /Lunch Thursday/);
@@ -210,7 +188,7 @@ test('a send undone leaves Drafts at the press, and comes back to it as it was',
   // Out of the list and the count while the toast still counts down.
   await row(page, /Lunch Thursday/).waitFor({ state: 'detached', timeout: 2_000 });
   await counting.click({ trial: true });
-  await readable(page, 'desktop-light-counting');
+  await expectUsable(page, 'drafts-desktop-light-counting');
 
   const undoneAt = page
     .waitForResponse((response) => !!response.request().postData()?.includes('"cancelSend"'))
@@ -232,7 +210,7 @@ test('a send undone leaves Drafts at the press, and comes back to it as it was',
 }, 60_000);
 
 test('an accepted send waits for the server’s copy out of Drafts, its count and the Outbox’s', async () => {
-  const page = await open({ ...DESKTOP, colorScheme: 'dark' });
+  const page = await open({ ...SIZES.desktop, colorScheme: 'dark' });
   const [drafts] = await counted(page, 'drafts');
   const outbox = outboxSnapshots(page);
   const server = draftsSnapshots(page);
@@ -248,7 +226,7 @@ test('an accepted send waits for the server’s copy out of Drafts, its count an
 
   // The server accepts it, and its copy comes a moment later.
   await waitUntil(() => outbox.some(({ states }) => states.includes('accepted')), 20_000);
-  await readable(page, 'desktop-dark-accepted');
+  await expectUsable(page, 'drafts-desktop-dark-accepted');
   await waitUntil(() => outbox.at(-1)?.states.length === 0, 20_000);
   // Drafts has synced since, and its count follows.
   await waitUntil(() => server.at(-1) === drafts! - 1, 20_000);
@@ -272,7 +250,7 @@ test('an accepted send waits for the server’s copy out of Drafts, its count an
 
 test('a count the folders lower before the Outbox lets the send go never drops twice', async () => {
   // At a desktop's size, where the list stays drawn while the reader shows the draft.
-  const page = await open({ ...DESKTOP, colorScheme: 'light' });
+  const page = await open({ ...SIZES.desktop, colorScheme: 'light' });
   const [drafts] = await counted(page, 'drafts');
   const outbox = outboxSnapshots(page);
   const server = draftsSnapshots(page);
@@ -287,7 +265,7 @@ test('a count the folders lower before the Outbox lets the send go never drops t
     .waitFor({ timeout: 2_000 });
   await row(page, /Offsite agenda/).waitFor({ state: 'detached', timeout: 2_000 });
   await waitUntil(() => outbox.some(({ states }) => states.includes('accepted')), 20_000);
-  await readable(page, 'desktop-light-accepted');
+  await expectUsable(page, 'drafts-desktop-light-accepted');
   await waitUntil(() => outbox.at(-1)?.states.length === 0, 20_000);
   await waitUntil(() => server.at(-1) === drafts! - 1, 20_000);
   await drawnNext(page);
@@ -302,20 +280,20 @@ test('a count the folders lower before the Outbox lets the send go never drops t
 }, 60_000);
 
 test('a send the server refuses is back in Drafts, and counted there again', async () => {
-  const page = await open({ ...PHONE, colorScheme: 'light' });
+  const page = await open({ ...SIZES.phone, colorScheme: 'light' });
   const [drafts] = await counted(page, 'drafts');
   await sendDraft(page, /Cabin/);
   await toast(page, /^Sending to Rae in \d+s$/).waitFor();
   await goTo(page, 'Drafts');
   await row(page, /Cabin/).waitFor({ state: 'detached', timeout: 2_000 });
-  await readable(page, 'phone-light-counting');
+  await expectUsable(page, 'drafts-phone-light-counting');
   await toast(page, /^Couldn’t send to Rae\. The mail server refused it: 554/).waitFor({
     timeout: 30_000,
   });
   await row(page, /Cabin/).waitFor();
   await drawsLast(page, { drafts: drafts!, outbox: '1', subject: 'Cabin', isListed: true });
   await atRest(page);
-  await readable(page, 'phone-light-refused');
+  await expectUsable(page, 'drafts-phone-light-refused');
 
   expect(await counted(page, 'drafts')).toEqual([drafts!, drafts! - 1, drafts!]);
   // A send that waits for the member stays in the Outbox's count.

@@ -1,5 +1,18 @@
+import { expect } from 'bun:test';
+import { join } from 'node:path';
 import type { Locator, Page } from 'playwright';
 import { atRest } from '../atRest.ts';
+import { RESULTS } from './suite.ts';
+
+/**
+ * Fails naming everything on `page` a member can't use, once it comes to rest, and leaves its
+ * screenshot as `screen` in the folder CI uploads.
+ */
+export async function expectUsable(page: Page, screen: string) {
+  const problems = await unusable(page);
+  await page.screenshot({ path: join(RESULTS, `${screen}.png`) });
+  expect({ screen, unusable: problems }).toEqual({ screen, unusable: [] });
+}
 
 /**
  * Everything on screen a member can't use, once it comes to rest: text whose contrast against what
@@ -18,11 +31,13 @@ export async function unusable(page: Page): Promise<string[]> {
 /**
  * Each control a tap can reach whose target is under 44 pixels either way, when the pointer is
  * coarse. A control's target is its label or, for a field, Astryx's box around it, which hands
- * every tap on it to the field.
+ * every tap on it to the field. Astryx grows a control's own target toward 44 pixels in the frame
+ * after it changes, so it is measured two frames on.
  */
 function smallTargets(page: Page): Promise<string[]> {
-  return page.evaluate(() => {
+  return page.evaluate(async () => {
     if (!matchMedia('(pointer: coarse)').matches) return [];
+    await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
     const controls = document.querySelectorAll(
       'a[href], button, input, select, textarea, [role=button], [role=link], [role=switch], [role=checkbox], [role=radio], [role=tab], [role=option], [role=treeitem], [role=menuitem], [role=menuitemradio], [role=menuitemcheckbox]',
     );

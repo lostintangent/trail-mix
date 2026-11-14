@@ -1,9 +1,8 @@
-import { afterEach, beforeAll, expect } from 'bun:test';
-import { mkdirSync } from 'node:fs';
+import { expect } from 'bun:test';
 import { join } from 'node:path';
 import type { Page, Request, Route } from 'playwright';
 import { unusable } from './usable.ts';
-import { suite } from './suite.ts';
+import { RESULTS, SIZES, suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 import { atRest } from '../atRest.ts';
 
@@ -13,10 +12,7 @@ import { atRest } from '../atRest.ts';
  * reaches it. A fresh member each run starts from the seeded mailbox.
  */
 
-const SHOTS = join(import.meta.dir, '../../test-results');
 const MEMBER = `triage-${Date.now()}@trailmix.test`;
-const DESKTOP = { viewport: { width: 1440, height: 900 } };
-const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
 /** How soon every other open browser shows a change, as the triage step promises. */
 const ELSEWHERE_MS = 5_000;
 
@@ -24,20 +20,11 @@ const app = suite({ vars: { DEV_MEMBER: MEMBER } });
 // A test that fails leaves a screenshot of each page and what it showed, for CI to keep.
 const { test } = app;
 
-beforeAll(() => {
-  mkdirSync(SHOTS, { recursive: true });
-});
-
-/** Every error a page threw during a test, which fails it. */
-const errors: string[] = [];
-afterEach(() => {
-  expect(errors.splice(0)).toEqual([]);
-});
-
 /** A browser on the unified Inbox, once the Mailroom has filled it. */
-async function inbox(size: typeof DESKTOP | typeof PHONE = DESKTOP): Promise<Page> {
+async function inbox(
+  size: typeof SIZES.desktop | typeof SIZES.phone = SIZES.desktop,
+): Promise<Page> {
   const page = await (await app.context(size)).newPage();
-  page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(app.url);
   await mailIsIn(page);
   return page;
@@ -239,7 +226,7 @@ function msUntilGone(page: Page, action: string, subject: string): Promise<numbe
 
 test('arrowing the list rings its active row, never the sheet, and a pointer clears that ring', async () => {
   for (const colorScheme of ['light', 'dark'] as const) {
-    const here = await inbox(DESKTOP);
+    const here = await inbox(SIZES.desktop);
     await here.emulateMedia({ colorScheme });
     const list = here.getByRole('listbox', { name: 'Inbox' });
     await list.focus();
@@ -401,7 +388,7 @@ test('opening a conversation marks it read, here and in the other browser', asyn
 }, 30_000);
 
 test('on a phone, a long press starts picking, a tap adds, and the island acts on what was picked', async () => {
-  const here = await inbox(PHONE);
+  const here = await inbox(SIZES.phone);
   const hand = await finger(here);
   const options = here.getByRole('option');
   const picked = await Promise.all([1, 2].map((at) => options.nth(at).textContent()));
@@ -432,7 +419,7 @@ test('on a phone, a long press starts picking, a tap adds, and the island acts o
 }, 30_000);
 
 test('on a phone, a row swiped far enough left is archived, and a short swipe slides back', async () => {
-  const here = await inbox(PHONE);
+  const here = await inbox(SIZES.phone);
   const hand = await finger(here);
   const options = here.getByRole('option');
 
@@ -527,14 +514,13 @@ test('Backspace deletes the whole selection together, and Undo restores all of i
   for (const text of picked) await listedSummary(here, text).waitFor({ timeout: ELSEWHERE_MS });
   await until(() => Promise.resolve(undoing.length === 4), ELSEWHERE_MS);
   expect(undoing).toEqual(['asked', 'asked', 'answered', 'answered']);
-  await here.context().close();
 }, 30_000);
 
 test("a toast's Undo is its icon alone, ruled off from the close, and its tooltip names Undo's key", async () => {
   // Each size in one theme, so both themes and both sizes show.
   for (const [size, options, colorScheme] of [
-    ['desktop', DESKTOP, 'light'],
-    ['phone', PHONE, 'dark'],
+    ['desktop', SIZES.desktop, 'light'],
+    ['phone', SIZES.phone, 'dark'],
   ] as const) {
     const here = await inbox(options);
     await here.emulateMedia({ colorScheme });
@@ -569,7 +555,7 @@ test("a toast's Undo is its icon alone, ruled off from the close, and its toolti
       await undo.hover();
       await here.getByRole('tooltip').filter({ hasText: 'Undo (Z)' }).waitFor();
     }
-    await here.screenshot({ path: join(SHOTS, `toast-undo-${size}-${colorScheme}.png`) });
+    await here.screenshot({ path: join(RESULTS, `toast-undo-${size}-${colorScheme}.png`) });
     expect({ colorScheme, size, unusable: await unusable(here) }).toEqual({
       colorScheme,
       size,
@@ -619,7 +605,6 @@ test('Delete and Backspace stay in the search field and palette while typing', a
   await editor.press('Delete');
   await expect(editor.textContent()).resolves.toBe('typed tex');
   await original.waitFor();
-  await writing.context().close();
 }, 45_000);
 
 test('straight after Z, a conversation opens with its messages, under the refs Undo gave them', async () => {

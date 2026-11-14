@@ -1,13 +1,9 @@
 import { expect } from 'bun:test';
-import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BrowserContextOptions, Page } from 'playwright';
 import { atRest } from '../atRest.ts';
-import { suite } from './suite.ts';
+import { RESULTS, SIZES, suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
-
-const SHOTS = join(import.meta.dir, '../../test-results');
-mkdirSync(SHOTS, { recursive: true });
 
 /**
  * Installing Trail Mix: Chromium finds nothing that stops it, and the manifest and icons it asks
@@ -18,10 +14,6 @@ mkdirSync(SHOTS, { recursive: true });
 const app = suite();
 const { test } = app;
 
-const SIZES = {
-  desktop: { viewport: { width: 1440, height: 900 } },
-  phone: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
-} satisfies Record<string, BrowserContextOptions>;
 /**
  * How soon after an offline reload's start the kept Inbox and the conversation open in it show, or,
  * on a device that kept nothing, the word that the app can't reach the mail. Nothing they need
@@ -55,7 +47,6 @@ test('Chromium can install Trail Mix, and asks for its manifest with the member�
   const { installabilityErrors } = await browser.send('Page.getInstallabilityErrors');
   expect({ errors, installabilityErrors }).toEqual({ errors: [], installabilityErrors: [] });
   expect((await (await asked).allHeaders())['cookie']).toContain('CF_Authorization=member');
-  await context.close();
 });
 
 // install.test.ts holds every icon to its size, and installing fetches the manifest's.
@@ -67,7 +58,6 @@ test('the shell names a touch icon the Worker serves as a PNG', async () => {
   expect(touch).toBe('/icons/apple-touch-icon.png');
   const response = await page.request.get(new URL(touch!, app.url).href);
   expect(response.headers()['content-type']).toBe('image/png');
-  await context.close();
 });
 
 test('the installed app with nothing kept opens offline, and says at once it can’t reach the mail', async () => {
@@ -75,7 +65,7 @@ test('the installed app with nothing kept opens offline, and says at once it can
     ['desktop', 'light'],
     ['phone', 'dark'],
   ] as const) {
-    const { context, page, errors } = await installed({ ...SIZES[size], colorScheme });
+    const { context, page } = await installed({ ...SIZES[size], colorScheme });
     await page.evaluate(() => keptNothing());
 
     await context.addInitScript(noteShown);
@@ -100,8 +90,9 @@ test('the installed app with nothing kept opens offline, and says at once it can
     expect({ size, missed }).toEqual({ size, missed: [] });
     // And why, in plain words, not the browser's.
     await page.getByText('This device is offline.', { exact: true }).waitFor();
-    await page.screenshot({ path: join(SHOTS, `offline-${size}-${colorScheme}-unreachable.png`) });
-    expect({ size, errors }).toEqual({ size, errors: [] });
+    await page.screenshot({
+      path: join(RESULTS, `offline-${size}-${colorScheme}-unreachable.png`),
+    });
     await context.close();
   }
 }, 60_000);
@@ -123,11 +114,10 @@ test('the installed app opens offline to the lists and conversations it showed',
     await page.setViewportSize({ width, height: 900 });
     expect({ width, ...(await listHeader(page)) }).toEqual({ width, ...HEADER_OFFLINE });
   }
-  await page.screenshot({ path: join(SHOTS, 'desktop-light-offline.png') });
+  await page.screenshot({ path: join(RESULTS, 'desktop-light-offline.png') });
   for (const [row, subject] of subjects.entries()) {
     expect({ row, opened: await openConversation(page, row) }).toEqual({ row, opened: subject });
   }
-  await context.close();
 }, 60_000);
 
 test('the installed app reads offline at both sizes in both themes: the Inbox and what it opened', async () => {
@@ -136,7 +126,7 @@ test('the installed app reads offline at both sizes in both themes: the Inbox an
     ['desktop', 'light'],
     ['phone', 'dark'],
   ] as const) {
-    const { context, page, errors } = await installed({ ...SIZES[size], colorScheme });
+    const { context, page } = await installed({ ...SIZES[size], colorScheme });
     const subject = await openConversation(page, 0);
     await page.waitForFunction(async () => (await keptCount()) >= 3, undefined, { polling: 200 });
 
@@ -157,7 +147,7 @@ test('the installed app reads offline at both sizes in both themes: the Inbox an
       at === undefined || at > OFFLINE_WITHIN_MS ? [`${what} at ${Math.round(at ?? -1)} ms`] : [],
     );
     expect({ size, colorScheme, late }).toEqual({ size, colorScheme, late: [] });
-    await page.screenshot({ path: join(SHOTS, `offline-${size}-${colorScheme}.png`) });
+    await page.screenshot({ path: join(RESULTS, `offline-${size}-${colorScheme}.png`) });
     if (size === 'phone') {
       await page.getByRole('button', { name: 'Back', exact: true }).click();
       await page.getByRole('option').first().waitFor();
@@ -173,20 +163,19 @@ test('the installed app reads offline at both sizes in both themes: the Inbox an
         colorScheme,
         ...HEADER_OFFLINE,
       });
-      await page.screenshot({ path: join(SHOTS, `offline-phone-${colorScheme}-inbox.png`) });
+      await page.screenshot({ path: join(RESULTS, `offline-phone-${colorScheme}-inbox.png`) });
     }
     expect({ size, colorScheme, rows: (await page.getByRole('option').count()) > 5 }).toEqual({
       size,
       colorScheme,
       rows: true,
     });
-    expect({ size, colorScheme, errors }).toEqual({ size, colorScheme, errors: [] });
     await context.close();
   }
 }, 60_000);
 
 test('offline, a conversation never opened says it opens once online, and Send keeps the message', async () => {
-  const { context, page, errors } = await installed();
+  const { context, page } = await installed();
   await openConversation(page, 0);
   await page.waitForFunction(async () => (await keptCount()) >= 3, undefined, { polling: 200 });
   await context.setOffline(true);
@@ -199,7 +188,7 @@ test('offline, a conversation never opened says it opens once online, and Send k
   const reader = page.locator('section[aria-label="Reader"]');
   await reader.getByRole('alert').filter({ hasText: 'It opens once you’re back online' }).waitFor();
   expect(await reader.locator('h1').textContent()).toMatch(NEVER_OPENED);
-  await page.screenshot({ path: join(SHOTS, 'offline-desktop-light-unopened.png') });
+  await page.screenshot({ path: join(RESULTS, 'offline-desktop-light-unopened.png') });
 
   // Archive can't reach the mail server, so the row stays, and the toast says why in plain words.
   await page.keyboard.press('e');
@@ -219,7 +208,7 @@ test('offline, a conversation never opened says it opens once online, and Send k
     ),
   );
   await reader.getByRole('alert').filter({ hasText: 'It opens once you’re back online' }).waitFor();
-  await page.screenshot({ path: join(SHOTS, 'offline-desktop-light-archive.png') });
+  await page.screenshot({ path: join(RESULTS, 'offline-desktop-light-archive.png') });
 
   // Writing offline is out of scope, so Send and Send later wait, plainly, and say why, and what was
   // written stays.
@@ -243,7 +232,7 @@ test('offline, a conversation never opened says it opens once online, and Send k
   // Send closes the composer in the key's own handler, so by the frame after it would be gone.
   await page.evaluate(() => new Promise(requestAnimationFrame));
   expect(await message.textContent({ timeout: 1_000 })).toBe('Kept until the network is back.');
-  await page.screenshot({ path: join(SHOTS, 'offline-desktop-light-send.png') });
+  await page.screenshot({ path: join(RESULTS, 'offline-desktop-light-send.png') });
 
   // The conversation the reload opened, from what was kept, asked for no read mark it couldn't make.
   expect(await page.getByText(/Couldn.t mark read/).count()).toBe(0);
@@ -252,12 +241,10 @@ test('offline, a conversation never opened says it opens once online, and Send k
   await context.setOffline(false);
   await composer.getByRole('status').filter({ hasText: 'Saved to Drafts' }).waitFor();
   expect(await send.isDisabled()).toBe(false);
-  expect(errors).toEqual([]);
-  await context.close();
 }, 60_000);
 
 test('on a phone, an archive refused offline puts back the conversation it took away, or what was picked', async () => {
-  const { context, page, errors } = await installed(SIZES.phone);
+  const { context, page } = await installed(SIZES.phone);
   const subject = await openConversation(page, 0);
   await page.waitForFunction(async () => (await keptCount()) >= 3, undefined, { polling: 200 });
   await context.setOffline(true);
@@ -305,12 +292,10 @@ test('on a phone, an archive refused offline puts back the conversation it took 
   expect(
     await Promise.all([1, 2].map((at) => options.nth(at).getAttribute('aria-selected'))),
   ).toEqual(['true', 'true']);
-  expect(errors).toEqual([]);
-  await context.close();
 }, 60_000);
 
 test('back online, the installed app catches up with what changed, with no reload', async () => {
-  const { context, page, errors } = await installed();
+  const { context, page } = await installed();
   await openConversation(page, 0);
   await page.waitForFunction(async () => (await keptCount()) >= 3, undefined, { polling: 200 });
   await context.setOffline(true);
@@ -343,9 +328,7 @@ test('back online, the installed app catches up with what changed, with no reloa
   await reader.locator('article').first().waitFor();
   expect(await reader.getByRole('alert').count()).toBe(0);
   expect(await page.evaluate(() => 'offlineLoad' in window)).toBe(true);
-  await page.screenshot({ path: join(SHOTS, 'online-desktop-light-caught-up.png') });
-  expect(errors).toEqual([]);
-  await context.close();
+  await page.screenshot({ path: join(RESULTS, 'online-desktop-light-caught-up.png') });
 }, 60_000);
 
 test('losing the network while open, the installed app still opens the conversations it kept', async () => {
@@ -381,7 +364,6 @@ test('losing the network while open, the installed app still opens the conversat
     before,
   );
   await unkept.waitFor({ timeout: 5_000 });
-  await context.close();
 }, 60_000);
 
 test('what a device kept of another Mailroom never shows, and goes', async () => {
@@ -436,25 +418,19 @@ test('a browser tab keeps nothing, and its page loads as it always has', async (
   await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
   expect(await page.evaluate(() => 'isWorkerAskedFor' in window)).toBe(false);
   expect(await page.evaluate(() => navigator.serviceWorker.getRegistrations())).toHaveLength(0);
-  await context.close();
 });
 
-/**
- * A page of Trail Mix run as an installed app, once its worker has kept the build, and the errors
- * its pages throw.
- */
+/** A page of Trail Mix run as an installed app, once its worker has kept the build. */
 async function installed(options: BrowserContextOptions = SIZES.desktop) {
   const context = await app.context(options);
   await context.addInitScript(runInstalled);
   await context.addInitScript(kept);
   const page = await context.newPage();
-  const errors: string[] = [];
-  page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(app.url, { waitUntil: 'networkidle' });
   await page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {
     timeout: 15_000,
   });
-  return { context, page, errors };
+  return { context, page };
 }
 
 /**

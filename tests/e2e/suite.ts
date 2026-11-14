@@ -29,8 +29,14 @@ export type Suite = {
   witnessed: (name: string, steps: () => void | Promise<void>) => () => Promise<void>;
 };
 
-/** Where a failed test's evidence goes, the folder CI uploads. */
-const RESULTS = join(import.meta.dir, '../../test-results');
+/** Where screenshots and a failed test's evidence go, the folder CI uploads. */
+export const RESULTS = join(import.meta.dir, '../../test-results');
+
+/** The two sizes Trail Mix is driven at: a desktop's window, and a phone's screen under a finger. */
+export const SIZES = {
+  desktop: { viewport: { width: 1440, height: 900 } },
+  phone: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
+} satisfies Record<string, BrowserContextOptions>;
 const ROOT = join(import.meta.dir, '../..');
 
 /**
@@ -38,7 +44,8 @@ const ROOT = join(import.meta.dir, '../..');
  * out, Bun ends every process its file started, the app's and the browser's included
  * (oven-sh/bun#46373), so each later test would fail. Before each test the app starts again if it
  * stopped answering, and a context that can't be opened in the browser is opened in a new one.
- * Call it at the top of the suite, since it adds the suite's hooks.
+ * A test fails if any page of the app it opened threw. Call it at the top of the suite, since it
+ * adds the suite's hooks.
  */
 export function suite({
   vars = {},
@@ -56,6 +63,8 @@ export function suite({
   let preview: Preview | undefined;
   let launched: Promise<Browser> | undefined;
   const opened: BrowserContext[] = [];
+  // Every error a page of the app threw and nothing caught.
+  const thrown: string[] = [];
   // Every class on any element of a page the test opened, and those the build's stylesheet pruned.
   const landed = new Set<string>();
   let pruned: Set<string> | undefined;
@@ -75,6 +84,7 @@ export function suite({
   };
 
   beforeAll(async () => {
+    mkdirSync(RESULTS, { recursive: true });
     preview = await startPreview(vars, env, build);
     pruned = prunedFrom(build);
   }, 60_000);
@@ -93,6 +103,7 @@ export function suite({
     await Promise.all(opened.splice(0).map((context) => context.close().catch(() => {})));
     const unstyled = [...landed].filter((name) => pruned?.has(name));
     landed.clear();
+    if (thrown.length) throw new Error(`A page threw:\n${thrown.splice(0).join('\n')}`);
     if (unstyled.length) {
       throw new Error(
         `Elements carried ${unstyled.join(', ')}, whose rules in Astryx's stylesheet the build ` +
@@ -111,7 +122,6 @@ export function suite({
 
   /** Leaves what each page still open shows, and what the app logged, for a test that failed. */
   async function witness(name: string, failure: unknown) {
-    mkdirSync(RESULTS, { recursive: true });
     const file = `failed-${name
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, '-')
@@ -169,6 +179,11 @@ export function suite({
         .catch(async () => (await launch()).newContext(options));
       opened.push(context);
       context.on('page', () => (isPageOpened = true));
+      // A test's init scripts also run in each new page's about:blank, which refuses them storage.
+      context.on('weberror', (error) => {
+        const url = error.page()?.url() ?? '';
+        if (preview && url.startsWith(preview.url)) thrown.push(`${url}: ${error.error().message}`);
+      });
       await context.exposeBinding(LANDED, (_, names: string[]) => {
         isReported = true;
         for (const name of names) landed.add(name);

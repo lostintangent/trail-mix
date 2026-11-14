@@ -1,11 +1,10 @@
-import { afterEach, beforeAll, expect } from 'bun:test';
-import { mkdirSync } from 'node:fs';
+import { expect } from 'bun:test';
 import { join } from 'node:path';
 import type { BrowserContextOptions, Locator, Page, Request, Route } from 'playwright';
 import { REST_MS } from '../../src/features/reader/core/rest.ts';
 import { bareSubject } from '../../src/features/reader/core/subject.ts';
-import { unusable } from './usable.ts';
-import { suite } from './suite.ts';
+import { expectUsable } from './usable.ts';
+import { RESULTS, SIZES, suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 
 /**
@@ -14,30 +13,15 @@ import { mailIsIn } from '../mailIsIn.ts';
  * the filing in the island.
  */
 
-const SHOTS = join(import.meta.dir, '../../test-results');
-const DESKTOP = { viewport: { width: 1440, height: 900 } };
-const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
-
 const app = suite({ vars: { DEV_MEMBER: `reader-${Date.now()}@trailmix.test` } });
 // A test that fails leaves a screenshot of each page and what it showed, for CI to keep.
 const { test } = app;
-
-beforeAll(() => {
-  mkdirSync(SHOTS, { recursive: true });
-});
-
-/** Every error a page threw during a test, which fails it. */
-const errors: string[] = [];
-afterEach(() => {
-  expect(errors.splice(0)).toEqual([]);
-});
 
 async function open(
   options: BrowserContextOptions,
   beforeLoad?: (page: Page) => unknown,
 ): Promise<Page> {
   const page = await (await app.context({ deviceScaleFactor: 2, ...options })).newPage();
-  page.on('pageerror', (error) => errors.push(error.message));
   await beforeLoad?.(page);
   await page.goto(app.url);
   await mailIsIn(page);
@@ -55,16 +39,11 @@ const folder = (page: Page, account: string, name: string) =>
     .getByRole('region', { name: account })
     .getByRole('button', { name: new RegExp(`^${name}( \\d+)?$`) });
 
-async function readable(page: Page, screen: string) {
-  await page.screenshot({ path: join(SHOTS, `reader-${screen}.png`) });
-  expect({ screen, unusable: await unusable(page) }).toEqual({ screen, unusable: [] });
-}
-
 test('the line under the subject names the folder the conversation lies in', async () => {
-  const page = await open({ ...DESKTOP, colorScheme: 'light' });
+  const page = await open({ ...SIZES.desktop, colorScheme: 'light' });
   await row(page, 'Workers migration plan').click();
   await says(page, 'Personal · Inbox · 3 messages');
-  await readable(page, 'desktop-light');
+  await expectUsable(page, 'reader-desktop-light');
 
   // A draft's own line says what it is, so the count is of the mail alone.
   await row(page, 'Lunch Thursday?').click();
@@ -84,7 +63,7 @@ test('the line under the subject names the folder the conversation lies in', asy
 }, 30_000);
 
 test('each message answers and shows the source of its own, and the palette the newest', async () => {
-  const page = await open({ ...DESKTOP, colorScheme: 'dark' });
+  const page = await open({ ...SIZES.desktop, colorScheme: 'dark' });
   await row(page, 'Q4 planning').click();
   const newest = reader(page).getByRole('article');
   const newestName = (await newest.getAttribute('aria-label'))!.replace('Message from ', '');
@@ -150,7 +129,7 @@ test('each message answers and shows the source of its own, and the palette the 
   await page.getByRole('menuitem', { name: 'View source' }).click();
   await source.getByText('Loading the source…').waitFor({ state: 'detached' });
   await expect(from.textContent()).resolves.toContain(address(earlierTo));
-  await readable(page, 'desktop-dark-source');
+  await expectUsable(page, 'reader-desktop-dark-source');
   await page.keyboard.press('Escape');
   await source.waitFor({ state: 'detached' });
 
@@ -177,7 +156,7 @@ async function holdTooltips(page: Page) {
 
 test('a button drawn before the tooltips’ code gains its tooltip as it arrives, under a resting pointer or key but never a press or tap', async () => {
   let tooltips!: Awaited<ReturnType<typeof holdTooltips>>;
-  const page = await open(DESKTOP, async (page) => (tooltips = await holdTooltips(page)));
+  const page = await open(SIZES.desktop, async (page) => (tooltips = await holdTooltips(page)));
   const more = reader(page).getByRole('button', { name: 'More for this message' }).last();
   const tooltip = page.getByRole('tooltip').filter({ hasText: /^More$/ });
 
@@ -211,8 +190,8 @@ test('a button drawn before the tooltips’ code gains its tooltip as it arrives
   // A press leaves the button without one, though the pointer rests on it still, and so does a tap,
   // though the tapped button keeps a sticky hover.
   for (const [options, press] of [
-    [DESKTOP, (button: Locator) => button.click()],
-    [PHONE, (button: Locator) => button.tap()],
+    [SIZES.desktop, (button: Locator) => button.click()],
+    [SIZES.phone, (button: Locator) => button.tap()],
   ] as const) {
     const pressed = await open(options, async (page) => (tooltips = await holdTooltips(page)));
     const unread = pressed.getByRole('button', { name: 'Unread only' });
@@ -227,8 +206,8 @@ test('a button drawn before the tooltips’ code gains its tooltip as it arrives
 test('light paper, chosen in the palette, holds for a sender on every device until turned off', async () => {
   // Two devices of the same member, both in the dark theme, where painted mail is darkened.
   const [first, second] = [
-    await open({ ...DESKTOP, colorScheme: 'dark' }),
-    await open({ ...DESKTOP, colorScheme: 'dark' }),
+    await open({ ...SIZES.desktop, colorScheme: 'dark' }),
+    await open({ ...SIZES.desktop, colorScheme: 'dark' }),
   ];
   const control = (page: Page) =>
     reader(page).getByRole('article').last().getByRole('button', { name: 'Light paper' });
@@ -255,7 +234,7 @@ test('light paper, chosen in the palette, holds for a sender on every device unt
   await first.keyboard.press('Enter');
   await shows(first, 'light');
   expect(await control(first).getAttribute('aria-pressed')).toBe('true');
-  await readable(first, 'desktop-dark-light-paper');
+  await expectUsable(first, 'reader-desktop-dark-light-paper');
   await shows(second, 'light');
 
   // Turned off on the other device, it darkens on both.
@@ -303,7 +282,7 @@ test('light paper, chosen in the palette, holds for a sender on every device unt
 }, 60_000);
 
 test('verified list mail offers to unsubscribe in one click, and says whether the sender took it', async () => {
-  const page = await open({ ...DESKTOP, colorScheme: 'light' });
+  const page = await open({ ...SIZES.desktop, colorScheme: 'light' });
   const sheet = reader(page).getByRole('article').last();
   const offer = sheet.getByRole('button', { name: 'Unsubscribe', exact: true });
   const said = (words: string) =>
@@ -330,7 +309,7 @@ test('verified list mail offers to unsubscribe in one click, and says whether th
   await release();
   await said('Unsubscribed');
   expect(await mailTop()).toBe(before);
-  await readable(page, 'desktop-light-unsubscribed');
+  await expectUsable(page, 'reader-desktop-light-unsubscribed');
   expect(await offered(page)).toBe(false);
 
   // The shop's list server turns its first try away, which the sheet says in its words, and then
@@ -339,32 +318,32 @@ test('verified list mail offers to unsubscribe in one click, and says whether th
   await row(page, 'Your order has shipped').click();
   await offer.click();
   await said('Couldn’t unsubscribe. shop.example.com answered 503 Service Unavailable.');
-  await readable(page, 'desktop-light-unsubscribe-refused');
+  await expectUsable(page, 'reader-desktop-light-unsubscribe-refused');
   await sheet.getByRole('button', { name: 'Try again' }).click();
   await said('Unsubscribed');
 
   // The palette's unsubscribes from the list of the conversation open, here on a page that hasn't
   // asked, in the dark theme.
-  const dark = await open({ ...DESKTOP, colorScheme: 'dark' });
+  const dark = await open({ ...SIZES.desktop, colorScheme: 'dark' });
   await row(dark, 'Kernel Weekly').click();
   const darkSheet = reader(dark).getByRole('article').last();
   await darkSheet.getByRole('button', { name: 'Unsubscribe', exact: true }).waitFor();
   await darkSheet.getByRole('button', { name: 'Show', exact: true }).click();
   await darkSheet.getByText('1 tracker blocked', { exact: true }).waitFor();
-  await readable(dark, 'desktop-dark-unsubscribe');
+  await expectUsable(dark, 'reader-desktop-dark-unsubscribe');
   expect(await offered(dark, { run: true })).toBe(true);
   await darkSheet.getByText('Unsubscribed', { exact: true }).waitFor();
-  await readable(dark, 'desktop-dark-unsubscribed');
+  await expectUsable(dark, 'reader-desktop-dark-unsubscribed');
 }, 60_000);
 
 for (const colorScheme of ['light', 'dark'] as const) {
   test(`on a phone, in ${colorScheme}, a newsletter's sheet offers to unsubscribe, and says the sender took it`, async () => {
-    const page = await open({ ...PHONE, colorScheme });
+    const page = await open({ ...SIZES.phone, colorScheme });
     await row(page, 'Kernel Weekly').click();
     const sheet = reader(page).getByRole('article').last();
     await sheet.getByRole('button', { name: 'Unsubscribe', exact: true }).tap();
     await sheet.getByText('Unsubscribed', { exact: true }).waitFor();
-    await readable(page, `phone-${colorScheme}-unsubscribed`);
+    await expectUsable(page, `reader-phone-${colorScheme}-unsubscribed`);
   }, 30_000);
 }
 
@@ -409,7 +388,7 @@ async function holdCommands(page: Page): Promise<() => Promise<void>> {
 
 for (const colorScheme of ['light', 'dark'] as const) {
   test(`in ${colorScheme}, the demo newsletter’s images, once shown, are its own pictures, and its open pixel stays blocked`, async () => {
-    const page = await open({ ...DESKTOP, colorScheme });
+    const page = await open({ ...SIZES.desktop, colorScheme });
     // Each remote image the page asked the Worker for, by the address it names.
     const asked: { url: string; status: number }[] = [];
     page.on('response', (response) => {
@@ -439,13 +418,13 @@ for (const colorScheme of ['light', 'dark'] as const) {
     expect(asked.some(({ url }) => url.endsWith('/masthead.svg'))).toBe(true);
     expect(asked.filter(({ status }) => status !== 200)).toEqual([]);
     expect(asked.filter(({ url }) => url.includes('/open/'))).toEqual([]);
-    await readable(page, `desktop-${colorScheme}-newsletter-images`);
+    await expectUsable(page, `reader-desktop-${colorScheme}-newsletter-images`);
   }, 30_000);
 }
 
 for (const colorScheme of ['light', 'dark'] as const) {
   test(`on a phone, in ${colorScheme}, a sheet keeps its time whole, and a new message’s title sits on its buttons’ line`, async () => {
-    const page = await open({ ...PHONE, colorScheme });
+    const page = await open({ ...SIZES.phone, colorScheme });
     await row(page, 'Q4 planning').click();
     const header = reader(page).getByRole('article').last().locator('header');
     await header.locator('time').waitFor();
@@ -462,7 +441,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
       };
     });
     expect(line).toEqual({ timeLines: 1, sameLine: true });
-    await page.screenshot({ path: join(SHOTS, `reader-phone-${colorScheme}-time.png`) });
+    await page.screenshot({ path: join(RESULTS, `reader-phone-${colorScheme}-time.png`) });
 
     await page.keyboard.press('c');
     const sheet = page.locator('section[aria-label="New message"]');
@@ -500,12 +479,12 @@ for (const colorScheme of ['light', 'dark'] as const) {
       };
     });
     expect(placed).toEqual({ under: true, inside: true, titleMiddle: centers.title });
-    await page.screenshot({ path: join(SHOTS, `composer-phone-${colorScheme}-title.png`) });
+    await page.screenshot({ path: join(RESULTS, `composer-phone-${colorScheme}-title.png`) });
   }, 30_000);
 }
 
 test('a conversation the Mailroom won’t give says so under its subject, and Try again opens it', async () => {
-  const page = await open({ ...DESKTOP, colorScheme: 'light' });
+  const page = await open({ ...SIZES.desktop, colorScheme: 'light' });
   await page.route('**/_serverFn/**', async (route) => {
     const asked = decodeURIComponent(route.request().url());
     await (asked.includes('"conversation"') ? route.abort() : route.fallback());
@@ -523,7 +502,7 @@ test('a conversation the Mailroom won’t give says so under its subject, and Tr
 }, 30_000);
 
 test('the Outbox’s empty reader asks for a send', async () => {
-  const page = await open({ ...DESKTOP, colorScheme: 'light' });
+  const page = await open({ ...SIZES.desktop, colorScheme: 'light' });
   await page
     .getByRole('button', { name: /^Outbox/ })
     .first()
@@ -533,14 +512,14 @@ test('the Outbox’s empty reader asks for a send', async () => {
 
 for (const colorScheme of ['light', 'dark'] as const) {
   test(`on a phone, in ${colorScheme}, the top of the screen marks and the island files`, async () => {
-    const page = await open({ ...PHONE, colorScheme });
+    const page = await open({ ...SIZES.phone, colorScheme });
     // Each scheme marks a conversation of its own, as both share the member's mailbox.
     const subject = colorScheme === 'light' ? 'Workers migration plan' : 'Lunch Thursday?';
     await row(page, subject).click();
     const top = page.getByRole('toolbar', { name: 'Marks' });
     const island = page.getByRole('toolbar', { name: 'Conversation' });
     await top.getByRole('button', { name: 'Flag', exact: true }).waitFor();
-    await readable(page, `phone-${colorScheme}`);
+    await expectUsable(page, `reader-phone-${colorScheme}`);
 
     /** Each button's name, from its label or else its word. */
     const names = (toolbar: typeof top) =>
@@ -565,7 +544,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
   }, 30_000);
 }
 
-for (const [size, options] of Object.entries({ desktop: DESKTOP, phone: PHONE })) {
+for (const [size, options] of Object.entries({ desktop: SIZES.desktop, phone: SIZES.phone })) {
   for (const colorScheme of ['light', 'dark'] as const) {
     test(`mail on its way shows skeletons where it will lie, and mail that comes quickly shows none, ${size} ${colorScheme}`, async () => {
       // The composer's code is held from the start, before anything could load it ahead.
@@ -578,7 +557,7 @@ for (const [size, options] of Object.entries({ desktop: DESKTOP, phone: PHONE })
         }),
       );
       const shot = (screen: string) =>
-        page.screenshot({ path: join(SHOTS, `skeleton-${screen}-${size}-${colorScheme}.png`) });
+        page.screenshot({ path: join(RESULTS, `skeleton-${screen}-${size}-${colorScheme}.png`) });
 
       // A new message while the composer's code is on its way shows its sheet with lines.
       await page.keyboard.press('c');
@@ -672,7 +651,7 @@ for (const [size, options] of Object.entries({ desktop: DESKTOP, phone: PHONE })
 
 test('an older message’s body is asked for as the pointer rests on its line or it takes the focus', async () => {
   let asksAlone!: () => Promise<void>;
-  const page = await open({ ...DESKTOP, colorScheme: 'light' }, (page) => {
+  const page = await open({ ...SIZES.desktop, colorScheme: 'light' }, (page) => {
     asksAlone = askingAlone(page);
   });
   await openRow(page, 'Workers migration plan');
@@ -705,7 +684,7 @@ test('an older message’s body is asked for as the pointer rests on its line or
 // The dark theme offers light paper for the conversation open, which must ask for nothing itself.
 test('a held key in the dark theme asks for no conversation it passes', async () => {
   let asksAlone!: () => Promise<void>;
-  const page = await open({ ...DESKTOP, colorScheme: 'dark' }, (page) => {
+  const page = await open({ ...SIZES.desktop, colorScheme: 'dark' }, (page) => {
     asksAlone = askingAlone(page);
   });
   await page.getByRole('option').first().click();
@@ -728,7 +707,7 @@ test('a held key in the dark theme asks for no conversation it passes', async ()
 
 test('a conversation is asked for as the pointer rests on its row, and its newest body as the row is pressed', async () => {
   let asksAlone!: () => Promise<void>;
-  const page = await open({ ...DESKTOP, colorScheme: 'light' }, (page) => {
+  const page = await open({ ...SIZES.desktop, colorScheme: 'light' }, (page) => {
     asksAlone = askingAlone(page);
   });
   // The newest conversation opens, and those either side are prepared while the browser is idle,

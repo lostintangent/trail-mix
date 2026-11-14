@@ -1,9 +1,8 @@
-import { beforeAll, expect } from 'bun:test';
-import { mkdirSync } from 'node:fs';
+import { expect } from 'bun:test';
 import { join } from 'node:path';
 import type { BrowserContext, BrowserContextOptions, Locator, Page } from 'playwright';
 import { PAGE_SIZE } from '../../src/features/mailroom/client/contract.ts';
-import { suite } from './suite.ts';
+import { RESULTS, SIZES, suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 
 /**
@@ -16,14 +15,6 @@ const app = suite({ vars: { DEV_MEMBER: `list-${Date.now()}@trailmix.test` } });
 // A test that fails leaves a screenshot of each page and what it showed, for CI to keep.
 const { test } = app;
 
-const DESKTOP = { viewport: { width: 1440, height: 900 } };
-const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
-const SHOTS = join(import.meta.dir, '../../test-results');
-
-beforeAll(() => {
-  mkdirSync(SHOTS, { recursive: true });
-});
-
 /**
  * The rows drawn where the list is scrolled. The conversation open, the Inbox's newest, stays drawn
  * at the top wherever the list is scrolled, so it's left out.
@@ -35,14 +26,13 @@ const SCROLLED = '[role="option"]:not([aria-selected="true"])';
  * `before` sets on the browser is set before the page first loads.
  */
 async function open(
-  options: BrowserContextOptions = DESKTOP,
+  options: BrowserContextOptions = SIZES.desktop,
   before?: (context: BrowserContext) => Promise<unknown>,
 ) {
   const context = await app.context(options);
   await before?.(context);
   const page = await context.newPage();
   const problems: string[] = [];
-  page.on('pageerror', (error) => problems.push(`page error: ${error.message}`));
   page.on('console', (message) => {
     if (message.type() === 'error') problems.push(`console: ${message.text()}`);
   });
@@ -56,7 +46,7 @@ async function open(
 }
 
 test('mail that arrives while the list is scrolled down moves nothing in sight, and leads it at the top', async () => {
-  const { context, page, problems } = await open();
+  const { page, problems } = await open();
   const list = page.locator('[role="listbox"][aria-multiselectable]');
   const length = async () =>
     Number(await list.getByRole('option').first().getAttribute('aria-setsize'));
@@ -102,11 +92,10 @@ test('mail that arrives while the list is scrolled down moves nothing in sight, 
   await list.evaluate((list) => (list.scrollTop = 0));
   await list.getByRole('option').first().filter({ hasText: subject }).waitFor({ timeout: 5_000 });
   expect(problems).toEqual([]);
-  await context.close();
 }, 60_000);
 
 test('a list dragged far down asks for no page on the way, only for where it stops', async () => {
-  const { context, page, problems } = await open();
+  const { page, problems } = await open();
   const list = page.locator('[role="listbox"][aria-multiselectable]');
   await list.getByRole('option').first().waitFor();
   // The places of the pages the list asks for, past its first.
@@ -142,11 +131,10 @@ test('a list dragged far down asks for no page on the way, only for where it sto
   expect(asked.length).toBeGreaterThan(0);
   expect(asked.every((at) => Math.abs(at - first) < 2 * PAGE_SIZE)).toBe(true);
   expect(problems).toEqual([]);
-  await context.close();
 }, 30_000);
 
 test('End selects the last conversation once its page arrives', async () => {
-  const { context, page, problems } = await open();
+  const { page, problems } = await open();
   const list = page.locator('[role="listbox"][aria-multiselectable]');
   const length = Number(await list.getByRole('option').first().getAttribute('aria-setsize'));
   expect(length).toBeGreaterThan(PAGE_SIZE);
@@ -157,11 +145,10 @@ test('End selects the last conversation once its page arrives', async () => {
     .locator(`[role="option"][aria-selected="true"][aria-posinset="${length}"]`)
     .waitFor({ timeout: 5_000 });
   expect(problems).toEqual([]);
-  await context.close();
 }, 30_000);
 
 test('Shift and an arrow key grow or shrink a selection at the end that moves, while the other end stays', async () => {
-  const { context, page, problems } = await open();
+  const { page, problems } = await open();
   const list = page.locator('[role="listbox"][aria-multiselectable]');
   /** The rows selected and the one the list names as active, by their places in the list. */
   const state = () =>
@@ -196,11 +183,10 @@ test('Shift and an arrow key grow or shrink a selection at the end that moves, w
   // An arrow alone moves on from the end that moved last.
   await press('ArrowDown', { selected: [2], active: 2 });
   expect(problems).toEqual([]);
-  await context.close();
 }, 30_000);
 
 test('a row leads with its sender’s picture when verified, or their initials, the same as the reader’s sheet', async () => {
-  const { context, page, problems } = await open();
+  const { page, problems } = await open();
   // Mail from Kernel Weekly, Ada and Fieldnote Studio is verified: Kernel Weekly has a logo, Ada a
   // photo and Fieldnote Studio's site an icon. Kwame writes as himself.
   for (const sender of ['Kernel Weekly', 'Ada, Sam', 'Fieldnote Studio']) {
@@ -229,15 +215,14 @@ test('a row leads with its sender’s picture when verified, or their initials, 
     .getByText('KM', { exact: true })
     .waitFor();
   expect(problems).toEqual([]);
-  await context.close();
 }, 30_000);
 
 test('a picture on its way leaves its initials until it has loaded, and one the browser holds shows at once', async () => {
   // Dark, where an empty light plate would show as a white disc, with the pictures held back from
   // a browser that has never had them, since it would keep them for good.
   const { promise: arrived, resolve: arrive } = Promise.withResolvers<void>();
-  const { context, page, problems } = await open(
-    { ...DESKTOP, colorScheme: 'dark', serviceWorkers: 'block' },
+  const { page, problems } = await open(
+    { ...SIZES.desktop, colorScheme: 'dark', serviceWorkers: 'block' },
     (context) =>
       context.route('**/avatars/**', async (route) => {
         await arrived;
@@ -322,14 +307,13 @@ test('a picture on its way leaves its initials until it has loaded, and one the 
   const back = await page.evaluate(() => (window as unknown as { frames_: Frame[] }).frames_);
   expect(back.find(({ row }) => row.includes('Kernel Weekly'))?.state).toBe('picture');
   expect(problems).toEqual([]);
-  await context.close();
 }, 30_000);
 
 /** How an avatar painted in one frame. */
 type Frame = { row: string; state: string; initials: string; loaded: boolean; seen: boolean };
 
 test('on a phone, tapping a row’s avatar picks the row, on a target 44 pixels across', async () => {
-  const { context, page, problems } = await open(PHONE);
+  const { page, problems } = await open(SIZES.phone);
   const target = avatarOf(page, 'Kwame Mensah');
   const box = await target.boundingBox();
   expect(box!.width).toBeGreaterThanOrEqual(44);
@@ -346,7 +330,6 @@ test('on a phone, tapping a row’s avatar picks the row, on a target 44 pixels 
   await avatarOf(page, 'Kernel Weekly').tap();
   await expect(picked.count()).resolves.toBe(1);
   expect(problems).toEqual([]);
-  await context.close();
 }, 30_000);
 
 test('on a phone, rows run under the floating controls, and the last row and a row moved to by key stay clear of them', async () => {
@@ -356,7 +339,7 @@ test('on a phone, rows run under the floating controls, and the last row and a r
     [320, 'light'],
   ] as const) {
     const { context, page, problems } = await open({
-      ...PHONE,
+      ...SIZES.phone,
       viewport: { width, height: 844 },
       colorScheme,
     });
@@ -364,7 +347,7 @@ test('on a phone, rows run under the floating controls, and the last row and a r
     await list.getByRole('option').first().waitFor();
     const shot = (moment: string) =>
       page.screenshot({
-        path: join(SHOTS, `list-under-island-${width}-${colorScheme}-${moment}.png`),
+        path: join(RESULTS, `list-under-island-${width}-${colorScheme}-${moment}.png`),
       });
     /**
      * The top of the controls floating over the list, and where the list and the last row it draws
@@ -439,11 +422,11 @@ test('on a phone, rows run under the floating controls, and the last row and a r
 }, 60_000);
 
 test('the list fades at an end only while it can scroll that way, and keys keep the selection clear of a fade', async () => {
-  const { context, page, problems } = await open();
+  const { page, problems } = await open();
   const list = page.locator('[role="listbox"][aria-multiselectable]');
   await list.getByRole('option').first().waitFor();
   const shot = (moment: string) =>
-    list.screenshot({ path: join(SHOTS, `list-fades-${moment}.png`) });
+    list.screenshot({ path: join(RESULTS, `list-fades-${moment}.png`) });
 
   // At the top its first row lies clear, and its foot fades over the rows below.
   expect(await fadesOf(list)).toEqual({ start: 0, end: 32 });
@@ -512,11 +495,10 @@ test('the list fades at an end only while it can scroll that way, and keys keep 
   expect(await list.evaluate((list) => list.scrollHeight <= list.clientHeight)).toBe(true);
   expect(await fadesOf(list)).toEqual({ start: 0, end: 0 });
   expect(problems).toEqual([]);
-  await context.close();
 }, 60_000);
 
 test('a conversation only the member wrote names whom it went to, and leads with the first of them', async () => {
-  const { context, page, problems } = await open();
+  const { page, problems } = await open();
   const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
 
   // Sent holds the cabin bookings Sam sent Rae, and nobody wrote back.
@@ -556,12 +538,11 @@ test('a conversation only the member wrote names whom it went to, and leads with
   const inkOf = (text: Locator) => text.evaluate((element) => getComputedStyle(element).color);
   expect(await inkOf(nobody)).toBe(await inkOf(row(page, 'To Rae Holm').getByText(/^Hi Rae/)));
   expect(problems).toEqual([]);
-  await context.close();
 }, 60_000);
 
 // Last, since it removes an account.
 test('the stamp marks rows only where a list mixes accounts', async () => {
-  const { context, page, problems } = await open();
+  const { page, problems } = await open();
   const stamps = () => page.locator('[role="option"] [data-stamp]').count();
   // The unified Inbox mixes Personal and Work.
   expect(await stamps()).toBeGreaterThan(0);
@@ -593,7 +574,6 @@ test('the stamp marks rows only where a list mixes accounts', async () => {
   await page.getByRole('option').first().waitFor();
   expect(await stamps()).toBe(0);
   expect(problems).toEqual([]);
-  await context.close();
 }, 30_000);
 
 /** The list's first row from a sender, or with these senders. */

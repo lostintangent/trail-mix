@@ -1,7 +1,7 @@
 import { afterAll, expect, test } from 'bun:test';
 import { cloudflareStandIn, STAND_IN_AUD } from '../cloudflare-stand-in.ts';
 import { serverFunctionIds } from './preview.ts';
-import { suite } from './suite.ts';
+import { SIZES, suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 
 /**
@@ -25,7 +25,7 @@ const app = suite({
 });
 
 test('anyone but the operator has no Members in Settings, and its calls are refused before Cloudflare', async () => {
-  const page = await (await app.context({ viewport: { width: 1440, height: 900 } })).newPage();
+  const page = await (await app.context(SIZES.desktop)).newPage();
   // Members is a command only once the Mailroom has said this member is the operator.
   const isOperator = page.waitForResponse((response) =>
     response.url().includes(encodeURIComponent('"isOperator"')),

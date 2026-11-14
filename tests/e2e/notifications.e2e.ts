@@ -1,13 +1,11 @@
-import { afterEach, beforeAll, expect } from 'bun:test';
+import { expect } from 'bun:test';
 import { generateKeyPairSync } from 'node:crypto';
-import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
 import type { BrowserContext, BrowserContextOptions, Page } from 'playwright';
 import { addressOf } from '../../src/features/mail/core/index.ts';
 import { readMessagePath } from '../../src/features/mailroom/client/urls.ts';
 import { pushOf, type Notice } from '../../src/features/notifications/core/index.ts';
-import { unusable } from './usable.ts';
-import { suite } from './suite.ts';
+import { expectUsable } from './usable.ts';
+import { SIZES, suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 import { atRest } from '../atRest.ts';
 
@@ -21,9 +19,6 @@ import { atRest } from '../atRest.ts';
  * through the DevTools protocol, as Chromium's own "Push" button sends one.
  */
 
-const SHOTS = join(import.meta.dir, '../../test-results');
-const DESKTOP = { viewport: { width: 1440, height: 900 } };
-const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
 const IPHONE_SAFARI =
   'Mozilla/5.0 (iPhone; CPU iPhone OS 18_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Mobile/15E148 Safari/604.1';
 
@@ -54,16 +49,6 @@ const app = suite({
 });
 const { test } = app;
 
-beforeAll(() => {
-  mkdirSync(SHOTS, { recursive: true });
-});
-
-/** Every error a page threw during a test, which fails it. */
-const errors: string[] = [];
-afterEach(() => {
-  expect(errors.splice(0)).toEqual([]);
-});
-
 /** Settings' switch for this device's notifications, or only while it shows them on or off. */
 const notifying = (page: Page, checked?: boolean) =>
   page
@@ -89,14 +74,13 @@ async function open(
   const context = await app.context({ deviceScaleFactor: 2, ...options });
   await prepare?.(context);
   const page = await context.newPage();
-  page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(app.url);
   await mailIsIn(page);
   return { context, page };
 }
 
 /** Trail Mix as an installed app, allowed to notify, with the stand-in PushManager. */
-async function installed(options: BrowserContextOptions = DESKTOP) {
+async function installed(options: BrowserContextOptions = SIZES.desktop) {
   const opened = await open({ ...options, colorScheme: 'light' }, async (context) => {
     await context.grantPermissions(['notifications'], { origin: app.url });
     await context.addInitScript(() => {
@@ -129,9 +113,12 @@ async function installed(options: BrowserContextOptions = DESKTOP) {
 
 test('in a browser tab, Settings says notifications come to the installed app, and on an iPhone to its Home Screen', async () => {
   for (const [options, says] of [
-    [{ ...DESKTOP, colorScheme: 'dark' }, 'Notifications come to Trail Mix installed as an app.'],
     [
-      { ...PHONE, colorScheme: 'light', userAgent: IPHONE_SAFARI },
+      { ...SIZES.desktop, colorScheme: 'dark' },
+      'Notifications come to Trail Mix installed as an app.',
+    ],
+    [
+      { ...SIZES.phone, colorScheme: 'light', userAgent: IPHONE_SAFARI },
       'On iPhone, notifications come to Trail Mix on the Home Screen.',
     ],
   ] as const) {
@@ -167,12 +154,12 @@ test('the installed app turns notifications on and off in Settings, and the Mail
     'push.example/devices/e2e',
   );
   await rowsAgree(page);
-  await shot(page, 'desktop-light-on');
+  await expectUsable(page, 'notifications-desktop-light-on');
   await page.emulateMedia({ colorScheme: 'dark' });
   // A theme changes over 125 ms, and a screen read mid-change has colors from both.
   await atRest(page);
   await rowsAgree(page);
-  await shot(page, 'desktop-dark-on');
+  await expectUsable(page, 'notifications-desktop-dark-on');
   await page.emulateMedia({ colorScheme: 'light' });
 
   // The Mailroom says this device is notified.
@@ -190,7 +177,7 @@ test('the installed app turns notifications on and off in Settings, and the Mail
 
 test('on a phone, Settings’ switch turns on with a tap, in both themes', async () => {
   for (const colorScheme of ['light', 'dark'] as const) {
-    const { page, context } = await installed(PHONE);
+    const { page, context } = await installed(SIZES.phone);
     await page.emulateMedia({ colorScheme });
     await page.getByRole('button', { name: 'Folders', exact: true }).click();
     await page.getByRole('button', { name: 'Open settings' }).click();
@@ -199,7 +186,7 @@ test('on a phone, Settings’ switch turns on with a tap, in both themes', async
     await notifying(page).tap();
     await isOn(page, true);
     await rowsAgree(page);
-    await shot(page, `phone-${colorScheme}-on`);
+    await expectUsable(page, `notifications-phone-${colorScheme}-on`);
     await context.close();
   }
 }, 60_000);
@@ -207,7 +194,7 @@ test('on a phone, Settings’ switch turns on with a tap, in both themes', async
 test('a push shows as a notification with Archive and Mark read, and a tap opens its conversation in the open app', async () => {
   const { page, context } = await installed();
   await page.emulateMedia({ colorScheme: 'dark' });
-  await shot(page, 'desktop-dark-off');
+  await expectUsable(page, 'notifications-desktop-dark-off');
   const reader = page.locator('section[aria-label="Reader"] h1');
   // The conversation the notice is about, known by the address that opens it, once the address
   // has moved on from the newest, which the Inbox opened at. The next is a conversation too, where
@@ -395,11 +382,6 @@ async function rowsAgree(page: Page) {
         .map(({ tagName, className }) => `${tagName}.${String(className)}`),
     ),
   ).toEqual([]);
-}
-
-async function shot(page: Page, screen: string) {
-  await page.screenshot({ path: join(SHOTS, `notifications-${screen}.png`) });
-  expect({ screen, unusable: await unusable(page) }).toEqual({ screen, unusable: [] });
 }
 
 /** In the page: a PushManager that subscribes one device and keeps it in the page's storage. */

@@ -1,7 +1,7 @@
-import { afterEach, expect } from 'bun:test';
+import { expect } from 'bun:test';
 import type { BrowserContextOptions, Page } from 'playwright';
 import { DWELL_MS } from '../../src/features/workbench/ui/useReadMark.ts';
-import { suite } from './suite.ts';
+import { SIZES, suite } from './suite.ts';
 
 /**
  * The address, end to end: the built app on workerd, on a member of its own. The address names the
@@ -10,21 +10,11 @@ import { suite } from './suite.ts';
  * newest conversation on a desktop, which is read only once it has stayed open.
  */
 
-const DESKTOP = { viewport: { width: 1440, height: 900 } };
-const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
-
 const app = suite({ vars: { DEV_MEMBER: `address-${Date.now()}@trailmix.test` } });
 const { test } = app;
 
-/** Every error a page threw during a test, which fails it. */
-const errors: string[] = [];
-afterEach(() => {
-  expect(errors.splice(0)).toEqual([]);
-});
-
 async function open(options: BrowserContextOptions, path = '/'): Promise<Page> {
   const page = await (await app.context(options)).newPage();
-  page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(new URL(path, app.url).href);
   await page.getByRole('option').first().waitFor({ timeout: 30_000 });
   return page;
@@ -69,7 +59,7 @@ async function openRow(page: Page, row: number) {
 }
 
 test('a folder and its open conversation come back on a reload and in another browser', async () => {
-  const page = await open(DESKTOP);
+  const page = await open(SIZES.desktop);
   await page
     .getByRole('region', { name: 'Personal' })
     .getByRole('button', { name: /^Archive/ })
@@ -86,7 +76,7 @@ test('a folder and its open conversation come back on a reload and in another br
   const address = page.url();
   expect(new URL(address).searchParams.get('folder')).toBe('Archive');
 
-  for (const again of [page, await (await app.context(DESKTOP)).newPage()]) {
+  for (const again of [page, await (await app.context(SIZES.desktop)).newPage()]) {
     await (again === page ? again.reload() : again.goto(address));
     await heading(again).filter({ hasText: 'Archive' }).waitFor();
     await expect(subject(again).textContent()).resolves.toBe(shown);
@@ -95,7 +85,7 @@ test('a folder and its open conversation come back on a reload and in another br
 }, 60_000);
 
 test('a conversation deep in its list opens at its page, its row in sight, and J moves on from it', async () => {
-  const page = await open(DESKTOP);
+  const page = await open(SIZES.desktop);
   await addressNaming(page, 'open');
   const newest = opened(page);
   const list = page.locator('[role="listbox"][aria-multiselectable]');
@@ -130,7 +120,7 @@ test('a conversation deep in its list opens at its page, its row in sight, and J
   await expect(selectedRow(page).getAttribute('aria-posinset')).resolves.toBe('71');
 
   // A phone opens it on the reader, with its row in sight on the list behind it.
-  const phone = await open(PHONE, deep);
+  const phone = await open(SIZES.phone, deep);
   await subject(phone).waitFor();
   await phone.getByRole('button', { name: 'Back', exact: true }).locator('visible=true').click();
   const shown = phone.locator('[role="listbox"][aria-multiselectable]');
@@ -142,8 +132,7 @@ test('a conversation deep in its list opens at its page, its row in sight, and J
   expect(again!.y + again!.height).toBeLessThanOrEqual(screen!.y + screen!.height);
 
   // Back before the page holding the row arrives still waits for it, and then shows the row.
-  const early = await (await app.context(PHONE)).newPage();
-  early.on('pageerror', (error) => errors.push(error.message));
+  const early = await (await app.context(SIZES.phone)).newPage();
   let release = () => {};
   const held = new Promise<void>((resolve) => (release = resolve));
   let asked = 0;
@@ -199,7 +188,7 @@ test('a conversation deep in its list opens at its page, its row in sight, and J
 }, 60_000);
 
 test('Back and Forward step between views, and moving by key adds no history', async () => {
-  const page = await open(DESKTOP);
+  const page = await open(SIZES.desktop);
   const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
   await page.getByRole('option').nth(0).click();
   await addressNaming(page, 'open');
@@ -268,7 +257,7 @@ test('Back and Forward step between views, and moving by key adds no history', a
 }, 60_000);
 
 test('an address whose conversation or folder has gone opens what remains, and says so', async () => {
-  const page = await open(DESKTOP);
+  const page = await open(SIZES.desktop);
   await page.getByRole('option').nth(1).click();
   await addressNaming(page, 'open');
   const opened = new URL(page.url()).searchParams.get('open')!;
@@ -290,7 +279,7 @@ test('an address whose conversation or folder has gone opens what remains, and s
 }, 60_000);
 
 test('on a phone, a conversation opens on its own address, Back slides to the list, and a reload opens it again with no slide', async () => {
-  const page = await open(PHONE);
+  const page = await open(SIZES.phone);
   const reader = page.locator('section[aria-label="Reader"]');
   const isShown = () => reader.evaluate((element) => !element.closest('[inert]'));
   const before = await historyLength(page);
@@ -323,7 +312,7 @@ test('on a phone, a conversation opens on its own address, Back slides to the li
 }, 60_000);
 
 test('choosing a view opens its newest, read only once it has stayed open two seconds', async () => {
-  const page = await open(DESKTOP);
+  const page = await open(SIZES.desktop);
   const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
   const choose = (name: RegExp) => sidebar.getByRole('button', { name }).first().click();
   const inbox = sidebar.getByRole('button', { name: /^Inbox/ }).first();
@@ -440,7 +429,7 @@ test('choosing a view opens its newest, read only once it has stayed open two se
 }, 60_000);
 
 test('an empty view opens on the empty reader, and on a phone a view opens on its list', async () => {
-  const page = await open(DESKTOP);
+  const page = await open(SIZES.desktop);
   await page.getByRole('button', { name: 'More for Work' }).click();
   await page.getByRole('menuitem', { name: 'New folder in Work' }).click();
   const field = page.getByRole('textbox', { name: 'Name of the new folder in Work' });
@@ -458,7 +447,7 @@ test('an empty view opens on the empty reader, and on a phone a view opens on it
     .waitFor();
   await expect(selectedRow(page).count()).resolves.toBe(0);
 
-  const phone = await open(PHONE);
+  const phone = await open(SIZES.phone);
   await page.close();
   await phone.getByRole('button', { name: 'Folders', exact: true }).click();
   await phone
@@ -475,7 +464,7 @@ test('an empty view opens on the empty reader, and on a phone a view opens on it
 }, 60_000);
 
 test('the member’s own choice wins over the view’s newest, however late its list comes', async () => {
-  const page = await open(DESKTOP);
+  const page = await open(SIZES.desktop);
   const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
   /** Holds the view's first page until the returned function lets it through. */
   const hold = async (view: string) => {

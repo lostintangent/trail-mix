@@ -1,9 +1,7 @@
-import { afterEach, beforeAll, expect } from 'bun:test';
-import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { expect } from 'bun:test';
 import type { BrowserContextOptions, Page } from 'playwright';
-import { unusable } from './usable.ts';
-import { suite } from './suite.ts';
+import { expectUsable } from './usable.ts';
+import { SIZES, suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 
 /**
@@ -13,28 +11,13 @@ import { mailIsIn } from '../mailIsIn.ts';
  * fresh member each run starts from the seeded drafts.
  */
 
-const SHOTS = join(import.meta.dir, '../../test-results');
-const DESKTOP = { viewport: { width: 1440, height: 900 } };
-const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
-
 const app = suite({ vars: { DEV_MEMBER: `outbox-${Date.now()}@trailmix.test` } });
 // A test that fails leaves a screenshot of each page and what it showed, for CI to keep.
 const { test } = app;
 
-beforeAll(() => {
-  mkdirSync(SHOTS, { recursive: true });
-});
-
-/** Every error a page threw during a test, which fails it. */
-const errors: string[] = [];
-afterEach(() => {
-  expect(errors.splice(0)).toEqual([]);
-});
-
 /** A browser on the unified Inbox, once the Mailroom has filled it. */
 async function open(options: BrowserContextOptions): Promise<Page> {
   const page = await (await app.context({ deviceScaleFactor: 2, ...options })).newPage();
-  page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(app.url);
   await mailIsIn(page);
   return page;
@@ -139,13 +122,8 @@ const retrying = (page: Page) =>
     await route.fulfill({ response, body });
   });
 
-async function readable(page: Page, screen: string) {
-  await page.screenshot({ path: join(SHOTS, `outbox-${screen}.png`) });
-  expect({ screen, unusable: await unusable(page) }).toEqual({ screen, unusable: [] });
-}
-
 test('the countdown matches the time the Mailroom stored, and Undo leaves the draft unsent', async () => {
-  const page = await open({ ...DESKTOP, colorScheme: 'light' });
+  const page = await open({ ...SIZES.desktop, colorScheme: 'light' });
   await openDraft(page, /Lunch Thursday/);
   const stored = storedSendAt(page);
   await send(page).click();
@@ -164,7 +142,7 @@ test('the countdown matches the time the Mailroom stored, and Undo leaves the dr
   const row = page.getByRole('listitem').filter({ hasText: /To Jonas Weber/ });
   await expect(row.getByText(/^in \d+s$/).innerText()).resolves.toMatch(/^in \d+s$/);
   expect(await hasAirmail(page, /To Jonas Weber/)).toBe(true);
-  await readable(page, 'desktop-light-counting');
+  await expectUsable(page, 'outbox-desktop-light-counting');
 
   await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
   await toast(page, /^Undone\. Nothing was sent to Jonas\.$/).waitFor();
@@ -174,7 +152,7 @@ test('the countdown matches the time the Mailroom stored, and Undo leaves the dr
 }, 60_000);
 
 test('a send pressed while a save is on its way waits for it, and leaves when the window from the press closes', async () => {
-  const page = await open({ ...DESKTOP, colorScheme: 'dark' });
+  const page = await open({ ...SIZES.desktop, colorScheme: 'dark' });
   await openDraft(page, /Lunch Thursday/);
   // Each save answers three seconds late, so the Mailroom hears of the send only after one.
   await page.route('**/_serverFn/**', async (route) => {
@@ -219,7 +197,7 @@ async function write(page: Page, subject: string) {
 const isSend = (body: string | null) => !!body?.includes('"send"');
 
 test('Send carries what was written since the last save in one request, and goes though the page closes before the answer', async () => {
-  const page = await open({ ...PHONE, colorScheme: 'light' });
+  const page = await open({ ...SIZES.phone, colorScheme: 'light' });
   const subject = `Gone at once ${Date.now()}`;
   const asked: string[] = [];
   page.on('request', (request) => {
@@ -241,7 +219,7 @@ test('Send carries what was written since the last save in one request, and goes
     asked.filter((body) => body.includes('"send"') && body.includes('Bring the map.')),
   ).toHaveLength(1);
 
-  const again = await open({ ...DESKTOP, colorScheme: 'light' });
+  const again = await open({ ...SIZES.desktop, colorScheme: 'light' });
   await again
     .getByRole('navigation', { name: 'Mailboxes' })
     .getByRole('region', { name: 'Personal' })
@@ -251,7 +229,7 @@ test('Send carries what was written since the last save in one request, and goes
 }, 60_000);
 
 test('a Send whose answer is lost asks again under its press, and goes once, with no composer back', async () => {
-  const page = await open({ ...DESKTOP, colorScheme: 'dark' });
+  const page = await open({ ...SIZES.desktop, colorScheme: 'dark' });
   const subject = `Asked again ${Date.now()}`;
   let asks = 0;
   // The Mailroom has the first ask, and its answer is lost on the way back.
@@ -283,7 +261,7 @@ test('a Send whose answer is lost asks again under its press, and goes once, wit
 }, 60_000);
 
 test('an Undo that reaches the Mailroom before its Send stops the send there, and nothing goes', async () => {
-  const page = await open({ ...PHONE, colorScheme: 'light' });
+  const page = await open({ ...SIZES.phone, colorScheme: 'light' });
   const subject = `Overtaken ${Date.now()}`;
   // The Send reaches the Mailroom only once the Undo has been answered.
   const undone = Promise.withResolvers<void>();
@@ -317,8 +295,7 @@ test('an Undo that reaches the Mailroom before its Send stops the send there, an
 }, 60_000);
 
 test('a send straight after a cold load counts down, though toasts and their theme load only then', async () => {
-  const page = await (await app.context({ ...DESKTOP, colorScheme: 'dark' })).newPage();
-  page.on('pageerror', (error) => errors.push(error.message));
+  const page = await (await app.context({ ...SIZES.desktop, colorScheme: 'dark' })).newPage();
   // Toasts, and Astryx's theme generator with them, are held back until the send has been answered,
   // so the countdown is asked for before anything can show it.
   let release = () => {};
@@ -346,7 +323,7 @@ test('a send straight after a cold load counts down, though toasts and their the
   expect(shown).toBeGreaterThanOrEqual(left - 1);
   // Once it has slid into place, so its words are read where they stay.
   await counting.click({ trial: true });
-  await readable(page, 'desktop-dark-first-toast');
+  await expectUsable(page, 'outbox-desktop-dark-first-toast');
   expect(held).toBeGreaterThan(0);
 
   await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
@@ -354,12 +331,12 @@ test('a send straight after a cold load counts down, though toasts and their the
 }, 60_000);
 
 test('an Undo that reaches the Mailroom after the send’s time is refused, and says so', async () => {
-  const page = await open({ ...PHONE, colorScheme: 'dark' });
+  const page = await open({ ...SIZES.phone, colorScheme: 'dark' });
   await openDraft(page, /Lunch Thursday/);
   const stored = storedSendAt(page);
   await send(page).click();
   await toast(page, /^Sending to Jonas in \d+s$/).waitFor();
-  await readable(page, 'phone-dark-counting');
+  await expectUsable(page, 'outbox-phone-dark-counting');
   // Hold the Undo back until the send's time has passed.
   const due = await stored;
   await page.route('**/_serverFn/**', async (route) => {
@@ -382,7 +359,7 @@ test('an Undo that reaches the Mailroom after the send’s time is refused, and 
 
 test('a send the server refuses keeps its reason in the Outbox, and Retry sends it', async () => {
   // The demo refuses a message's first try only, so one size sees the refusal.
-  const page = await open({ ...PHONE, colorScheme: 'light' });
+  const page = await open({ ...SIZES.phone, colorScheme: 'light' });
   await openDraft(page, /Cabin/);
   // Seen first as a send that tries again on its own, then as the refusal it is.
   await retrying(page);
@@ -391,24 +368,24 @@ test('a send the server refuses keeps its reason in the Outbox, and Retry sends 
     timeout: 30_000,
   });
   await readsAcross(page, /^Not sent to Rae yet\./);
-  await readable(page, 'phone-light-retrying');
+  await expectUsable(page, 'outbox-phone-light-retrying');
   await page.unrouteAll();
   await toast(page, /^Couldn’t send to Rae\. The mail server refused it: 554/).waitFor({
     timeout: 30_000,
   });
   await readsAcross(page, /^Couldn’t send to Rae\./);
-  await readable(page, 'phone-light-refused');
+  await expectUsable(page, 'outbox-phone-light-refused');
   await page.getByRole('button', { name: 'Open Outbox' }).click();
   const row = page.getByRole('listitem').filter({ hasText: /To Rae Holm/ });
   await row.getByText(/554 5\.4\.4 unreachable\.example can’t be reached right now/).waitFor();
   expect(await hasAirmail(page, /To Rae Holm/)).toBe(false);
-  await readable(page, 'phone-light-failed');
+  await expectUsable(page, 'outbox-phone-light-failed');
   await row.getByRole('button', { name: 'Retry' }).click();
   await page.getByRole('heading', { name: 'Nothing is leaving' }).waitFor({ timeout: 30_000 });
 }, 60_000);
 
 test('a send later says when on a phone, across its toast, and Undo keeps the draft', async () => {
-  const page = await open({ ...PHONE, colorScheme: 'dark' });
+  const page = await open({ ...SIZES.phone, colorScheme: 'dark' });
   await openDraft(page, /Offsite agenda/);
   await page.getByRole('button', { name: 'Send later' }).filter({ visible: true }).click();
   await page
@@ -420,13 +397,13 @@ test('a send later says when on a phone, across its toast, and Undo keeps the dr
   await page.getByRole('heading', { name: 'Drafts' }).first().click({ trial: true });
   await toast(page, scheduled).click({ trial: true });
   await readsAcross(page, scheduled);
-  await readable(page, 'phone-dark-scheduled');
+  await expectUsable(page, 'outbox-phone-dark-scheduled');
   await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
   await toast(page, /^Undone\. Nothing was sent to Sofia and 2 others\.$/).waitFor();
 }, 60_000);
 
 test('a send at a picked time waits for it in the Outbox, under airmail', async () => {
-  const page = await open({ ...DESKTOP, colorScheme: 'light' });
+  const page = await open({ ...SIZES.desktop, colorScheme: 'light' });
   await openDraft(page, /Offsite agenda/);
   // The next whole minute at least 20 seconds off, in the browser's own time zone, which the test
   // runner's may not share.
@@ -447,5 +424,5 @@ test('a send at a picked time waits for it in the Outbox, under airmail', async 
   const row = page.getByRole('listitem').filter({ hasText: /Offsite agenda/ });
   await row.getByText(/^Today /).waitFor();
   expect(await hasAirmail(page, /Offsite agenda/)).toBe(true);
-  await readable(page, 'desktop-light-scheduled');
+  await expectUsable(page, 'outbox-desktop-light-scheduled');
 }, 60_000);

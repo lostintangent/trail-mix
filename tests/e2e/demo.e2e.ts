@@ -1,14 +1,14 @@
-import { afterEach, beforeAll, expect } from 'bun:test';
-import { mkdirSync, readdirSync } from 'node:fs';
+import { expect } from 'bun:test';
+import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { toJSON } from 'seroval';
 import type { Page } from 'playwright';
-import { unusable } from './usable.ts';
+import { expectUsable } from './usable.ts';
 import { checkDemo } from './demo-check.ts';
 import { PANELS } from '../../src/features/workbench/ui/panels.ts';
 import { VISITOR_SECONDS } from '../../src/server/access.ts';
 import { BUILDS, serverFunctionIds } from './preview.ts';
-import { suite } from './suite.ts';
+import { RESULTS, SIZES, suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 
 /**
@@ -23,12 +23,6 @@ import { mailIsIn } from '../mailIsIn.ts';
 const A_DAY = 6;
 /** How many changes the demo takes a minute from one network, as `wrangler.jsonc` sets it. */
 const CHANGES_A_MINUTE = 300;
-const ROOT = join(import.meta.dir, '../..');
-const SHOTS = join(ROOT, 'test-results');
-const SIZES = {
-  desktop: { viewport: { width: 1440, height: 900 } },
-  phone: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
-};
 
 const VISITOR_KEY = crypto.randomUUID().repeat(2);
 const app = suite({
@@ -36,16 +30,6 @@ const app = suite({
   vars: { VISITOR_KEY, NEW_VISITORS_A_DAY: String(A_DAY) },
 });
 const { test } = app;
-
-beforeAll(() => {
-  mkdirSync(SHOTS, { recursive: true });
-});
-
-/** Every error a page threw during a test, which fails it. */
-const errors: string[] = [];
-afterEach(() => {
-  expect(errors.splice(0)).toEqual([]);
-});
 
 /**
  * How many Mailrooms the demo has made: one database each, beside the namespace's own, where the
@@ -78,7 +62,6 @@ async function visitor(): Promise<Page> {
     });
   });
   const page = await context.newPage();
-  page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(app.url);
   await mailIsIn(page);
   await page.getByRole('option').first().waitFor();
@@ -161,7 +144,7 @@ test('a visitor can’t add an account of their own, or remove or erase the demo
   // The app says as much: the demo names itself, invites rather than asks for an account, and
   // offers no Remove account or Erase everything, saying why beside each.
   await cy.getByText('A sample mailbox, yours for a day.').waitFor();
-  await cy.screenshot({ path: join(SHOTS, 'desktop-light-demo-foot.png') });
+  await cy.screenshot({ path: join(RESULTS, 'desktop-light-demo-foot.png') });
   await cy.getByRole('button', { name: 'Add account' }).click();
   await cy.getByText('deploy a Trail Mix of your own').waitFor();
   expect(await cy.getByRole('form', { name: 'Add an account' }).count()).toBe(0);
@@ -304,17 +287,11 @@ test('a page load makes no Mailroom, and a script makes no more new visitors tha
     for (const colorScheme of ['light', 'dark'] as const) {
       const context = await app.context({ deviceScaleFactor: 2, ...options, colorScheme });
       const page = await context.newPage();
-      page.on('pageerror', (error) => errors.push(error.message));
       await page.goto(app.url);
       await page
         .getByRole('heading', { name: 'Trail Mix’s demo is full for now' })
         .waitFor({ timeout: 10_000 });
-      await page.screenshot({ path: join(SHOTS, `${size}-${colorScheme}-demo-full.png`) });
-      const screen = `${size} ${colorScheme} demo full`;
-      expect({ screen, unusable: await unusable(page) }).toEqual({
-        screen,
-        unusable: [],
-      });
+      await expectUsable(page, `${size}-${colorScheme}-demo-full`);
       await context.close();
     }
   }

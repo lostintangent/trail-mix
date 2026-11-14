@@ -1,33 +1,15 @@
-import { afterEach, beforeAll, describe, expect } from 'bun:test';
-import { mkdirSync } from 'node:fs';
+import { describe, expect } from 'bun:test';
 import { join } from 'node:path';
 import type { BrowserContextOptions, Page } from 'playwright';
-import { unusable } from './usable.ts';
-import { suite } from './suite.ts';
+import { expectUsable, unusable } from './usable.ts';
+import { RESULTS, SIZES, suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
-import { atRest } from '../atRest.ts';
 
 /**
  * The first-run screen, as a member with no accounts sees it: the built app without the demo
  * mailbox, at both sizes in both themes. Adding an account from it is proven against the test mail
  * server, in `tests/accounts`.
  */
-
-const SHOTS = join(import.meta.dir, '../../test-results');
-const SIZES = {
-  desktop: { viewport: { width: 1440, height: 900 } },
-  phone: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
-};
-
-beforeAll(() => {
-  mkdirSync(SHOTS, { recursive: true });
-});
-
-/** Every error a page threw during a test, which fails it. */
-const errors: string[] = [];
-afterEach(() => {
-  expect(errors.splice(0)).toEqual([]);
-});
 
 // Each describe runs its own app, which stops before the next one starts: a preview's variables
 // and its build's pointer are one file each, so two at once would read each other's.
@@ -53,11 +35,10 @@ describe('The first-run screen', () => {
           }).observe(document, { childList: true, subtree: true });
         });
         const page = await context.newPage();
-        page.on('pageerror', (error) => errors.push(error.message));
         await page.goto(app.url);
         const sheet = page.getByRole('article', { name: 'Welcome to Trail Mix' });
         await page.getByRole('form', { name: 'Add an account' }).waitFor();
-        await page.screenshot({ path: join(SHOTS, `${size}-${colorScheme}-first-run.png`) });
+        await page.screenshot({ path: join(RESULTS, `${size}-${colorScheme}-first-run.png`) });
         const screen = `${size} ${colorScheme} first run`;
         const place = await sheet.evaluate((element, isPhone) => {
           const { top, height } = element.getBoundingClientRect();
@@ -97,7 +78,7 @@ describe('The first-run screen', () => {
     expect({ asks: asked.length, isSpread: waited > 5_000 }).toEqual({ asks: 4, isSpread: true });
     // Online, the browser's own words are the only clue to what went wrong.
     await page.getByText('No answer came: Failed to fetch', { exact: true }).waitFor();
-    await page.screenshot({ path: join(SHOTS, 'desktop-light-unreachable.png') });
+    await page.screenshot({ path: join(RESULTS, 'desktop-light-unreachable.png') });
     await page.unroute('**/_serverFn/**');
     await page.getByRole('button', { name: 'Try again' }).click();
     await page.getByRole('heading', { name: 'Welcome to Trail Mix' }).waitFor();
@@ -138,7 +119,6 @@ for (const [size, options] of Object.entries(SIZES)) {
 
     async function device(more: BrowserContextOptions = {}): Promise<Page> {
       const page = await (await erasing.context({ ...options, colorScheme, ...more })).newPage();
-      page.on('pageerror', (error) => errors.push(error.message));
       await page.goto(erasing.url);
       await mailIsIn(page);
       return page;
@@ -166,7 +146,7 @@ for (const [size, options] of Object.entries(SIZES)) {
           'The demo mailbox goes, with all its mail. Every device you’re signed in on starts over.',
         );
         expect(await page.evaluate(() => document.activeElement?.textContent)).toBe('Cancel');
-        await shown(page, `${size}-${colorScheme}-erase-question`);
+        await expectUsable(page, `accounts-${size}-${colorScheme}-erase-question`);
         await page.keyboard.press('Enter');
         await question.waitFor({ state: 'detached' });
         expect(await page.getByRole('form', { name: 'Add an account' }).count()).toBe(0);
@@ -176,7 +156,7 @@ for (const [size, options] of Object.entries(SIZES)) {
         const everything = page.getByRole('region', { name: 'All of Trail Mix' });
         const erase = everything.getByRole('button', { name: 'Erase everything…' });
         await erase.waitFor();
-        await shown(page, `${size}-${colorScheme}-erase-from-account`);
+        await expectUsable(page, `accounts-${size}-${colorScheme}-erase-from-account`);
         await erase.click();
         await question.getByRole('button', { name: 'Erase everything' }).click();
 
@@ -185,15 +165,9 @@ for (const [size, options] of Object.entries(SIZES)) {
         await other.getByRole('form', { name: 'Add an account' }).waitFor({ timeout: 30_000 });
         await page.reload();
         await page.getByRole('form', { name: 'Add an account' }).waitFor();
-        await shown(page, `${size}-${colorScheme}-erased`);
+        await expectUsable(page, `accounts-${size}-${colorScheme}-erased`);
       },
       90_000,
     );
   });
-}
-
-async function shown(page: Page, screen: string) {
-  await atRest(page);
-  await page.screenshot({ path: join(SHOTS, `accounts-${screen}.png`) });
-  expect({ screen, unusable: await unusable(page) }).toEqual({ screen, unusable: [] });
 }

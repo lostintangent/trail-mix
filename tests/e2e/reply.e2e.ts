@@ -3,28 +3,16 @@
 // the end of its conversation while it leaves, saying there all there is to say of its send, with no
 // toast while the member stays. Each at a desktop's size and a phone's, as a member of their own, in
 // both themes.
-import { afterEach, describe, expect } from 'bun:test';
+import { describe, expect } from 'bun:test';
 import { join } from 'node:path';
 import type { BrowserContextOptions, Page, Route } from 'playwright';
-import { unusable } from './usable.ts';
-import { suite } from './suite.ts';
+import { expectUsable } from './usable.ts';
+import { RESULTS, SIZES, suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
-import { atRest } from '../atRest.ts';
 
-const SIZES = {
-  desktop: { viewport: { width: 1440, height: 900 } },
-  phone: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
-} as const;
-const SHOTS = join(import.meta.dir, '../../test-results');
 /** How long a slow server takes to send a message's body. */
 const SLOW_MS = 3000;
 const LIST = 'ridge@lists.example';
-
-/** Every error a page threw during a test, which fails it. */
-const errors: string[] = [];
-afterEach(() => {
-  expect(errors.splice(0)).toEqual([]);
-});
 
 /**
  * Has the server send each message's body only after `SLOW_MS`, or once `held` settles, and say in
@@ -80,7 +68,6 @@ for (const [size, options] of Object.entries(SIZES)) {
       before: (page: Page) => Promise<void> = async () => {},
     ) {
       const page = await (await app.context({ ...options, colorScheme, ...more })).newPage();
-      page.on('pageerror', (error) => errors.push(error.message));
       await before(page);
       await page.goto(app.url);
       await mailIsIn(page);
@@ -125,7 +112,7 @@ for (const [size, options] of Object.entries(SIZES)) {
       await savedToSender;
       await until(async () => (await to.inputValue()) === LIST, SLOW_MS + 5000);
       await savedToList;
-      await readable(page, size, 'light-opened');
+      await expectUsable(page, `reply-${size}-light-opened`);
     }, 60_000);
 
     test('a key pressed straight after R goes to the reply, though nothing else has run', async () => {
@@ -307,7 +294,7 @@ for (const [size, options] of Object.entries(SIZES)) {
       const saved = reply.getByRole('status').filter({ hasText: 'Saved to Drafts' });
       await page.keyboard.type('Sounds right to me.');
       await saved.waitFor({ timeout: 10_000 });
-      await readable(page, size, 'dark-saved');
+      await expectUsable(page, `reply-${size}-dark-saved`);
       await page.keyboard.type(' See you Thursday.');
       await until(() => Promise.resolve(saves >= 2), 10_000);
       await saved.waitFor({ timeout: 10_000 });
@@ -517,7 +504,7 @@ for (const [size, options] of Object.entries(SIZES)) {
       await sending.waitFor({ timeout: 3_000 });
       await sending.getByRole('button', { name: 'Undo', exact: true }).waitFor();
       expect(await sending.evaluate(onPaper)).toBe(true);
-      await page.screenshot({ path: join(SHOTS, `reply-${size}-left.png`) });
+      await page.screenshot({ path: join(RESULTS, `reply-${size}-left.png`) });
       // Back on it, the toast goes, and the line takes up the countdown.
       await open(page);
       await sending.waitFor({ state: 'detached', timeout: 3_000 });
@@ -549,7 +536,7 @@ for (const [size, options] of Object.entries(SIZES)) {
       await line.waitFor({ timeout: 30_000 });
       await line.getByText(/^The mail server refused it: 554/).waitFor();
       expect(await line.locator('[data-airmail]').count()).toBe(0);
-      await readable(page, size, `${size === 'desktop' ? 'light' : 'dark'}-refused`);
+      await expectUsable(page, `reply-${size}-${size === 'desktop' ? 'light' : 'dark'}-refused`);
       expect(await toasted(page)).toEqual([]);
       await line.getByRole('button', { name: 'Open Outbox' }).click();
       await page
@@ -579,7 +566,7 @@ for (const [size, options] of Object.entries(SIZES)) {
           drawn.map(() => ({ isRunning: motion === 'no-preference', isDrawn: true })),
         );
         if (motion === 'reduce') {
-          await page.screenshot({ path: join(SHOTS, `reply-${size}-forced-still.png`) });
+          await page.screenshot({ path: join(RESULTS, `reply-${size}-forced-still.png`) });
         }
         await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
         await composer(page).getByRole('textbox', { name: 'Reply' }).waitFor();
@@ -610,7 +597,7 @@ async function sentShows(page: Page, text: string, screen: string) {
       }),
     2000,
   );
-  await readable(page, sizeOf(page), screen);
+  await expectUsable(page, `reply-${sizeOf(page)}-${screen}`);
 }
 
 const sizeOf = (page: Page) => ((page.viewportSize()?.width ?? 0) < 768 ? 'phone' : 'desktop');
@@ -743,11 +730,4 @@ async function until(check: () => Promise<boolean>, ms: number) {
     if (Date.now() > by) throw new Error(`Still not so after ${ms} ms.`);
     await new Promise((done) => setTimeout(done, 25));
   }
-}
-
-async function readable(page: Page, size: string, screen: string) {
-  // Running airmail never finishes, so only what ends is waited for.
-  await atRest(page);
-  await page.screenshot({ path: join(SHOTS, `reply-${size}-${screen}.png`) });
-  expect({ screen, unusable: await unusable(page) }).toEqual({ screen, unusable: [] });
 }

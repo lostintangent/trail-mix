@@ -1,9 +1,7 @@
-import { afterEach, beforeAll, expect } from 'bun:test';
-import { mkdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { expect } from 'bun:test';
 import type { BrowserContextOptions, Page, Route } from 'playwright';
-import { unusable } from './usable.ts';
-import { suite } from './suite.ts';
+import { expectUsable } from './usable.ts';
+import { SIZES, suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 
 /**
@@ -12,27 +10,12 @@ import { mailIsIn } from '../mailIsIn.ts';
  * server refuses comes back with its reason. A fresh member each run starts from the seeded folders.
  */
 
-const SHOTS = join(import.meta.dir, '../../test-results');
-const DESKTOP = { viewport: { width: 1440, height: 900 } };
-const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
-
 const app = suite({ vars: { DEV_MEMBER: `folders-${Date.now()}@trailmix.test` } });
 // A test that fails leaves a screenshot of each page and what it showed, for CI to keep.
 const { test } = app;
 
-beforeAll(() => {
-  mkdirSync(SHOTS, { recursive: true });
-});
-
-/** Every error a page threw during a test, which fails it. */
-const errors: string[] = [];
-afterEach(() => {
-  expect(errors.splice(0)).toEqual([]);
-});
-
 async function open(options: BrowserContextOptions): Promise<Page> {
   const page = await (await app.context({ deviceScaleFactor: 2, ...options })).newPage();
-  page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(app.url);
   await mailIsIn(page);
   return page;
@@ -57,13 +40,8 @@ async function holdCommands(page: Page): Promise<() => Promise<void>> {
   };
 }
 
-async function readable(page: Page, screen: string) {
-  await page.screenshot({ path: join(SHOTS, `folders-${screen}.png`) });
-  expect({ screen, unusable: await unusable(page) }).toEqual({ screen, unusable: [] });
-}
-
 test('folders are made, nested and renamed in place, and show before the server answers', async () => {
-  const page = await open({ ...DESKTOP, colorScheme: 'light' });
+  const page = await open({ ...SIZES.desktop, colorScheme: 'light' });
 
   // A name the folder can't take says why, and nothing is sent.
   await page.getByRole('button', { name: 'More for Personal' }).click();
@@ -79,7 +57,7 @@ test('folders are made, nested and renamed in place, and show before the server 
     .getByRole('alert')
     .filter({ hasText: 'There’s already a folder called “archive” here.' })
     .waitFor();
-  await readable(page, 'desktop-light-name-problem');
+  await expectUsable(page, 'folders-desktop-light-name-problem');
   expect(sent.filter((body) => body.includes('createFolder'))).toEqual([]);
 
   // A new folder shows at once, while its command is still on its way.
@@ -104,7 +82,7 @@ test('folders are made, nested and renamed in place, and show before the server 
   await page.getByRole('menuitem', { name: 'Rename Trips' }).click();
   const renaming = page.getByRole('textbox', { name: 'New name for Trips' });
   await expect(renaming.inputValue()).resolves.toBe('Trips');
-  await readable(page, 'desktop-light-renaming');
+  await expectUsable(page, 'folders-desktop-light-renaming');
   await renaming.fill('Travel');
   await renaming.press('Enter');
   await folderRow(page, 'Travel').waitFor({ timeout: 1_000 });
@@ -119,7 +97,7 @@ test('folders are made, nested and renamed in place, and show before the server 
 }, 60_000);
 
 test('a delete asks first with what goes, comes back with the server’s reason, then goes', async () => {
-  const page = await open({ ...DESKTOP, colorScheme: 'dark' });
+  const page = await open({ ...SIZES.desktop, colorScheme: 'dark' });
   await folderRow(page, 'Projects').click();
   // The list's folder menu gathers what can be done to the folder in view.
   await page.getByRole('button', { name: 'Folder', exact: true }).click();
@@ -137,7 +115,7 @@ test('a delete asks first with what goes, comes back with the server’s reason,
       /^Projects, with 1 folder inside it and \d+ messages, will be deleted from the mail server\. This can’t be undone\.$/,
     )
     .waitFor();
-  await readable(page, 'desktop-dark-delete-question');
+  await expectUsable(page, 'folders-desktop-dark-delete-question');
 
   // The demo's server turns the first delete away. The folder goes at once, and comes back.
   const release = await holdCommands(page);
@@ -153,7 +131,7 @@ test('a delete asks first with what goes, comes back with the server’s reason,
   await folderRow(page, 'Toy Box').waitFor();
   // The view went to the Inbox with the folder, and comes back with it.
   await page.getByRole('heading', { name: 'Projects', level: 2 }).waitFor();
-  await readable(page, 'desktop-dark-refused');
+  await expectUsable(page, 'folders-desktop-dark-refused');
 
   await page.getByRole('button', { name: 'Folder', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Delete Projects' }).click();
@@ -169,7 +147,7 @@ test('a delete asks first with what goes, comes back with the server’s reason,
 }, 60_000);
 
 test('on a phone, a folder is named in the sidebar', async () => {
-  const page = await open({ ...PHONE, colorScheme: 'light' });
+  const page = await open({ ...SIZES.phone, colorScheme: 'light' });
   await page.getByRole('button', { name: 'Folders', exact: true }).click();
   await folderRow(page, 'Archive').click();
   const folderMenu = page.getByRole('button', { name: 'Folder', exact: true });
@@ -182,7 +160,7 @@ test('on a phone, a folder is named in the sidebar', async () => {
   await field.waitFor();
   await expect(field.getAttribute('placeholder')).resolves.toBe('Folder name');
   await expect(field.evaluate((input) => !input.closest('[inert]'))).resolves.toBe(true);
-  await readable(page, 'phone-light-naming');
+  await expectUsable(page, 'folders-phone-light-naming');
   await field.fill('2026');
   await field.press('Enter');
   await folderRow(page, '2026').waitFor();

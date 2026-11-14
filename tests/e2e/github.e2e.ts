@@ -1,8 +1,8 @@
-import { afterEach, expect } from 'bun:test';
+import { expect } from 'bun:test';
 import type { BrowserContextOptions, Page } from 'playwright';
 import { DWELL_MS } from '../../src/features/workbench/ui/useReadMark.ts';
 import { mailIsIn } from '../mailIsIn.ts';
-import { suite } from './suite.ts';
+import { SIZES, suite } from './suite.ts';
 
 /**
  * GitHub bundles, end to end: the built app on workerd, on a member of its own. Each Inbox view
@@ -12,21 +12,11 @@ import { suite } from './suite.ts';
  * the same threads as conversations.
  */
 
-const DESKTOP = { viewport: { width: 1440, height: 900 } };
-const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
-
 const app = suite({ vars: { DEV_MEMBER: `github-${Date.now()}@trailmix.test` } });
 const { test } = app;
 
-/** Every error a page threw during a test, which fails it. */
-const errors: string[] = [];
-afterEach(() => {
-  expect(errors.splice(0)).toEqual([]);
-});
-
 async function open(options: BrowserContextOptions, path = '/'): Promise<Page> {
   const page = await (await app.context(options)).newPage();
-  page.on('pageerror', (error) => errors.push(error.message));
   await page.goto(new URL(path, app.url).href);
   await mailIsIn(page);
   return page;
@@ -61,7 +51,7 @@ const openedOnceRested = async (page: Page, before?: string) =>
   ).jsonValue()) as string;
 
 test('each Inbox lists one row for each repository, and a search or a folder lists its threads', async () => {
-  const page = await open(DESKTOP);
+  const page = await open(SIZES.desktop);
   for (const repository of [TOY_BOX, PIXELS]) {
     await expect(bundleRow(page, repository).count()).resolves.toBe(1);
     await expect(threadRows(page, repository).count()).resolves.toBe(0);
@@ -94,7 +84,7 @@ test('each Inbox lists one row for each repository, and a search or a folder lis
 }, 60_000);
 
 test('a bundle opens its threads unread, and a thread opens under it and links to GitHub', async () => {
-  const page = await open(DESKTOP);
+  const page = await open(SIZES.desktop);
   const row = bundleRow(page, TOY_BOX);
   await row.click();
   await shows(page, TOY_BOX);
@@ -121,7 +111,7 @@ test('a bundle opens its threads unread, and a thread opens under it and links t
 }, 60_000);
 
 test('a thread deep in its bundle opens at its place on a reload, and J moves on from it', async () => {
-  const page = await open(DESKTOP);
+  const page = await open(SIZES.desktop);
   await bundleRow(page, TOY_BOX).click();
   await shows(page, TOY_BOX);
   // The bundle's sheet scrolls past its first page to the 56th thread.
@@ -151,8 +141,7 @@ test('a thread deep in its bundle opens at its place on a reload, and J moves on
 
   // Closing it before the page holding it arrives waits for that page, and the bundle opens with
   // the thread in sight rather than at its top.
-  const early = await (await app.context(DESKTOP)).newPage();
-  early.on('pageerror', (error) => errors.push(error.message));
+  const early = await (await app.context(SIZES.desktop)).newPage();
   let release = () => {};
   const held = new Promise<void>((resolve) => (release = resolve));
   let asked = 0;
@@ -180,7 +169,7 @@ test('a thread deep in its bundle opens at its place on a reload, and J moves on
 }, 60_000);
 
 test("a bundle's actions act on every thread in it, and Undo brings them all back", async () => {
-  const page = await open(DESKTOP);
+  const page = await open(SIZES.desktop);
   const row = bundleRow(page, TOY_BOX);
   await row.click();
   await shows(page, TOY_BOX);
@@ -211,7 +200,7 @@ test("a bundle's actions act on every thread in it, and Undo brings them all bac
 }, 60_000);
 
 test('on a phone, a bundle opens as a sheet whose island archives it, and a thread steps back to it', async () => {
-  const page = await open(PHONE);
+  const page = await open(SIZES.phone);
   await bundleRow(page, TOY_BOX).click();
   await shows(page, TOY_BOX);
   const island = page.getByRole('toolbar', { name: 'Repository' });
