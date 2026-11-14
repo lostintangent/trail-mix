@@ -182,20 +182,14 @@ function Writer({
   /** Whom a reply goes to once the parent's body says, which waits on the member's own choice. */
   recipients: Pick<Writing, 'to' | 'cc'> | undefined;
 } & Omit<ComposerProps, 'compose'>) {
-  const message = useWriting(start, recipients);
-  const { writing } = message;
-  const [editor, setEditor] = useState<TiptapEditor | null>(null);
   const queryClient = useQueryClient();
   const [drafting] = useState(
     () => resumed ?? startDrafting(queryClient, { draft, writing: start }),
   );
-  const autosave = useAutosave({
-    drafting,
-    writing,
-    edits: message.edits,
-    onDraft,
-    onNamed: message.nameFiles,
-  });
+  const message = useWriting(drafting, recipients);
+  const { writing } = message;
+  const [editor, setEditor] = useState<TiptapEditor | null>(null);
+  const saveState = useAutosave(drafting, onDraft);
   // Send hands the message over and closes at once, as its last save finishes behind it. A second
   // press before it closes does nothing.
   const isSent = useRef(false);
@@ -203,7 +197,6 @@ function Writer({
   const send = (at?: string) => {
     if (isSent.current || !canSend) return;
     isSent.current = true;
-    autosave.flush();
     onSend(drafting, at);
     onClose();
   };
@@ -237,7 +230,7 @@ function Writer({
         isSheet ? [styles.centered, styles.sheetStatus] : styles.grow,
       )}
     >
-      {(isOffline ? OFFLINE : SAVED[autosave.state]) || '\u00a0'}
+      {(isOffline ? OFFLINE : SAVED[saveState]) || '\u00a0'}
     </span>
   );
   const writer = (

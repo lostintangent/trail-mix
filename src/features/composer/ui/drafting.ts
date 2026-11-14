@@ -1,5 +1,6 @@
 import type { QueryClient } from '@tanstack/react-query';
 import { Undo2 } from 'lucide-react';
+import { listeners } from '../../../shared/listeners.ts';
 import { toast } from '../../../shared/toasts.tsx';
 import { sameRef, type MessageRef } from '../../mail/core/index.ts';
 import { bodyQuery, mailroom, untilAnswered, type LastSave } from '../../mailroom/client/index.ts';
@@ -22,15 +23,12 @@ export type SaveState = 'unsaved' | 'saving' | 'saved' | 'failed';
 
 /** What the composer showing a message hears of its saves. */
 export type Showing = {
-  onState: (state: SaveState) => void;
   /**
    * Each draft the message takes, and the one it took the place of: the one a save makes, as soon
    * as the Mailroom answers, none from the moment a discard begins, and the same one again if the
    * Mailroom refuses the discard.
    */
   onDraft: (saved: MessageRef | undefined, replaced: MessageRef | undefined) => void;
-  /** The files it carries, named by the parts of the draft saved, so their bytes cross once. */
-  onNamed: (named: Map<Attached, Attached>) => void;
 };
 
 /**
@@ -45,14 +43,19 @@ export type Showing = {
 export type Drafting = {
   /** The draft it was last saved as, if it has been. */
   readonly draft: MessageRef | undefined;
-  /** What was last written in it. */
+  /**
+   * What is written in it. Each save names its files by the parts of the draft it made, so their
+   * bytes cross once.
+   */
   readonly writing: Writing;
   readonly state: SaveState;
+  /** Hears of each change to what is written, or to how its saves go, until it stops. */
+  subscribe: (listener: () => void) => () => void;
   /** A composer shows it, and hears of its saves until another does. */
   show: (showing: Showing) => void;
   /** Hears of each draft a save makes, until it stops. */
   watch: (watcher: (saved: MessageRef) => void) => () => void;
-  /** What the composer holds now, which the next save saves. */
+  /** What the member writes, which the next save saves. */
   write: (writing: Writing) => void;
   /** A change of the member's, which owes a save. */
   owe: () => void;
@@ -93,6 +96,7 @@ export function startDrafting(
   let { draft, writing } = start;
   let state: SaveState = draft ? 'saved' : 'unsaved';
   let showing: Showing | undefined;
+  const { subscribe, tell } = listeners();
   const watchers = new Set<(saved: MessageRef) => void>();
   let isOwed = false;
   let owedSince = 0;
@@ -110,12 +114,14 @@ export function startDrafting(
   // old names may be of a draft that filing replaced, whose bytes the Mailroom lets go.
   let carried: readonly Attached[] | undefined;
   let unnamed: { made: MessageRef; attachments: readonly Attached[] } | undefined;
-  // The names they took, for a composer that started from what was written before they did.
-  let named: Map<Attached, Attached> | undefined;
 
+  const write = (next: Writing) => {
+    writing = next;
+    tell();
+  };
   const become = (next: SaveState) => {
     state = next;
-    showing?.onState(next);
+    tell();
   };
 
   /** One step of saving at a time, which the next waits for, then a save of what came meanwhile. */
@@ -194,24 +200,21 @@ export function startDrafting(
 
   /**
    * Names files as they were when saved, `attachments`, by the parts of the draft `made` that hold
-   * them, so their bytes cross once, and tells the composer showing them.
+   * them, so their bytes cross once.
    */
   const rename = async (attachments: readonly Attached[], made: MessageRef) => {
     const body = await queryClient.fetchQuery(bodyQuery(made));
     const fresh = afterSave(attachments, made, body);
     const names = new Map(attachments.map((file, at) => [file, fresh[at]!]));
-    writing = {
+    write({
       ...writing,
       attachments: writing.attachments.map((attached) => names.get(attached) ?? attached),
-    };
-    showing?.onNamed(names);
-    return names;
+    });
   };
 
   const nameCarried = async () => {
     if (!unnamed) return;
-    const { made, attachments } = unnamed;
-    named = await rename(attachments, made);
+    await rename(unnamed.attachments, unnamed.made);
     unnamed = undefined;
   };
 
@@ -229,16 +232,13 @@ export function startDrafting(
       showing = next;
       isClosed = false;
       retriesClosed = 0;
-      if (named) next.onNamed(named);
-      named = undefined;
     },
     watch: (watcher) => {
       watchers.add(watcher);
       return () => watchers.delete(watcher);
     },
-    write: (next) => {
-      writing = next;
-    },
+    subscribe,
+    write,
     owe: () => {
       if (!isOwed) owedSince = performance.now();
       isOwed = true;

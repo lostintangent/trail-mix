@@ -1,30 +1,32 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { addressesIn, type Account } from '../../mail/core/index.ts';
 import { partUrl } from '../../mailroom/client/index.ts';
 import { contentIdFor } from '../core/draft.ts';
 import { addressText, sentFrom, type Attached, type Writing } from '../core/session.ts';
+import type { Drafting } from './drafting.ts';
 
 /** The address fields as the member types them, which the message reads as addresses. */
 export type AddressText = Record<'to' | 'cc' | 'bcc', string>;
 
 /**
- * The message being written, as the member changes it. Each change of theirs counts in `edits`,
- * which autosave owes a save for. The composer's own changes don't count: the editor settling the
- * text it was given, and files named by the draft that saved them.
+ * The message being written, as the member changes it. Each change of theirs owes a save. The
+ * composer's own changes don't: the editor settling the text it was given, and files named by the
+ * draft that saved them.
  */
-export function useWriting(start: Writing, recipients: Pick<Writing, 'to' | 'cc'> | undefined) {
-  const [writing, setWriting] = useState(start);
-  const [edits, setEdits] = useState(0);
+export function useWriting(drafting: Drafting, recipients: Pick<Writing, 'to' | 'cc'> | undefined) {
+  const writing = useSyncExternalStore(drafting.subscribe, () => drafting.writing);
   const [typed, setTyped] = useState<AddressText>(() => ({
-    to: addressText(start.to),
-    cc: addressText(start.cc),
-    bcc: addressText(start.bcc),
+    to: addressText(writing.to),
+    cc: addressText(writing.cc),
+    bcc: addressText(writing.bcc),
   }));
   const fileUrl = useFileUrls();
+  const hasEdited = useRef(false);
 
   const edit = (change: (was: Writing) => Partial<Writing>) => {
-    setWriting((was) => ({ ...was, ...change(was) }));
-    setEdits((count) => count + 1);
+    drafting.write({ ...drafting.writing, ...change(drafting.writing) });
+    drafting.owe();
+    hasEdited.current = true;
   };
 
   // The parent's Reply-To arrives with its body. Until the member has chosen whom it's to, the
@@ -34,18 +36,17 @@ export function useWriting(start: Writing, recipients: Pick<Writing, 'to' | 'cc'
   useEffect(() => {
     if (!recipients || hasChosen.current) return;
     setTyped((was) => ({ ...was, to: addressText(recipients.to), cc: addressText(recipients.cc) }));
-    setWriting((was) => ({ ...was, ...recipients }));
-    setEdits((count) => (count > 0 ? count + 1 : count));
-  }, [recipients]);
+    drafting.write({ ...drafting.writing, ...recipients });
+    if (hasEdited.current) drafting.owe();
+  }, [recipients, drafting]);
 
   return {
     writing,
-    edits,
     typed,
     /** What the editor holds, as the member writes it or as the editor settles what it was given. */
     write: (markdown: string, isEdit: boolean) => {
       if (isEdit) edit(() => ({ markdown }));
-      else setWriting((was) => ({ ...was, markdown }));
+      else drafting.write({ ...drafting.writing, markdown });
     },
     address: (field: keyof AddressText, text: string) => {
       hasChosen.current = true;
@@ -69,12 +70,6 @@ export function useWriting(start: Writing, recipients: Pick<Writing, 'to' | 'cc'
     },
     remove: (attached: Attached) =>
       edit((was) => ({ attachments: was.attachments.filter((each) => each !== attached) })),
-    /** Names each file by the part of the saved draft that holds it, so its bytes cross once. */
-    nameFiles: (named: Map<Attached, Attached>) =>
-      setWriting((was) => ({
-        ...was,
-        attachments: was.attachments.map((attached) => named.get(attached) ?? attached),
-      })),
     /** Where an image in the text shows from: a new file's bytes, or the saved draft's part. */
     imageUrl: (contentId: string) => {
       const found = writing.attachments.find((attached) => attached.contentId === contentId);
