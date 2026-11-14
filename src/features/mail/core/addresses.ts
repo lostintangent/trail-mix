@@ -11,12 +11,6 @@ export function domainOf(address: string): string {
         .toLowerCase();
 }
 
-/** Whether an address is on a list of them, which ignores case as mail does. */
-export function listed(address: string, list: readonly string[]): boolean {
-  const wanted = address.toLowerCase();
-  return list.some((listing) => listing.toLowerCase() === wanted);
-}
-
 /**
  * The addresses in an address-list header, such as From, To or Reply-To, as a message carries it:
  * unfolded, but with its encoded words still encoded. Each mailbox gives one address, with its

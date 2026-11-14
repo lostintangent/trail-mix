@@ -1,5 +1,6 @@
 export * from './model.ts';
-export { addressesIn, domainOf, listed } from './addresses.ts';
+export { addressesIn, domainOf } from './addresses.ts';
+export { listed } from './listed.ts';
 export { isVerified, oneClickUnsubscribe } from './authentication.ts';
 export { refKey, refOf, sameRef } from './refs.ts';
 export { linkIdsOf, messageIdOf, newestShown, referencesOf } from './conversations.ts';
