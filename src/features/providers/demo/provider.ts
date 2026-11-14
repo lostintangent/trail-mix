@@ -11,7 +11,7 @@ import {
   type Moved,
 } from '../../mail/core/index.ts';
 import { previewFrom } from '../imap/core/preview.ts';
-import { withoutBcc } from '../imap/core/send.ts';
+import { recipientsIn, withoutBcc } from '../imap/core/send.ts';
 import { planSync } from '../imap/core/sync.ts';
 import { SEARCH_LIMIT, SendFailure, beforeSending, type MailProvider } from '../provider.ts';
 import * as server from './mailbox.ts';
@@ -226,12 +226,10 @@ export function demoServer(
         const outgoing = await written(withoutBcc(raw));
         const recipients = await recipientsOf(raw);
         // The host turns a message to the unreachable domain away once, and takes its next try.
-        const refused = mailbox.refused ?? [];
         if (
           recipients.some((email) => email.endsWith(`@${UNREACHABLE}`)) &&
-          !refused.includes(messageId)
+          (await refusesOnce(messageId))
         ) {
-          await commit({ ...mailbox, refused: [...refused, messageId] }, []);
           throw new SendFailure(
             `The mail server refused it: 554 5.4.4 ${UNREACHABLE} can’t be reached right now`,
             false,
@@ -300,10 +298,8 @@ export function demoServer(
     async deleteFolder(path) {
       // The server turns the first delete of the seeded Projects away, as if another session had
       // it open, and takes the next.
-      const refused = mailbox.refused ?? [];
-      const asked = `DELETE ${path}`;
-      if (path === BUSY_FOLDER && server.folderOf(mailbox, path) && !refused.includes(asked)) {
-        await commit({ ...mailbox, refused: [...refused, asked] }, []);
+      const busy = path === BUSY_FOLDER && server.folderOf(mailbox, path);
+      if (busy && (await refusesOnce(`DELETE ${path}`))) {
         throw new Error(`NO [INUSE] ${path} is open in another session`);
       }
       await commit(server.deleteFolder(mailbox, path), [...watchers.keys()]);
@@ -311,6 +307,14 @@ export function demoServer(
 
     close: () => settle(() => watchers.clear()),
   };
+
+  /** Whether the server turns `asked` away, as it does the first time it is asked and never again. */
+  async function refusesOnce(asked: string): Promise<boolean> {
+    const refused = mailbox.refused ?? [];
+    if (refused.includes(asked)) return false;
+    await commit({ ...mailbox, refused: [...refused, asked] }, []);
+    return true;
+  }
 
   /** Files in Sent the host's own copies that `which` picks, of those it owes. */
   async function fileHostCopies(which: (copy: server.Written) => boolean) {
@@ -366,10 +370,7 @@ export function demoServer(
       await commit(server.emptied(mailbox), [...watchers.keys()]);
     },
     async unsubscribe(address) {
-      const refused = mailbox.refused ?? [];
-      const asked = `UNSUBSCRIBE ${address}`;
-      if (address === BUSY_LIST && !refused.includes(asked)) {
-        await commit({ ...mailbox, refused: [...refused, asked] }, []);
+      if (address === BUSY_LIST && (await refusesOnce(`UNSUBSCRIBE ${address}`))) {
         return new Response(null, { status: 503, statusText: 'Service Unavailable' });
       }
       return new Response(null, { status: 200 });
@@ -429,12 +430,8 @@ async function written(bytes: Uint8Array): Promise<server.Written> {
 }
 
 /** Everyone a message is addressed to, Bcc included, lowercased. */
-async function recipientsOf(bytes: Uint8Array): Promise<string[]> {
-  const parsed = await PostalMime.parse(bytes);
-  return addresses([...(parsed.to ?? []), ...(parsed.cc ?? []), ...(parsed.bcc ?? [])]).map(
-    ({ email }) => email.toLowerCase(),
-  );
-}
+const recipientsOf = async (bytes: Uint8Array) =>
+  recipientsIn(await PostalMime.parse(bytes)).map((email) => email.toLowerCase());
 
 function addresses(parsed: readonly ParsedAddress[]): Address[] {
   return parsed

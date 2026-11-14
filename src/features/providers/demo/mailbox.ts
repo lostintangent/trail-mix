@@ -204,7 +204,7 @@ export function move(
   const next = uids.reduce((current, uid) => {
     const entry = storedAt(current, path, uid);
     if (!entry) return current;
-    const [copied, landed] = add(current, to, entry.source, entry.flags);
+    const [copied, landed] = append(current, to, entry.source, entry.flags);
     moved.push([uid, landed]);
     return expunge(copied, path, [uid]);
   }, mailbox);
@@ -216,17 +216,6 @@ export function expunge(mailbox: DemoMailbox, path: string, uids: readonly numbe
     if (!messageAt(current, path, uid)) return current;
     return rewrite(nextModSeq(current, path)[0], path, uid, () => undefined);
   }, mailbox);
-}
-
-/** Files a message from outside the seed in a folder, and says the UID it was given. */
-export function append(
-  mailbox: DemoMailbox,
-  path: string,
-  message: Written,
-  flags: Flags,
-): [DemoMailbox, number] {
-  if (!folderOf(mailbox, path)) throw new Error(`There is no folder "${path}" to file it in.`);
-  return add(mailbox, path, message, flags);
 }
 
 /** Numbers a folder's messages again under a new UIDVALIDITY, as a server that lost its state does. */
@@ -251,8 +240,7 @@ export function renameFolder(mailbox: DemoMailbox, path: string, to: string): De
   if (path === 'INBOX') throw new Error('The Inbox cannot be renamed.');
   if (!folderOf(mailbox, path)) return mailbox;
   if (folderOf(mailbox, to)) throw new Error(`There is already a folder "${to}".`);
-  const renamed = (inner: string) =>
-    inner === path ? to : inner.startsWith(`${path}/`) ? `${to}${inner.slice(path.length)}` : inner;
+  const renamed = (held: string) => (inside(held, path) ? `${to}${held.slice(path.length)}` : held);
   return {
     ...mailbox,
     folders: mailbox.folders.map((folder) => ({ ...folder, path: renamed(folder.path) })),
@@ -264,11 +252,10 @@ export function renameFolder(mailbox: DemoMailbox, path: string, to: string): De
 export function deleteFolder(mailbox: DemoMailbox, path: string): DemoMailbox {
   if (path === 'INBOX') throw new Error('The Inbox cannot be deleted.');
   if (!folderOf(mailbox, path)) return mailbox;
-  const goes = (held: string) => held === path || held.startsWith(`${path}/`);
   return {
     ...mailbox,
-    folders: mailbox.folders.filter((folder) => !goes(folder.path)),
-    stored: mailbox.stored.filter((entry) => !goes(entry.path)),
+    folders: mailbox.folders.filter((folder) => !inside(folder.path, path)),
+    stored: mailbox.stored.filter((entry) => !inside(entry.path, path)),
   };
 }
 
@@ -295,6 +282,9 @@ export function emptied(mailbox: DemoMailbox): DemoMailbox {
 }
 
 // Mechanics
+
+/** Whether the folder at `held` is the one at `path` or inside it. */
+const inside = (held: string, path: string) => held === path || held.startsWith(`${path}/`);
 
 function seededIn(mailbox: DemoMailbox, seeded: string) {
   return seededFolders(mailbox.kind, mailbox.size).get(seeded);
@@ -355,13 +345,15 @@ function rewrite(
   };
 }
 
-function add(
+/** Files a message in a folder, and says the UID it was given. */
+export function append(
   mailbox: DemoMailbox,
   path: string,
   source: Stored['source'],
   flags: Flags,
 ): [DemoMailbox, number] {
-  const uid = folderOf(mailbox, path)!.uidNext;
+  const uid = folderOf(mailbox, path)?.uidNext;
+  if (uid === undefined) throw new Error(`There is no folder "${path}" to file it in.`);
   const [next, modSeq] = nextModSeq(mailbox, path);
   return [
     {

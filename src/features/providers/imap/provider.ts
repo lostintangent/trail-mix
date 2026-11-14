@@ -40,7 +40,7 @@ import { previewOf } from './core/preview.ts';
 import { flagsOf, planSync, type SyncPlan } from './core/sync.ts';
 import { subtree } from './core/folders.ts';
 import type { Endpoint } from './core/presets.ts';
-import { submitFailure, withoutBcc } from './core/send.ts';
+import { recipientsIn, submitFailure, withoutBcc } from './core/send.ts';
 import { signInFailure, type SentCredentials } from './core/signin.ts';
 
 export type ImapAccount = {
@@ -554,14 +554,9 @@ export function imapProvider(account: ImapAccount, network: Network): MailProvid
       );
       if (typeof source === 'string') return source;
       const parsed = await PostalMime.parse(source);
-      const recipients = [
-        ...(parsed.to ?? []),
-        ...(parsed.cc ?? []),
-        ...(parsed.bcc ?? []),
-      ].flatMap((a) => (a.group ? a.group.map((m) => m.address) : [a.address]));
       const from = parsed.from && !parsed.from.group ? parsed.from.address : account.auth.user;
       // Bcc recipients get the message, but no copy says who they were.
-      await deliver(withoutBcc(source), from, recipients);
+      await deliver(withoutBcc(source), from, recipientsIn(parsed));
       return 'sent';
     },
 

@@ -73,3 +73,14 @@ export function withoutBcc(message: Uint8Array): Uint8Array {
 }
 
 const [TAB, LF, CR, SPACE] = [9, 10, 13, 32];
+
+/** Everyone a parsed message is addressed to, Bcc included, each member of a group on its own. */
+export function recipientsIn({ to = [], cc = [], bcc = [] }: Addressees): string[] {
+  return [...to, ...cc, ...bcc]
+    .flatMap((each) => each.group ?? [each])
+    .flatMap(({ address }) => (address ? [address] : []));
+}
+
+/** A message's addressees as a parser reads them, each a mailbox or a group of them. */
+type Addressees = Partial<Record<'to' | 'cc' | 'bcc', Addressee[]>>;
+type Addressee = { address?: string; group?: Addressee[] };

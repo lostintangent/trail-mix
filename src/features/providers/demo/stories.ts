@@ -62,9 +62,14 @@ export const DEMO_ACCOUNTS: Record<DemoKind, { name: string; me: Address; stamp:
   },
 };
 
+/** A folder for each role, named as most servers name it. */
+const ROLE_FOLDERS = (['inbox', 'drafts', 'sent', 'archive', 'trash', 'junk'] as const).map(
+  (role) => ({ path: role === 'inbox' ? 'INBOX' : role[0]!.toUpperCase() + role.slice(1), role }),
+);
+
 export const SEEDED_FOLDERS: Record<DemoKind, { path: string; role?: FolderRole }[]> = {
-  personal: [...roleFolders(), { path: 'Projects' }, { path: 'Projects/Toy Box' }],
-  work: [...roleFolders(), { path: 'Receipts' }],
+  personal: [...ROLE_FOLDERS, { path: 'Projects' }, { path: 'Projects/Toy Box' }],
+  work: [...ROLE_FOLDERS, { path: 'Receipts' }],
 };
 
 /** How many messages a mailbox holds in all, for an Inbox of `inbox` messages. */
@@ -1006,7 +1011,10 @@ const STORIES: Record<string, (cycle: number) => Thread> = {
   },
 
   invoice: (c) => {
-    const month = MONTH_NAMES[(((9 - c) % 12) + 12) % 12]!;
+    const month = new Date(Date.UTC(2000, 9 - c)).toLocaleString('en-US', {
+      month: 'long',
+      timeZone: 'UTC',
+    });
     const number = `INV-${2071 - (c % 2000)}`;
     return {
       subject: `Invoice for ${month}`,
@@ -1247,32 +1255,6 @@ const LAYOUT: Record<DemoKind, [story: string, step: number][]> = {
   ],
 };
 
-const MONTH_NAMES = [
-  'January',
-  'February',
-  'March',
-  'April',
-  'May',
-  'June',
-  'July',
-  'August',
-  'September',
-  'October',
-  'November',
-  'December',
-];
-
-function roleFolders(): { path: string; role: FolderRole }[] {
-  return [
-    { path: 'INBOX', role: 'inbox' },
-    { path: 'Drafts', role: 'drafts' },
-    { path: 'Sent', role: 'sent' },
-    { path: 'Archive', role: 'archive' },
-    { path: 'Trash', role: 'trash' },
-    { path: 'Junk', role: 'junk' },
-  ];
-}
-
 // Dates. The newest cycle spreads over a few weeks, closest together at the top, and everything
 // older is spaced evenly back to within a year, so a twelve-month window holds the whole mailbox.
 
@@ -1300,14 +1282,11 @@ function dateOf(rank: number, size: number, createdAt: string): string {
 
 // Bodies
 
-const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
 function quote(text: string, author: Address, date: string): string {
-  const when = new Date(date);
-  const time = `${String(when.getUTCHours()).padStart(2, '0')}:${String(when.getUTCMinutes()).padStart(2, '0')}`;
-  const day = `${DAY_NAMES[when.getUTCDay()]}, ${when.getUTCDate()} ${MONTH_NAMES[when.getUTCMonth()]!.slice(0, 3)} ${when.getUTCFullYear()}`;
+  // As "Tue, 03 Nov 2026 14:05:00 GMT", which ECMAScript fixes, so no locale data can change it.
+  const [weekday, day, month, year, time] = new Date(date).toUTCString().split(' ');
   const quoted = text.split('\n').map((line) => (line ? `> ${line}` : '>'));
-  return `\n\nOn ${day} at ${time}, ${author.name ?? author.email} wrote:\n${quoted.join('\n')}`;
+  return `\n\nOn ${weekday} ${Number(day)} ${month} ${year} at ${time!.slice(0, 5)}, ${author.name ?? author.email} wrote:\n${quoted.join('\n')}`;
 }
 
 /** Paragraphs, lists, indented code and quotes, as a mail client would send them. */
