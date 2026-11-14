@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
-import { listOf, pagesCovering, placesOf, type Fetched } from './pages.ts';
+import { bundleIdOf } from '../../mail/core/index.ts';
+import { listOf, neighbors, pagesCovering, placesOf, type Fetched } from './pages.ts';
 
 const rows = (...ids: string[]) => ids.map((id) => ({ id }));
 const page = (
@@ -93,4 +94,27 @@ test('a fetched conversation is found at its place, and one not fetched is nowhe
   const places = placesOf(listOf([page(0, 6, ['a', 'b']), page(4, 6, ['e', 'f'])])!);
 
   expect([places.get('b'), places.get('e'), places.get('c')]).toEqual([1, 4, undefined]);
+});
+
+test('the reader prepares the rows below and above the selected one, or the first two with none', () => {
+  const listed = rows('a', 'b', 'c', 'd');
+  const places = placesOf(listed);
+  expect(neighbors(listed, places, 'c')).toEqual(['d', 'b']);
+  expect(neighbors(listed, places, 'a')).toEqual(['b']);
+  expect(neighbors(listed, places, undefined)).toEqual(['a', 'b']);
+});
+
+test('the reader prepares nothing around a selected row the list hasn’t listed yet', () => {
+  const listed = rows('a', 'b');
+  expect(neighbors(listed, placesOf(listed), 'far')).toEqual([]);
+  expect(neighbors(undefined, new Map(), undefined)).toEqual([]);
+});
+
+test('the reader prepares no bundle, and no row whose page hasn’t arrived', () => {
+  const bundle = bundleIdOf('work', 'acme/site');
+  const listed = [{ id: 'a' }, { id: bundle }, undefined, { id: 'd' }];
+  const places = placesOf(listed);
+  expect(neighbors(listed, places, 'a')).toEqual([]);
+  expect(neighbors(listed, places, 'd')).toEqual([]);
+  expect(neighbors(listed, places, bundle)).toEqual(['a']);
 });

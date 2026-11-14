@@ -1,4 +1,4 @@
-import type { ConversationId } from '../../mail/core/index.ts';
+import { bundlePartsOf, type ConversationId } from '../../mail/core/index.ts';
 
 /**
  * A list a page at a time. The browser keeps each page of a view's list it has fetched by the place
@@ -72,4 +72,27 @@ export function placesOf<Row extends { id: ConversationId }>(
     if (row) places.set(row.id, place);
   }
   return places;
+}
+
+/**
+ * The conversations the member may open next, which the reader prepares ahead: those just below and
+ * above the selected one, or the first ones while nothing is selected.
+ */
+export function neighbors<Row extends { id: ConversationId }>(
+  conversations: Listed<Row> | undefined,
+  places: ReadonlyMap<ConversationId, number>,
+  selected: ConversationId | undefined,
+): ConversationId[] {
+  if (!conversations) return [];
+  const at = selected === undefined ? undefined : places.get(selected);
+  if (selected !== undefined && at === undefined) return [];
+  const near =
+    at === undefined ? conversations.slice(0, 2) : [conversations[at + 1], conversations[at - 1]];
+  // A bundle is no conversation to prepare.
+  return idsIn(near).filter((id) => bundlePartsOf(id) === undefined);
+}
+
+/** The ids of a list's fetched rows, in its order. */
+export function idsIn<Row extends { id: ConversationId }>(rows: Listed<Row>): ConversationId[] {
+  return rows.flatMap((row) => (row ? [row.id] : []));
 }

@@ -4,6 +4,7 @@ import {
   useQuery,
   useQueryClient,
   type QueryClient,
+  type QueryKey,
   type UseQueryOptions,
 } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
@@ -175,6 +176,28 @@ export function usePages<
     [key, total, pages],
   );
   return { rows, isFetching, show };
+}
+
+/**
+ * Asks for the page of a list around a row it hasn't listed, and says whether the list waits for
+ * it: while the page is on its way, and once it holds the row, until the list has caught up with
+ * it. The looking is done once the list lists the row, or has caught up without it, or asking for
+ * the page failed. Offline it waits for nothing and asks again once it can.
+ */
+export function useAround<Fetched extends Page, Key extends QueryKey>(
+  row: ConversationId | undefined,
+  places: ReadonlyMap<string, number> | undefined,
+  isFetching: boolean,
+  query: UseQueryOptions<Fetched, Error, Fetched, Key>,
+): { awaits: boolean; isDone: boolean } {
+  const isAsked = row !== undefined && places !== undefined && !places.has(row);
+  const around = useQuery({ ...query, enabled: isAsked });
+  const awaits =
+    isAsked &&
+    (around.isLoading || (isFetching && around.data?.items.some(({ id }) => id === row) === true));
+  const isDone =
+    row !== undefined && places !== undefined && (!isAsked || (around.isFetched && !awaits));
+  return { awaits, isDone };
 }
 
 /**

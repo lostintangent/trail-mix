@@ -1,12 +1,6 @@
 import { colorVars, durationVars, spacingVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import {
-  hashKey,
-  useQuery,
-  useQueryClient,
-  type QueryKey,
-  type UseQueryOptions,
-} from '@tanstack/react-query';
+import { hashKey, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   startTransition,
   Suspense,
@@ -47,7 +41,6 @@ import {
   outboxQuery,
   thisDeviceQuery,
   useIsCaughtUp,
-  type Page,
 } from '../../mailroom/client/index.ts';
 import {
   isDraftsView,
@@ -82,8 +75,10 @@ import {
 import {
   ConversationListSkeleton,
   gitHubCommand,
+  idsIn,
   isSameSelection,
   NOTHING_SELECTED,
+  neighbors,
   rowChange,
   SearchContext,
   SearchField,
@@ -92,6 +87,7 @@ import {
   selectOnly,
   TriageActions,
   triageCommands,
+  useAround,
   useBundle,
   useSearch,
   useTriage,
@@ -1551,28 +1547,6 @@ function useAddress({
   return { move, onViewChange, chooseView, written, pushed, isArrived };
 }
 
-/**
- * Asks for the page of a list around a row it hasn't listed, and says whether the list waits for
- * it: while the page is on its way, and once it holds the row, until the list has caught up with
- * it. The looking is done once the list lists the row, or has caught up without it, or asking for
- * the page failed. Offline it waits for nothing and asks again once it can.
- */
-function useAround<Fetched extends Page, Key extends QueryKey>(
-  row: ConversationId | undefined,
-  places: ReadonlyMap<string, number> | undefined,
-  isFetching: boolean,
-  query: UseQueryOptions<Fetched, Error, Fetched, Key>,
-): { awaits: boolean; isDone: boolean } {
-  const isAsked = row !== undefined && places !== undefined && !places.has(row);
-  const around = useQuery({ ...query, enabled: isAsked });
-  const awaits =
-    isAsked &&
-    (around.isLoading || (isFetching && around.data?.items.some(({ id }) => id === row) === true));
-  const isDone =
-    row !== undefined && places !== undefined && (!isAsked || (around.isFetched && !awaits));
-  return { awaits, isDone };
-}
-
 /** The place of a view, with the bundle and the conversation open in it, if any. */
 const placeIn = (
   view: View,
@@ -1594,29 +1568,6 @@ function listing(view: View & { in: 'folder' | 'inbox' }, unreadOnly: boolean): 
 
 /** A step to a new view is pushed, so Back returns, except from a search, which it takes the place of. */
 const historyFrom = (view: View) => (view.in === 'search' ? 'replace' : 'push');
-
-/**
- * The conversations the member may open next, which the reader prepares ahead: those just below and
- * above the selected one, or the first ones while nothing is selected.
- */
-function neighbors(
-  conversations: Listed<ListItem> | undefined,
-  places: ReadonlyMap<ConversationId, number>,
-  selected: ConversationId | undefined,
-): ConversationId[] {
-  if (!conversations) return [];
-  const at = selected === undefined ? undefined : places.get(selected);
-  if (selected !== undefined && at === undefined) return [];
-  const near =
-    at === undefined ? conversations.slice(0, 2) : [conversations[at + 1], conversations[at - 1]];
-  // A bundle is no conversation to prepare.
-  return idsIn(near).filter((id) => bundlePartsOf(id) === undefined);
-}
-
-/** The ids of a list's fetched rows, in its order. */
-function idsIn(rows: Listed<ListItem>): ConversationId[] {
-  return rows.flatMap((row) => (row ? [row.id] : []));
-}
 
 const NO_PLACES: ReadonlyMap<ConversationId, number> = new Map();
 
