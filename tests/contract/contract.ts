@@ -16,6 +16,7 @@ import {
   type Cursor,
   type MailProvider,
 } from '../../src/features/providers/index.ts';
+import { message } from '../message.ts';
 import { until } from '../until.ts';
 
 export type Harness = {
@@ -121,12 +122,14 @@ export function describeContract(
     });
 
     it('reports a folder newest first, as envelopes a list and a conversation need', async () => {
-      await world().deliver(message({ id: 'first', subject: 'First', minutesAgo: 30 }));
+      await world().deliver(
+        message({ id: 'first', subject: 'First', date: new Date('2026-11-09T11:30:00Z') }),
+      );
       await world().deliver(
         message({
           id: 'second',
           subject: 'Second',
-          minutesAgo: 20,
+          date: new Date('2026-11-09T11:40:00Z'),
           inReplyTo: 'first',
           list: 'news.example.com',
           text: '> quoted\r\nThe second message says hello.',
@@ -564,64 +567,3 @@ export function describeContract(
 /** Refs as comparable keys, in one order. */
 const keys = (refs: MessageRef[]) => refs.map(refKey).sort();
 const bytes = (raw: string) => new TextEncoder().encode(raw);
-
-/**
- * A plain RFC 5322 message, with HTML beside its text or a file attached when asked. Its id is
- * `<id@example.com>`.
- */
-export function message(fields: {
-  id: string;
-  subject: string;
-  from?: string;
-  to?: string;
-  bcc?: string;
-  inReplyTo?: string;
-  list?: string;
-  text?: string;
-  html?: string;
-  attachment?: boolean;
-  minutesAgo?: number;
-}): string {
-  const date = new Date(Date.UTC(2026, 10, 9, 12) - (fields.minutesAgo ?? 0) * 60_000);
-  const headers = [
-    `From: ${fields.from ?? 'Ada Park <ada@example.com>'}`,
-    `To: ${fields.to ?? 'me@trailmix.test'}`,
-    ...(fields.bcc ? [`Bcc: ${fields.bcc}`] : []),
-    `Subject: ${fields.subject}`,
-    `Date: ${date.toUTCString()}`,
-    `Message-ID: <${fields.id}@example.com>`,
-    ...(fields.inReplyTo ? [`In-Reply-To: <${fields.inReplyTo}@example.com>`] : []),
-    ...(fields.list ? [`List-Id: News <${fields.list}>`] : []),
-    'MIME-Version: 1.0',
-  ];
-  const text = [
-    'Content-Type: text/plain; charset=utf-8',
-    '',
-    fields.text ?? `This is ${fields.subject}.`,
-  ];
-  const html = fields.html !== undefined && [
-    'Content-Type: text/html; charset=utf-8',
-    '',
-    fields.html,
-  ];
-  const file = fields.attachment && [
-    'Content-Type: application/pdf; name="plan.pdf"',
-    'Content-Disposition: attachment; filename="plan.pdf"',
-    'Content-Transfer-Encoding: base64',
-    '',
-    btoa('%PDF-1.4 a plan'),
-  ];
-  const second = html || file;
-  const body = second
-    ? [
-        `Content-Type: multipart/${html ? 'alternative' : 'mixed'}; boundary="part"`,
-        '',
-        '--part',
-        ...text,
-        '--part',
-        ...second,
-        '--part--',
-      ]
-    : text;
-  return [...headers, ...body, ''].join('\r\n');
-}

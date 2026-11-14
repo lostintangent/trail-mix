@@ -22,6 +22,7 @@ import { missing } from './clients.ts';
 import { mutt } from './mutt.ts';
 import { roundcube, type Roundcube } from './roundcube.ts';
 import { mailIsIn } from '../mailIsIn.ts';
+import { message } from '../message.ts';
 import { until } from '../until.ts';
 
 const { alice, bob } = users;
@@ -44,24 +45,26 @@ describe('Mail written in Trail Mix', () => {
     await Promise.all([empty(alice.email), empty(bob.email)]);
     // Bob asked Alice and kept a copy, so his question is in both Inboxes. Dan's message shares its
     // subject and nothing else, so only a client that threads by subject would join the two.
-    const question = raw({
+    const question = message({
       id: 'lunch',
       from: `Bob <${bob.email}>`,
       to: alice.email,
       cc: bob.email,
       subject: 'Lunch on Thursday?',
       text: 'Shall we try the new place?',
+      minutesAgo: 60,
     });
     for (const user of [alice, bob]) await append(user, 'INBOX', question);
     await append(
       bob,
       'INBOX',
-      raw({
+      message({
         id: 'other-lunch',
         from: 'Dan <dan@example.com>',
         to: bob.email,
         subject: 'Re: Lunch on Thursday?',
         text: 'A different lunch altogether.',
+        minutesAgo: 60,
       }),
     );
   }, 120_000);
@@ -343,24 +346,16 @@ describe('Mail written in Trail Mix', () => {
       inReplyTo: '<old-plan@example.com>',
       references: '<first-plan@example.com> <old-plan@example.com>',
     };
-    await append(
-      alice,
-      'Drafts',
-      [
-        `Message-ID: <plan-reply-${Date.now()}@example.com>`,
-        `Date: ${new Date().toUTCString()}`,
-        `From: Alice <${alice.email}>`,
-        `To: Bob <${bob.email}>`,
-        `Subject: ${subject}`,
-        `In-Reply-To: ${thread.inReplyTo}`,
-        `References: ${thread.references}`,
-        'Content-Type: text/plain; charset=utf-8',
-        '',
-        'Still on for it?',
-        '',
-      ].join('\r\n'),
-      ['\\Draft', '\\Seen'],
-    );
+    const draft = message({
+      id: `plan-reply-${Date.now()}`,
+      headers: [`References: ${thread.references}`],
+      from: `Alice <${alice.email}>`,
+      to: `Bob <${bob.email}>`,
+      subject,
+      inReplyTo: 'old-plan',
+      text: 'Still on for it?',
+    });
+    await append(alice, 'Drafts', draft, ['\\Draft', '\\Seen']);
     const page = await trailMix();
     await openDraft(page, subject);
     const reply = page.getByRole('region', { name: 'Reply' });
@@ -485,18 +480,16 @@ describe('Mail written in Trail Mix', () => {
 
     /** A message in Alice's Inbox whose text and HTML both show remote images. */
     async function fromMallory() {
-      const id = `offer-${Date.now()}@example.com`;
+      const id = `offer-${Date.now()}`;
       const subject = `You have won ${Date.now()}`;
       await append(
         alice,
         'INBOX',
-        alternative({
-          headers: [
-            `Message-ID: <${id}>`,
-            'From: Mallory <mallory@example.com>',
-            `To: ${alice.email}`,
-            `Subject: ${subject}`,
-          ],
+        message({
+          id,
+          from: 'Mallory <mallory@example.com>',
+          to: alice.email,
+          subject,
           text: `Claim your prize:\r\n![prize](${pixel('inbox-markdown')})`,
           html: `<p>Claim your prize:</p><img src="${pixel('inbox-html')}" alt="prize">`,
         }),
@@ -509,26 +502,15 @@ describe('Mail written in Trail Mix', () => {
       offer: { id: string; subject: string },
       body: { text?: string; html: string },
     ) {
-      const headers = [
-        `Message-ID: <reply-${Date.now()}@example.com>`,
-        `From: Alice <${alice.email}>`,
-        'To: Mallory <mallory@example.com>',
-        `Subject: Re: ${offer.subject}`,
-        `In-Reply-To: <${offer.id}>`,
-        `References: <${offer.id}>`,
-      ];
-      const draft =
-        body.text === undefined
-          ? [
-              ...headers,
-              `Date: ${new Date().toUTCString()}`,
-              'MIME-Version: 1.0',
-              'Content-Type: text/html; charset=utf-8',
-              '',
-              body.html,
-              '',
-            ].join('\r\n')
-          : alternative({ headers, text: body.text, html: body.html });
+      const draft = message({
+        id: `reply-${Date.now()}`,
+        headers: [`References: <${offer.id}@example.com>`],
+        from: `Alice <${alice.email}>`,
+        to: 'Mallory <mallory@example.com>',
+        subject: `Re: ${offer.subject}`,
+        inReplyTo: offer.id,
+        ...body,
+      });
       await append(alice, 'Drafts', draft, ['\\Draft', '\\Seen']);
     }
   });
@@ -681,50 +663,6 @@ function htmlDraft(subject: string): string {
     '',
     PNG,
     '--plan--',
-    '',
-  ].join('\r\n');
-}
-
-/** A message with a text and an HTML version of the same words. */
-function alternative({ headers, text, html }: { headers: string[]; text: string; html: string }) {
-  return [
-    ...headers,
-    `Date: ${new Date().toUTCString()}`,
-    'MIME-Version: 1.0',
-    'Content-Type: multipart/alternative; boundary="versions"',
-    '',
-    '--versions',
-    'Content-Type: text/plain; charset=utf-8',
-    '',
-    text,
-    '--versions',
-    'Content-Type: text/html; charset=utf-8',
-    '',
-    html,
-    '--versions--',
-    '',
-  ].join('\r\n');
-}
-
-function raw(fields: {
-  id: string;
-  from: string;
-  to: string;
-  cc?: string;
-  subject: string;
-  text: string;
-}) {
-  return [
-    `Message-ID: <${fields.id}@example.com>`,
-    `Date: ${new Date(Date.now() - 60 * 60_000).toUTCString()}`,
-    `From: ${fields.from}`,
-    `To: ${fields.to}`,
-    ...(fields.cc ? [`Cc: ${fields.cc}`] : []),
-    `Subject: ${fields.subject}`,
-    'MIME-Version: 1.0',
-    'Content-Type: text/plain; charset=utf-8',
-    '',
-    fields.text,
     '',
   ].join('\r\n');
 }

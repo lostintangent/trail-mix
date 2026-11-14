@@ -31,8 +31,9 @@ import {
   type Profile,
 } from '../mail-server/server.ts';
 import { signedIn } from '../mail-server/sign-in.ts';
+import { message } from '../message.ts';
 import { until } from '../until.ts';
-import { describeContract, message, type Harness } from './contract.ts';
+import { describeContract, type Harness } from './contract.ts';
 
 const { alice } = users;
 const auth = { user: alice.email, pass: alice.password };
@@ -140,18 +141,13 @@ describe('The IMAP provider', () => {
    * submit took, and how often the message arrived.
    */
   async function failedSubmit(
-    fields: { id: string; to?: string; extra?: string },
+    fields: { id: string; to?: string; headers?: string[] },
     sending = aliceAt(),
   ) {
     await start('full');
     await empty(alice.email);
-    const raw = message({
-      id: fields.id,
-      subject: fields.id,
-      from: alice.email,
-      to: fields.to ?? alice.email,
-    });
-    const draft = await sending.saveDraft(bytes(fields.extra ? `${fields.extra}\r\n${raw}` : raw));
+    const raw = message({ subject: fields.id, from: alice.email, to: alice.email, ...fields });
+    const draft = await sending.saveDraft(bytes(raw));
     const started = Date.now();
     const failure = await sending
       .submit(draft, `<${fields.id}@example.com>`)
@@ -214,7 +210,7 @@ describe('The IMAP provider', () => {
   test('a submit whose connection drops after the message went out says it may have gone', async () => {
     const { failure, delivered } = await failedSubmit({
       id: 'dropped',
-      extra: DROP_AFTER_DATA_HEADER,
+      headers: [DROP_AFTER_DATA_HEADER],
     });
     expect(failure.passing).toBe(false);
     expect(failure.message).toContain('so it may have been delivered');
