@@ -270,29 +270,23 @@ export function ReaderPane({
   // Preparing what comes next is never urgent, so a change to it, as when the open conversation
   // leaves the list, doesn't make the open conversation render again in the change's own frame.
   const preparing = useDeferredValue(upcoming);
-  // A bundle's actions stand where a conversation's do.
-  const bundleBar = listed?.actions('bar');
-  const bundleTop = listed?.actions('top');
-  const bundleIsland = listed?.actions('island');
+  // A bundle's actions stand where a conversation's do, with its place beside them in the bar.
+  const barActions = listed ? listed.actions('bar') : bar;
+  const barPlace = listed ? barActions && place(listed.id) : placed;
+  const topActions = listed ? listed.actions('top') : top;
+  const islandActions = listed ? listed.actions('island') : island;
   // A thread open in its bundle lies under the bundle's name, the way back to its threads, which a
   // phone's Back names shorter.
-  const repository = bundle && repositoryOf(bundle);
-  const backTo =
-    bundle && selected !== undefined && repository
-      ? {
-          label: repository,
-          short: repository.slice(repository.indexOf('/') + 1),
-          go: bundle.onClose,
-        }
-      : undefined;
+  const repository = bundle && selected !== undefined ? repositoryOf(bundle) : '';
+  const backTo = repository ? bundle?.onClose : undefined;
   const crumbed = backTo && (
     <div {...stylex.props(styles.crumb)}>
       <Button
-        label={backTo.label}
+        label={repository}
         icon={BACK_ICON}
         variant="ghost"
         size="sm"
-        onClick={backTo.go}
+        onClick={backTo}
         xstyle={styles.back}
       />
     </div>
@@ -301,10 +295,13 @@ export function ReaderPane({
   return (
     <section aria-label="Reader" {...stylex.props(styles.sheet)}>
       <header {...stylex.props(styles.phoneHeader)}>
-        <BackButton onClick={backTo?.go ?? onBack} label={backTo?.short} />
-        {(bundleTop ?? top) && !writing && !page ? (
+        <BackButton
+          onClick={backTo ?? onBack}
+          label={backTo && repository.slice(repository.indexOf('/') + 1)}
+        />
+        {topActions && !writing && !page ? (
           <div role="toolbar" aria-label="Marks" {...stylex.props(styles.top)}>
-            <Suspense>{bundleTop ?? top}</Suspense>
+            <Suspense>{topActions}</Suspense>
           </div>
         ) : null}
       </header>
@@ -319,21 +316,14 @@ export function ReaderPane({
       ) : null}
       {/* A composer over everything lies outside the panes, wherever it is drawn. */}
       {writing?.place === 'over' && writing.composer}
-      {listed && bundleBar && !isFilled ? (
-        <div role="toolbar" aria-label="Repository" {...stylex.props(styles.bar)}>
-          <Suspense>
-            {bundleBar}
-            {place(listed.id)}
-          </Suspense>
-        </div>
-      ) : (bar || placed) && !isFilled ? (
+      {(barActions || barPlace) && !isFilled ? (
         <div
           role="toolbar"
-          aria-label={bar ? 'Conversation' : 'Place'}
+          aria-label={listed ? 'Repository' : barActions ? 'Conversation' : 'Place'}
           {...stylex.props(styles.bar)}
         >
-          {bar && <Suspense>{bar}</Suspense>}
-          {placed}
+          {barActions && <Suspense>{barActions}</Suspense>}
+          {barPlace}
         </div>
       ) : null}
       {isFilled ? null : listed ? (
@@ -405,9 +395,9 @@ export function ReaderPane({
           />
         </div>
       )}
-      {(listed ? bundleIsland : island) && !writing && !page ? (
+      {islandActions && !writing && !page ? (
         <PhoneIsland label={listed ? 'Repository' : 'Conversation'} spans>
-          <Suspense>{listed ? bundleIsland : island}</Suspense>
+          <Suspense>{islandActions}</Suspense>
         </PhoneIsland>
       ) : null}
     </section>
