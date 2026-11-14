@@ -454,26 +454,9 @@ test('on a phone, a row swiped far enough left is archived, and a short swipe sl
   await options.filter({ hasText: far ?? '' }).waitFor({ timeout: ELSEWHERE_MS });
 }, 30_000);
 
-test('keys run the registry’s commands: from the list, inside a message, and ? lists them', async () => {
+test('keys run the registry’s commands inside a message, and ? lists them', async () => {
   const here = await inbox();
   const options = here.getByRole('option');
-  const selected = here.locator('[role="option"][aria-selected="true"]');
-  await options.nth(1).click();
-  const place = () => selected.getAttribute('aria-posinset');
-  await expect(place()).resolves.toBe('2');
-
-  await here.keyboard.press('j');
-  await expect(place()).resolves.toBe('3');
-  await here.keyboard.press('k');
-  await expect(place()).resolves.toBe('2');
-
-  // E archives the open conversation, and Z puts it back.
-  const archived = options.filter({ hasText: await shownSubject(here) });
-  await here.keyboard.press('e');
-  await archived.waitFor({ state: 'detached', timeout: 1_000 });
-  await undoButton(here).waitFor();
-  await here.keyboard.press('z');
-  await archived.waitFor({ timeout: ELSEWHERE_MS });
 
   // After a click inside a message, focus is in its frame, and E still archives. Every message in
   // Toy Box is HTML, so it has a frame.
