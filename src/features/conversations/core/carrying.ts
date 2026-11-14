@@ -64,14 +64,10 @@ export function errandFor(
       const to = action.do === 'move' ? action.to : destination(action);
       return movable.length > 0 ? { move: movable.map(refOf), to } : undefined;
     }
-    case 'flag':
-      return flagsFor(conversations.map(newest), { flagged: true });
-    case 'unflag':
-      return flagsFor(all, { flagged: false });
-    case 'read':
-      return flagsFor(all, { seen: true });
-    case 'unread':
-      return flagsFor(conversations.map(newest), { seen: false });
+    default: {
+      const { change, isNewestOnly } = MARKS[action.do];
+      return flagsFor(isNewestOnly ? conversations.map(newest) : all, change);
+    }
   }
 }
 
@@ -95,16 +91,21 @@ export function bundleErrandFor(
         roleOf(folders, action.to.account, action.to.path) !== 'inbox'
         ? { move: scope, to: action.to }
         : undefined;
-    case 'flag':
-      return { setFlags: scope, change: { flagged: true } };
-    case 'unflag':
-      return { setFlags: scope, change: { flagged: false } };
-    case 'read':
-      return { setFlags: scope, change: { seen: true } };
-    case 'unread':
-      return { setFlags: scope, change: { seen: false } };
+    default:
+      return { setFlags: scope, change: MARKS[action.do].change };
   }
 }
+
+/**
+ * The flag each mark sets, and whether it reaches only each conversation's newest message: a flag
+ * marks the conversation, and an unread mark brings back only its newest message to read.
+ */
+const MARKS = {
+  flag: { change: { flagged: true }, isNewestOnly: true },
+  unflag: { change: { flagged: false }, isNewestOnly: false },
+  read: { change: { seen: true }, isNewestOnly: false },
+  unread: { change: { seen: false }, isNewestOnly: true },
+} as const;
 
 /** What undoes an errand: each moved message back to the folder it left, or each flag back. */
 export function undoOf(errand: Errand, moved: readonly Moved[]): Errand[] {

@@ -223,24 +223,19 @@ function said(action: Action, count: number, folders: readonly Folder[]): string
     unread: 'Marked unread',
   }[action.do];
   const what = count === 1 ? '' : ` ${count} conversations`;
-  const where = action.do === 'move' ? ` to ${destinationName(action.to, folders)}` : '';
-  return `${how}${what}${where}`;
+  return `${how}${what}${whereTo(action, folders)}`;
 }
 
 /** What a refusal says the member was doing: "Couldn't archive." */
 function doingOf(action: Action, folders: readonly Folder[]): string {
-  switch (action.do) {
-    case 'move':
-      return `move to ${destinationName(action.to, folders)}`;
-    case 'read':
-    case 'unread':
-      return `mark ${action.do}`;
-    default:
-      return action.do;
-  }
+  const mark = action.do === 'read' || action.do === 'unread' ? 'mark ' : '';
+  return `${mark}${action.do}${whereTo(action, folders)}`;
 }
 
-function destinationName(to: { account: string; path: string }, folders: readonly Folder[]) {
-  const folder = folders.find(({ account, path }) => account === to.account && path === to.path);
-  return folder ? folderName(folder) : to.path;
+/** Where a move takes mail, as " to Receipts", and nothing for any other action. */
+function whereTo(action: Action, folders: readonly Folder[]): string {
+  if (action.do !== 'move') return '';
+  const { account, path } = action.to;
+  const folder = folders.find((each) => each.account === account && each.path === path);
+  return ` to ${folder ? folderName(folder) : path}`;
 }
