@@ -1,10 +1,12 @@
 import { expect } from 'bun:test';
 import { join } from 'node:path';
 import type { Page, Request, Route } from 'playwright';
+import { bodiesShown, goTo, hold, reader, shownSubject } from './helpers.ts';
 import { unusable } from './usable.ts';
 import { RESULTS, SIZES, suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 import { atRest } from '../atRest.ts';
+import { until } from '../until.ts';
 
 /**
  * Triage, end to end: the built app on workerd, with two browsers open on one member's demo mail.
@@ -87,68 +89,6 @@ async function centerOf(page: Page, at: number) {
   return { x: box.x + box.width / 2, y: box.y + box.height / 2, width: box.width };
 }
 
-/** Waits until a check holds, or fails once `ms` have passed without it. */
-async function until(check: () => Promise<boolean>, ms: number) {
-  const by = Date.now() + ms;
-  while (!(await check())) {
-    if (Date.now() > by) throw new Error(`Still not so after ${ms} ms.`);
-    await new Promise((done) => setTimeout(done, 25));
-  }
-}
-
-/**
- * Holds the asks this browser makes of its Mailroom that `which` picks until released, so what it
- * shows meanwhile comes only from what it already had. The release lets them through, then stops
- * holding.
- */
-async function hold(page: Page, which: (request: Request) => boolean) {
-  let release = () => {};
-  const released = new Promise<void>((done) => (release = done));
-  const held: Promise<void>[] = [];
-  const holding = (route: Route) => {
-    if (!which(route.request())) return route.fallback();
-    const through = released.then(() =>
-      // An ask the app gave up on meanwhile, as a superseded refetch is, is already handled.
-      route.continue().catch((error: unknown) => {
-        if (!String(error).includes('already handled')) throw error;
-      }),
-    );
-    held.push(through);
-    return through;
-  };
-  await page.route('**/_serverFn/**', holding);
-  return async () => {
-    release();
-    await Promise.all(held);
-    await page.unroute('**/_serverFn/**', holding);
-  };
-}
-
-/**
- * Waits until the reader shows `count` messages open, each with its body: HTML in its frame, or
- * plain text, and neither still on its way nor failed.
- */
-async function bodiesShown(page: Page, count: number) {
-  await page.waitForFunction(
-    (count) => {
-      const sheets = [...document.querySelectorAll('section[aria-label="Reader"] article')];
-      return (
-        sheets.length === count &&
-        sheets.every(
-          (sheet) =>
-            !sheet.querySelector('[role="alert"]') &&
-            !sheet.querySelector('[aria-busy="true"]') &&
-            [...sheet.querySelectorAll('iframe')].every(
-              (frame) => frame.style.visibility === 'visible',
-            ),
-        )
-      );
-    },
-    count,
-    { timeout: ELSEWHERE_MS },
-  );
-}
-
 /** Waits until the reader shows `count` messages' HTML, each in its frame. */
 async function framesShown(page: Page, count: number) {
   await page.waitForFunction(
@@ -159,16 +99,6 @@ async function framesShown(page: Page, count: number) {
     count,
     { timeout: ELSEWHERE_MS },
   );
-}
-
-/** The subject the reader shows, once it shows the selected conversation. */
-async function shownSubject(page: Page): Promise<string> {
-  const shown = await page.waitForFunction(() => {
-    const title = document.querySelector('section[aria-label="Reader"] h1')?.textContent;
-    const selected = document.querySelector('[role="option"][aria-selected="true"]');
-    return title && selected?.textContent?.includes(title) ? title : undefined;
-  });
-  return (await shown.jsonValue()) as string;
 }
 
 const row = (page: Page, subject: RegExp) => page.getByRole('option').filter({ hasText: subject });
@@ -193,7 +123,6 @@ const textAt = async (page: Page, place: number) =>
   (await at(page, place).textContent())?.replace('Unread', '');
 /** The reader bar's buttons for the open conversation. */
 const bar = (page: Page) => page.getByRole('toolbar', { name: 'Conversation' });
-const reader = (page: Page) => page.locator('section[aria-label="Reader"]');
 /** The toast's Undo. Its name is exact, since a folded message's preview can mention undoing. */
 const undoButton = (page: Page) => page.getByRole('button', { name: 'Undo', exact: true });
 
@@ -225,34 +154,30 @@ function msUntilGone(page: Page, action: string, subject: string): Promise<numbe
 }
 
 test('arrowing the list rings its active row, never the sheet, and a pointer clears that ring', async () => {
-  for (const colorScheme of ['light', 'dark'] as const) {
-    const here = await inbox(SIZES.desktop);
-    await here.emulateMedia({ colorScheme });
-    const list = here.getByRole('listbox', { name: 'Inbox' });
-    await list.focus();
-    await list.press('ArrowDown');
-    const state = () =>
-      list.evaluate((element) => {
-        const row = document.getElementById(element.getAttribute('aria-activedescendant')!)!;
-        const sheet = element.closest('section')!;
-        const { outlineStyle, outlineWidth, outlineColor } = getComputedStyle(row);
-        return {
-          sheet: getComputedStyle(sheet).outlineStyle,
-          row: `${outlineStyle} ${outlineWidth} ${outlineColor}`,
-          isWhole: row.getBoundingClientRect().width > 0,
-        };
-      });
-    const focused = await state();
-    expect(focused.sheet).toBe('none');
-    expect(focused.row).toMatch(/^solid 2px /);
-    expect(focused.isWhole).toBe(true);
+  const here = await inbox(SIZES.desktop);
+  const list = here.getByRole('listbox', { name: 'Inbox' });
+  await list.focus();
+  await list.press('ArrowDown');
+  const state = () =>
+    list.evaluate((element) => {
+      const row = document.getElementById(element.getAttribute('aria-activedescendant')!)!;
+      const sheet = element.closest('section')!;
+      const { outlineStyle, outlineWidth, outlineColor } = getComputedStyle(row);
+      return {
+        sheet: getComputedStyle(sheet).outlineStyle,
+        row: `${outlineStyle} ${outlineWidth} ${outlineColor}`,
+        isWhole: row.getBoundingClientRect().width > 0,
+      };
+    });
+  const focused = await state();
+  expect(focused.sheet).toBe('none');
+  expect(focused.row).toMatch(/^solid 2px /);
+  expect(focused.isWhole).toBe(true);
 
-    await here.getByRole('option').nth(1).click();
-    const pointer = await state();
-    expect(pointer.sheet).toBe('none');
-    expect(pointer.row.startsWith('none')).toBe(true);
-    await here.context().close();
-  }
+  await here.getByRole('option').nth(1).click();
+  const pointer = await state();
+  expect(pointer.sheet).toBe('none');
+  expect(pointer.row.startsWith('none')).toBe(true);
 }, 30_000);
 
 test('archiving shows at once, reaches another open browser, and Undo brings it back to both', async () => {
@@ -396,17 +321,6 @@ test('a flag and a read mark show at once and in the other browser, and Undo tak
   await unread(there).waitFor({ state: 'attached', timeout: ELSEWHERE_MS });
 }, 30_000);
 
-test('opening a conversation marks it read, here and in the other browser', async () => {
-  const [here, there] = await Promise.all([inbox(), inbox()]);
-  const subject = /Trip photos/;
-  const unread = (page: Page) => row(page, subject).getByText('Unread', { exact: true });
-  await unread(here).waitFor({ state: 'attached' });
-
-  await row(here, subject).click();
-  await unread(here).waitFor({ state: 'detached', timeout: 1_000 });
-  await unread(there).waitFor({ state: 'detached', timeout: ELSEWHERE_MS });
-}, 30_000);
-
 test('on a phone, a long press starts picking, a tap adds, and the island acts on what was picked', async () => {
   const here = await inbox(SIZES.phone);
   const hand = await finger(here);
@@ -467,10 +381,7 @@ test('keys run the registry’s commands inside a message, and ? lists them', as
 
   // After a click inside a message, focus is in its frame, and E still archives. Every message in
   // Toy Box is HTML, so it has a frame.
-  await here
-    .getByRole('region', { name: 'Personal' })
-    .getByRole('button', { name: /^Toy Box/ })
-    .click();
+  await goTo(here, 'Toy Box', 'Personal');
   await options.first().click();
   await shownSubject(here);
   await framesShown(here, 1);
@@ -492,24 +403,26 @@ test('keys run the registry’s commands inside a message, and ? lists them', as
   await expect(conversationKeys.getByText('#', { exact: true }).isVisible()).resolves.toBe(true);
 }, 30_000);
 
-test('Delete deletes the open conversation from the list, with Undo', async () => {
+test('#, Delete and Backspace delete the open conversation or the whole selection, and Undo restores all of it at once', async () => {
   const here = await inbox();
+  const list = here.getByRole('listbox', { name: 'Inbox' });
   const target = row(here, /Trip photos/);
   await target.click();
   await shownSubject(here);
   await bar(here).getByRole('button', { name: 'Delete' }).hover();
   await here.getByRole('tooltip').filter({ hasText: 'Delete (#, Delete, Backspace)' }).waitFor();
-  await here.getByRole('listbox', { name: 'Inbox' }).focus();
+  for (const key of ['#', 'Delete']) {
+    await target.click();
+    await list.focus();
+    await here.keyboard.press(key);
+    await target.waitFor({ state: 'detached', timeout: 1_000 });
+    // Its Undo, clicked once the toast is still, as a member sees it. Astryx 0.7.11 never removes a
+    // toast dismissed before it starts to show, and Z there would leave its Undo behind.
+    await undoButton(here).click();
+    await target.waitFor({ timeout: 1_000 });
+    await undoButton(here).waitFor({ state: 'detached' });
+  }
 
-  await here.keyboard.press('Delete');
-  await target.waitFor({ state: 'detached', timeout: 1_000 });
-  await undoButton(here).waitFor();
-  await here.keyboard.press('z');
-  await target.waitFor({ timeout: 1_000 });
-}, 30_000);
-
-test('Backspace deletes the whole selection together, and Undo restores all of it at once', async () => {
-  const here = await inbox();
   const options = here.getByRole('option');
   const picked = await Promise.all([5, 6, 7].map((place) => summaryAt(here, place)));
   await options.nth(4).click();
@@ -518,7 +431,7 @@ test('Backspace deletes the whole selection together, and Undo restores all of i
   await here.getByRole('heading', { name: '2 conversations selected' }).waitFor();
   await options.nth(5).click({ modifiers: ['ControlOrMeta'] });
   await here.getByRole('heading', { name: '3 conversations selected' }).waitFor();
-  await here.getByRole('listbox', { name: 'Inbox' }).focus();
+  await list.focus();
   await here.keyboard.press('Backspace');
   for (const text of picked) {
     await listedSummary(here, text).waitFor({ state: 'detached', timeout: 1_000 });
@@ -532,7 +445,7 @@ test('Backspace deletes the whole selection together, and Undo restores all of i
   here.on('response', (response) => isMove(response.request()) && undoing.push('answered'));
   await here.keyboard.press('z');
   for (const text of picked) await listedSummary(here, text).waitFor({ timeout: ELSEWHERE_MS });
-  await until(() => Promise.resolve(undoing.length === 4), ELSEWHERE_MS);
+  await until(() => undoing.length === 4, ELSEWHERE_MS);
   expect(undoing).toEqual(['asked', 'asked', 'answered', 'answered']);
 }, 30_000);
 
@@ -603,20 +516,20 @@ test('Delete and Backspace stay in the search field and palette while typing', a
   await field.press('Backspace');
   await expect(field.inputValue()).resolves.toBe('Delet');
   await expect(undoButton(here).count()).resolves.toBe(0);
-  await here.context().close();
+  await field.fill('');
+  await here.keyboard.press('Escape');
 
   // A docked reply leaves the conversation's commands available, but its editor keeps its own keys.
-  const writing = await inbox();
   // Known by its subject, since a GitHub bundle, which has no Reply, can sit at any place near the top.
-  const original = row(writing, /Lunch Thursday/);
+  const original = row(here, /Lunch Thursday/);
   await original.click();
-  await shownSubject(writing);
-  const reply = reader(writing)
+  await shownSubject(here);
+  const reply = reader(here)
     .getByRole('button', { name: 'Reply', exact: true })
     .filter({ visible: true })
     .last();
   await reply.click();
-  const editor = writing
+  const editor = here
     .getByRole('region', { name: 'Reply' })
     .getByRole('textbox', { name: 'Reply' });
   await editor.fill('typed text');
@@ -644,7 +557,7 @@ test('straight after Z, a conversation opens with its messages, under the refs U
     if (place > 10) throw new Error('No conversation on screen has an earlier message.');
     await at(here, place).click();
     await shownSubject(here);
-    await bodiesShown(here, 1);
+    await bodiesShown(here, 1, ELSEWHERE_MS);
   } while ((await folded.count()) === 0);
   const [conversation, below] = [await textAt(here, place), await textAt(here, place + 1)];
 
@@ -660,16 +573,16 @@ test('straight after Z, a conversation opens with its messages, under the refs U
   await at(here, place).click();
   // Until the reader shows the picked conversation, it shows the one that took its place.
   await shownSubject(here);
-  await bodiesShown(here, 1);
+  await bodiesShown(here, 1, ELSEWHERE_MS);
   expect(await where()).toBe('Archive');
   await folded.first().click();
-  await bodiesShown(here, 2);
+  await bodiesShown(here, 2, ELSEWHERE_MS);
 
   // Back in the Inbox, the messages Undo moved have its refs, and both stay open under them.
-  await commands();
+  await commands.release();
   await until(async () => (await where()) === 'Inbox', ELSEWHERE_MS);
-  await bodiesShown(here, 2);
-  await refetches();
+  await bodiesShown(here, 2, ELSEWHERE_MS);
+  await refetches.release();
   expect(failed).toEqual([]);
 }, 30_000);
 

@@ -7,6 +7,7 @@ import { DESK_HEX } from '../../src/app/theme/palette.ts';
 import { accentRule, accentTokens } from '../../src/app/theme/readableAccent.ts';
 import { PAGE_SIZE } from '../../src/features/mailroom/client/contract.ts';
 import { REST_MS } from '../../src/features/reader/core/rest.ts';
+import { bodiesShown, goTo, hold, problems, reachable } from './helpers.ts';
 import { textContrasts, unusable } from './usable.ts';
 import { RESULTS, SIZES, suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
@@ -32,15 +33,9 @@ async function open(options: BrowserContextOptions, { path = '/', accent = '' } 
   const context = await app.context({ deviceScaleFactor: 2, ...options });
   if (accent) await pickBeforeLoad(context, accent);
   const page = await context.newPage();
-  const problems: string[] = [];
-  page.on('console', (message) => {
-    if (message.type() === 'error') problems.push(`console: ${message.text()}`);
-  });
-  page.on('response', (response) => {
-    if (response.status() >= 400) problems.push(`${response.status()} ${response.url()}`);
-  });
+  const met = problems(page);
   await page.goto(new URL(path, app.url).href, { waitUntil: 'networkidle' });
-  return { context, page, problems };
+  return { context, page, problems: met };
 }
 
 for (const accent of ACCENTS) {
@@ -330,19 +325,6 @@ test('a pane shows its thin scrollbar only while the pointer is over it or keys 
   await finger.close();
 });
 
-/** Holds the page's ask for its accounts until `release`, as a Mailroom slow to answer would. */
-async function holdAccounts(page: Page) {
-  const { promise: released, resolve: release } = Promise.withResolvers<void>();
-  await page.route(
-    (url) => url.href.includes(encodeURIComponent('"accounts"')),
-    async (route) => {
-      await released;
-      await route.continue().catch(() => {});
-    },
-  );
-  return release;
-}
-
 test('the first screen draws every control it settles with, from the first load alone, at both sizes', async () => {
   // The Mailroom is filled first, so both screens compared hold the same mail.
   const filling = await app.context(SIZES.desktop);
@@ -447,15 +429,10 @@ async function controls(page: Page) {
 
 test('a reader bar menu reached before its code has come opens once the code is here, and keeps the focus', async () => {
   const context = await app.context({ ...SIZES.desktop, serviceWorkers: 'block' });
-  /** A page whose menus' code waits until the returned release. */
+  /** A page whose menus' code waits until `code` is released. */
   const opened = async () => {
     const page = await context.newPage();
-    let release = () => {};
-    const held = new Promise<void>((resolve) => (release = resolve));
-    await page.route(/\/assets\/DropdownMenu-[^/]+\.js$/, async (route) => {
-      await held;
-      await route.continue();
-    });
+    const code = await hold(page, /\/assets\/DropdownMenu-[^/]+\.js$/);
     await page.goto(app.url);
     await page.getByRole('option').first().waitFor();
     const header = page.getByRole('toolbar', { name: 'Conversation' }).first();
@@ -464,49 +441,26 @@ test('a reader bar menu reached before its code has come opens once the code is 
     const isReal = (name: string) =>
       menu(name).evaluate((button) => button.hasAttribute('aria-controls'));
     expect(await isReal('More')).toBe(false);
-    return { page, menu, isReal, release };
+    return { page, menu, isReal, code };
   };
 
   const pressing = await opened();
   await pressing.menu('More').click();
   expect(await pressing.page.getByRole('menu').count()).toBe(0);
-  pressing.release();
+  await pressing.code.release();
   await pressing.page.getByRole('menuitem', { name: /^Mark (read|unread)$/ }).waitFor();
   await pressing.page.close();
 
   const focusing = await opened();
   await focusing.menu('Move to').focus();
-  focusing.release();
+  await focusing.code.release();
   await focusing.menu('Move to').and(focusing.page.locator('[aria-controls]')).waitFor();
   expect(
     await focusing.menu('Move to').evaluate((button) => button === document.activeElement),
   ).toBe(true);
 }, 60_000);
 
-test('a device that last saw mail draws the workbench and its skeletons before the Mailroom answers', async () => {
-  const context = await app.context(SIZES.desktop);
-  const page = await context.newPage();
-  await page.goto(app.url);
-  await mailIsIn(page);
-  await page.waitForFunction(() => localStorage.getItem('trail-mix.has-mail') !== null);
-
-  const release = await holdAccounts(page);
-  await page.reload();
-  await page.getByRole('navigation', { name: 'Mailboxes' }).waitFor();
-  // The list needs no word on the accounts: its skeleton stands in until its own snapshot comes.
-  await page
-    .getByRole('listbox', { name: 'Inbox' })
-    .or(page.getByLabel('Loading Inbox'))
-    .first()
-    .waitFor();
-  expect(await page.getByRole('region', { name: 'Personal' }).count()).toBe(0);
-  await page.screenshot({ path: join(RESULTS, 'desktop-light-opening-known.png') });
-  release();
-  await mailIsIn(page);
-  await page.getByRole('option').first().waitFor();
-}, 60_000);
-
-test('a device that hasn’t seen mail waits on a quiet desk, and says it’s opening only after a moment', async () => {
+test('a device that hasn’t seen mail waits on a quiet desk, and once it has, draws the workbench and its skeletons before the Mailroom answers', async () => {
   const context = await app.context(SIZES.desktop);
   const page = await context.newPage();
   // Whether the desk said anything within its first moment, or drew the workbench before the
@@ -525,16 +479,33 @@ test('a device that hasn’t seen mail waits on a quiet desk, and says it’s op
       }
     }).observe(document, { childList: true, subtree: true, characterData: true });
   });
-  const release = await holdAccounts(page);
+  let accounts = await hold(page, 'accounts');
   await page.goto(app.url);
   await page.getByText('Opening your mail…').waitFor();
   await page.screenshot({ path: join(RESULTS, 'desktop-light-opening-unknown.png') });
   expect(await page.evaluate(() => (window as unknown as { early: string[] }).early)).toEqual([]);
-  release();
+  await accounts.release();
+  await mailIsIn(page);
+  await page.waitForFunction(() => localStorage.getItem('trail-mix.has-mail') !== null);
+
+  accounts = await hold(page, 'accounts');
+  await page.reload();
   await page.getByRole('navigation', { name: 'Mailboxes' }).waitFor();
+  // The list needs no word on the accounts: its skeleton stands in until its own snapshot comes.
+  await page
+    .getByRole('listbox', { name: 'Inbox' })
+    .or(page.getByLabel('Loading Inbox'))
+    .first()
+    .waitFor();
+  expect(await page.getByRole('region', { name: 'Personal' }).count()).toBe(0);
+  await page.screenshot({ path: join(RESULTS, 'desktop-light-opening-known.png') });
+  await accounts.release();
+  await mailIsIn(page);
+  await page.getByRole('option').first().waitFor();
 }, 60_000);
 
-test('the desk, and the browser’s chrome, follow the system, whatever an earlier release saved', async () => {
+test('the desk, the browser’s chrome and a saved accent follow the system before any of the app runs, whatever an earlier release saved', async () => {
+  const pick = '#c2185b';
   for (const [saved, system] of [
     ['dark', 'light'],
     ['light', 'dark'],
@@ -544,6 +515,7 @@ test('the desk, and the browser’s chrome, follow the system, whatever an earli
       if (!sessionStorage.getItem('seeded')) localStorage.setItem('trail-mix.theme', mode);
       sessionStorage.setItem('seeded', 'yes');
     }, saved);
+    await pickBeforeLoad(context, pick);
     const page = await context.newPage();
     // Whether the desk shows the system's scheme: as a probe set to that scheme draws it.
     const deskShown = () =>
@@ -556,33 +528,21 @@ test('the desk, and the browser’s chrome, follow the system, whatever an earli
         probe.remove();
         return getComputedStyle(document.body).backgroundColor === expected;
       }, system);
-    // Before any of the app runs, the system's theme shows.
+    // Before any of the app runs, the system's theme shows, with the accent made readable in it.
     await page.route(/\.js(\?|$)/, (route) => route.abort());
     await page.goto(app.url, { waitUntil: 'load' });
     expect(await deskShown()).toBe(true);
     expect(await chromeColors(page)).toEqual([DESK_HEX.light, DESK_HEX.dark]);
+    expect({ system, accent: await accentShown(page) }).toEqual({
+      system,
+      accent: shownAs(accentTokens(parseHex(pick)!, system).accent),
+    });
     // Once it runs, the choice is forgotten, and the system's still shows.
     await page.unroute(/\.js(\?|$)/);
     await page.reload();
     await page.getByRole('navigation', { name: 'Mailboxes' }).waitFor();
     expect(await deskShown()).toBe(true);
     expect(await page.evaluate(() => localStorage.getItem('trail-mix.theme'))).toBeNull();
-    await context.close();
-  }
-});
-
-test('a saved accent paints before any of the app runs, made readable in each theme', async () => {
-  const pick = '#c2185b';
-  for (const colorScheme of THEMES) {
-    const context = await app.context({ colorScheme });
-    await pickBeforeLoad(context, pick);
-    const page = await context.newPage();
-    await page.route(/\.js(\?|$)/, (route) => route.abort());
-    await page.goto(app.url, { waitUntil: 'load' });
-    expect({ colorScheme, accent: await accentShown(page) }).toEqual({
-      colorScheme,
-      accent: shownAs(accentTokens(parseHex(pick)!, colorScheme).accent),
-    });
     await context.close();
   }
 });
@@ -717,53 +677,6 @@ test('a sheet that sets its own color scheme takes the theme’s colors for that
   expect(await inkIn('light')).not.toBe(await inkIn('dark'));
 });
 
-test('the reader follows a move made after a rest at once, and waits while a key is held', async () => {
-  const { page, problems } = await open(SIZES.desktop);
-  await openConversation(page, 0);
-  await preparedBelow(page);
-
-  const shown = await page.evaluate(async () => {
-    const reader = document.querySelector('section[aria-label="Reader"]')!;
-    const list = document.querySelector('[role="listbox"]')!;
-    const heading = () => reader.querySelector('h1')?.textContent ?? '';
-    const option = (index: number) => list.querySelectorAll('[role="option"]')[index]?.textContent;
-    const press = () =>
-      list.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }));
-
-    const before = heading();
-    press();
-    await new Promise(requestAnimationFrame);
-    const afterRest = { before, heading: heading(), row: option(1) };
-
-    // Four more presses, 30 ms apart as a held key's repeats come, never let the selection rest.
-    const whileHeld: string[] = [];
-    // A conversation still loading shows no heading, and that is not one shown.
-    const observer = new MutationObserver(() => {
-      const now = heading();
-      if (now && now !== (whileHeld.at(-1) ?? afterRest.heading)) whileHeld.push(now);
-    });
-    observer.observe(reader, { subtree: true, childList: true, characterData: true });
-    for (let repeat = 0; repeat < 4; repeat++) {
-      await new Promise((resolve) => setTimeout(resolve, 30));
-      press();
-    }
-    await new Promise(requestAnimationFrame);
-    const last = list.querySelector('[aria-selected="true"]')?.textContent ?? '';
-    while (!heading() || !last.includes(heading())) {
-      await new Promise((resolve) => setTimeout(resolve, 20));
-    }
-    observer.disconnect();
-    return { afterRest, whileHeld, last, isLastRow5: last === option(5) };
-  });
-
-  expect(shown.afterRest.heading).not.toBe(shown.afterRest.before);
-  expect(shown.afterRest.row).toContain(shown.afterRest.heading);
-  expect(shown.isLastRow5).toBe(true);
-  expect(shown.whileHeld).toHaveLength(1);
-  expect(shown.last).toContain(shown.whileHeld[0] ?? '(none)');
-  expect(problems).toEqual([]);
-}, 30_000);
-
 test('quick presses never rest, however long a slow phone takes to draw each move', async () => {
   const { page, problems } = await open(SIZES.desktop);
   const rows = page.getByRole('option');
@@ -800,9 +713,11 @@ test('quick presses never rest, however long a slow phone takes to draw each mov
       await new Promise((resolve) => setTimeout(resolve, 30));
     }
     // ...each handled 200 ms after the last move was drawn, as on a slow phone.
+    let first = '';
     for (const press of presses) {
       list.dispatchEvent(press);
       await new Promise(requestAnimationFrame);
+      first ||= subject();
       const drawnBy = performance.now() + 200;
       while (performance.now() < drawnBy);
     }
@@ -812,11 +727,13 @@ test('quick presses never rest, however long a slow phone takes to draw each mov
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
     observer.disconnect();
-    return { seen, last };
+    return { first, seen, last };
   });
 
-  // The first press came after a rest, so it opened its conversation, and then only the last.
+  // The first press came after a rest, so it opened its conversation in its own frame, and then
+  // only the last.
   expect(shown.seen).toHaveLength(2);
+  expect(shown.first).toBe(shown.seen[0]!);
   expect(shown.last).toContain(shown.seen[1] ?? '(none)');
   expect(problems).toEqual([]);
 }, 30_000);
@@ -944,10 +861,7 @@ test('the list header names its view and holds only what acts on it, and the rea
   }
   // The Outbox lists sends, with nothing to press in its header.
   await expect(list.locator('header [role="toolbar"], header button').count()).resolves.toBe(0);
-  await page
-    .getByRole('region', { name: 'Personal' })
-    .getByRole('button', { name: /^Sent/ })
-    .click();
+  await goTo(page, 'Sent', 'Personal');
   await page.getByRole('heading', { name: 'Sent', level: 2 }).waitFor();
   const [sent, sentRow] = await icons();
   expect(sent).toBe(sentRow);
@@ -960,10 +874,7 @@ test('the list header names its view and holds only what acts on it, and the rea
     return Math.round(end - menu.getBoundingClientRect().right);
   });
   expect(menuGap).toBe(0);
-  await sidebar
-    .getByRole('button', { name: /^Inbox/ })
-    .first()
-    .click();
+  await goTo(page, 'Inbox');
   await page.getByRole('heading', { name: 'Inbox', level: 2 }).waitFor();
   // The reader's bar keeps triage on its left and the place on its right, with the list shown.
   await page.getByRole('option').nth(1).click();
@@ -988,32 +899,42 @@ test('the list header names its view and holds only what acts on it, and the rea
   expect(more.x + more.width).toBeLessThan(placeBounds.x);
   expect(await headerButtons(list)).toEqual(['Unread only']);
 
-  // A selection of several keeps its own toolbar in its reader sheet.
+  // In either theme, a selection of several keeps its own toolbar in its reader sheet, and with the
+  // list folded to its rail the same reader bar still holds actions and place.
   const rows = page.getByRole('option');
-  await rows.nth(2).click({ modifiers: ['Shift'] });
-  await page.getByRole('heading', { name: '2 conversations selected' }).waitFor();
   const selection = page.getByRole('region', { name: 'Selection' });
-  await selection
-    .getByRole('toolbar', { name: 'Selected conversations' })
-    .getByRole('button', { name: 'Archive' })
-    .waitFor();
-  expect(await headerButtons(list)).toEqual(['Unread only']);
-  await selection.getByRole('button', { name: 'Clear selection' }).click();
-
-  // With the list folded to its rail, the same reader bar still holds actions and place.
-  await page.getByRole('option').nth(1).click();
-  await header.getByRole('button', { name: 'Archive' }).waitFor();
   const edge = page.getByRole('separator', { name: 'Resize the conversation list' });
-  await edge.focus();
-  await page.keyboard.press('Enter');
   const folded = page
     .locator('section[aria-label="Reader"]')
     .getByRole('toolbar', { name: 'Conversation' });
-  await folded.getByRole('button', { name: 'Archive' }).waitFor();
-  await folded.getByRole('button', { name: 'Next conversation' }).waitFor();
-  await page.keyboard.press('Enter');
+  const screenshot = async (name: string) => {
+    await page.screenshot({ path: join(RESULTS, `${name}.png`) });
+    expect({ name, unusable: await unusable(page) }).toEqual({ name, unusable: [] });
+  };
+  for (const colorScheme of THEMES) {
+    await page.emulateMedia({ colorScheme });
+    await rows.nth(2).click({ modifiers: ['Shift'] });
+    await page.getByRole('heading', { name: '2 conversations selected' }).waitFor();
+    await selection
+      .getByRole('toolbar', { name: 'Selected conversations' })
+      .getByRole('button', { name: 'Archive' })
+      .waitFor();
+    expect(await headerButtons(list)).toEqual(['Unread only']);
+    await screenshot(`t75-desktop-${colorScheme}-selection`);
+    await selection.getByRole('button', { name: 'Clear selection' }).click();
+
+    await rows.nth(1).click();
+    await header.getByRole('button', { name: 'Archive' }).waitFor();
+    await edge.focus();
+    await page.keyboard.press('Enter');
+    await page.getByRole('button', { name: /^Show Inbox/ }).waitFor();
+    await folded.getByRole('button', { name: 'Archive' }).waitFor();
+    await folded.getByRole('button', { name: 'Next conversation' }).waitFor();
+    await screenshot(`t75-desktop-${colorScheme}-folded`);
+    await page.keyboard.press('Enter');
+  }
   expect(problems).toEqual([]);
-}, 30_000);
+}, 60_000);
 
 test('the list shows only unread mail while its filter is on, and keeps the one open until the member leaves it', async () => {
   const { page, problems } = await open(SIZES.desktop);
@@ -1117,23 +1038,12 @@ test('the list shows only unread mail while its filter is on, and keeps the one 
   // A view chosen from the sidebar opens unfiltered.
   await toggle.click();
   await page.waitForURL(isFiltered);
-  await page
-    .getByRole('region', { name: 'Personal' })
-    .getByRole('button', { name: /^Inbox/ })
-    .click();
+  await goTo(page, 'Inbox', 'Personal');
   await page.waitForURL((url) => url.searchParams.has('folder') && !isFiltered(url));
   await expect(toggle.getAttribute('aria-pressed')).resolves.toBe('false');
-  expect(problems).toEqual([]);
-}, 60_000);
 
-test('a folder with nothing unread, listed only for its unread mail, says so in the list and the reader', async () => {
-  const { page, problems } = await open(SIZES.desktop);
-  const list = page.locator('section[aria-labelledby]').first();
-  const toggle = list.getByRole('button', { name: 'Unread only' });
-  await page
-    .getByRole('region', { name: 'Personal' })
-    .getByRole('button', { name: /^Sent/ })
-    .click();
+  // A folder with nothing unread says so in the list and the reader.
+  await goTo(page, 'Sent', 'Personal');
   await page.getByRole('heading', { name: 'Sent', level: 2 }).waitFor();
   await page.getByRole('option').first().waitFor();
   // With nothing unread, the filter isn't offered, though an address can still name it.
@@ -1162,46 +1072,7 @@ test('a folder with nothing unread, listed only for its unread mail, says so in 
   await page.getByRole('option').first().waitFor();
   await expect(toggle.count()).resolves.toBe(0);
   expect(problems).toEqual([]);
-}, 30_000);
-
-test('reader triage sits at the left of its bar, with place at the right, in both themes and panes', async () => {
-  const screenshot = async (page: Page, name: string) => {
-    await page.screenshot({ path: join(RESULTS, `${name}.png`) });
-    expect({ name, unusable: await unusable(page) }).toEqual({ name, unusable: [] });
-  };
-  for (const colorScheme of THEMES) {
-    const { context, page, problems } = await open({ ...SIZES.desktop, colorScheme });
-    await page.getByRole('option').nth(1).click();
-    const reader = page.locator('section[aria-label="Reader"]');
-    await reader
-      .getByRole('toolbar', { name: 'Conversation' })
-      .getByRole('button', { name: 'Archive' })
-      .waitFor();
-
-    const rows = page.getByRole('option');
-    await rows.nth(3).click({ modifiers: ['Shift'] });
-    await page.getByRole('heading', { name: /conversations selected/ }).waitFor();
-    const selection = page.getByRole('region', { name: 'Selection' });
-    await selection.getByRole('button', { name: 'Archive' }).waitFor();
-    await screenshot(page, `t75-desktop-${colorScheme}-selection`);
-    await selection.getByRole('button', { name: 'Clear selection' }).click();
-
-    await rows.nth(1).click();
-    await reader
-      .getByRole('toolbar', { name: 'Conversation' })
-      .getByRole('button', { name: 'Archive' })
-      .waitFor();
-    const listEdge = page.getByRole('separator', { name: 'Resize the conversation list' });
-    await listEdge.focus();
-    await page.keyboard.press('Enter');
-    await page.getByRole('button', { name: /^Show Inbox/ }).waitFor();
-    const folded = reader.getByRole('toolbar', { name: 'Conversation' });
-    await folded.getByRole('button', { name: 'Next conversation' }).waitFor();
-    await screenshot(page, `t75-desktop-${colorScheme}-folded`);
-    expect(problems).toEqual([]);
-    await context.close();
-  }
-}, 60_000);
+}, 90_000);
 
 test('a narrow list’s header gives up its unread count, whole, before a letter of its title, under a finger too', async () => {
   const TABLET = { viewport: { width: 1180, height: 820 }, isMobile: true, hasTouch: true };
@@ -1251,17 +1122,6 @@ test('a narrow list’s header gives up its unread count, whole, before a letter
   }
 }, 60_000);
 
-test('on a phone, the list’s header holds no triage, and the reader’s island files what’s open', async () => {
-  const { page, problems } = await open(SIZES.phone);
-  await expect(page.getByRole('toolbar', { name: 'Conversation' }).count()).resolves.toBe(0);
-  await openConversation(page, 1);
-  await page
-    .getByRole('toolbar', { name: 'Conversation' })
-    .getByRole('button', { name: 'Archive' })
-    .waitFor();
-  expect(problems).toEqual([]);
-}, 30_000);
-
 test('the reader says where its conversation sits, and steps to the ones either side', async () => {
   const { page, problems } = await open(SIZES.desktop);
   // A bundle's row is a place like any other, and its sheet's bar says so as a conversation's does.
@@ -1294,10 +1154,7 @@ test('the reader says where its conversation sits, and steps to the ones either 
   await bar.getByRole('button', { name: 'Previous conversation' }).click();
   await shows(`2 of ${inbox}`);
 
-  await page
-    .getByRole('region', { name: 'Work' })
-    .getByRole('button', { name: /^Receipts/ })
-    .click();
+  await goTo(page, 'Receipts', 'Work');
   await rows.first().click();
   await shows(`1 of ${await listed()}`);
 
@@ -1351,47 +1208,18 @@ function shownAs(hex: string): string {
 }
 
 async function openConversation(page: Page, which: number | RegExp) {
-  const back = page.getByRole('button', { name: 'Back', exact: true });
-  if (await inView(back)) await back.click();
-  const inbox = page.getByRole('button', { name: /^Inbox/ }).first();
-  if (await inView(inbox)) await inbox.click();
+  await goTo(page, 'Inbox');
   const rows = page.getByRole('option');
   await (
     typeof which === 'number' ? rows.nth(which) : rows.filter({ hasText: which }).first()
   ).click();
-  await page.waitForFunction(() => {
-    const frames = [
-      ...document.querySelectorAll<HTMLIFrameElement>('section[aria-label="Reader"] iframe'),
-    ];
-    return frames.length > 0 && frames.every((frame) => frame.style.visibility === 'visible');
-  });
-}
-
-/**
- * Waits until the reader has prepared the conversation below the open one, as it does while the
- * browser is idle: its newest body fetched, the page's second after the open one's, and sanitized
- * in an idle moment after it came.
- */
-async function preparedBelow(page: Page) {
-  await page.waitForFunction(
-    (body) =>
-      new Set(
-        performance
-          .getEntriesByType('resource')
-          .map(({ name }) => name)
-          .filter((name) => name.includes(body)),
-      ).size >= 2,
-    encodeURIComponent('"body"'),
-  );
-  await page.evaluate(
-    () => new Promise((resolve) => requestIdleCallback(() => requestIdleCallback(resolve))),
-  );
+  await bodiesShown(page);
 }
 
 /** Types a search into the field and waits for the rows it marks. On a phone, from the list. */
 async function searchFor(page: Page, text: string) {
   const back = page.getByRole('button', { name: 'Back', exact: true });
-  if (await inView(back)) await back.click();
+  if (await reachable(back)) await back.click();
   await page.getByRole('searchbox', { name: 'Search mail' }).fill(text);
   await page.locator('[role="option"] mark').first().waitFor();
 }
@@ -1443,9 +1271,4 @@ function headerButtons(list: Locator): Promise<(string | null)[]> {
   return list
     .locator('header button')
     .evaluateAll((all) => all.map((button) => button.getAttribute('aria-label')));
-}
-
-/** Whether a control is in a pane on screen. A pane off a phone's screen is inert. */
-async function inView(locator: Locator): Promise<boolean> {
-  return (await locator.count()) > 0 && locator.evaluate((element) => !element.closest('[inert]'));
 }

@@ -2,6 +2,7 @@ import { expect } from 'bun:test';
 import type { BrowserContextOptions, Page } from 'playwright';
 import { DWELL_MS } from '../../src/features/workbench/ui/useReadMark.ts';
 import { mailIsIn } from '../mailIsIn.ts';
+import { goTo, reader } from './helpers.ts';
 import { SIZES, suite } from './suite.ts';
 
 /**
@@ -32,7 +33,6 @@ const bundleRow = (page: Page, repository: string) =>
 /** Rows of a repository's GitHub mail listed as conversations, by their subjects. */
 const threadRows = (page: Page, repository: string) =>
   page.getByRole('option').filter({ hasText: `[${repository}]` });
-const reader = (page: Page) => page.getByRole('region', { name: 'Reader' });
 /** Waits until the reader's heading reads `text`. */
 const shows = (page: Page, text: string) =>
   reader(page).getByRole('heading', { level: 1, name: text, exact: true }).waitFor();
@@ -60,10 +60,7 @@ test('each Inbox lists one row for each repository, and a search or a folder lis
   await expect(bundleRow(page, TOY_BOX).textContent()).resolves.toMatch(/\+\d+$/);
 
   // An account's own Inbox bundles its repository too.
-  await page
-    .getByRole('region', { name: 'Work' })
-    .getByRole('button', { name: /^Inbox/ })
-    .click();
+  await goTo(page, 'Inbox', 'Work');
   await page.getByRole('heading', { level: 2, name: 'Inbox' }).waitFor();
   await bundleRow(page, PIXELS).waitFor();
   await expect(bundleRow(page, TOY_BOX).count()).resolves.toBe(0);
@@ -74,10 +71,7 @@ test('each Inbox lists one row for each repository, and a search or a folder lis
   expect(await threadRows(page, TOY_BOX).count()).toBeGreaterThan(1);
 
   await page.goto(app.url);
-  await page
-    .getByRole('region', { name: 'Personal' })
-    .getByRole('button', { name: /^Toy Box/ })
-    .click();
+  await goTo(page, 'Toy Box', 'Personal');
   await page.getByRole('heading', { level: 2, name: 'Toy Box' }).waitFor();
   await threadRows(page, TOY_BOX).first().waitFor();
   await expect(bundleRow(page, TOY_BOX).count()).resolves.toBe(0);

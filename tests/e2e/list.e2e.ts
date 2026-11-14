@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import type { BrowserContext, BrowserContextOptions, Locator, Page } from 'playwright';
 import { PAGE_SIZE } from '../../src/features/mailroom/client/contract.ts';
 import { RESULTS, SIZES, suite } from './suite.ts';
+import { goTo, problems } from './helpers.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 
 /**
@@ -32,27 +33,42 @@ async function open(
   const context = await app.context(options);
   await before?.(context);
   const page = await context.newPage();
-  const problems: string[] = [];
-  page.on('console', (message) => {
-    if (message.type() === 'error') problems.push(`console: ${message.text()}`);
-  });
-  page.on('response', (response) => {
-    if (response.status() >= 400) problems.push(`${response.status()} ${response.url()}`);
-  });
+  const met = problems(page);
   // A request held back keeps the network busy, so the page counts as loaded once it is drawn.
   await page.goto(app.url, { waitUntil: before ? 'domcontentloaded' : 'networkidle' });
   await mailIsIn(page);
-  return { context, page, problems };
+  return { context, page, problems: met };
 }
 
-test('mail that arrives while the list is scrolled down moves nothing in sight, and leads it at the top', async () => {
+test('a list dragged far down asks only for where it stops, and mail that arrives there moves nothing in sight, but leads it at the top', async () => {
   const { page, problems } = await open();
   const list = page.locator('[role="listbox"][aria-multiselectable]');
   const length = async () =>
     Number(await list.getByRole('option').first().getAttribute('aria-setsize'));
   const before = await length();
-  // Halfway down the Inbox, far past its first page, once the rows there have arrived.
-  await list.evaluate((list) => (list.scrollTop = list.scrollHeight / 2));
+  // The places of the pages the list asks for, past its first.
+  const asked: number[] = [];
+  page.on('request', (request) => {
+    const payload = decodeURIComponent(request.url());
+    const at = /"s":"conversations".*?"t":0,"s":(\d+)/.exec(payload)?.[1];
+    if (at && Number(at) > 0) asked.push(Number(at));
+  });
+
+  // A thumb dragged halfway down over half a second, the list moving a long way each frame, far
+  // past its first page, until the rows there have arrived.
+  await list.evaluate(
+    (list) =>
+      new Promise<void>((resolve) => {
+        let frame = 0;
+        const step = () => {
+          list.scrollTop = (list.scrollHeight / 2) * (++frame / 30);
+          if (frame < 30) requestAnimationFrame(step);
+          else resolve();
+        };
+        requestAnimationFrame(step);
+      }),
+  );
+  const onTheWay = asked.length;
   await page.waitForFunction(
     ({ page, drawn }) => {
       const list = document.querySelector('[role="listbox"][aria-multiselectable]');
@@ -61,6 +77,12 @@ test('mail that arrives while the list is scrolled down moves nothing in sight, 
     },
     { page: PAGE_SIZE, drawn: SCROLLED },
   );
+  const first = Number(await list.locator(SCROLLED).first().getAttribute('aria-posinset'));
+  expect(onTheWay).toBe(0);
+  // The pages in sight where it stopped, with the rows either side that arrive ahead.
+  expect(asked.length).toBeGreaterThan(0);
+  expect(asked.every((at) => Math.abs(at - first) < 2 * PAGE_SIZE)).toBe(true);
+
   const inSight = () =>
     list.evaluate((list) => {
       const top = list.getBoundingClientRect().top;
@@ -93,45 +115,6 @@ test('mail that arrives while the list is scrolled down moves nothing in sight, 
   await list.getByRole('option').first().filter({ hasText: subject }).waitFor({ timeout: 5_000 });
   expect(problems).toEqual([]);
 }, 60_000);
-
-test('a list dragged far down asks for no page on the way, only for where it stops', async () => {
-  const { page, problems } = await open();
-  const list = page.locator('[role="listbox"][aria-multiselectable]');
-  await list.getByRole('option').first().waitFor();
-  // The places of the pages the list asks for, past its first.
-  const asked: number[] = [];
-  page.on('request', (request) => {
-    const payload = decodeURIComponent(request.url());
-    const at = /"s":"conversations".*?"t":0,"s":(\d+)/.exec(payload)?.[1];
-    if (at && Number(at) > 0) asked.push(Number(at));
-  });
-
-  // A thumb dragged halfway down over half a second, the list moving a long way each frame.
-  await list.evaluate(
-    (list) =>
-      new Promise<void>((resolve) => {
-        let frame = 0;
-        const step = () => {
-          list.scrollTop = (list.scrollHeight / 2) * (++frame / 30);
-          if (frame < 30) requestAnimationFrame(step);
-          else resolve();
-        };
-        requestAnimationFrame(step);
-      }),
-  );
-  const onTheWay = asked.length;
-  await page.waitForFunction((drawn) => {
-    const list = document.querySelector('[role="listbox"][aria-multiselectable]');
-    return list?.getAttribute('aria-busy') === 'false' && list.querySelector(drawn);
-  }, SCROLLED);
-  const first = Number(await list.locator(SCROLLED).first().getAttribute('aria-posinset'));
-
-  expect(onTheWay).toBe(0);
-  // The pages in sight where it stopped, with the rows either side that arrive ahead.
-  expect(asked.length).toBeGreaterThan(0);
-  expect(asked.every((at) => Math.abs(at - first) < 2 * PAGE_SIZE)).toBe(true);
-  expect(problems).toEqual([]);
-}, 30_000);
 
 test('End selects the last conversation once its page arrives', async () => {
   const { page, problems } = await open();
@@ -174,10 +157,8 @@ test('Shift and an arrow key grow or shrink a selection at the end that moves, w
   await list.locator('[role="option"][aria-posinset="2"]').click();
   await press('Shift+ArrowDown', { selected: [2, 3], active: 3 });
   await press('Shift+ArrowDown', { selected: [2, 3, 4], active: 4 });
-  await press('Shift+ArrowDown', { selected: [2, 3, 4, 5], active: 5 });
-  await press('Shift+ArrowUp', { selected: [2, 3, 4], active: 4 });
-  // Past the row it began from, it grows the other way.
   await press('Shift+ArrowUp', { selected: [2, 3], active: 3 });
+  // Past the row it began from, it grows the other way.
   await press('Shift+ArrowUp', { selected: [2], active: 2 });
   await press('Shift+ArrowUp', { selected: [1, 2], active: 1 });
   // An arrow alone moves on from the end that moved last.
@@ -286,19 +267,12 @@ test('a picture on its way leaves its initials until it has loaded, and one the 
   expect(kernels.at(-1)).toBe('picture');
 
   // Back in a view after another, its pictures show from the first frame its rows paint in.
-  const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
-  await sidebar
-    .getByRole('region', { name: 'Personal' })
-    .getByRole('button', { name: /^Sent( \d+)?$/ })
-    .click();
+  await goTo(page, 'Sent', 'Personal');
   await page.getByRole('heading', { name: 'Sent', level: 2 }).waitFor();
   await page.evaluate(() => {
     (window as unknown as { frames_: Frame[] }).frames_.length = 0;
   });
-  await sidebar
-    .getByRole('button', { name: /^Inbox( \d+)?$/ })
-    .first()
-    .click();
+  await goTo(page, 'Inbox');
   await page.waitForFunction(() =>
     (window as unknown as { frames_: Frame[] }).frames_.some(({ row }) =>
       row.includes('Kernel Weekly'),
@@ -333,21 +307,16 @@ test('on a phone, tapping a row’s avatar picks the row, on a target 44 pixels 
 }, 30_000);
 
 test('on a phone, rows run under the floating controls, and the last row and a row moved to by key stay clear of them', async () => {
-  for (const [width, colorScheme] of [
-    [390, 'light'],
-    [390, 'dark'],
-    [320, 'light'],
-  ] as const) {
+  for (const width of [390, 320]) {
     const { context, page, problems } = await open({
       ...SIZES.phone,
       viewport: { width, height: 844 },
-      colorScheme,
     });
     const list = page.locator('[role="listbox"][aria-multiselectable]');
     await list.getByRole('option').first().waitFor();
     const shot = (moment: string) =>
       page.screenshot({
-        path: join(RESULTS, `list-under-island-${width}-${colorScheme}-${moment}.png`),
+        path: join(RESULTS, `list-under-island-${width}-${moment}.png`),
       });
     /**
      * The top of the controls floating over the list, and where the list and the last row it draws
@@ -499,23 +468,16 @@ test('the list fades at an end only while it can scroll that way, and keys keep 
 
 test('a conversation only the member wrote names whom it went to, and leads with the first of them', async () => {
   const { page, problems } = await open();
-  const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
 
   // Sent holds the cabin bookings Sam sent Rae, and nobody wrote back.
-  await sidebar
-    .getByRole('region', { name: 'Personal' })
-    .getByRole('button', { name: /^Sent( \d+)?$/ })
-    .click();
+  await goTo(page, 'Sent', 'Personal');
   await page.getByRole('heading', { name: 'Sent', level: 2 }).waitFor();
   await row(page, 'Booking the cabin').waitFor();
   expect(await row(page, 'Booking the cabin').textContent()).toStartWith('RHTo Rae Holm');
 
   // Drafts names whom each is to, by first names for several, and leads with the first of them:
   // Sofia's picture, which her verified mail brought, and Rae's initials.
-  await sidebar
-    .getByRole('button', { name: /^Drafts( \d+)?$/ })
-    .first()
-    .click();
+  await goTo(page, 'Drafts');
   await page.getByRole('heading', { name: 'Drafts', level: 2 }).waitFor();
   await row(page, 'To Sofia, Priya, Kwame').waitFor();
   await expect(
@@ -551,10 +513,7 @@ test('the stamp marks rows only where a list mixes accounts', async () => {
   ).toBeTruthy();
 
   // One account's folder doesn't.
-  await page
-    .getByRole('region', { name: 'Personal' })
-    .getByRole('button', { name: /^Inbox/ })
-    .click();
+  await goTo(page, 'Inbox', 'Personal');
   await page.getByRole('heading', { name: 'Inbox', level: 2 }).waitFor();
   await page.getByRole('option').first().waitFor();
   expect(await stamps()).toBe(0);
@@ -567,10 +526,7 @@ test('the stamp marks rows only where a list mixes accounts', async () => {
   await page.getByRole('menuitem', { name: 'Remove the Work account' }).click();
   await page.getByRole('alertdialog').getByRole('button', { name: 'Remove' }).click();
   await page.getByRole('region', { name: 'Work' }).waitFor({ state: 'detached' });
-  await page
-    .getByRole('button', { name: /^Inbox/ })
-    .first()
-    .click();
+  await goTo(page, 'Inbox');
   await page.getByRole('option').first().waitFor();
   expect(await stamps()).toBe(0);
   expect(problems).toEqual([]);

@@ -1,6 +1,7 @@
 import { expect } from 'bun:test';
 import type { BrowserContextOptions, Page } from 'playwright';
 import { DWELL_MS } from '../../src/features/workbench/ui/useReadMark.ts';
+import { goTo, shownSubject } from './helpers.ts';
 import { SIZES, suite } from './suite.ts';
 
 /**
@@ -48,22 +49,13 @@ const watchTop = (page: Page) =>
 const sawTop = (page: Page) => page.evaluate(() => 'sawTop' in window);
 /** Opens a row's conversation and waits for the reader to show it. Returns its subject. */
 async function openRow(page: Page, row: number) {
-  const option = page.getByRole('option').nth(row);
-  const listed = (await option.textContent()) ?? '';
-  await option.click();
-  await page.waitForFunction((listed) => {
-    const shown = document.querySelector('section[aria-label="Reader"] h1')?.textContent;
-    return Boolean(shown && listed.includes(shown));
-  }, listed);
-  return subject(page).textContent();
+  await page.getByRole('option').nth(row).click();
+  return shownSubject(page);
 }
 
-test('a folder and its open conversation come back on a reload and in another browser', async () => {
+test('a folder and its open conversation come back on a reload', async () => {
   const page = await open(SIZES.desktop);
-  await page
-    .getByRole('region', { name: 'Personal' })
-    .getByRole('button', { name: /^Archive/ })
-    .click();
+  await goTo(page, 'Archive', 'Personal');
   await heading(page).filter({ hasText: 'Archive' }).waitFor();
   // Choosing the folder opened its newest, and the member opens the next.
   await addressNaming(page, 'open');
@@ -73,15 +65,14 @@ test('a folder and its open conversation come back on a reload and in another br
     const open = new URL(location.href).searchParams.get('open');
     return open !== null && open !== newest;
   }, newest);
-  const address = page.url();
-  expect(new URL(address).searchParams.get('folder')).toBe('Archive');
+  expect(new URL(page.url()).searchParams.get('folder')).toBe('Archive');
 
-  for (const again of [page, await (await app.context(SIZES.desktop)).newPage()]) {
-    await (again === page ? again.reload() : again.goto(address));
-    await heading(again).filter({ hasText: 'Archive' }).waitFor();
-    await expect(subject(again).textContent()).resolves.toBe(shown);
-    await expect(selectedRow(again).textContent()).resolves.toContain(shown!.replace(/^Re: /, ''));
-  }
+  // Nothing on the device keeps the place, so a reload opens it from the address alone, as
+  // another browser does in the next test.
+  await page.reload();
+  await heading(page).filter({ hasText: 'Archive' }).waitFor();
+  await expect(subject(page).textContent()).resolves.toBe(shown);
+  await expect(selectedRow(page).textContent()).resolves.toContain(shown.replace(/^Re: /, ''));
 }, 60_000);
 
 test('a conversation deep in its list opens at its page, its row in sight, and J moves on from it', async () => {
@@ -189,7 +180,6 @@ test('a conversation deep in its list opens at its page, its row in sight, and J
 
 test('Back and Forward step between views, and moving by key adds no history', async () => {
   const page = await open(SIZES.desktop);
-  const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
   await page.getByRole('option').nth(0).click();
   await addressNaming(page, 'open');
   const first = new URL(page.url()).searchParams.get('open');
@@ -208,15 +198,9 @@ test('Back and Forward step between views, and moving by key adds no history', a
   }, first);
   expect(await historyLength(page)).toBe(before);
 
-  await sidebar
-    .getByRole('button', { name: /^Drafts/ })
-    .first()
-    .click();
+  await goTo(page, 'Drafts');
   await heading(page).filter({ hasText: 'Drafts' }).waitFor();
-  await sidebar
-    .getByRole('button', { name: /^Flagged/ })
-    .first()
-    .click();
+  await goTo(page, 'Flagged');
   await heading(page).filter({ hasText: 'Flagged' }).waitFor();
   await page.goBack();
   await heading(page).filter({ hasText: 'Drafts' }).waitFor();
@@ -239,24 +223,18 @@ test('Back and Forward step between views, and moving by key adds no history', a
   await heading(page).filter({ hasText: 'Drafts' }).waitFor();
 
   // A key's move made just before the view changes is in the step Back returns to.
-  await sidebar
-    .getByRole('button', { name: /^Inbox/ })
-    .first()
-    .click();
+  await goTo(page, 'Inbox');
   await heading(page).filter({ hasText: 'Inbox' }).waitFor();
   await page.getByRole('option').nth(0).click();
   await page.keyboard.press('j');
-  await sidebar
-    .getByRole('button', { name: /^Flagged/ })
-    .first()
-    .click();
+  await goTo(page, 'Flagged');
   await heading(page).filter({ hasText: 'Flagged' }).waitFor();
   await page.goBack();
   await heading(page).filter({ hasText: 'Inbox' }).waitFor();
   await expect(selectedRow(page).getAttribute('aria-posinset')).resolves.toBe('2');
 }, 60_000);
 
-test('an address whose conversation or folder has gone opens what remains, and says so', async () => {
+test('an address whose conversation or folder has gone opens what remains, and comes to name only that', async () => {
   const page = await open(SIZES.desktop);
   await page.getByRole('option').nth(1).click();
   await addressNaming(page, 'open');
@@ -435,10 +413,7 @@ test('an empty view opens on the empty reader, and on a phone a view opens on it
   const field = page.getByRole('textbox', { name: 'Name of the new folder in Work' });
   await field.fill('Empty');
   await field.press('Enter');
-  await page
-    .getByRole('region', { name: 'Work' })
-    .getByRole('button', { name: /^Empty/ })
-    .click();
+  await goTo(page, 'Empty', 'Work');
   await heading(page).filter({ hasText: 'Empty' }).waitFor();
   await page
     .locator('section[aria-label="Reader"]')
@@ -465,7 +440,6 @@ test('an empty view opens on the empty reader, and on a phone a view opens on it
 
 test('the member’s own choice wins over the view’s newest, however late its list comes', async () => {
   const page = await open(SIZES.desktop);
-  const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
   /** Holds the view's first page until the returned function lets it through. */
   const hold = async (view: string) => {
     let release = () => {};
@@ -483,10 +457,7 @@ test('the member’s own choice wins over the view’s newest, however late its 
 
   // A new message begun while Drafts' list is on its way stays open once the list comes.
   let release = await hold('drafts');
-  await sidebar
-    .getByRole('button', { name: /^Drafts/ })
-    .first()
-    .click();
+  await goTo(page, 'Drafts');
   await page.keyboard.press('c');
   const composer = page.locator('section[aria-label="New message"]');
   await composer.waitFor();
@@ -504,10 +475,7 @@ test('the member’s own choice wins over the view’s newest, however late its 
 
   // A row picked the moment the folder's rows arrive is the one that opens.
   release = await hold('Archive');
-  await page
-    .getByRole('region', { name: 'Personal' })
-    .getByRole('button', { name: /^Archive/ })
-    .click();
+  await goTo(page, 'Archive', 'Personal');
   await page.evaluate(() =>
     new MutationObserver((_, watching) => {
       const second = document.querySelectorAll<HTMLElement>('[role="option"]')[1];

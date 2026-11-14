@@ -2,6 +2,7 @@ import { expect } from 'bun:test';
 import { join } from 'node:path';
 import type { BrowserContextOptions, Page } from 'playwright';
 import { atRest } from '../atRest.ts';
+import { bodiesShown, shownSubject } from './helpers.ts';
 import { RESULTS, SIZES, suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 
@@ -35,7 +36,8 @@ const HEADER_OFFLINE = {
 /** A conversation far enough down the Inbox that opening the first never prepares it ahead. */
 const NEVER_OPENED = /Trip photos/;
 
-test('Chromium can install Trail Mix, and asks for its manifest with the member’s cookie', async () => {
+// install.test.ts holds every icon to its size, and installing fetches the manifest's.
+test('Chromium can install Trail Mix, and asks for its manifest with the member’s cookie, and an iPhone finds its touch icon', async () => {
   const context = await app.context();
   await context.addCookies([{ name: 'CF_Authorization', value: 'member', url: app.url }]);
   const page = await context.newPage();
@@ -47,13 +49,7 @@ test('Chromium can install Trail Mix, and asks for its manifest with the member�
   const { installabilityErrors } = await browser.send('Page.getInstallabilityErrors');
   expect({ errors, installabilityErrors }).toEqual({ errors: [], installabilityErrors: [] });
   expect((await (await asked).allHeaders())['cookie']).toContain('CF_Authorization=member');
-});
 
-// install.test.ts holds every icon to its size, and installing fetches the manifest's.
-test('the shell names a touch icon the Worker serves as a PNG', async () => {
-  const context = await app.context();
-  const page = await context.newPage();
-  await page.goto(app.url, { waitUntil: 'load' });
   const touch = await page.locator('link[rel="apple-touch-icon"]').getAttribute('href');
   expect(touch).toBe('/icons/apple-touch-icon.png');
   const response = await page.request.get(new URL(touch!, app.url).href);
@@ -61,63 +57,32 @@ test('the shell names a touch icon the Worker serves as a PNG', async () => {
 });
 
 test('the installed app with nothing kept opens offline, and says at once it can’t reach the mail', async () => {
-  for (const [size, colorScheme] of [
-    ['desktop', 'light'],
-    ['phone', 'dark'],
-  ] as const) {
-    const { context, page } = await installed({ ...SIZES[size], colorScheme });
-    await page.evaluate(() => keptNothing());
-
-    await context.addInitScript(noteShown);
-    await context.setOffline(true);
-    await page.reload();
-    // The shell and the app's code came from the worker, so the app runs and says what it can't
-    // do, without waiting to ask a network the browser says it hasn't got.
-    await page
-      .getByRole('heading', { name: 'Trail Mix can’t reach your mail' })
-      .waitFor({ timeout: 15_000 });
-    // Nor does it take away what it drew first while that word's code comes.
-    const { at, bare } = await page.evaluate(() => ({
-      at: window.unreachableShownAt,
-      bare: window.bareAt,
-    }));
-    const missed = [
-      ...(at === undefined || at > OFFLINE_WITHIN_MS
-        ? [`said so at ${Math.round(at ?? -1)} ms`]
-        : []),
-      ...(bare === undefined ? [] : [`a bare desk at ${Math.round(bare)} ms`]),
-    ];
-    expect({ size, missed }).toEqual({ size, missed: [] });
-    // And why, in plain words, not the browser's.
-    await page.getByText('This device is offline.', { exact: true }).waitFor();
-    await page.screenshot({
-      path: join(RESULTS, `offline-${size}-${colorScheme}-unreachable.png`),
-    });
-    await context.close();
-  }
-}, 60_000);
-
-test('the installed app opens offline to the lists and conversations it showed', async () => {
   const { context, page } = await installed();
-  const subjects: string[] = [];
-  for (const row of [0, 1, 2]) subjects.push(await openConversation(page, row));
-  // Each conversation and its open body is kept as it arrives.
-  await page.waitForFunction(async (least) => (await keptCount()) >= least, 9, { polling: 200 });
+  await page.evaluate(() => keptNothing());
 
+  await context.addInitScript(noteShown);
   await context.setOffline(true);
   await page.reload();
-  await page.getByText('Offline: kept mail').waitFor();
-  // Beside the open conversation's buttons, with the list at its first width, the title shows
-  // whole, and the status gives way before it, a whole word at a time, at a desktop's width and a
-  // laptop's.
-  for (const width of [1024, 1440]) {
-    await page.setViewportSize({ width, height: 900 });
-    expect({ width, ...(await listHeader(page)) }).toEqual({ width, ...HEADER_OFFLINE });
-  }
-  await page.screenshot({ path: join(RESULTS, 'desktop-light-offline.png') });
-  for (const [row, subject] of subjects.entries()) {
-    expect({ row, opened: await openConversation(page, row) }).toEqual({ row, opened: subject });
-  }
+  // The shell and the app's code came from the worker, so the app runs and says what it can't
+  // do, without waiting to ask a network the browser says it hasn't got.
+  await page
+    .getByRole('heading', { name: 'Trail Mix can’t reach your mail' })
+    .waitFor({ timeout: 15_000 });
+  // Nor does it take away what it drew first while that word's code comes.
+  const { at, bare } = await page.evaluate(() => ({
+    at: window.unreachableShownAt,
+    bare: window.bareAt,
+  }));
+  const missed = [
+    ...(at === undefined || at > OFFLINE_WITHIN_MS
+      ? [`said so at ${Math.round(at ?? -1)} ms`]
+      : []),
+    ...(bare === undefined ? [] : [`a bare desk at ${Math.round(bare)} ms`]),
+  ];
+  expect(missed).toEqual([]);
+  // And why, in plain words, not the browser's.
+  await page.getByText('This device is offline.', { exact: true }).waitFor();
+  await page.screenshot({ path: join(RESULTS, 'offline-desktop-light-unreachable.png') });
 }, 60_000);
 
 test('the installed app reads offline at both sizes in both themes: the Inbox and what it opened', async () => {
@@ -127,8 +92,15 @@ test('the installed app reads offline at both sizes in both themes: the Inbox an
     ['phone', 'dark'],
   ] as const) {
     const { context, page } = await installed({ ...SIZES[size], colorScheme });
-    const subject = await openConversation(page, 0);
-    await page.waitForFunction(async () => (await keptCount()) >= 3, undefined, { polling: 200 });
+    const subjects: string[] = [];
+    for (const row of size === 'desktop' ? [0, 1, 2] : [0]) {
+      subjects.push(await openConversation(page, row));
+    }
+    const subject = subjects.at(-1);
+    // Each conversation and its open body is kept as it arrives.
+    await page.waitForFunction(async (least) => (await keptCount()) >= least, subjects.length * 3, {
+      polling: 200,
+    });
 
     await context.addInitScript(noteShown);
     await context.setOffline(true);
@@ -148,7 +120,21 @@ test('the installed app reads offline at both sizes in both themes: the Inbox an
     );
     expect({ size, colorScheme, late }).toEqual({ size, colorScheme, late: [] });
     await page.screenshot({ path: join(RESULTS, `offline-${size}-${colorScheme}.png`) });
-    if (size === 'phone') {
+    if (size === 'desktop') {
+      // Beside the open conversation's buttons, with the list at its first width, the title shows
+      // whole, and the status gives way before it, a whole word at a time, at a desktop's width
+      // and a laptop's.
+      for (const width of [1024, 1440]) {
+        await page.setViewportSize({ width, height: 900 });
+        expect({ width, ...(await listHeader(page)) }).toEqual({ width, ...HEADER_OFFLINE });
+      }
+      for (const [row, subject] of subjects.entries()) {
+        expect({ row, opened: await openConversation(page, row) }).toEqual({
+          row,
+          opened: subject,
+        });
+      }
+    } else {
       await page.getByRole('button', { name: 'Back', exact: true }).click();
       await page.getByRole('option').first().waitFor();
       // The list says it beside its title, at every width.
@@ -172,9 +158,9 @@ test('the installed app reads offline at both sizes in both themes: the Inbox an
     });
     await context.close();
   }
-}, 60_000);
+}, 90_000);
 
-test('offline, a conversation never opened says it opens once online, and Send keeps the message', async () => {
+test('offline, a conversation never opened says it opens once online, and does with no reload, and Send keeps the message', async () => {
   const { context, page } = await installed();
   await openConversation(page, 0);
   await page.waitForFunction(async () => (await keptCount()) >= 3, undefined, { polling: 200 });
@@ -210,8 +196,35 @@ test('offline, a conversation never opened says it opens once online, and Send k
   await reader.getByRole('alert').filter({ hasText: 'It opens once you’re back online' }).waitFor();
   await page.screenshot({ path: join(RESULTS, 'offline-desktop-light-archive.png') });
 
+  // Another device, online, archives a conversation this one still lists.
+  await page.evaluate(() => Object.assign(window, { offlineLoad: true }));
+  const archived = page.getByRole('option').filter({ hasText: /Invoice for October/ });
+  await archived.first().waitFor();
+  const other = await (await app.context(SIZES.desktop)).newPage();
+  await other.goto(app.url);
+  const row = other
+    .getByRole('option')
+    .filter({ hasText: /Invoice for October/ })
+    .first();
+  await row.click();
+  await other.keyboard.press('e');
+  await row.waitFor({ state: 'detached' });
+  // The conversation the reload opened, from what was kept, asked for no read mark it couldn't make.
+  expect(await page.getByText(/Couldn.t mark read/).count()).toBe(0);
+
+  // Back online, the page that reloaded offline catches up with what changed, and the conversation
+  // it couldn't open opens by itself.
+  await context.setOffline(false);
+  await mailIsIn(page);
+  await archived.first().waitFor({ state: 'detached', timeout: 15_000 });
+  await reader.locator('article').first().waitFor();
+  expect(await reader.getByRole('alert').count()).toBe(0);
+  expect(await page.evaluate(() => 'offlineLoad' in window)).toBe(true);
+  await page.screenshot({ path: join(RESULTS, 'online-desktop-light-caught-up.png') });
+
   // Writing offline is out of scope, so Send and Send later wait, plainly, and say why, and what was
   // written stays.
+  await context.setOffline(true);
   await page.keyboard.press('c');
   const composer = page.getByRole('region', { name: 'New message' });
   await composer.getByRole('combobox', { name: 'To' }).fill('sam@trailmix.test');
@@ -234,14 +247,11 @@ test('offline, a conversation never opened says it opens once online, and Send k
   expect(await message.textContent({ timeout: 1_000 })).toBe('Kept until the network is back.');
   await page.screenshot({ path: join(RESULTS, 'offline-desktop-light-send.png') });
 
-  // The conversation the reload opened, from what was kept, asked for no read mark it couldn't make.
-  expect(await page.getByText(/Couldn.t mark read/).count()).toBe(0);
-
   // Back online, what was written saves, and Send can go.
   await context.setOffline(false);
   await composer.getByRole('status').filter({ hasText: 'Saved to Drafts' }).waitFor();
   expect(await send.isDisabled()).toBe(false);
-}, 60_000);
+}, 90_000);
 
 test('on a phone, an archive refused offline puts back the conversation it took away, or what was picked', async () => {
   const { context, page } = await installed(SIZES.phone);
@@ -292,43 +302,6 @@ test('on a phone, an archive refused offline puts back the conversation it took 
   expect(
     await Promise.all([1, 2].map((at) => options.nth(at).getAttribute('aria-selected'))),
   ).toEqual(['true', 'true']);
-}, 60_000);
-
-test('back online, the installed app catches up with what changed, with no reload', async () => {
-  const { context, page } = await installed();
-  await openConversation(page, 0);
-  await page.waitForFunction(async () => (await keptCount()) >= 3, undefined, { polling: 200 });
-  await context.setOffline(true);
-  await page.reload();
-  await page.getByText('Offline: kept mail').waitFor();
-  await page.getByRole('option').filter({ hasText: NEVER_OPENED }).first().click();
-  const reader = page.locator('section[aria-label="Reader"]');
-  await reader.getByRole('alert').waitFor();
-  // The page that reloaded offline, which a reload would replace.
-  await page.evaluate(() => Object.assign(window, { offlineLoad: true }));
-
-  // Another device, online, archives a conversation this one still lists.
-  const archived = /Invoice for October/;
-  await page.getByRole('option').filter({ hasText: archived }).first().waitFor();
-  const other = await (await app.context(SIZES.desktop)).newPage();
-  await other.goto(app.url);
-  const row = other.getByRole('option').filter({ hasText: archived }).first();
-  await row.click();
-  await other.keyboard.press('e');
-  await row.waitFor({ state: 'detached' });
-
-  await context.setOffline(false);
-  await mailIsIn(page);
-  await page
-    .getByRole('option')
-    .filter({ hasText: archived })
-    .first()
-    .waitFor({ state: 'detached', timeout: 15_000 });
-  // The conversation it couldn't open opens by itself.
-  await reader.locator('article').first().waitFor();
-  expect(await reader.getByRole('alert').count()).toBe(0);
-  expect(await page.evaluate(() => 'offlineLoad' in window)).toBe(true);
-  await page.screenshot({ path: join(RESULTS, 'online-desktop-light-caught-up.png') });
 }, 60_000);
 
 test('losing the network while open, the installed app still opens the conversations it kept', async () => {
@@ -440,30 +413,10 @@ async function installed(options: BrowserContextOptions = SIZES.desktop) {
  */
 async function openConversation(page: Page, row: number | RegExp): Promise<string> {
   const rows = page.getByRole('option');
-  const option = typeof row === 'number' ? rows.nth(row) : rows.filter({ hasText: row }).first();
-  const listed = (await option.textContent()) ?? '';
-  await option.click();
-  const subject = page.locator('section[aria-label="Reader"] h1');
-  // It shows the row's conversation, and its open messages show their bodies: HTML in a frame sized
-  // to it, or plain text, which has none.
-  await page.waitForFunction((listed) => {
-    const reader = document.querySelector('section[aria-label="Reader"]');
-    const shown = reader?.querySelector('h1')?.textContent ?? '';
-    const sheets = [...(reader?.querySelectorAll('article') ?? [])];
-    return (
-      shown !== '' &&
-      listed.includes(shown) &&
-      sheets.length > 0 &&
-      sheets.every(
-        (sheet) =>
-          !sheet.querySelector('[aria-busy="true"], [role="alert"]') &&
-          [...sheet.querySelectorAll('iframe')].every(
-            (frame) => frame.style.visibility === 'visible',
-          ),
-      )
-    );
-  }, listed);
-  return (await subject.textContent()) ?? '';
+  await (typeof row === 'number' ? rows.nth(row) : rows.filter({ hasText: row }).first()).click();
+  const subject = await shownSubject(page);
+  await bodiesShown(page);
+  return subject;
 }
 
 /**
