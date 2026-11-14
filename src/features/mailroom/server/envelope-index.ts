@@ -492,6 +492,17 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
         .map((row) => JSON.parse(row.folder) as Folder);
     },
 
+    /** An account's folder with a role, as last listed, if it has one. */
+    withRole(account: string, role: FolderRole): Folder | undefined {
+      return sql
+        .all<{ folder: string }>(
+          `SELECT folder FROM folders WHERE account = ? AND role = ? ORDER BY path LIMIT 1`,
+          account,
+          role,
+        )
+        .map((row) => JSON.parse(row.folder) as Folder)[0];
+    },
+
     /**
      * Records the folders a server listed. A folder it no longer lists is forgotten, messages and
      * all, so its events must be folded first. Returns the paths that are gone.

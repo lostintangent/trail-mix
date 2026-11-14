@@ -203,7 +203,7 @@ export function savingDrafts(ports: {
   const answeredBy = async (
     draft: MessageRef,
   ): Promise<Pick<Envelope, 'messageId' | 'references'> | undefined> => {
-    const drafts = store.folders(draft.account).find((folder) => folder.role === 'drafts');
+    const drafts = store.withRole(draft.account, 'drafts');
     if (draft.path !== drafts?.path) return undefined;
     const bytes = await bodies.bytes(draft).catch(() => null);
     if (!bytes) return undefined;

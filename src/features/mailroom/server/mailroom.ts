@@ -1,10 +1,8 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { DurableObject } from 'cloudflare:workers';
 import { connect } from 'cloudflare:sockets';
-import { createProblem, deleteProblem, inside, renameProblem } from '../../folders/core/index.ts';
 import {
   refKey,
-  refOf,
   type Account,
   type AccountId,
   type Address,
@@ -87,9 +85,11 @@ import { bodyCache, type BodyBatches, type BodyCache } from './bodies.ts';
 import { connections, type Connections, type ImapCode } from './connections.ts';
 import { credentialsOf } from './credentials.ts';
 import { savingDrafts, type SavingDrafts } from './drafts.ts';
+import { folderCommands, type FolderCommands } from './folders.ts';
 import { notifying, type Notifying } from './notifying.ts';
 import { envelopeIndex, type EnvelopeIndex } from './envelope-index.ts';
 import * as input from './input.ts';
+import { messageCommands, type MessageCommands } from './messages.ts';
 import {
   avatarCache,
   avatarNetwork,
@@ -212,6 +212,8 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   protected readonly sending: OutboxQueue;
   private readonly drafts: SavingDrafts;
   protected readonly outboxCommands: OutboxCommands;
+  private readonly folderCommands: FolderCommands;
+  private readonly messageCommands: MessageCommands;
   /** When every account was last owed a check. A cold start checks at its first wake. */
   private checkedAt = 0;
   /** When a signed-in device last asked for something, as storage holds it. */
@@ -323,7 +325,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       hint,
       sent: ({ draft }) => {
         this.queue.folder({ account: draft.account, path: draft.path });
-        const sent = this.store.folders(draft.account).find((folder) => folder.role === 'sent');
+        const sent = this.store.withRole(draft.account, 'sent');
         if (sent) this.queue.folder(folderRef(sent));
       },
       accepted: () => this.accepted(),
@@ -346,6 +348,16 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       book: this.book,
       store: this.store,
       wakeBy: (at) => this.wakeBy(at),
+    });
+    const owe = (owing: () => void) => this.owe(owing);
+    this.folderCommands = folderCommands({ book: this.book, provider, sync: this.queue, owe });
+    this.messageCommands = messageCommands({
+      book: this.book,
+      store: this.store,
+      provider,
+      sync: this.queue,
+      owe,
+      movedIn: (ref) => this.noteMovedIn(ref),
     });
     // Every wake is a cold start, and this is where one begins: a send found mid-submit was cut
     // short by whatever ended the last instance.
@@ -561,53 +573,12 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     }
   }
 
-  async setFlags(
-    messages: MessageRef[] | BundleScope,
-    change: Partial<Flags>,
-  ): Promise<MessageRef[]> {
-    const checked = input.flagsOf(change);
-    const refs = this.refsIn(messages, (scope) =>
-      this.store
-        .bundled(
-          scope.bundle,
-          scope.through,
-          checked.seen === false || checked.flagged === true ? 'newest' : 'every',
-        )
-        .filter(({ flags }) =>
-          Object.entries(checked).some(([flag, on]) => flags[flag as keyof Flags] !== on),
-        ),
-    );
-    for (const [account, held] of this.byAccount(refs)) {
-      await (await this.connections.provider(account)).setFlags(held, checked);
-      await this.owe(() => {
-        for (const path of new Set(held.map((ref) => ref.path)))
-          this.queue.folder({ account, path });
-      });
-    }
-    return refs;
+  setFlags(messages: MessageRef[] | BundleScope, change: Partial<Flags>): Promise<MessageRef[]> {
+    return this.messageCommands.setFlags(messages, change);
   }
 
-  async move(messages: MessageRef[] | BundleScope, to: FolderRef | FolderRole): Promise<Moved[]> {
-    const destination = input.destinationOf(to);
-    const refs = this.refsIn(messages, (scope) =>
-      this.store.bundled(scope.bundle, scope.through, 'inbox'),
-    );
-    const moved: Moved[] = [];
-    for (const [account, held] of this.byAccount(refs)) {
-      const path =
-        typeof destination === 'string'
-          ? this.pathWithRole(account, destination)
-          : destination.path;
-      const landed = await (await this.connections.provider(account)).move(held, path);
-      for (const { to } of landed) this.noteMovedIn(to);
-      moved.push(...landed);
-      await this.owe(() => {
-        for (const from of new Set([...held.map((ref) => ref.path), path])) {
-          this.queue.folder({ account, path: from });
-        }
-      });
-    }
-    return moved;
+  move(messages: MessageRef[] | BundleScope, to: FolderRef | FolderRole): Promise<Moved[]> {
+    return this.messageCommands.move(messages, to);
   }
 
   /** Files a draft in its account's Drafts, in place of the version before it. */
@@ -650,39 +621,12 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     return this.outboxCommands.retry(input.sendOf(id));
   }
 
-  // Folder commands judge a change by the server's own listing, not the index's, which a change a
-  // moment ago may not have reached yet.
-
-  async createFolder(folder: FolderRef): Promise<void> {
-    const { account, path } = this.ownFolder(folder);
-    const provider = await this.connections.provider(account);
-    const problem = createProblem(path, await provider.folders());
-    if (problem) throw new Error(problem);
-    await provider.createFolder(path);
-    await this.owe(() => this.queue.check(account));
+  createFolder(folder: FolderRef): Promise<void> {
+    return this.folderCommands.create(folder);
   }
 
-  async renameFolder(folder: FolderRef, to: string): Promise<void> {
-    const { account, path } = this.ownFolder(folder);
-    const renamed = input.folderOf({ account, path: to }).path;
-    const provider = await this.connections.provider(account);
-    const listed = await provider.folders();
-    const current = listed.find((each) => each.path === path);
-    if (!current) throw new Error('There is no such folder.');
-    const problem = renameProblem(current, renamed, listed);
-    if (problem) throw new Error(problem);
-    if (renamed === path) return;
-    await provider.renameFolder(path, renamed);
-    // The folders inside go along, and so do the messages the index holds in them all, under the
-    // paths it holds them at, which an earlier rename it hasn't listed yet may have changed since.
-    this.queue.renamed(
-      account,
-      [current, ...inside(current, listed)].map(({ path: at }) => ({
-        from: this.queue.heldAt(account, at),
-        to: `${renamed}${at.slice(path.length)}`,
-      })),
-    );
-    await this.owe(() => this.queue.check(account));
+  renameFolder(folder: FolderRef, to: string): Promise<void> {
+    return this.folderCommands.rename(folder, to);
   }
 
   /**
@@ -702,17 +646,8 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     return Promise.resolve();
   }
 
-  async deleteFolder(folder: FolderRef): Promise<void> {
-    const { account, path } = this.ownFolder(folder);
-    const provider = await this.connections.provider(account);
-    const listed = await provider.folders();
-    const current = listed.find((each) => each.path === path);
-    // Gone already, as when another device deleted it first.
-    if (!current) return;
-    const problem = deleteProblem(current, listed);
-    if (problem) throw new Error(problem);
-    await provider.deleteFolder(path);
-    await this.owe(() => this.queue.check(account));
+  deleteFolder(folder: FolderRef): Promise<void> {
+    return this.folderCommands.remove(folder);
   }
 
   // A message's bytes, for the Worker's routes. Null means the message or part is gone.
@@ -1028,7 +963,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 
   private async watch(account: AccountId) {
     if (this.watchers.has(account)) return;
-    const inbox = this.store.folders(account).find((folder) => folder.role === 'inbox');
+    const inbox = this.store.withRole(account, 'inbox');
     if (!inbox) return;
     const provider = await this.connections.provider(account);
     if (this.watchers.has(account)) return;
@@ -1171,39 +1106,6 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 
   protected sweepBodies(batches?: BodyBatches): Promise<boolean> {
     return this.bodies.sweep(batches);
-  }
-
-  // The member's own accounts and folders
-
-  /** The messages a command names: those given, or those of a bundle that `bundled` picks. */
-  private refsIn(
-    messages: MessageRef[] | BundleScope,
-    bundled: (scope: BundleScope) => readonly MessageRef[],
-  ): MessageRef[] {
-    const checked = input.messagesOf(messages);
-    if (Array.isArray(checked)) return checked;
-    return bundled(checked).map(refOf);
-  }
-
-  private byAccount(refs: MessageRef[]) {
-    const groups = new Map<AccountId, MessageRef[]>();
-    for (const ref of input.refsOf(refs)) {
-      if (!this.book.get(ref.account)) throw new Error('There is no such account.');
-      groups.set(ref.account, [...(groups.get(ref.account) ?? []), ref]);
-    }
-    return groups;
-  }
-
-  private ownFolder(folder: FolderRef): FolderRef {
-    const checked = input.folderOf(folder);
-    if (!this.book.get(checked.account)) throw new Error('There is no such account.');
-    return checked;
-  }
-
-  private pathWithRole(account: AccountId, role: FolderRole) {
-    const folder = this.store.folders(account).find((held) => held.role === role);
-    if (!folder) throw new Error(`That account has no ${role} folder.`);
-    return folder.path;
   }
 
   /** Work the caller doesn't wait for. Its failure is logged, and the next check tries again. */
