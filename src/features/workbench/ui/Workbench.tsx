@@ -318,7 +318,7 @@ export function Workbench({
     view.in !== 'search' &&
     view.in !== 'outbox' &&
     (!isCaughtUp || (scope ? [scope] : accounts).some(({ status }) => status === 'syncing'));
-  const { move, onViewChange, chooseView, written, pushed } = useAddress({
+  const { move, onViewChange, chooseView, written, pushed, isArrived } = useAddress({
     place,
     onPlaceChange,
     bundle: bundleOpen,
@@ -401,6 +401,23 @@ export function Workbench({
     (id: ConversationId) => conversations?.[places.get(id) ?? -1],
     [conversations, places],
   );
+  // A place that arrives naming a conversation deeper in its list than the pages it holds asks for
+  // the page holding it, and the list waits for that page, and for the row it brought to be listed,
+  // so it opens there with the row in sight rather than at its top, unless the page can't be asked
+  // for, as offline, or doesn't hold the row. A thread deep in its bundle is asked for alike, so J
+  // steps on from it.
+  const isAround =
+    isArrived && selected !== undefined && conversations !== undefined && !places.has(selected);
+  const around = useQuery({
+    ...conversationsQuery(view, { around: selected ?? '' }, isUnreadOnly ? selected : undefined),
+    enabled: isAround,
+  });
+  const awaitsAround =
+    isAround && (around.isLoading || around.data?.items.some(({ id }) => id === selected) === true);
+  useQuery({
+    ...bundleQuery(bundleOpen ?? '', { around: thread ?? '' }),
+    enabled: isArrived && thread !== undefined && inBundle.threads !== undefined && threadAt < 0,
+  });
   // A conversation that leaves the list gives way to the one below it, or above it at the end. On a
   // phone, where the reader fills the screen, the list comes back instead. The list shows the
   // conversation gone at once, and the reader turns to the next one just after, so the frame that
@@ -1245,7 +1262,11 @@ export function Workbench({
                 }
                 viewIn={view.in}
                 listKey={hashKey([view])}
-                conversations={isFilling && conversations?.length === 0 ? undefined : conversations}
+                conversations={
+                  (isFilling && conversations?.length === 0) || awaitsAround
+                    ? undefined
+                    : conversations
+                }
                 isUpdating={isFetching}
                 marks={marks}
                 stamps={mixesAccounts ? stamps : undefined}
@@ -1409,8 +1430,9 @@ const openOnly = (open: ConversationId | undefined): Selection =>
  * The open conversation and the place, kept together. A change of view pushes the place, so Back
  * returns to it, except while a search is typed, which replaces it at each key. The selection
  * replaces it, so moving by key adds no history. A place the workbench didn't move to arrives from
- * outside, as a load, a link, Back and Forward bring one, and the workbench follows it. A place
- * whose conversation has gone opens its view with nothing selected, or its bundle with no thread.
+ * outside, as a load, a link, Back and Forward bring one, and the workbench follows it, until the
+ * member moves on. A place whose conversation has gone opens its view with nothing selected, or its
+ * bundle with no thread.
  */
 function useAddress({
   place,
@@ -1441,9 +1463,9 @@ function useAddress({
   // a place it already holds.
   const written = useRef(place.open ?? place.bundle);
   const pushed = useRef<ConversationId>(undefined);
-  // The conversation a place opened from outside, until the member moves on. It's looked up, since
-  // it may have gone since the address was written.
-  const [arrived, setArrived] = useState(place.open);
+  // The place that came from outside, until the member moves on. The conversation it opens is
+  // looked up, since it may have gone since the address was written.
+  const [arrived, setArrived] = useState<Place | undefined>(place);
   const latest = useRef({ view, bundle, open, arrive, close });
   useLayoutEffect(() => {
     latest.current = { view, bundle, open, arrive, close };
@@ -1460,7 +1482,7 @@ function useAddress({
     if (place === moved.current) return;
     moved.current = place;
     written.current = place.open ?? place.bundle;
-    setArrived(place.open);
+    setArrived(place);
     latest.current.arrive(place);
   }, [place]);
 
@@ -1475,20 +1497,21 @@ function useAddress({
     move(placeIn(view, bundle, open), 'replace');
   }, [isMany, at, move]);
 
+  const opens = arrived?.open;
   const { data: shown } = useQuery({
-    ...conversationQuery(arrived ?? ''),
-    enabled: arrived !== undefined,
+    ...conversationQuery(opens ?? ''),
+    enabled: opens !== undefined,
   });
   useEffect(() => {
-    if (arrived === undefined || shown === undefined || shown.length > 0) return;
+    if (opens === undefined || shown === undefined || shown.length > 0) return;
     setArrived(undefined);
     // The member may have moved on already, as archiving it does.
     const { view, bundle, open } = latest.current;
-    if (open !== arrived) return;
+    if (open !== opens) return;
     written.current = bundle;
     latest.current.close();
     move(placeIn(view, bundle, undefined), 'replace');
-  }, [arrived, shown, move]);
+  }, [opens, shown, move]);
 
   // The view changes under the open conversation, as a search typed or a folder renamed changes it.
   // A filter turned on or off takes the place of the view it filters.
@@ -1508,7 +1531,9 @@ function useAddress({
     },
     [move],
   );
-  return { move, onViewChange, chooseView, written, pushed };
+  // A search typed or a filter turned on makes a view of its own, which the place didn't name.
+  const isArrived = arrived?.view === view;
+  return { move, onViewChange, chooseView, written, pushed, isArrived };
 }
 
 /** The place of a view, with the bundle and the conversation open in it, if any. */

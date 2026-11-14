@@ -139,6 +139,35 @@ test('a bundle opens its threads unread, and a thread opens under it, steps by J
   await shows(page, TOY_BOX);
 }, 60_000);
 
+test('a thread deep in its bundle opens at its place on a reload, and J moves on from it', async () => {
+  const page = await open(DESKTOP);
+  await bundleRow(page, TOY_BOX).click();
+  await shows(page, TOY_BOX);
+  // The bundle's sheet scrolls past its first page to the 56th thread.
+  await reader(page)
+    .locator('[data-index="1"]')
+    .evaluate((sheet) => {
+      let scroller = sheet.parentElement;
+      while (scroller && !/auto|scroll/.test(getComputedStyle(scroller).overflowY)) {
+        scroller = scroller.parentElement;
+      }
+      scroller!.scrollTop = 120 * 55;
+    });
+  const deep = reader(page).locator('[data-index="56"] article > div > button');
+  const [title = ''] = (await deep.textContent())!.split(' #');
+  await deep.click();
+  const place = page.getByRole('toolbar', { name: 'Conversation' });
+  await place.getByText(/^56 of \d+$/).waitFor();
+  const threads = Number(/of (\d+)/.exec((await place.textContent())!)![1]);
+  await openedOnceRested(page);
+
+  await page.reload();
+  await place.getByText(`56 of ${threads}`).waitFor();
+  await shows(page, title);
+  await page.keyboard.press('j');
+  await place.getByText(`57 of ${threads}`).waitFor();
+}, 60_000);
+
 test("a bundle's actions act on every thread in it, and Undo brings them all back", async () => {
   const page = await open(DESKTOP);
   const row = bundleRow(page, TOY_BOX);

@@ -9,6 +9,7 @@ import {
   type MessageRef,
   type View,
 } from '../../mail/core/index.ts';
+import type { PageAt } from './contract.ts';
 import { mailroom, type Unanswered } from './rpc.ts';
 
 /** What each query's snapshot is cached under. */
@@ -24,12 +25,13 @@ export const keys = {
   outbox: ['outbox'],
   /** Under this device, so an erase, which makes the Mailroom anew, asks again. */
   notified: (endpoint: string | undefined) => ['this-device', endpoint ?? null] as const,
-  // A view's list, under which each of its pages is kept by the place it starts at.
+  // A view's list, under which each of its pages is kept by the place it starts at, or by the row
+  // it was asked for around.
   conversations: (view: View) => ['conversations', view] as const,
-  page: (view: View, at: number) => ['conversations', view, at] as const,
-  // A bundle's threads, under which each of its pages is kept by the place it starts at.
+  page: (view: View, at: PageAt) => ['conversations', view, at] as const,
+  // A bundle's threads, under which each of its pages is kept as a view's are.
   bundle: (id: BundleId) => ['bundle', id] as const,
-  bundlePage: (id: BundleId, at: number) => ['bundle', id, at] as const,
+  bundlePage: (id: BundleId, at: PageAt) => ['bundle', id, at] as const,
   conversation: (id: ConversationId) => ['conversation', id] as const,
   body: (ref: MessageRef) => ['body', ref] as const,
   people: (typed: string) => ['people', typed] as const,
@@ -140,18 +142,22 @@ export const outboxQuery = queryOptions({
 });
 
 /**
- * The page of a view's list from its place `at`, newest first, with how long the list is. A list of
- * unread mail also holds the conversation or bundle `keep` names, which the member has open. The
- * page is kept under the view's key alone, whatever it kept, since keeping changes only that row.
+ * The page of a view's list from its place `at`, or the one holding a row, newest first, with how
+ * long the list is. A list of unread mail also holds the conversation or bundle `keep` names, which
+ * the member has open. The page is kept under the view's key alone, whatever it kept, since keeping
+ * changes only that row.
  */
-export const conversationsQuery = (view: View, at = 0, keep?: ConversationId) =>
+export const conversationsQuery = (view: View, at: PageAt = 0, keep?: ConversationId) =>
   queryOptions({
     queryKey: keys.page(view, at),
     queryFn: () => mailroom.conversations(view, at, keep),
   });
 
-/** A page of a bundle's threads, newest first, from the place `at`, with the bundle's row. */
-export const bundleQuery = (id: BundleId, at = 0) =>
+/**
+ * A page of a bundle's threads, newest first, from the place `at` or the one holding a thread, with
+ * the bundle's row.
+ */
+export const bundleQuery = (id: BundleId, at: PageAt = 0) =>
   queryOptions({ queryKey: keys.bundlePage(id, at), queryFn: () => mailroom.bundle(id, at) });
 
 export const conversationQuery = (id: ConversationId) =>

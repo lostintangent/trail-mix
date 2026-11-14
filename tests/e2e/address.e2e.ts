@@ -77,6 +77,66 @@ test('a folder and its open conversation come back on a reload and in another br
   }
 }, 60_000);
 
+test('a conversation deep in its list opens at its page, its row in sight, and J moves on from it', async () => {
+  const page = await open(DESKTOP);
+  await addressNaming(page, 'open');
+  const newest = opened(page);
+  const list = page.locator('[role="listbox"][aria-multiselectable]');
+  // The first sync may still be listing older mail, which lands below the row and lengthens the list.
+  await list.evaluate(async (list) => {
+    const length = () =>
+      Number(list.querySelector('[role="option"]')?.getAttribute('aria-setsize'));
+    while (length() <= 100) await new Promise(requestAnimationFrame);
+    list.scrollTop = (list.scrollHeight * 66) / length();
+  });
+  await list.locator('[role="option"][aria-posinset="70"]').click();
+  const place = page.getByRole('toolbar', { name: 'Conversation' });
+  const at = (row: number) => place.getByText(new RegExp(`^${row} of \\d+$`));
+  await at(70).waitFor();
+  await page.waitForFunction((newest) => {
+    const open = new URL(location.href).searchParams.get('open');
+    return open !== null && open !== newest;
+  }, newest);
+  const deep = page.url();
+
+  // The list waits for the page holding the row, and opens there: no frame shows its top row.
+  await page.addInitScript(() => {
+    const look = () => {
+      const list = document.querySelector('[role="listbox"][aria-multiselectable]');
+      const top = list?.querySelector('[role="option"][aria-posinset="1"]');
+      if (list && top) {
+        const [row, sheet] = [top.getBoundingClientRect(), list.getBoundingClientRect()];
+        if (row.bottom > sheet.top && row.top < sheet.bottom)
+          Object.assign(window, { sawTop: true });
+      }
+      requestAnimationFrame(look);
+    };
+    requestAnimationFrame(look);
+  });
+  await page.reload();
+  await at(70).waitFor();
+  await expect(selectedRow(page).getAttribute('aria-posinset')).resolves.toBe('70');
+  const [row, sheet] = await Promise.all([selectedRow(page).boundingBox(), list.boundingBox()]);
+  expect(row!.y).toBeGreaterThanOrEqual(sheet!.y);
+  expect(row!.y + row!.height).toBeLessThanOrEqual(sheet!.y + sheet!.height);
+  expect(await page.evaluate(() => 'sawTop' in window)).toBe(false);
+  await page.keyboard.press('j');
+  await at(71).waitFor();
+  await expect(selectedRow(page).getAttribute('aria-posinset')).resolves.toBe('71');
+
+  // A phone opens it on the reader, with its row in sight on the list behind it.
+  const phone = await open(PHONE, deep);
+  await subject(phone).waitFor();
+  await phone.getByRole('button', { name: 'Back', exact: true }).locator('visible=true').click();
+  const shown = phone.locator('[role="listbox"][aria-multiselectable]');
+  const [again, screen] = await Promise.all([
+    shown.locator('[role="option"][aria-posinset="70"]').boundingBox(),
+    shown.boundingBox(),
+  ]);
+  expect(again!.y).toBeGreaterThanOrEqual(screen!.y);
+  expect(again!.y + again!.height).toBeLessThanOrEqual(screen!.y + screen!.height);
+}, 60_000);
+
 test('Back and Forward step between views, and moving by key adds no history', async () => {
   const page = await open(DESKTOP);
   const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
