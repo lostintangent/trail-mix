@@ -351,40 +351,36 @@ export function ReaderPane({
             <BundleSkeleton repository={repositoryOf(listed) || undefined} />
           )}
         </div>
-      ) : reading ? (
+      ) : reading || isOpening || isUnopened ? (
         <div {...stylex.props(styles.scroll, styles.underBar)}>
           {crumbed}
-          <Suspense fallback={<ReaderSkeleton subject={headingOf(rowOf(reading.id))} />}>
-            <Reader
-              conversation={reading.conversation}
-              account={reading.account}
-              folders={folders}
-              actionsFor={actionsFor}
-              upcoming={isPassing ? [] : preparing}
-              onMessageKey={onMessageKey}
-              hidden={hidden}
-              leaving={leaving}
-              onOpenDraft={openDraft}
-              isPassing={isPassing}
+          {reading ? (
+            <Suspense fallback={<ReaderSkeleton subject={headingOf(rowOf(reading.id))} />}>
+              <Reader
+                conversation={reading.conversation}
+                account={reading.account}
+                folders={folders}
+                actionsFor={actionsFor}
+                upcoming={isPassing ? [] : preparing}
+                onMessageKey={onMessageKey}
+                hidden={hidden}
+                leaving={leaving}
+                onOpenDraft={openDraft}
+                isPassing={isPassing}
+              />
+            </Suspense>
+          ) : isOpening ? (
+            <ReaderSkeleton subject={headingOf(row)} />
+          ) : (
+            <ConversationUnopened
+              subject={headingOf(row)}
+              isOffline={isOffline}
+              onTryAgain={() => void refetch()}
             />
-          </Suspense>
-          {isDocked && (
+          )}
+          {reading && isDocked && (
             <div {...stylex.props(styles.writing, styles.docked)}>{writing?.composer}</div>
           )}
-        </div>
-      ) : isOpening ? (
-        <div {...stylex.props(styles.scroll, styles.underBar)}>
-          {crumbed}
-          <ReaderSkeleton subject={shown && headingOf(rowOf(shown))} />
-        </div>
-      ) : isUnopened ? (
-        <div {...stylex.props(styles.scroll, styles.underBar)}>
-          {crumbed}
-          <ConversationUnopened
-            subject={headingOf(rowOf(shown))}
-            isOffline={isOffline}
-            onTryAgain={() => void refetch()}
-          />
         </div>
       ) : (
         <div {...stylex.props(styles.empty)}>

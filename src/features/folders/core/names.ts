@@ -9,10 +9,6 @@ import type { Folder, FolderRef } from '../../mail/core/index.ts';
 export const isAt = (ref: FolderRef, folder: FolderRef) =>
   ref.account === folder.account && ref.path === folder.path;
 
-/** The folder a ref names, while the server lists it. */
-export const folderAt = (folders: readonly Folder[], ref: FolderRef) =>
-  folders.find((folder) => isAt(ref, folder));
-
 /** Whether a ref names `folder` or a folder inside it, however deep. */
 export const isWithin = (ref: FolderRef, folder: Folder) =>
   ref.account === folder.account &&

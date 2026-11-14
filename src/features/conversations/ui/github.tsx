@@ -64,7 +64,6 @@ export function BundleChips({ chips, threads }: { chips: readonly BundleChip[]; 
   useLayoutEffect(() => {
     const element = line.current;
     if (!element) return;
-    fold(element, beyond);
     const observer = new ResizeObserver(() => fold(element, beyond));
     observer.observe(element);
     return () => observer.disconnect();

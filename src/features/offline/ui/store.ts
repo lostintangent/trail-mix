@@ -34,12 +34,8 @@ function settled<T>(request: IDBRequest<T>): Promise<T> {
 /** The storage TanStack's persister asks for, over IndexedDB. */
 export const snapshots = {
   getItem: (key: string) => inStore<unknown>('readonly', (store) => store.get(key)),
-  setItem: async (key: string, value: unknown) => {
-    await inStore('readwrite', (store) => store.put(value, key));
-  },
-  removeItem: async (key: string) => {
-    await inStore('readwrite', (store) => store.delete(key));
-  },
+  setItem: (key: string, value: unknown) => inStore('readwrite', (store) => store.put(value, key)),
+  removeItem: (key: string) => inStore('readwrite', (store) => store.delete(key)),
   // Keys and values read in one transaction, which lists both in the keys' order.
   entries: async (): Promise<[string, unknown][]> => {
     const store = (await database()).transaction(STORE).objectStore(STORE);
@@ -49,7 +45,5 @@ export const snapshots = {
     ]);
     return keys.map((key, at) => [key as string, values[at]]);
   },
-  clear: async () => {
-    await inStore('readwrite', (store) => store.clear());
-  },
+  clear: () => inStore('readwrite', (store) => store.clear()),
 };

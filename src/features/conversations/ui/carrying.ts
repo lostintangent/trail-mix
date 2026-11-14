@@ -4,6 +4,7 @@ import { boundTooltipOf, UNDO_COMMAND } from '../../commands/index.ts';
 import { folderName } from '../../folders/index.ts';
 import {
   bundlePartsOf,
+  folderAt,
   isBundle,
   type BundleSummary,
   type ConversationId,
@@ -236,7 +237,6 @@ function doingOf(action: Action, folders: readonly Folder[]): string {
 /** Where a move takes mail, as " to Receipts", and nothing for any other action. */
 function whereTo(action: Action, folders: readonly Folder[]): string {
   if (action.do !== 'move') return '';
-  const { account, path } = action.to;
-  const folder = folders.find((each) => each.account === account && each.path === path);
-  return ` to ${folder ? folderName(folder) : path}`;
+  const folder = folderAt(folders, action.to);
+  return ` to ${folder ? folderName(folder) : action.to.path}`;
 }

@@ -21,12 +21,8 @@ function prepaint(
   size: typeof panelSize,
 ): void {
   const root = document.documentElement;
-  let storage: Pick<Storage, 'getItem'> = { getItem: () => null };
-  try {
-    storage = localStorage;
-  } catch {
-    // Without storage the panels take their defaults.
-  }
+  // Blocked storage throws once touched, so it's touched only inside each read's own try.
+  const storage = { getItem: (key: string) => localStorage.getItem(key) };
   try {
     const { css } = JSON.parse(storage.getItem(accent.key) ?? '{}') as { css?: unknown };
     if (typeof css === 'string') {

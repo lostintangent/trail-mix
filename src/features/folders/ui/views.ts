@@ -11,8 +11,13 @@ import {
   Trash2,
   type LucideIcon,
 } from 'lucide-react';
-import type { Account, Folder, FolderRole, View } from '../../mail/core/index.ts';
-import { folderAt } from '../core/names.ts';
+import {
+  folderAt,
+  type Account,
+  type Folder,
+  type FolderRole,
+  type View,
+} from '../../mail/core/index.ts';
 import { folderName } from './name.ts';
 
 /**

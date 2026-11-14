@@ -1,4 +1,5 @@
 import {
+  folderAt,
   refKey,
   refOf,
   sameFolder,
@@ -59,7 +60,7 @@ export function errandFor(
           ? shown.filter(
               ({ account, path }) => account === action.to.account && path !== action.to.path,
             )
-          : shown.filter((message) => roleOf(folders, message) !== destination(action));
+          : shown.filter((message) => folderAt(folders, message)?.role !== destination(action));
       const to = action.do === 'move' ? action.to : destination(action);
       return movable.length > 0 ? { move: movable.map(refOf), to } : undefined;
     }
@@ -86,7 +87,7 @@ export function bundleErrandFor(
     case 'delete':
       return { move: scope, to: destination(action) };
     case 'move':
-      return action.to.account === bundle.account && roleOf(folders, action.to) !== 'inbox'
+      return action.to.account === bundle.account && folderAt(folders, action.to)?.role !== 'inbox'
         ? { move: scope, to: action.to }
         : undefined;
     default:
@@ -159,7 +160,7 @@ export function followMoves(
  */
 function isShownIn(view: View, message: Message, folders: readonly Folder[]): boolean {
   if (view.in === 'folder') return sameFolder(message, view.folder);
-  const role = roleOf(folders, message);
+  const role = folderAt(folders, message)?.role;
   switch (view.in) {
     case 'drafts':
       return role === 'drafts';
@@ -172,9 +173,6 @@ function isShownIn(view: View, message: Message, folders: readonly Folder[]): bo
 
 const destination = (action: { do: 'archive' | 'delete' }): FolderRole =>
   action.do === 'archive' ? 'archive' : 'trash';
-
-const roleOf = (folders: readonly Folder[], ref: FolderRef) =>
-  folders.find((folder) => sameFolder(folder, ref))?.role;
 
 /** The messages whose flag isn't already as asked, so Undo changes back exactly those. */
 function flagsFor(

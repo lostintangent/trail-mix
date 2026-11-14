@@ -1,4 +1,4 @@
-import type { Folder, Message } from '../../mail/core/index.ts';
+import { folderAt, type Folder, type Message } from '../../mail/core/index.ts';
 
 /**
  * The folder a conversation lies in, which the reader names under its subject. A conversation
@@ -13,7 +13,7 @@ export function folderOf(
 ): Folder | undefined {
   const located = conversation
     .toSorted((a, b) => a.date.localeCompare(b.date))
-    .map((message) => folderFor(message, folders));
+    .map((message) => folderAt(folders, message));
   return located.findLast((folder) => folder && !isOwnWriting(folder)) ?? located.at(-1);
 }
 
@@ -26,11 +26,8 @@ export function receivedIn(
   conversation: readonly Message[],
   folders: readonly Folder[],
 ): Message[] {
-  return conversation.filter((message) => !isOwnWriting(folderFor(message, folders)));
+  return conversation.filter((message) => !isOwnWriting(folderAt(folders, message)));
 }
 
 /** Whether a folder holds the member's own writing: what was sent, and what is being written. */
 const isOwnWriting = (folder?: Folder) => folder?.role === 'sent' || folder?.role === 'drafts';
-
-const folderFor = (message: Message, folders: readonly Folder[]) =>
-  folders.find(({ account, path }) => account === message.account && path === message.path);

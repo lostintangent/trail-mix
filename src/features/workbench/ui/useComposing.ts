@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   newestShown,
   sameRef,
@@ -74,10 +74,7 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
   useEffect(() => {
     if (started && started.in !== selected) start(undefined);
   }, [started, selected, start]);
-  const open = useRef<Compose>(undefined);
-  useEffect(() => {
-    open.current = compose;
-  }, [compose]);
+  const open = useLatest(compose);
 
   const write = useCallback((account: Account) => start({ as: 'new', account }), [start]);
   /** Answers one message, its sender or everyone on it. */
@@ -147,7 +144,7 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
       });
       if (open.current === from) setEditing(saved);
     },
-    [],
+    [open],
   );
   // Drafts on their way stay out too, since they can't be written on until their send is undone.
   const hiding = useMemo<Hiding>(

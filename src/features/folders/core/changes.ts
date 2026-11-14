@@ -1,5 +1,5 @@
-import type { Folder, View } from '../../mail/core/index.ts';
-import { folderAt, isWithin, prefixOf } from './names.ts';
+import { folderAt, type Folder, type View } from '../../mail/core/index.ts';
+import { isWithin, prefixOf } from './names.ts';
 
 /**
  * A change to an account's folders on its way to the server, which the browser shows at once by

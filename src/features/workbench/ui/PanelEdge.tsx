@@ -1,6 +1,6 @@
 import { durationVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { memo, useRef, useState, type PointerEvent } from 'react';
+import { memo, useRef, useState } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { dragPanel, nudgePanel, panelSize, type PanelSpec, type PanelState } from './panels.ts';
 
@@ -44,10 +44,9 @@ export const PanelEdge = memo(function PanelEdge({
     setDrag(next);
   };
 
-  const end = (event: PointerEvent<HTMLDivElement>) => {
+  const end = () => {
     if (!origin.current) return;
     origin.current = null;
-    event.currentTarget.releasePointerCapture(event.pointerId);
     if (drag) onChange(drag);
     setDrag(null);
     onResizingChange(false);

@@ -1,8 +1,8 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useLatest } from '../../../shared/useLatest.ts';
-import type { Account, Folder, View } from '../../mail/core/index.ts';
+import { folderAt, type Account, type Folder, type View } from '../../mail/core/index.ts';
 import { followed, type FolderChange } from '../core/changes.ts';
-import { childPath, folderAt, renamedPath } from '../core/names.ts';
+import { childPath, renamedPath } from '../core/names.ts';
 import { useFolderChange } from './changes.ts';
 import { createCommands, folderActions, type FolderEdit } from './commands.ts';
 

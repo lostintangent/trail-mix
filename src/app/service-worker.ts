@@ -76,6 +76,7 @@ worker.addEventListener('notificationclick', (event) => clickNotification(worker
 worker.addEventListener('fetch', (event) => {
   const answer = answerFor(event.request, worker.location.origin, KEPT);
   if (answer === 'kept') {
+    // A kept file is this build's whatever the request sent, such as an Origin the host varies by.
     event.respondWith(
       caches
         .match(event.request, { ignoreVary: true })
@@ -116,11 +117,7 @@ async function keepBuild() {
     files.map(async (path) => {
       const response = await fetch(new Request(path, { cache: 'reload' }));
       if (!response.ok) throw new Error(`Couldn't keep ${path}: ${response.status}`);
-      // A host that varies by Origin would leave the kept copy unmatched by a request that sends
-      // one, as a module script does. Each file is the same for this build whatever was sent.
-      const headers = new Headers(response.headers);
-      headers.delete('vary');
-      await cache.put(path, new Response(response.body, { status: response.status, headers }));
+      await cache.put(path, response);
     }),
   );
   const shell = await fetch(new Request(SHELL, { cache: 'reload', redirect: 'manual' })).catch(
