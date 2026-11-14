@@ -17,9 +17,7 @@ import { SenderAvatar } from '../../../app/theme/SenderAvatar.tsx';
 import { focusRing, media, tm } from '../../../app/theme/tokens.stylex.ts';
 import {
   isBundle,
-  type BundleSummary,
   type ConversationId,
-  type ConversationSummary,
   type ListItem,
   type Marks,
   type StampColor,
@@ -136,111 +134,84 @@ export const ConversationRow = memo(function ConversationRow({
       >
         <SenderAvatar name={name} picture={item.avatar && avatarUrl(item.avatar)} stamp={stamp} />
       </span>
-      {isBundle(item) ? (
-        <BundleLines bundle={item} />
-      ) : (
-        <ConversationLines conversation={item} marks={marks} names={people?.names} />
-      )}
+      <RowLines item={item} marks={marks} names={people?.names} />
     </div>
   );
 });
 
-/** A conversation's three lines: whom it is with, its subject and its preview. */
-function ConversationLines({
-  conversation,
+/**
+ * A row's three lines. A conversation's say whom it is with, its subject and its preview. A
+ * bundle's say its repository, its owner in quiet ink, then its newest thread's title and number,
+ * then a chip for each of its first threads.
+ */
+function RowLines({
+  item,
   marks,
   names,
 }: {
-  conversation: ConversationSummary;
+  item: ListItem;
   marks: Marks;
   names: string | undefined;
 }) {
-  const { subject, preview, date, unread, flagged, hasAttachments } = conversation;
+  const { date, unread, flagged } = item;
   const isUnread = unread > 0;
+  const slash = isBundle(item) ? item.repository.indexOf('/') + 1 : 0;
+  const number = isBundle(item) ? numberOf(item.newest) : undefined;
   return (
     <span {...stylex.props(styles.lines)}>
       <span {...stylex.props(styles.top, styles.line)}>
         {isUnread && <span {...stylex.props(styles.dot)} />}
         <span {...stylex.props(styles.sender, isUnread && styles.senderUnread, styles.clip)}>
-          {names === undefined ? (
-            <span {...stylex.props(styles.nobody)}>No recipients</span>
+          {isBundle(item) ? (
+            <>
+              <span {...stylex.props(styles.owner)}>{item.repository.slice(0, slash)}</span>
+              {item.repository.slice(slash)}
+            </>
+          ) : names === undefined ? (
+            // A draft addressed to nobody yet says so in the row's quiet ink.
+            <span {...stylex.props(styles.quiet)}>No recipients</span>
           ) : (
             <Marked text={names} marks={marks} />
           )}
         </span>
-        <RowMarks isUnread={isUnread} flagged={flagged} hasAttachments={hasAttachments} />
-        <time dateTime={date} {...stylex.props(styles.time)}>
+        {isUnread && <VisuallyHidden>Unread</VisuallyHidden>}
+        {flagged && <Icon icon={Star} size="xsm" label="Flagged" xstyle={styles.flag} />}
+        {!isBundle(item) && item.hasAttachments && (
+          <Icon icon={Paperclip} size="xsm" label="Has attachments" xstyle={styles.quiet} />
+        )}
+        <time dateTime={date} {...stylex.props(styles.quiet, styles.time)}>
           {formatListDate(date)}
         </time>
       </span>
-      <span {...stylex.props(isUnread && styles.subjectUnread, styles.clip, styles.line)}>
-        {subject ? <Marked text={subject} marks={marks} /> : '(no subject)'}
-      </span>
-      <span {...stylex.props(styles.preview, styles.clip, styles.line)}>
-        <Marked text={preview} marks={marks} />
-      </span>
-    </span>
-  );
-}
-
-/**
- * A bundle's three lines: its repository, its owner in quiet ink, then its newest thread's title
- * and number, then a chip for each of its first threads.
- */
-function BundleLines({ bundle }: { bundle: BundleSummary }) {
-  const { repository, newest, date, unread, flagged, chips, threads } = bundle;
-  const isUnread = unread > 0;
-  const slash = repository.indexOf('/') + 1;
-  const number = numberOf(newest);
-  return (
-    <span {...stylex.props(styles.lines)}>
-      <span {...stylex.props(styles.top, styles.line)}>
-        {isUnread && <span {...stylex.props(styles.dot)} />}
-        <span {...stylex.props(styles.sender, isUnread && styles.senderUnread, styles.clip)}>
-          <span {...stylex.props(styles.owner)}>{repository.slice(0, slash)}</span>
-          {repository.slice(slash)}
-        </span>
-        <RowMarks isUnread={isUnread} flagged={flagged} hasAttachments={false} />
-        <time dateTime={date} {...stylex.props(styles.time)}>
-          {formatListDate(date)}
-        </time>
-      </span>
-      <span {...stylex.props(isUnread && styles.subjectUnread, styles.clip, styles.line)}>
-        {newest.title}
-        {number && (
+      <span {...stylex.props(isUnread && styles.sender, styles.clip, styles.line)}>
+        {isBundle(item) ? (
           <>
-            {' '}
-            <span {...stylex.props(styles.owner, number.isCommit && styles.commit)}>
-              {number.text}
-            </span>
+            {item.newest.title}
+            {number && (
+              <>
+                {' '}
+                <span {...stylex.props(styles.owner, number.isCommit && styles.commit)}>
+                  {number.text}
+                </span>
+              </>
+            )}
           </>
+        ) : item.subject ? (
+          <Marked text={item.subject} marks={marks} />
+        ) : (
+          '(no subject)'
         )}
       </span>
-      <span {...stylex.props(styles.preview, styles.line, styles.chipLine)}>
-        <BundleChips chips={chips} threads={threads} />
-      </span>
-    </span>
-  );
-}
-
-/** What a row's first line says beside its name: unread, flagged and attached. */
-function RowMarks({
-  isUnread,
-  flagged,
-  hasAttachments,
-}: {
-  isUnread: boolean;
-  flagged: boolean;
-  hasAttachments: boolean;
-}) {
-  return (
-    <>
-      {isUnread && <VisuallyHidden>Unread</VisuallyHidden>}
-      {flagged && <Icon icon={Star} size="xsm" label="Flagged" xstyle={styles.flag} />}
-      {hasAttachments && (
-        <Icon icon={Paperclip} size="xsm" label="Has attachments" xstyle={styles.quiet} />
+      {isBundle(item) ? (
+        <span {...stylex.props(styles.preview, styles.line, styles.chipLine)}>
+          <BundleChips chips={item.chips} threads={item.threads} />
+        </span>
+      ) : (
+        <span {...stylex.props(styles.preview, styles.clip, styles.line)}>
+          <Marked text={item.preview} marks={marks} />
+        </span>
       )}
-    </>
+    </span>
   );
 }
 
@@ -281,7 +252,7 @@ export function RowSkeleton({ row, top }: { row: number; top?: number }) {
           <span {...stylex.props(styles.sender, styles.grow)}>
             <TextSkeleton width={width(SENDER_WIDTHS)} index={row} />
           </span>
-          <span {...stylex.props(styles.time)}>
+          <span {...stylex.props(styles.quiet, styles.time)}>
             <TextSkeleton width="3em" index={row} />
           </span>
         </span>
@@ -386,9 +357,7 @@ const styles = stylex.create({
     fontWeight: fontWeightVars['--font-weight-medium'],
   },
   time: {
-    flexShrink: 0,
     marginInlineStart: 'auto',
-    color: tm.textQuiet,
     fontSize: typeScaleVars['--text-supporting-size'],
   },
   preview: {
@@ -428,9 +397,6 @@ const styles = stylex.create({
   senderUnread: {
     fontWeight: fontWeightVars['--font-weight-semibold'],
   },
-  subjectUnread: {
-    fontWeight: fontWeightVars['--font-weight-medium'],
-  },
   clip: {
     minWidth: 0,
     overflow: 'hidden',
@@ -444,10 +410,6 @@ const styles = stylex.create({
   },
   quiet: {
     flexShrink: 0,
-    color: tm.textQuiet,
-  },
-  // A draft addressed to nobody yet says so in the row's muted ink.
-  nobody: {
     color: tm.textQuiet,
   },
   // A bundle's owner, and a thread's number, recede beside the repository and the title.
