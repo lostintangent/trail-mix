@@ -233,10 +233,10 @@ function Desk({
   // until its draft has gone from the server's Drafts.
   const leaving = useLeaving();
   const { onTheirWay, withoutAway } = useDraftsAway(leaving.all, folders);
-  // While the Outbox's next snapshot is on its way, the counts wait for it, since the folders may
-  // already have counted without a send the Outbox still holds. Its first snapshot holds nothing up.
+  // While a send is on its way and the Outbox's next snapshot is too, the counts wait for it, since
+  // the folders may already have counted without a send the Outbox still holds.
   const counts = useHeldWhile(
-    isOutboxComing,
+    isOutboxComing && leaving.all.length > 0,
     useMemo(() => viewCounts(folders, outbox, onTheirWay), [folders, outbox, onTheirWay]),
   );
   // The Outbox lists sends, not conversations.
