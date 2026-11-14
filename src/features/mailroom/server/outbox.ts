@@ -98,17 +98,24 @@ export function outboxQueue(sending: Sending) {
     },
 
     /**
-     * Schedules a draft, to go when the undo window that opens `now` closes, or at `at` if later.
-     * Sending a draft that is already on its way returns that send. A failed one starts over.
+     * Schedules a draft, to go when the undo window that opened at the press, `opened`, closes, or
+     * at `at` if later. Sending a draft that is already on its way returns that send, as it was
+     * scheduled. A failed one starts over.
      */
     send(
       draft: Pick<Outgoing, 'draft' | 'messageId' | 'to' | 'subject'>,
       now: string,
       at?: string,
+      opened?: string,
     ): Outgoing {
       const held = all().find((entry) => sameRef(entry.draft, draft.draft));
       if (held && held.state !== 'failed') return held;
-      const scheduled = outbox.schedule({ id: held?.id ?? crypto.randomUUID(), ...draft }, now, at);
+      const scheduled = outbox.schedule(
+        { id: held?.id ?? crypto.randomUUID(), ...draft },
+        now,
+        at,
+        opened,
+      );
       put(scheduled);
       changed();
       return scheduled;

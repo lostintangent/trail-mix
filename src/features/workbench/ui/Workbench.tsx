@@ -14,7 +14,7 @@ import {
   type ReactNode,
 } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
-import { Toasts } from '../../../shared/toasts.tsx';
+import { toast, Toasts } from '../../../shared/toasts.tsx';
 import {
   bundlePartsOf,
   isBundle,
@@ -29,7 +29,6 @@ import {
   type Folder,
   type ListItem,
   type Message,
-  type MessageRef,
   type Place,
   type View,
 } from '../../mail/core/index.ts';
@@ -113,6 +112,7 @@ import {
   ComposerSkeleton,
   isDocked,
   useIsReplyOnItsWay,
+  type Drafting,
   type Sender,
   type Writing,
 } from '../../composer/ui/index.ts';
@@ -802,19 +802,22 @@ export function Workbench({
   );
   const outbox = useOutboxCommands();
 
-  // Send sends what the open composer holds, once it's saved, and Undo brings the composer back as
-  // it was, under its conversation if that's still the one open.
+  // Send closes the composer at once and sends what it holds once its last save is done. Undo, or a
+  // send that fails, brings the same message back, under its conversation if that's still the one
+  // open, unless another composer has opened meanwhile, when a failure's toast offers to open it.
   const send = useSend();
   const sender = useRef<Sender['current']>(undefined);
   const [isSendable, setSendable] = useState(false);
   const shownNow = useRef(opened);
+  const composeNow = useRef(compose);
   useLayoutEffect(() => {
     shownNow.current = opened;
+    composeNow.current = compose;
   });
   // A reply is on its way at the end of its conversation in the frame its composer closes, as is a
-  // draft opened in its own, and leaves it again if the Mailroom refuses it or Undo takes it back. A
-  // new message has no conversation until the Outbox names one.
-  const sendWritten = (draft: MessageRef, at: string | undefined, writing: Writing) => {
+  // draft opened in its own, and leaves it again if the send fails or Undo takes it back. A new
+  // message has no conversation until the Outbox names one.
+  const sendWritten = (drafting: Drafting, at: string | undefined, writing: Writing) => {
     const from = { conversation: opened, isDocked: compose !== undefined && isDocked(compose) };
     // A draft opened from its conversation gives way to the next conversation, as one archived
     // does, when its send leaves nothing to show: a draft alone there, or a Drafts list the
@@ -829,26 +832,51 @@ export function Workbench({
         !from.isDocked || (isDraftsView(view, folders) && leavesDrafts(leaving.all, others));
       if (isLeft) giveWay(edited.conversation);
     }
+    const id = crypto.randomUUID();
     const pressedAt = Date.now();
-    leaving.pressed(draft, {
+    // Whom it goes to, as the Outbox will say: everyone it names but Bcc.
+    const to = [...writing.to, ...writing.cc];
+    leaving.pressed(id, {
+      draft: drafting.draft,
       in: from.isDocked
         ? from.conversation
         : compose?.as === 'draft'
           ? compose.draft.conversation
           : undefined,
       written: writing.markdown,
+      to,
       at,
       pressedAt,
     });
-    void send(draft, {
+    composing.sent(id);
+    const unwatch = drafting.watch((saved) => leaving.named(id, saved));
+    // Until its last save is done, the drafts it makes are the leaving’s, and stay out of sight.
+    const handed = () => {
+      unwatch();
+      composing.saved(id);
+    };
+    const back = () => {
+      leaving.forgotten(id);
+      composing.resume(drafting, from.isDocked && shownNow.current === from.conversation);
+    };
+    send({
+      id,
+      saved: (signal) => drafting.settle(signal).finally(handed),
+      to,
       at,
       pressedAt,
-      onUndone: (back) => {
-        leaving.forgotten(back);
-        composing.resume(writing, back, from.isDocked && shownNow.current === from.conversation);
+      onUndone: back,
+      onFailed: (reason) => {
+        handed();
+        const body = `Couldn’t send. ${reason}`;
+        if (composeNow.current === undefined) {
+          back();
+          void toast({ type: 'error', body });
+          return;
+        }
+        leaving.forgotten(id);
+        void toast({ type: 'error', body, action: { label: 'Open', onAction: back } });
       },
-    }).then((outgoing) => {
-      if (!outgoing) leaving.forgotten(draft);
     });
   };
   // With no network nothing can be sent, and writing offline is out of scope, so Send and Send
@@ -891,8 +919,14 @@ export function Workbench({
   const isOpenInView = isInView && !isBehindComposer;
   // A send on its way says where it stands on its line in its conversation while that's on screen,
   // and in a toast while the member is elsewhere.
+  // One giving way to the next is already left, so a send from it is followed elsewhere.
   const shown =
-    (!isPhone || phonePane === 'reader') && page === undefined && isInView ? opened : undefined;
+    (!isPhone || phonePane === 'reader') &&
+    page === undefined &&
+    isInView &&
+    opened !== vacating?.row.id
+      ? opened
+      : undefined;
   useLeavingToasts(leaving.all, shown);
   // What GitHub shows of what's open: the thread, or the bundle's repository.
   const openRow = threadRow ?? (selected === undefined ? undefined : rowOf(selected));

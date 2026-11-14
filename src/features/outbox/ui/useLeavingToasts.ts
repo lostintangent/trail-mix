@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { ConversationId } from '../../mail/core/index.ts';
-import { toastFor, type Leaving } from '../core/leaving.ts';
+import { standingOfLeaving, toastFor, type Leaving } from '../core/leaving.ts';
 import { isAsked, useAskedVersion } from './asked.ts';
 import { loadSending } from './useSend.ts';
 
@@ -18,17 +18,16 @@ export function useLeavingToasts(all: readonly Leaving[], shown: ConversationId 
     was.current = shown;
     const now = Date.now();
     for (const leaving of all) {
-      const { seen } = leaving;
-      if (!seen || !isAsked(seen.last.id)) continue;
-      const isFirstSight = !known.current.has(seen.last.id);
+      if (!isAsked(leaving.id)) continue;
+      const isFirstSight = !known.current.has(leaving.id);
       if (!isFirstSight && !hasMoved) continue;
-      known.current.add(seen.last.id);
+      known.current.add(leaving.id);
       const doing = toastFor(leaving, shown, isFirstSight, now);
       if (doing === 'stay') continue;
       void loadSending().then((sending) =>
         doing === 'show'
-          ? sending.showLeavingToast(seen, leaving.closes)
-          : sending.putAwayLeavingToast(seen.last.id),
+          ? sending.showLeavingToast(leaving, standingOfLeaving(leaving, Date.now()))
+          : sending.putAwayLeavingToast(leaving.id),
       );
     }
   }, [all, shown, asked]);

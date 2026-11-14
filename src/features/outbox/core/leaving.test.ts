@@ -1,12 +1,14 @@
 import { expect, test } from 'bun:test';
 import type { Message, Outgoing } from '../../mail/core/index.ts';
 import {
+  draftOf,
   draftsLeaving,
   expire,
   forget,
   GONE_MS,
   isAway,
   leavingIn,
+  named,
   nextExpiry,
   observe,
   press,
@@ -14,7 +16,7 @@ import {
   toastFor,
 } from './leaving.ts';
 import { begin, filed, schedule, submitted } from './outbox.ts';
-import { closesAt } from './standing.ts';
+import { closesAt, followed } from './standing.ts';
 
 const T0 = Date.parse('2026-11-10T09:00:00.000Z');
 /** The time `seconds` after nine. */
@@ -41,11 +43,8 @@ const outgoing = (sendAt = iso(10)): Outgoing => ({
 });
 const closesFor = closesAt;
 const pressed = press([], {
-  draft,
-  pressedIn: thread,
+  ...pressedWith(),
   written: 'Thursday works.\n\n> On Monday, Mina wrote:\n> Lunch?\nSee you there.',
-  pressedAt: at(0),
-  at: undefined,
 });
 
 test('a reply pressed is on its way at once, at the end of its conversation, as it was written', () => {
@@ -63,7 +62,7 @@ test('a reply pressed for later waits for its time', () => {
 });
 
 test('a press the Mailroom refused is forgotten, and its draft is a draft again', () => {
-  const refused = forget(pressed, draft);
+  const refused = forget(pressed, 'press');
   expect(leavingIn(refused, thread, [parent, indexed])).toEqual([]);
   expect(draftsLeaving(refused)).toEqual([]);
 });
@@ -124,7 +123,7 @@ test('a failed send stays at the end of its conversation saying why, back in Dra
 test('a draft sent again after its send failed lies at the end of its conversation once', () => {
   const failed = submitted(begin(outgoing()), { error: '554 refused', passing: false }, iso(11));
   let all = observe(pressed, [failed], at(11), closesFor);
-  all = press(all, { ...pressedWith(), pressedAt: at(30) });
+  all = press(all, { ...pressedWith(), id: 'again', pressedAt: at(30) });
   all = observe(all, [outgoing(iso(40))], at(30.2), closesFor);
   expect(leavingIn(all, thread, [parent, indexed])).toHaveLength(1);
 });
@@ -140,9 +139,14 @@ test('a send gone without its copy stops waiting for it after a while', () => {
 
 test('replies on their way lie soonest to go first, and a new message waits for its conversation', () => {
   const second = { ...draft, uid: 43 };
-  const later = press(pressed, { ...pressedWith(), draft: second, at: iso(3600) });
-  const sooner = press(later, { ...pressedWith(), draft: { ...draft, uid: 44 }, pressedAt: at(1) });
-  expect(leavingIn(sooner, thread, [parent]).map(({ leaving }) => leaving.draft.uid)).toEqual([
+  const later = press(pressed, { ...pressedWith(), id: 'later', draft: second, at: iso(3600) });
+  const sooner = press(later, {
+    ...pressedWith(),
+    id: 'sooner',
+    draft: { ...draft, uid: 44 },
+    pressedAt: at(1),
+  });
+  expect(leavingIn(sooner, thread, [parent]).map(({ leaving }) => draftOf(leaving)?.uid)).toEqual([
     42, 44, 43,
   ]);
   const fresh = press([], { ...pressedWith(), pressedIn: undefined });
@@ -185,8 +189,46 @@ test('a send first seen away from its conversation shows its toast, as a new mes
   expect(toastFor(later, 'another-thread', true, at(1))).toBe('show');
 });
 
+test('a message pressed before it was ever saved is on its way, and its draft joins it once saved', () => {
+  const unsaved = press([], { ...pressedWith(), draft: undefined });
+  expect(leavingIn(unsaved, thread, [parent])).toEqual([
+    { leaving: unsaved[0]!, preview: 'Thursday works.' },
+  ]);
+  expect(standingOfLeaving(unsaved[0]!, at(1))).toEqual({ is: 'counting', seconds: 9 });
+  expect(draftsLeaving(unsaved)).toEqual([]);
+  expect(observe(unsaved, [outgoing()], at(0.5), closesFor)[0]).not.toHaveProperty('seen');
+
+  const saved = named(unsaved, 'press', draft);
+  expect(draftsLeaving(saved)).toEqual([draft]);
+  expect(observe(saved, [outgoing()], at(1), closesFor)).toEqual([
+    { ...saved[0]!, seen: followed(outgoing()) },
+  ]);
+});
+
+test('a message saved again on its way keeps both drafts out, and is the send of the last', () => {
+  const resaved = { ...draft, uid: 43 };
+  const all = named(named(pressed, 'press', resaved), 'press', resaved);
+  expect(draftsLeaving(all)).toEqual([draft, resaved]);
+  expect(leavingIn(all, thread, [parent, indexed])).toHaveLength(1);
+  // A send that failed with the draft it replaced is another send, which this press doesn't take.
+  const old = submitted(begin(outgoing()), { error: '554 refused', passing: false }, iso(11));
+  const seen = observe(all, [old], at(11), closesFor);
+  expect(seen[0]).toEqual(all[0]);
+  expect(seen[1]).toMatchObject({ id: 'one', drafts: [draft], seen: followed(old) });
+  const sent = { ...outgoing(), id: 'two', draft: resaved };
+  expect(observe(all, [sent], at(1), closesFor)).toEqual([{ ...all[0]!, seen: followed(sent) }]);
+});
+
 function pressedWith(): Parameters<typeof press>[1] {
-  return { draft, pressedIn: thread, written: 'Thursday works.', pressedAt: at(0), at: undefined };
+  return {
+    id: 'press',
+    draft,
+    pressedIn: thread,
+    written: 'Thursday works.',
+    to: [{ name: 'Mina Okafor', email: 'mina@example.com' }],
+    pressedAt: at(0),
+    at: undefined,
+  };
 }
 
 function message(

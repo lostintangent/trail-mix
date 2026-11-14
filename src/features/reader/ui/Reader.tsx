@@ -219,7 +219,7 @@ const Conversation = memo(function Conversation({
         ),
       )}
       {leavingIn(leaving, newest.conversation, conversation).map((shown) => (
-        <OnItsWay key={refKey(shown.leaving.draft)} shown={shown} />
+        <OnItsWay key={shown.leaving.id} shown={shown} />
       ))}
     </div>
   );

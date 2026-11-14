@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { ConversationId, MessageRef, Outgoing } from '../../mail/core/index.ts';
+import type { Address, ConversationId, MessageRef, Outgoing } from '../../mail/core/index.ts';
 import { outboxQuery } from '../../mailroom/client/index.ts';
 import {
   draftsLeaving,
   expire,
   forget,
+  named as nameDraft,
   nextExpiry,
   observe,
   press,
@@ -53,40 +54,50 @@ export function useLeaving() {
     return () => clearTimeout(timer);
   }, [all]);
 
+  /** A press of Send, with the draft its message was last saved as, if it has been. */
   const pressed = useCallback(
     (
-      draft: MessageRef,
+      id: string,
       sent: {
+        draft: MessageRef | undefined;
         in: ConversationId | undefined;
         written: string;
+        to: readonly Address[];
         at: string | undefined;
         pressedAt: number;
       },
     ) => {
-      const { pressedAt } = sent;
       setHeld((was) => ({
         ...was,
         all: press(was.all, {
-          draft,
+          id,
+          draft: sent.draft,
           pressedIn: sent.in,
           written: sent.written,
-          pressedAt,
+          to: sent.to,
+          pressedAt: sent.pressedAt,
           at: sent.at,
         }),
       }));
     },
     [],
   );
-  /** Stops following a send, as when the Mailroom refused it or this device took it back. */
+  /** A press's message, saved again on its way to the Mailroom. */
+  const named = useCallback(
+    (id: string, draft: MessageRef) =>
+      setHeld((was) => ({ ...was, all: nameDraft(was.all, id, draft) })),
+    [],
+  );
+  /** Stops following a press, as when its send failed or this device took it back. */
   const forgotten = useCallback(
-    (draft: MessageRef) => setHeld((was) => ({ ...was, all: forget(was.all, draft) })),
+    (id: string) => setHeld((was) => ({ ...was, all: forget(was.all, id) })),
     [],
   );
   const drafts = useMemo(() => draftsLeaving(all), [all]);
-  return { all, drafts, pressed, forgotten };
+  return { all, drafts, pressed, named, forgotten };
 }
 
-/** The sends this device follows, the drafts they hold, and how a press or a refusal moves them. */
+/** The sends this device follows, the drafts they hold, and how a press, a save or a failure moves them. */
 export type LeavingSends = ReturnType<typeof useLeaving>;
 
 /**

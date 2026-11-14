@@ -5,4 +5,5 @@ export { Composer, preloadComposer } from './lazy.ts';
 export { holdKeys, releaseKeys, useIsReplyOnItsWay } from './heldKeys.ts';
 export { ComposerSkeleton, isDocked } from './sheet.tsx';
 export type { Compose, ComposerProps, Sender } from './Composer.tsx';
+export type { Drafting } from './drafting.ts';
 export type { Writing } from '../core/session.ts';

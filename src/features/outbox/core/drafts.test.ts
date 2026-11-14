@@ -8,7 +8,7 @@ import {
   notePeaks,
   type Peak,
 } from './drafts.ts';
-import { forget, observe, press, type Leaving } from './leaving.ts';
+import { forget, named, observe, press, type Leaving } from './leaving.ts';
 import { begin, schedule, submitted } from './outbox.ts';
 import { closesAt } from './standing.ts';
 
@@ -28,11 +28,14 @@ const outgoing = (of: MessageRef = draft, id = 'one'): Outgoing => ({
   ),
   conversation: thread,
 });
-const pressing = (of: MessageRef = draft, all: readonly Leaving[] = []) =>
+/** A press of Send, of a draft, or of a message never saved, for `null`. */
+const pressing = (of: MessageRef | null = draft, all: readonly Leaving[] = []) =>
   press(all, {
-    draft: of,
+    id: `press ${of?.uid ?? 'unsaved'}`,
+    draft: of ?? undefined,
     pressedIn: thread,
     written: 'Thursday works.',
+    to: [],
     pressedAt: at(0),
     at: undefined,
   });
@@ -125,12 +128,36 @@ test('a send that failed or was undone is a draft in the count again, and one se
   expect(count(observe(pressing(), [refused], at(11), closesAt), 3)).toBe(0);
   let all = pressing();
   expect(count(all, 4)).toBe(1);
-  all = forget(all, draft);
+  all = forget(all, 'press 42');
   expect(count(all, 3)).toBe(0);
   // Sent again at the count it fell to, it is held until the count falls from there.
   all = observe(pressing(draft, all), [outgoing()], at(12), closesAt);
   expect(count(all, 3)).toBe(1);
   all = observe(all, [], at(20), closesAt);
+  expect(count(all, 3)).toBe(1);
+  expect(count(all, 2)).toBe(0);
+});
+
+test('a message saved again on its way keeps each draft out of Drafts, and is counted once', () => {
+  const count = counting();
+  let all = named(pressing(), 'press 42', second);
+  expect([...awayFromDrafts(all, () => [draft, second])]).toEqual([thread]);
+  expect([...awayFromDrafts(all, () => [second])]).toEqual([thread]);
+  expect(leavesDrafts(all, [draft])).toBe(true);
+  expect(count(all, 3)).toBe(1);
+  all = observe(observe(all, [outgoing(second)], at(1), closesAt), [], at(12), closesAt);
+  expect(count(all, 3)).toBe(1);
+  expect(count(all, 2)).toBe(0);
+});
+
+test('a message pressed before it was ever saved is counted from the save that names its draft', () => {
+  const count = counting();
+  let all = pressing(null);
+  expect([...awayFromDrafts(all, () => undefined)]).toEqual([thread]);
+  expect(count(all, 2)).toBe(0);
+  all = named(all, 'press unsaved', draft);
+  expect(count(all, 3)).toBe(1);
+  all = observe(observe(all, [outgoing()], at(1), closesAt), [], at(12), closesAt);
   expect(count(all, 3)).toBe(1);
   expect(count(all, 2)).toBe(0);
 });

@@ -135,6 +135,22 @@ export function instantOf(value: unknown): string {
   return new Date(instant).toISOString();
 }
 
+/**
+ * An argument the browser may leave out, read by `read` when given. One left out before a later
+ * argument arrives as null, since JSON has no undefined.
+ */
+export function optional<T>(value: unknown, read: (value: unknown) => T): T | undefined {
+  return value === undefined || value === null ? undefined : read(value);
+}
+
+/** How long the device waited, in milliseconds, before asking for what the member did. */
+export function waitedOf(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) {
+    throw new TypeError('That isn’t a wait.');
+  }
+  return value;
+}
+
 /** An Outbox entry's id. */
 export function sendOf(value: unknown): string {
   if (typeof value !== 'string' || !value || value.length > 100) {

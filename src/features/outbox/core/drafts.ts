@@ -5,7 +5,7 @@ import {
   type MessageRef,
   type View,
 } from '../../mail/core/index.ts';
-import { conversationOf, isAway, type Leaving } from './leaving.ts';
+import { conversationOf, draftOf, isAway, type Leaving } from './leaving.ts';
 
 /**
  * Mail on its way stays out of Drafts, from the press of Send until its draft has gone from the
@@ -30,7 +30,7 @@ export function awayFromDrafts(
 ): ReadonlySet<ConversationId> {
   const away = all.filter(isAway);
   const conversations = new Set(away.flatMap((leaving) => conversationOf(leaving) ?? []));
-  const isOnItsWay = (draft: MessageRef) => away.some((leaving) => sameRef(leaving.draft, draft));
+  const isOnItsWay = (draft: MessageRef) => away.some((leaving) => isOf(leaving, draft));
   return new Set(
     [...conversations].filter((conversation) => (draftsIn(conversation) ?? []).every(isOnItsWay)),
   );
@@ -50,7 +50,11 @@ export const isDraftsView = (view: View, folders: readonly Folder[]): boolean =>
  * drafts: every one of them is already on its way.
  */
 export const leavesDrafts = (all: readonly Leaving[], others: readonly MessageRef[]): boolean =>
-  others.every((held) => all.some((leaving) => isAway(leaving) && sameRef(leaving.draft, held)));
+  others.every((held) => all.some((leaving) => isAway(leaving) && isOf(leaving, held)));
+
+/** Whether a draft is one a send's message was saved as since its press. */
+const isOf = (leaving: Leaving, draft: MessageRef) =>
+  leaving.drafts.some((each) => sameRef(each, draft));
 
 /** The most a send's Drafts folder has counted since the send began. */
 export type Peak = { draft: MessageRef; count: number };
@@ -58,16 +62,18 @@ export type Peak = { draft: MessageRef; count: number };
 /**
  * What a device has seen of each send's Drafts folder, given the folders' counts now. `countOf`
  * gives the count of a draft's folder, if it is a Drafts folder the device knows. A send no longer
- * followed is forgotten, so one sent again starts from the count it begins with.
+ * followed is forgotten, so one sent again starts from the count it begins with. A send is followed
+ * by the draft it sends, from when its message was last saved.
  */
 export function notePeaks(
   peaks: readonly Peak[],
   all: readonly Leaving[],
   countOf: (draft: MessageRef) => number | undefined,
 ): readonly Peak[] {
-  const noted = all.flatMap(({ draft }): Peak[] => {
-    const count = countOf(draft);
-    if (count === undefined) return [];
+  const noted = all.flatMap((leaving): Peak[] => {
+    const draft = draftOf(leaving);
+    const count = draft && countOf(draft);
+    if (!draft || count === undefined) return [];
     const was = peaks.find((peak) => sameRef(peak.draft, draft))?.count ?? count;
     return [{ draft, count: Math.max(was, count) }];
   });
@@ -81,18 +87,23 @@ export function notePeaks(
 
 /**
  * How many drafts on their way the Drafts folders' counts still hold. A send the Outbox holds has
- * its draft there. Of the sends gone from it, a folder holds as many as its count has not yet
- * fallen from the most it counted since the first of them began.
+ * its draft there, and so does a press from when its message was last saved, one draft however
+ * many it was saved as, since each save replaced the one before. Of the sends gone from the Outbox,
+ * a folder holds as many as its count has not yet fallen from the most it counted since the first
+ * of them began.
  */
 export function draftsStillCounted(
   all: readonly Leaving[],
   peaks: readonly Peak[],
   countOf: (draft: MessageRef) => number | undefined,
 ): number {
-  const away = all.filter((leaving) => isAway(leaving) && countOf(leaving.draft) !== undefined);
-  const held = away.filter(({ seen }) => seen?.goneAt === undefined).length;
+  const away = all.flatMap((leaving) => {
+    const draft = draftOf(leaving);
+    return isAway(leaving) && draft && countOf(draft) !== undefined ? [{ leaving, draft }] : [];
+  });
+  const held = away.filter(({ leaving }) => leaving.seen?.goneAt === undefined).length;
   const gone = Map.groupBy(
-    away.filter(({ seen }) => seen?.goneAt !== undefined),
+    away.filter(({ leaving }) => leaving.seen?.goneAt !== undefined),
     ({ draft }) => JSON.stringify([draft.account, draft.path]),
   );
   return [...gone.values()].reduce((counted, sends) => {

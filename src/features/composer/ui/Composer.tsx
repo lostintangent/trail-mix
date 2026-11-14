@@ -11,7 +11,7 @@ import {
   typographyVars,
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useEditorState, type Editor as TiptapEditor } from '@tiptap/react';
 import {
   Bold,
@@ -53,6 +53,7 @@ import {
 } from '../core/session.ts';
 import { Editor, type EditorProps } from './Editor.tsx';
 import { ComposerSkeleton, isDocked, Over, sheetStyles } from './sheet.tsx';
+import { startDrafting, type Drafting } from './drafting.ts';
 import { useAutosave, type SaveState } from './useAutosave.ts';
 
 /**
@@ -63,7 +64,7 @@ export type Compose =
   | { as: 'new'; account: Account }
   | { as: 'reply'; to: Message; all: boolean }
   | { as: 'draft'; draft: Message; conversation: readonly Message[] }
-  | { as: 'resumed'; writing: Writing; draft: MessageRef; isDocked: boolean };
+  | { as: 'resumed'; drafting: Drafting; isDocked: boolean };
 
 /** How the workbench's Send reaches the open composer: a time to send at, or now. */
 export type Sender = { current: ((at?: string) => void) | undefined };
@@ -77,10 +78,10 @@ export type ComposerProps = {
    */
   onDraft?: (saved: MessageRef, replaced: MessageRef | undefined) => void;
   /**
-   * Sends the draft once everything written is saved, with what was written, which comes back
-   * if the send is undone. Then the composer closes.
+   * Sends the message, with what was written, and the composer closes at once. Its last save
+   * finishes behind it, and the message comes back if the send is undone.
    */
-  onSend: (draft: MessageRef, at: string | undefined, writing: Writing) => void;
+  onSend: (drafting: Drafting, at: string | undefined, writing: Writing) => void;
   /** Filled with the composer's Send while it is open, for the registry's Send and its keys. */
   sender: Sender;
   /** Whether what's written can be sent now, which it can once it is to someone. */
@@ -150,7 +151,8 @@ export function Composer({ compose, ...props }: ComposerProps) {
           ? { html: body.html }
           : { markdown: start.markdown }
       }
-      draft={compose.as === 'draft' || compose.as === 'resumed' ? refOf(compose.draft) : undefined}
+      draft={compose.as === 'draft' ? refOf(compose.draft) : undefined}
+      resumed={compose.as === 'resumed' ? compose.drafting : undefined}
       recipients={recipients}
       isNew={compose.as === 'new' || !start.inReplyTo}
       // A draft that answers mail the index doesn't hold stands alone, but is a reply all the same.
@@ -177,7 +179,7 @@ function startOf(
     case 'draft':
       return body ? reopened(compose.draft, body, compose.conversation) : undefined;
     case 'resumed':
-      return compose.writing;
+      return compose.drafting.writing;
   }
 }
 
@@ -185,6 +187,7 @@ function Writer({
   start,
   from,
   draft,
+  resumed,
   recipients,
   isNew,
   isReply,
@@ -200,6 +203,8 @@ function Writer({
   start: Writing;
   from: EditorProps['start'];
   draft: MessageRef | undefined;
+  /** The message a send of it was undone for, still being saved as it was. */
+  resumed: Drafting | undefined;
   /** Whom a reply goes to once the parent's body says, which waits on the member's own choice. */
   recipients?: Pick<Writing, 'to' | 'cc'> | undefined;
   /** Whether it stands alone, filling the reader with its Subject, rather than under its parent. */
@@ -218,17 +223,20 @@ function Writer({
   const [editor, setEditor] = useState<TiptapEditor>();
   const fileUrl = useFileUrls();
   const id = useId();
+  const queryClient = useQueryClient();
+  const [drafting] = useState(
+    () => resumed ?? startDrafting(queryClient, { draft, writing: start }),
+  );
   const autosave = useAutosave({
+    drafting,
     writing,
     edits,
-    draft,
-    onSaved: (saved, replaced, named) => {
+    onDraft: (saved, replaced) => onDraft?.(saved, replaced),
+    onNamed: (named) =>
       setWriting((was) => ({
         ...was,
         attachments: was.attachments.map((attached) => named.get(attached) ?? attached),
-      }));
-      onDraft?.(saved, replaced);
-    },
+      })),
   });
 
   const edit = (change: (was: Writing) => Partial<Writing>) => {
@@ -273,30 +281,24 @@ function Writer({
     if (!found) return undefined;
     return 'file' in found ? fileUrl(found.file) : partUrl(found.in, found.id);
   };
-  // Send saves what's left to save, then hands the draft over and closes. A second press while the
-  // first is saving does nothing.
-  const isSending = useRef(false);
+  // Send hands the message over and closes at once, as its last save finishes behind it. A second
+  // press before it closes does nothing.
+  const isSent = useRef(false);
   const isSendable = writing.to.length + writing.cc.length + writing.bcc.length > 0;
-  const send = async (at?: string) => {
-    if (isSending.current || !isSendable) return;
-    isSending.current = true;
-    try {
-      const saved = await autosave.settle();
-      onSend(saved, at, { ...writing });
-      onClose();
-    } catch {
-      // The status says the save failed, and the save is tried again.
-    } finally {
-      isSending.current = false;
-    }
+  const send = (at?: string) => {
+    if (isSent.current || !isSendable) return;
+    isSent.current = true;
+    autosave.flush();
+    onSend(drafting, at, { ...writing });
+    onClose();
   };
   useLayoutEffect(() => {
-    sender.current = (at) => void send(at);
+    sender.current = send;
   });
   useEffect(() => () => void (sender.current = undefined), [sender]);
   useEffect(() => onSendable(isSendable), [isSendable, onSendable]);
   const discard = () => {
-    void autosave.discard();
+    void drafting.discard();
     onClose();
   };
   const account = accounts.find((each) => each.id === writing.account);

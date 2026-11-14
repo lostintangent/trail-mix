@@ -1,11 +1,11 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useCommands } from '../../commands/index.ts';
-import type { Outgoing } from '../../mail/core/index.ts';
 import type { Leaving } from '../core/leaving.ts';
 import { formatAhead } from '../core/later.ts';
 import { isUndoable, type Standing } from '../core/standing.ts';
-import { isAsked, takeBack, useAskedVersion } from './asked.ts';
+import { isAsked, useAskedVersion } from './asked.ts';
+import { takeBack, undo as undoPress } from './undo.ts';
 import { offerUndo } from './undoable.ts';
 import { useLeavingStanding } from './useLeaving.ts';
 
@@ -24,49 +24,45 @@ export type LeavingLine = {
 /**
  * A send followed to the end of its conversation, as its line there tells it while the member is
  * on that conversation: its countdown with Undo, the time it goes, that it's sending or went, or
- * why it didn't with the way to the Outbox. Undo pressed before the Mailroom has the send takes it
- * back once it does, and Undo's key reaches a send this device asked for while it counts.
+ * why it didn't with the way to the Outbox. Undo pressed before the Mailroom has the send stops it,
+ * or takes it back once the Mailroom does, and Undo's key reaches a send this device asked for
+ * while it counts.
  */
 export function useLeavingLine(leaving: Leaving): LeavingLine {
   const queryClient = useQueryClient();
   const standing = useLeavingStanding(leaving);
-  const [undo, setUndo] = useState<'idle' | 'wanted' | 'asking' | { refused: string }>('idle');
+  const [undo, setUndo] = useState<'idle' | 'asking' | { refused: string }>('idle');
   const outgoing = leaving.seen?.last;
 
-  const ask = async (outgoing: Outgoing) => {
-    setUndo('asking');
-    const refused = await takeBack(queryClient, outgoing);
-    if (refused !== undefined) setUndo({ refused });
-  };
-  const askOnceKnown = useEffectEvent((outgoing: Outgoing) => void ask(outgoing));
-  useEffect(() => {
-    if (undo === 'wanted' && outgoing) askOnceKnown(outgoing);
-  }, [undo, outgoing]);
-  const press = () => {
+  // A press of this device's that the Mailroom doesn't have yet stops, or is taken back once it
+  // does.
+  const press = async () => {
     if (undo !== 'idle') return;
-    if (outgoing) void ask(outgoing);
-    else setUndo('wanted');
+    setUndo('asking');
+    const refused = outgoing
+      ? await takeBack(queryClient, outgoing)
+      : await undoPress(queryClient, leaving.id);
+    if (refused !== undefined) setUndo({ refused });
   };
 
   useAskedVersion();
-  const isMine = outgoing === undefined || isAsked(outgoing.id);
+  const isMine = isAsked(leaving.id);
   const canTakeBack = isUndoable(standing) && undo === 'idle';
   const latestPress = useRef(press);
   useLayoutEffect(() => {
     latestPress.current = press;
   });
-  const id = outgoing?.id ?? '';
   useEffect(() => {
     if (!canTakeBack || !isMine) return;
-    return offerUndo({ id, takeBack: () => latestPress.current() });
-  }, [canTakeBack, isMine, id]);
+    return offerUndo({ id: leaving.id, takeBack: () => void latestPress.current() });
+  }, [canTakeBack, isMine, leaving.id]);
 
   const goToOutbox = useCommands().find((command) => command.id === 'go.outbox');
   const refused = typeof undo === 'object' ? undo.refused : undefined;
   const { said, reason: why } = saidOf(standing);
   const reason = [refused, why].filter(Boolean).join(' ') || undefined;
   const action: LeavingLine['action'] = isUndoable(standing)
-    ? { label: 'Undo', run: press, isBusy: undo === 'wanted' || undo === 'asking' }
+    ? { label: 'Undo', run: () => void press(), isBusy: undo === 'asking' }
     : goToOutbox && (standing.is === 'failed' || standing.is === 'retrying')
       ? { label: 'Open Outbox', run: () => void goToOutbox.run(), isBusy: false }
       : undefined;

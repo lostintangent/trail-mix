@@ -70,16 +70,20 @@ export const HOST_FILING_SECONDS = 120;
 const FIRST_LOOK_SECONDS = 2;
 
 /**
- * A draft scheduled to go when the undo window that opens at `now` closes, or at `at` if that is
- * later, for a send scheduled ahead.
+ * A draft scheduled at `now` to go when the undo window closes, or at `at` if that is later, for a
+ * send scheduled ahead. The window opens at `opened`, when the member pressed Send, which is before
+ * `now` when the draft's last save kept the device from asking at once. One that has closed by now
+ * sends now.
  */
 export function schedule(
   entry: Pick<Outgoing, 'id' | 'draft' | 'messageId' | 'to' | 'subject'>,
   now: string,
   at?: string,
+  opened: string = now,
 ): Outgoing {
-  const undone = Date.parse(now) + UNDO_SECONDS * 1000;
-  const sendAt = new Date(Math.max(undone, at === undefined ? 0 : Date.parse(at))).toISOString();
+  const undone = Date.parse(opened) + UNDO_SECONDS * 1000;
+  const later = at === undefined ? 0 : Date.parse(at);
+  const sendAt = new Date(Math.max(Date.parse(now), undone, later)).toISOString();
   return { ...entry, sendAt, state: 'waiting', attempts: 0 };
 }
 

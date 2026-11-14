@@ -4,15 +4,11 @@ import { reasonOf } from '../../../shared/reasons.ts';
 import { toast } from '../../../shared/toasts.tsx';
 import type { MessageRef, Outgoing } from '../../mail/core/index.ts';
 import { mailroom, outboxQuery } from '../../mailroom/client/index.ts';
-import {
-  briefly,
-  closesAfterPress,
-  closesAt,
-  standingOfFollowed,
-  type Followed,
-} from '../core/standing.ts';
-import { rememberAsked } from './asked.ts';
+import type { Leaving } from '../core/leaving.ts';
+import { briefly, type Standing } from '../core/standing.ts';
+import { handed } from './asked.ts';
 import LeavingToast, { said } from './LeavingToast.tsx';
+import type { Press } from './useSend.ts';
 
 /**
  * What the browser does with the Outbox, loaded when it's first wanted rather than with the first
@@ -20,38 +16,39 @@ import LeavingToast, { said } from './LeavingToast.tsx';
  * toast and leaves the Outbox as the Mailroom has it.
  */
 
-export type SendOptions = {
-  /** When to send, as an instant. A time inside the undo window sends when the window closes. */
-  at?: string;
-  /** Hands back the draft once Undo has taken the send back, as the composer reopens it. */
-  onUndone?: (draft: MessageRef) => void;
-  /** When the member pressed Send, which the undo window counts from. Now, if not given. */
-  pressedAt?: number;
-};
-
 /**
- * Schedules a saved draft. Once the Mailroom has the send, the Outbox shows it, and this device
- * follows it as one it asked for: on its line in its conversation, and in a toast while the member
- * is elsewhere.
+ * Hands a press to the Mailroom once its message's last save is done, asking for the undo window
+ * to count from the press. Once the Mailroom has the send, the Outbox shows it, and this device
+ * follows it as one it asked for. A save that fails, or a send the Mailroom refuses, says why to
+ * the press. Undo stops it while it saves.
  */
-export async function sendDraft(
+export async function handOff(queryClient: QueryClient, press: Press, signal: AbortSignal) {
+  let draft: MessageRef;
+  try {
+    draft = await press.saved(signal);
+  } catch (error) {
+    if (!signal.aborted) fail(press, error);
+    return;
+  }
+  if (signal.aborted) return;
+  const answer = ask(queryClient, press, draft);
+  handed(press.id, { is: 'asking', answer });
+  await answer;
+}
+
+async function ask(
   queryClient: QueryClient,
+  press: Press,
   draft: MessageRef,
-  { at, onUndone, pressedAt }: SendOptions = {},
 ): Promise<Outgoing | undefined> {
-  const pressed = pressedAt ?? Date.now();
   let outgoing: Outgoing;
   try {
-    outgoing = await mailroom.send(draft, at);
+    outgoing = await mailroom.send(draft, press.at, Math.max(0, Date.now() - press.pressedAt));
   } catch (error) {
-    void toast({ type: 'error', body: `Couldn’t send. ${reasonOf(error)}` });
+    fail(press, error);
     return undefined;
   }
-  const isLater = at !== undefined && Date.parse(at) > closesAfterPress(pressed);
-  rememberAsked(outgoing.id, {
-    closes: isLater ? closesAt(outgoing) : closesAfterPress(pressed),
-    ...(onUndone && { onUndone }),
-  });
+  handed(press.id, { is: 'asked', send: outgoing });
   // A snapshot asked for before the Mailroom had the send would take it out of the Outbox again.
   await queryClient.cancelQueries({ queryKey: outboxQuery.queryKey });
   queryClient.setQueryData(outboxQuery.queryKey, (held = []) => [
@@ -61,20 +58,25 @@ export async function sendDraft(
   return outgoing;
 }
 
+function fail(press: Press, error: unknown) {
+  handed(press.id, { is: 'failed' });
+  press.onFailed(reasonOf(error));
+}
+
 /**
- * The toasts following sends this device asked for, by send. One put away, as the member comes to
- * the send's conversation, can show again. One that ended, once it had nothing more to say or the
- * member dismissed it, never does.
+ * The toasts following the sends this device asked for, by press. One put away, as the member comes
+ * to the send's conversation, can show again. One that ended, once it had nothing more to say or
+ * the member dismissed it, never does.
  */
 const toasts = new Map<string, { isShown: boolean; hasEnded: boolean; dismiss?: () => void }>();
 
 /**
- * Shows the toast that follows a send, as it stands now: a countdown with Undo through the undo
- * window, or the time it goes, then what came of it. A send whose toast shows already, or ended,
- * shows nothing more.
+ * Shows the toast that follows a send, as it stands now: from the press, a countdown with Undo
+ * through the undo window, or the time it goes, then what came of it. A send whose toast shows
+ * already, or ended, shows nothing more.
  */
-export function showLeavingToast(seen: Followed, closes: number) {
-  const { id } = seen.last;
+export function showLeavingToast(leaving: Leaving, standing: Standing) {
+  const { id, seen, closes } = leaving;
   const was = toasts.get(id);
   if (was?.isShown || was?.hasEnded) return;
   const following: { isShown: boolean; hasEnded: boolean; dismiss?: () => void } = {
@@ -82,8 +84,8 @@ export function showLeavingToast(seen: Followed, closes: number) {
     hasEnded: false,
   };
   toasts.set(id, following);
-  const standing = standingOfFollowed(seen, closes, Date.now(), false);
-  const who = briefly(seen.last.to);
+  const to = seen?.last.to ?? leaving.to ?? [];
+  const who = briefly(to);
   void toast({
     body:
       standing.is === 'counting'
@@ -91,7 +93,7 @@ export function showLeavingToast(seen: Followed, closes: number) {
         : said(standing, who).text,
     render: (dismiss) => (
       <Suspense>
-        <LeavingToast seen={seen} closes={closes} dismiss={dismiss} />
+        <LeavingToast id={id} to={to} seen={seen} closes={closes} dismiss={dismiss} />
       </Suspense>
     ),
     // However it goes but put away, it has ended.

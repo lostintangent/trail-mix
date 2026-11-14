@@ -4,7 +4,7 @@ export { useOutboxCommands } from './ui/commands.ts';
 export { sendCommands } from './ui/sendCommands.ts';
 export { useSendCommands } from './ui/useSendCommands.ts';
 export { OutboxList, SendActions, preloadSendActions } from './ui/lazy.ts';
-export { useSend, type Send, type SendOptions } from './ui/useSend.ts';
+export { useSend, type Press, type Send } from './ui/useSend.ts';
 export { useLeaving, type LeavingSends } from './ui/useLeaving.ts';
 export { useLeavingLine, type LeavingLine } from './ui/useLeavingLine.ts';
 export { useLeavingToasts } from './ui/useLeavingToasts.ts';

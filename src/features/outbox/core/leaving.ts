@@ -1,5 +1,6 @@
 import {
   sameRef,
+  type Address,
   type ConversationId,
   type Message,
   type MessageRef,
@@ -19,13 +20,21 @@ import {
 /**
  * The sends a device follows to the ends of their conversations, where each lies as a reply on its
  * way until the server's copy takes its place. A send this device asked for is followed from the
- * press, before the Mailroom has it, and one asked for elsewhere from the first snapshot of the
- * Outbox that holds it. Each is followed through the Outbox's snapshots, so one gone from the
- * Outbox keeps its place if it went, and leaves at once if it was undone or given up. One that
- * failed stays, saying why. Its draft stays out of the conversation all the while.
+ * press, before its last save has made the draft it sends, and one asked for elsewhere from the
+ * first snapshot of the Outbox that holds it. Each is followed through the Outbox's snapshots, so
+ * one gone from the Outbox keeps its place if it went, and leaves at once if it was undone or given
+ * up. One that failed stays, saying why. Its drafts stay out of the conversation all the while.
  */
 export type Leaving = {
-  draft: MessageRef;
+  /** The press, or for a send asked for elsewhere, its id in the Outbox. */
+  id: string;
+  /**
+   * Every draft the message has been saved as since the press, the last the one it sends, which
+   * replaced the others. None, until a message never saved has been.
+   */
+  drafts: readonly MessageRef[];
+  /** Whom the press sent it to, until the Outbox says. */
+  to?: readonly Address[];
   /** The conversation a reply was pressed in. One asked for elsewhere is where the Outbox says. */
   pressedIn?: ConversationId;
   /** What the press sent, as a conversation's line reads it, until the index has the draft. */
@@ -43,42 +52,69 @@ export type Leaving = {
 export const GONE_MS = 30_000;
 
 /**
- * A press of Send, for `at` if later than the undo window: the reply is on its way at once. A press
- * of the same draft replaces the one before.
+ * A press of Send, for `at` if later than the undo window: the reply is on its way at once, from
+ * the draft the message was last saved as, if it has been. A press of the same draft replaces the
+ * one before.
  */
 export function press(
   all: readonly Leaving[],
   {
+    id,
     draft,
     pressedIn,
     written,
+    to,
     pressedAt,
     at,
   }: {
-    draft: MessageRef;
+    id: string;
+    draft: MessageRef | undefined;
     pressedIn: ConversationId | undefined;
     /** The Markdown the member wrote. */
     written: string;
+    to: readonly Address[];
     pressedAt: number;
     at: string | undefined;
   },
 ): readonly Leaving[] {
-  const window = closesAfterPress(pressedAt);
-  const closes = at === undefined ? window : Math.max(window, Date.parse(at));
+  const others = all.filter(
+    (leaving) => leaving.id !== id && !(draft && leaving.drafts.some((was) => sameRef(was, draft))),
+  );
   return [
-    ...forget(all, draft),
-    { draft, ...(pressedIn && { pressedIn }), preview: previewOf(written), closes },
+    ...others,
+    {
+      id,
+      drafts: draft ? [draft] : [],
+      to,
+      ...(pressedIn && { pressedIn }),
+      preview: previewOf(written),
+      closes: closesAfterPress(pressedAt, at),
+    },
   ];
 }
 
+/** A press's message, saved again as `draft` on its way to the Mailroom, which replaced the last. */
+export function named(all: readonly Leaving[], id: string, draft: MessageRef): readonly Leaving[] {
+  return all.map((leaving) => {
+    const last = draftOf(leaving);
+    return leaving.id !== id || (last && sameRef(last, draft))
+      ? leaving
+      : { ...leaving, drafts: [...leaving.drafts, draft] };
+  });
+}
+
 /** A send this device no longer follows: the Mailroom refused it, or this device took it back. */
-export const forget = (all: readonly Leaving[], draft: MessageRef): readonly Leaving[] =>
-  all.filter((leaving) => !sameRef(leaving.draft, draft));
+export const forget = (all: readonly Leaving[], id: string): readonly Leaving[] =>
+  all.filter((leaving) => leaving.id !== id);
+
+/** The draft a send sends: the one its message was last saved as. */
+export const draftOf = (leaving: Leaving): MessageRef | undefined => leaving.drafts.at(-1);
 
 /**
  * What a snapshot of the Outbox, taken by `at`, shows. Each send it holds is followed, and each
  * followed one it lacks is seen gone. `closesFor` says when a send's window closes on this device.
- * A press stays as it was until the Outbox holds its send, since a snapshot can be older than it.
+ * A press stays as it was until the Outbox holds its send, since a snapshot can be older than it. A
+ * send is known by the draft it sends, so one of a draft its message replaced is another's.
  */
 export function observe(
   all: readonly Leaving[],
@@ -86,16 +122,24 @@ export function observe(
   at: number,
   closesFor: (outgoing: Outgoing) => number,
 ): readonly Leaving[] {
-  const entryOf = (draft: MessageRef) => outbox.find((held) => sameRef(held.draft, draft));
+  const entryOf = (leaving: Leaving) => {
+    const draft = draftOf(leaving);
+    return draft && outbox.find((held) => sameRef(held.draft, draft));
+  };
   const seen = all.map((leaving): Leaving => {
-    const entry = entryOf(leaving.draft);
+    const entry = entryOf(leaving);
     const closes = entry ? closesFor(entry) : leaving.closes;
     if (leaving.seen) return { ...leaving, closes, seen: follow(leaving.seen, entry, at) };
     return entry ? { ...leaving, closes, seen: followed(entry) } : leaving;
   });
   const added = outbox
-    .filter((held) => !all.some((leaving) => sameRef(leaving.draft, held.draft)))
-    .map((held): Leaving => ({ draft: held.draft, closes: closesFor(held), seen: followed(held) }));
+    .filter((held) => !all.some((leaving) => entryOf(leaving) === held))
+    .map((held): Leaving => ({
+      id: held.id,
+      drafts: [held.draft],
+      closes: closesFor(held),
+      seen: followed(held),
+    }));
   return expire([...seen, ...added], at);
 }
 
@@ -120,7 +164,7 @@ export function nextExpiry(all: readonly Leaving[]): number | undefined {
  * of its conversation as its send instead: on its way, or saying why it didn't go.
  */
 export const draftsLeaving = (all: readonly Leaving[]): MessageRef[] =>
-  all.map(({ draft }) => draft);
+  all.flatMap(({ drafts }) => drafts);
 
 /**
  * Whether a send is away from its draft, which Drafts leaves out: on its way, or gone, but not
@@ -145,7 +189,9 @@ export function leavingIn(
 ): Shown[] {
   return all
     .flatMap((leaving): Shown[] => {
-      const draft = messages.find((message) => sameRef(message, leaving.draft));
+      const draft = messages.find((message) =>
+        leaving.drafts.some((each) => sameRef(message, each)),
+      );
       if (conversationOf(leaving) !== conversation) return [];
       const messageId = leaving.seen?.last.messageId ?? draft?.messageId;
       const isCopied = messages.some(

@@ -8,16 +8,17 @@ import {
   type MessageRef,
 } from '../../mail/core/index.ts';
 import { conversationQuery } from '../../mailroom/client/index.ts';
-import { holdKeys, releaseKeys, type Compose, type Writing } from '../../composer/ui/index.ts';
+import { holdKeys, releaseKeys, type Compose, type Drafting } from '../../composer/ui/index.ts';
 
 /**
  * What the member is writing, if anything, and how writing starts and ends. A composer belongs to
  * the conversation open when it started, and opening another conversation closes it, which saves
  * what it holds. The drafts it has saved stay out of the reader: every draft that comes to its
  * conversation while the composer is open, which a hint can bring before the save that made it has
- * answered, and every one a later save replaced, which the server has dropped. The reader asks
- * which to leave out of the messages it is about to show, so it never draws one that came in the
- * same snapshot as the conversation.
+ * answered, and every one a later save replaced, which the server has dropped. Send closes the
+ * composer at once, and its drafts stay out the same way until its message's last save is done. The
+ * reader asks which to leave out of the messages it is about to show, so it never draws one that
+ * came in the same snapshot as the conversation.
  */
 export function useComposing(selected: ConversationId | undefined, leaving: readonly MessageRef[]) {
   const queryClient = useQueryClient();
@@ -32,6 +33,8 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
   }>();
   const [editing, setEditing] = useState<MessageRef>();
   const [replaced, setReplaced] = useState<readonly MessageRef[]>([]);
+  // The composers Send closed, by press, whose last saves are still on their way.
+  const [sending, setSending] = useState<ReadonlyMap<string, Written>>(new Map());
   const selectedNow = useRef(selected);
   useLayoutEffect(() => {
     selectedNow.current = selected;
@@ -46,7 +49,13 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
       setStarted(
         (was) => next && { compose: next, in: opened, session: (was?.session ?? 0) + 1, before },
       );
-      setEditing(next?.as === 'draft' || next?.as === 'resumed' ? next.draft : undefined);
+      setEditing(
+        next?.as === 'draft'
+          ? next.draft
+          : next?.as === 'resumed'
+            ? next.drafting.draft
+            : undefined,
+      );
       // A reply holds the keys pressed from the moment it begins until its editor takes them.
       if (next?.as === 'reply') holdKeys();
       else releaseKeys();
@@ -102,11 +111,28 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
   );
   /** Brings back what was being written when a send of it was undone. */
   const resume = useCallback(
-    (writing: Writing, draft: MessageRef, isDocked: boolean) =>
-      start({ as: 'resumed', writing, draft, isDocked }),
+    (drafting: Drafting, isDocked: boolean) => start({ as: 'resumed', drafting, isDocked }),
     [start],
   );
   const close = useCallback(() => start(undefined), [start]);
+  /** Send closed the composer, and its message's last save goes on behind it until `saved`. */
+  const sent = useCallback(
+    (id: string) => {
+      if (!started) return;
+      const written: Written = { in: started.in, before: started.before, editing };
+      setSending((was) => new Map(was).set(id, written));
+    },
+    [started, editing],
+  );
+  const saved = useCallback(
+    (id: string) =>
+      setSending((was) => {
+        const left = new Map(was);
+        left.delete(id);
+        return left;
+      }),
+    [],
+  );
   // A save can land after its composer has closed, and then only what it replaced matters.
   const noteDraft = useCallback(
     (from: Compose, saved: MessageRef, older: MessageRef | undefined) => {
@@ -118,10 +144,13 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
   // Drafts on their way stay out too, since they can't be written on until their send is undone.
   const hiding = useMemo<Hiding>(
     () => ({
-      writing: compose && started && { in: started.in, before: started.before, editing },
+      writing: [
+        ...(compose && started ? [{ in: started.in, before: started.before, editing }] : []),
+        ...sending.values(),
+      ],
       gone: [...replaced, ...leaving],
     }),
-    [compose, started, editing, replaced, leaving],
+    [compose, started, editing, sending, replaced, leaving],
   );
 
   return {
@@ -135,22 +164,26 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
     resume,
     close,
     noteDraft,
+    sent,
+    saved,
     hiding,
   };
 }
 
 /**
- * What the reader leaves out while the member writes: the composer open, if any, with the
- * conversation it started in, the drafts that conversation held then and the draft it edits, and
- * the drafts gone from every conversation.
+ * What the reader leaves out while the member writes: the composer open, if any, and each one Send
+ * closed whose last save is on its way, and the drafts gone from every conversation.
  */
 export type Hiding = {
-  writing?: {
-    in: ConversationId | undefined;
-    before: readonly MessageRef[];
-    editing: MessageRef | undefined;
-  };
+  writing: readonly Written[];
   gone: readonly MessageRef[];
+};
+
+/** A composer's message: the conversation it started in, the drafts that held then, and its draft. */
+type Written = {
+  in: ConversationId | undefined;
+  before: readonly MessageRef[];
+  editing: MessageRef | undefined;
 };
 
 /**
@@ -162,15 +195,15 @@ export function hiddenIn(
   id: ConversationId,
   conversation: readonly Message[],
 ): MessageRef[] {
-  if (!writing) return [...gone];
-  const written =
-    writing.in === id
+  const written = writing.flatMap(({ in: started, before, editing }) => [
+    ...(started === id
       ? conversation.filter(
-          (message) =>
-            message.flags.draft && !writing.before.some((draft) => sameRef(draft, message)),
+          (message) => message.flags.draft && !before.some((draft) => sameRef(draft, message)),
         )
-      : [];
-  return [...gone, ...written, ...(writing.editing ? [writing.editing] : [])];
+      : []),
+    ...(editing ? [editing] : []),
+  ]);
+  return [...gone, ...written];
 }
 
 /** A conversation's newest message that isn't a draft, which its keys answer and show. */

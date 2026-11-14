@@ -3,11 +3,14 @@ import {
   accountChangeOf,
   draftOf,
   flagsOf,
+  instantOf,
   messagesOf,
+  optional,
   refOf,
   setupOf,
   signInOf,
   viewOf,
+  waitedOf,
 } from './input.ts';
 
 // What a browser sends reaches the Mailroom only through these checks.
@@ -44,6 +47,16 @@ test('a command’s messages are refs, or a bundle’s through the instant its r
   }
   expect(() => messagesOf({ bundle, through: 'yesterday' })).toThrow(TypeError);
   expect(() => messagesOf({ bundle })).toThrow(TypeError);
+});
+
+test('an argument left out before a later one arrives as null, and reads as left out', () => {
+  // `send(draft, undefined, 4000)` reaches the Mailroom as `[draft, null, 4000]`.
+  expect(optional(null, instantOf)).toBeUndefined();
+  expect(optional(undefined, waitedOf)).toBeUndefined();
+  expect(optional(4000, waitedOf)).toBe(4000);
+  for (const wait of [-1, Number.NaN, Number.POSITIVE_INFINITY, '4000']) {
+    expect(() => optional(wait, waitedOf)).toThrow(TypeError);
+  }
 });
 
 test('a flag change names only the four flags, each on or off', () => {

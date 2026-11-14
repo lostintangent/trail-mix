@@ -10,14 +10,14 @@ test('a draft its composer saved is out of the first snapshot that holds it, bef
   const writing = { in: thread, before: [], editing: draft(8) };
   const conversation = [message(1), message(9, true)];
 
-  expect(uids(hiddenIn({ writing, gone: [] }, thread, conversation))).toContain(9);
+  expect(uids(hiddenIn({ writing: [writing], gone: [] }, thread, conversation))).toContain(9);
 });
 
 test('the drafts its conversation held as the composer started stay in sight', () => {
   const writing = { in: thread, before: [draft(5)], editing: undefined };
   const conversation = [message(1), message(5, true), message(9, true)];
 
-  expect(uids(hiddenIn({ writing, gone: [] }, thread, conversation))).toEqual([9]);
+  expect(uids(hiddenIn({ writing: [writing], gone: [] }, thread, conversation))).toEqual([9]);
 });
 
 function uids(refs: readonly MessageRef[]): number[] {

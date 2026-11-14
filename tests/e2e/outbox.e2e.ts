@@ -175,6 +175,37 @@ test('the countdown matches the time the Mailroom stored, and Undo leaves the dr
   await page.getByRole('option', { name: /Lunch Thursday/ }).waitFor();
 }, 60_000);
 
+test('a send pressed while its last save is on its way leaves when the window from the press closes', async () => {
+  const page = await open({ ...DESKTOP, colorScheme: 'dark' });
+  await openDraft(page, /Lunch Thursday/);
+  // Each save answers three seconds late, so the Mailroom hears of the send only after them.
+  await page.route('**/_serverFn/**', async (route) => {
+    const request = route.request();
+    if (request.method() !== 'POST' || !request.postData()?.includes('saveDraft')) {
+      return route.fallback();
+    }
+    const response = await route.fetch();
+    await new Promise((done) => setTimeout(done, 3_000));
+    await route.fulfill({ response });
+  });
+  // Lunch Thursday is a reply, so its body is the reply's.
+  await page.getByRole('textbox', { name: /^(Reply|Message)$/ }).click();
+  await page.keyboard.press('ControlOrMeta+End');
+  await page.keyboard.type(' See you there.');
+  const stored = storedSendAt(page);
+  const pressed = Date.now();
+  await send(page).click();
+  // It counts down from the press, before the Mailroom has heard of it.
+  await toast(page, /^Sending to Jonas in (10|9)s$/).waitFor({ timeout: 1_000 });
+  const sendAt = await stored;
+  expect(Date.now() - pressed).toBeGreaterThan(3_000);
+  expect(sendAt - pressed).toBeGreaterThan(9_500);
+  expect(sendAt - pressed).toBeLessThan(11_000);
+
+  await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
+  await toast(page, /^Undone\. Nothing was sent to Jonas\.$/).waitFor();
+}, 60_000);
+
 test('a send straight after a cold load counts down, though toasts and their theme load only then', async () => {
   const page = await (await app.context({ ...DESKTOP, colorScheme: 'dark' })).newPage();
   page.on('pageerror', (error) => errors.push(error.message));

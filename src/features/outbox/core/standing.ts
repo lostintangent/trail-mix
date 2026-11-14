@@ -23,11 +23,14 @@ export type Standing =
   | { is: 'undone' };
 
 /**
- * When a send's undo window closes, in milliseconds on this device's clock. The Mailroom's clock
- * may differ, so a device that asked for a send now counts from its press, which is no later than
- * the Mailroom's own start. A device that only reads the Outbox trusts its clock.
+ * When a send's undo window closes, in milliseconds on this device's clock, or when it is due, for
+ * a send at a later time. The Mailroom's clock may differ, so a device that asked for a send counts
+ * from its press, which is no later than the start the Mailroom counts from, since the device tells
+ * it how long ago the press was and the telling takes time. A device that only reads the Outbox
+ * trusts its clock.
  */
-export const closesAfterPress = (pressed: number) => pressed + UNDO_SECONDS * 1000;
+export const closesAfterPress = (pressed: number, at?: string) =>
+  Math.max(pressed + UNDO_SECONDS * 1000, at === undefined ? 0 : Date.parse(at));
 
 export const closesAt = (outgoing: Outgoing) => Date.parse(outgoing.sendAt);
 

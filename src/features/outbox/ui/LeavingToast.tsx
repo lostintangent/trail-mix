@@ -13,22 +13,26 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, CircleAlert, Clock, Send, Undo2, X, type LucideIcon } from 'lucide-react';
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react';
 import { tooltipOf, UNDO_COMMAND, useCommands } from '../../commands/index.ts';
+import type { Address } from '../../mail/core/index.ts';
 import { conversationQuery, foldersQuery, outboxQuery } from '../../mailroom/client/index.ts';
 import { formatAhead } from '../core/later.ts';
 import {
   briefly,
   follow,
+  followed,
   isLeaving,
   isOnItsWay,
   isUndoable,
   standingOfFollowed,
+  standingOfWait,
   type Followed,
   type Standing,
 } from '../core/standing.ts';
 import { media } from '../../../app/theme/tokens.stylex.ts';
 import { ToastRule } from '../../../shared/ToastRule.tsx';
 import { Airmail } from './Airmail.tsx';
-import { takeBack as takeBackSend } from './asked.ts';
+import { useAsked } from './asked.ts';
+import { undo as undoSend } from './undo.ts';
 import { offerUndo } from './undoable.ts';
 
 /** How long a toast stays once there is nothing left to do in it. */
@@ -46,43 +50,56 @@ const TICK_MS = 250;
 
 /**
  * The toast that follows a send from the device that asked for it, while the member is away from
- * its conversation. Through the undo window it counts down with Undo, and for a send later it says
- * when. Then it says what the Mailroom has shown: that it's sending, that it went, or why it
- * didn't, with the way to the Outbox. Airmail lies along its top while the message is leaving, and
- * runs while it's on its way. It starts from what the device has seen of the send so far.
+ * its conversation. From the press, through the undo window, it counts down with Undo, and for a
+ * send later it says when. Then it says what the Mailroom has shown: that it's sending, that it
+ * went, or why it didn't, with the way to the Outbox. Airmail lies along its top while the message
+ * is leaving, and runs while it's on its way. It starts from what the device has seen of the send
+ * so far, and goes if the hand-off fails, whose own toast says why.
  */
 export default function LeavingToast({
+  id,
+  to,
   seen: seenFirst,
   closes,
   dismiss,
 }: {
-  seen: Followed;
+  /** The press. */
+  id: string;
+  /** Whom the press sent it to. */
+  to: readonly Address[];
+  seen: Followed | undefined;
   /** When the undo window closes on this device's clock. */
   closes: number;
   dismiss: () => void;
 }) {
   const queryClient = useQueryClient();
-  const outgoing = seenFirst.last;
   const [seen, setSeen] = useState(seenFirst);
   const [undo, setUndo] = useState<'idle' | 'asking' | 'done' | { refused: string }>('idle');
   const [now, setNow] = useState(Date.now);
+  const hand = useAsked(id)?.hand;
+  const outgoing = seen?.last;
 
-  // The workbench asks after a send under way, in case a hint is lost, and the toast follows.
+  // The workbench asks after a send under way, in case a hint is lost, and the toast follows,
+  // from the first snapshot that holds the send its press asked for.
   const { data: outbox, dataUpdatedAt } = useQuery(outboxQuery);
+  const asked = hand?.is === 'asked' ? hand.send.id : undefined;
   useEffect(() => {
-    if (outbox)
-      setSeen((was) =>
-        follow(
+    if (!outbox) return;
+    setSeen((was) => {
+      if (was)
+        return follow(
           was,
-          outbox.find(({ id }) => id === outgoing.id),
+          outbox.find((held) => held.id === was.last.id),
           dataUpdatedAt,
-        ),
-      );
-  }, [outbox, dataUpdatedAt, outgoing.id]);
+        );
+      const held = outbox.find((each) => each.id === asked);
+      return held && followed(held);
+    });
+  }, [outbox, dataUpdatedAt, asked]);
 
   // Gone without a sign that it went, the send went if Sent holds its copy.
-  const isAwaitingCopy = seen.goneAt !== undefined && !seen.hasBegun;
-  const conversation = seen.last.conversation;
+  const isAwaitingCopy = seen?.goneAt !== undefined && !seen.hasBegun;
+  const conversation = seen?.last.conversation;
   const { data: messages } = useQuery({
     ...conversationQuery(conversation ?? ''),
     enabled: isAwaitingCopy && conversation !== undefined,
@@ -93,7 +110,7 @@ export default function LeavingToast({
     isAwaitingCopy &&
     (messages ?? []).some(
       (message) =>
-        message.messageId === outgoing.messageId &&
+        message.messageId === outgoing?.messageId &&
         folders?.some(
           ({ account, path, role }) =>
             role === 'sent' && account === message.account && path === message.path,
@@ -101,7 +118,11 @@ export default function LeavingToast({
     );
 
   const standing: Standing =
-    undo === 'done' ? { is: 'undone' } : standingOfFollowed(seen, closes, now, isInSent);
+    undo === 'done'
+      ? { is: 'undone' }
+      : seen
+        ? standingOfFollowed(seen, closes, now, isInSent)
+        : standingOfWait(new Date(closes).toISOString(), closes, now);
 
   useEffect(() => {
     if (standing.is !== 'counting') return;
@@ -115,10 +136,14 @@ export default function LeavingToast({
     const timer = setTimeout(leave, linger);
     return () => clearTimeout(timer);
   }, [linger]);
+  const hasFailed = hand?.is === 'failed';
+  useEffect(() => {
+    if (hasFailed) leave();
+  }, [hasFailed]);
 
   const takeBack = async () => {
     setUndo('asking');
-    const refused = await takeBackSend(queryClient, outgoing);
+    const refused = await undoSend(queryClient, id);
     setUndo(refused === undefined ? 'done' : { refused });
   };
 
@@ -130,13 +155,13 @@ export default function LeavingToast({
   const canTakeBack = isUndoable(standing) && undo === 'idle';
   useEffect(() => {
     if (!canTakeBack) return;
-    return offerUndo({ id: outgoing.id, takeBack: () => void latestTakeBack.current() });
-  }, [canTakeBack, outgoing.id]);
+    return offerUndo({ id, takeBack: () => void latestTakeBack.current() });
+  }, [canTakeBack, id]);
   const commands = useCommands();
   const goToOutbox = commands.find(({ id }) => id === 'go.outbox');
   const undoCommand = commands.find(({ id }) => id === UNDO_COMMAND);
 
-  const who = briefly(outgoing.to);
+  const who = briefly(outgoing?.to ?? to);
   const refused = typeof undo === 'object' ? undo.refused : undefined;
   const { icon, text: status } = said(standing, who);
   // A refused Undo stays said, as the send goes on to whatever it comes to.

@@ -80,6 +80,12 @@ test('a send scheduled ahead goes at its time, and never before the undo window 
   expect(schedule(entry('past'), at(0), at(-60)).sendAt).toBe(at(10 / 60));
 });
 
+test('the undo window counts from the press, when the draft’s last save held the send back', () => {
+  expect(schedule(entry('saved'), atSecond(4), undefined, atSecond(0)).sendAt).toBe(atSecond(10));
+  expect(schedule(entry('slow'), atSecond(30), undefined, atSecond(0)).sendAt).toBe(atSecond(30));
+  expect(schedule(entry('later'), atSecond(4), at(60), atSecond(0)).sendAt).toBe(at(60));
+});
+
 test('undo inside the window gives back the draft untouched', () => {
   expect(cancel(send('now', at(0.25)), at(0.2))).toBe(draft);
   expect(cancel(send('tomorrow', at(24 * 60)), at(0))).toBe(draft);

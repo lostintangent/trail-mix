@@ -1,35 +1,56 @@
-import type { QueryClient } from '@tanstack/react-query';
 import { useSyncExternalStore } from 'react';
-import { reasonOf } from '../../../shared/reasons.ts';
-import type { MessageRef, Outgoing } from '../../mail/core/index.ts';
-import { mailroom, outboxQuery } from '../../mailroom/client/index.ts';
+import type { Outgoing } from '../../mail/core/index.ts';
 import { closesAt } from '../core/standing.ts';
 
 /**
- * The sends this device asked for: when each one's undo window closes on its own clock, so its
- * line, its toast and its Outbox row count down alike, and what Undo hands its draft back to. A send
- * asked for elsewhere trusts this device's clock.
+ * The sends this device asked for, each by its press: when its undo window closes on this device's
+ * clock, so its line, its toast and its Outbox row count down alike, how its hand-off to the
+ * Mailroom is going, and what Undo brings back. A send asked for elsewhere trusts this device's
+ * clock.
  */
 export type Asked = {
   closes: number;
-  /** Hands back the draft once Undo has taken the send back, as the composer reopens it. */
-  onUndone?: (draft: MessageRef) => void;
+  hand: Hand;
+  /** Brings the message back to a composer, once Undo has stopped or taken back its send. */
+  onUndone: () => void;
+  /** Stops the hand-off before it asks the Mailroom. */
+  stop: () => void;
 };
 
-const asked = new Map<string, Asked>();
+/**
+ * How a press reaches the Mailroom: its message's last save, then the asking, then the send the
+ * Mailroom scheduled. Undo stops it while it saves, or takes back the send once it is asked.
+ */
+export type Hand =
+  | { is: 'saving' }
+  | { is: 'asking'; answer: Promise<Outgoing | undefined> }
+  | { is: 'asked'; send: Outgoing }
+  | { is: 'stopped' }
+  | { is: 'failed' };
+
+let asked: ReadonlyMap<string, Asked> = new Map();
 const listeners = new Set<() => void>();
 let version = 0;
 
-export function rememberAsked(id: string, send: Asked) {
-  asked.set(id, send);
-  version++;
-  for (const listener of listeners) listener();
+/** A press of Send, followed from the moment it's pressed, while its message's last save runs. */
+export function pressed(id: string, press: Omit<Asked, 'hand'>) {
+  change(id, { ...press, hand: { is: 'saving' } });
+}
+
+/** How a press's hand-off has gone on. */
+export function handed(id: string, hand: Hand) {
+  const was = asked.get(id);
+  if (was) change(id, { ...was, hand });
 }
 
 export const isAsked = (id: string) => asked.has(id);
 
+/** A press, as its hand-off stands now. */
+export const askedFor = (id: string) => asked.get(id);
+
+/** When a send this device asked for closes its undo window here, or else when the Mailroom says. */
 export function closesFor(outgoing: Outgoing): number {
-  return asked.get(outgoing.id)?.closes ?? closesAt(outgoing);
+  return pressOf(outgoing)?.closes ?? closesAt(outgoing);
 }
 
 const subscribe = (listener: () => void) => {
@@ -43,26 +64,27 @@ const subscribe = (listener: () => void) => {
  */
 export const useAskedVersion = () => useSyncExternalStore(subscribe, () => version);
 
-/**
- * Takes a send back, and hands its draft to whoever asked for it. Says why not if the Mailroom
- * refused: an Undo that reached it after the window closed was too late, whatever the send has
- * come to since, and anything else says the Mailroom's reason.
- */
-export async function takeBack(
-  queryClient: QueryClient,
-  outgoing: Outgoing,
-): Promise<string | undefined> {
-  try {
-    const draft = await mailroom.cancelSend(outgoing.id);
-    queryClient.setQueryData(outboxQuery.queryKey, (held) =>
-      held?.filter(({ id }) => id !== outgoing.id),
-    );
-    asked.get(outgoing.id)?.onUndone?.(draft);
-    return undefined;
-  } catch (error) {
-    void queryClient.invalidateQueries({ queryKey: outboxQuery.queryKey });
-    return Date.now() >= closesFor(outgoing)
-      ? 'Too late to undo.'
-      : `Couldn’t undo. ${reasonOf(error)}`;
-  }
+/** A press, as its hand-off goes on. */
+export const useAsked = (id: string) => useSyncExternalStore(subscribe, () => asked.get(id));
+
+/** The press that asked for a send, if this device asked for it. */
+export const pressOf = (outgoing: Outgoing) =>
+  [...asked.values()].find(({ hand }) => hand.is === 'asked' && hand.send.id === outgoing.id);
+
+function change(id: string, press: Asked) {
+  asked = new Map(asked).set(id, press);
+  version++;
+  holdPage([...asked.values()].some(({ hand }) => hand.is === 'saving' || hand.is === 'asking'));
+  for (const listener of listeners) listener();
 }
+
+/**
+ * While a press is on its way to the Mailroom, closing the page would lose it, so the browser asks
+ * first. Only then, since a page that listens for unloading can't be kept for going back to.
+ */
+function holdPage(isHeld: boolean) {
+  if (isHeld) window.addEventListener('beforeunload', ask);
+  else window.removeEventListener('beforeunload', ask);
+}
+
+const ask = (event: BeforeUnloadEvent) => event.preventDefault();

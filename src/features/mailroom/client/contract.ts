@@ -108,8 +108,11 @@ export interface Commands {
     to: FolderRef | FolderRole,
   ): Promise<{ from: MessageRef; to: MessageRef }[]>;
   saveDraft(draft: DraftInput, replaces?: MessageRef): Promise<MessageRef>;
-  /** At now plus the undo window, unless given a time. */
-  send(draft: MessageRef, at?: string): Promise<Outgoing>;
+  /**
+   * At the press of Send plus the undo window, unless given a later time. The press came `waited`
+   * milliseconds before the call, while the draft's last save finished, and is now if not given.
+   */
+  send(draft: MessageRef, at?: string, waited?: number): Promise<Outgoing>;
   /** Returns the draft, untouched. Refused once the send is due, unless it failed. */
   cancelSend(id: string): Promise<MessageRef>;
   /** A failed send, tried again now. */

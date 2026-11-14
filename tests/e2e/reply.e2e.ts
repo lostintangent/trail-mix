@@ -327,6 +327,69 @@ for (const [size, options] of Object.entries(SIZES)) {
       });
     }, 60_000);
 
+    test('Send closes a reply at once while its last save is on its way, and Undo then brings back every word in one draft', async () => {
+      const page = await inbox(size === 'desktop' ? 'dark' : 'light');
+      await open(page);
+      await composerLoaded(page);
+      const drafts = reader(page).getByRole('button', { name: /^Draft/ });
+      const before = await drafts.count();
+      // Each save answers two seconds late, and nothing asks the Mailroom to send.
+      let asked = 0;
+      let answered = 0;
+      let sends = 0;
+      await page.route('**/_serverFn/**', async (route: Route) => {
+        const request = route.request();
+        if (request.postData()?.includes('"send"')) sends++;
+        if (request.method() !== 'POST' || !request.postData()?.includes('saveDraft')) {
+          return route.fallback();
+        }
+        asked++;
+        const response = await route.fetch();
+        await new Promise((done) => setTimeout(done, 2_000));
+        await route.fulfill({ response });
+        answered++;
+      });
+      const text = 'Sent while a save was on its way, every word.';
+      await watch(page, text);
+      await page.keyboard.press('r');
+      const reply = composer(page);
+      await reply.getByRole('textbox', { name: 'Reply' }).waitFor();
+      await page.keyboard.type('Sent while a save was on its way,');
+      // The rest is typed while the first save is on its way, and sent straight after.
+      await until(() => Promise.resolve(asked > 0), 10_000);
+      await page.keyboard.type(' every word.');
+      await page.keyboard.press('ControlOrMeta+Enter');
+      await reply.waitFor({ state: 'detached', timeout: 1_000 });
+      const line = reader(page).locator('div:has(> [data-airmail])', { hasText: text });
+      await line.getByText(/^Sending in \d+s$/).waitFor({ timeout: 1_000 });
+      expect(answered).toBe(0);
+      await line.getByRole('button', { name: 'Undo', exact: true }).click();
+      const editor = composer(page).getByRole('textbox', { name: 'Reply' });
+      await editor.waitFor({ timeout: 2_000 });
+      expect(await editor.innerText()).toBe(text);
+      // Once every save has answered, leaving it keeps one draft, which says it all.
+      await until(() => Promise.resolve(answered === asked), 15_000);
+      await page.keyboard.press('Escape');
+      await composer(page).waitFor({ state: 'detached' });
+      await drafts.filter({ hasText: text }).waitFor({ timeout: 10_000 });
+      await painted(page);
+      expect({ sends, drafts: await drafts.count() }).toEqual({ sends: 0, drafts: before + 1 });
+      // No draft of it showed while it was on its way, or under its composer.
+      const sent = afterSend(await shown(page));
+      const back = sent.findIndex(({ composer }) => composer);
+      expect(sent.slice(0, back).every(({ leaving, drafts }) => leaving === 1 && !drafts)).toBe(
+        true,
+      );
+      expect(sent.slice(back).filter(({ composer, drafts }) => composer && drafts)).toEqual([]);
+      expect(sent.at(-1)).toEqual({
+        composer: false,
+        leaving: 0,
+        running: 0,
+        copies: 0,
+        drafts: 1,
+      });
+    }, 60_000);
+
     /** Writes a reply to the conversation open in `page`, and sends it. */
     async function sendReply(page: Page, text: string) {
       await page.keyboard.press('r');

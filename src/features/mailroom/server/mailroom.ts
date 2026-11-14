@@ -38,6 +38,7 @@ import {
   type Subscription,
 } from '../../notifications/core/index.ts';
 import { deliver, pushKeyOf, type PushKey } from '../../notifications/server/index.ts';
+import { UNDO_SECONDS } from '../../outbox/core/index.ts';
 import {
   DEMO_ACCOUNTS,
   DEMO_SIGNERS,
@@ -780,17 +781,22 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 
   /**
    * Schedules a draft to send when the undo window closes, or at a later time. The draft stays in
-   * Drafts, as it is, until the host accepts it.
+   * Drafts, as it is, until the host accepts it. The window opened when the member pressed Send,
+   * `waited` milliseconds before the device asked, and never further back than its own length.
    */
-  async send(draft: MessageRef, at?: string): Promise<Outgoing> {
+  async send(draft: MessageRef, at?: string, waited?: number): Promise<Outgoing> {
     const ref = input.refOf(draft);
-    const when = at === undefined ? undefined : input.instantOf(at);
+    const when = input.optional(at, input.instantOf);
+    const since = Math.min(input.optional(waited, input.waitedOf) ?? 0, UNDO_SECONDS * 1000);
     if (!this.book.get(ref.account)) throw new Error('There is no such account.');
     if (this.store.reads.role(ref) !== 'drafts') throw new Error('Only a draft can be sent.');
+    const addressing = await this.addressing(ref);
+    const now = Date.now();
     const outgoing = this.sending.send(
-      { draft: ref, ...(await this.addressing(ref)) },
-      new Date().toISOString(),
+      { draft: ref, ...addressing },
+      new Date(now).toISOString(),
       when,
+      new Date(now - since).toISOString(),
     );
     await this.wakeBy(Date.parse(outgoing.sendAt));
     return this.placed(outgoing);
