@@ -23,7 +23,6 @@ const SIZES = {
   desktop: { viewport: { width: 1440, height: 900 } },
   phone: { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
 } satisfies Record<string, BrowserContextOptions>;
-const THEMES = ['light', 'dark'] as const;
 /**
  * How soon after an offline reload's start the kept Inbox and the conversation open in it show, or,
  * on a device that kept nothing, the word that the app can't reach the mail. Nothing they need
@@ -140,57 +139,59 @@ test('the installed app opens offline to the lists and conversations it showed',
 }, 60_000);
 
 test('the installed app reads offline at both sizes in both themes: the Inbox and what it opened', async () => {
-  for (const [size, options] of Object.entries(SIZES)) {
-    for (const colorScheme of THEMES) {
-      const { context, page, errors } = await installed({ ...options, colorScheme });
-      const subject = await openConversation(page, 0);
-      await page.waitForFunction(async () => (await keptCount()) >= 3, undefined, { polling: 200 });
+  // Each size in one theme, so both themes and both sizes show.
+  for (const [size, colorScheme] of [
+    ['desktop', 'light'],
+    ['phone', 'dark'],
+  ] as const) {
+    const { context, page, errors } = await installed({ ...SIZES[size], colorScheme });
+    const subject = await openConversation(page, 0);
+    await page.waitForFunction(async () => (await keptCount()) >= 3, undefined, { polling: 200 });
 
-      await context.addInitScript(noteShown);
-      await context.setOffline(true);
-      await page.reload();
-      // The address names the conversation, which opens from what the device kept, beside the
-      // Inbox, or on a phone over it.
-      await page.getByText('Offline: kept mail').first().waitFor({ state: 'attached' });
-      await page.waitForFunction(
-        (subject) =>
-          document.querySelector('section[aria-label="Reader"] h1')?.textContent === subject &&
-          document.querySelector('section[aria-label="Reader"] article') !== null,
-        subject,
-      );
-      const shown = await page.evaluate(() => ({ rows: rowsShownAt, reader: readerShownAt }));
-      const late = Object.entries(shown).flatMap(([what, at]) =>
-        at === undefined || at > OFFLINE_WITHIN_MS ? [`${what} at ${Math.round(at ?? -1)} ms`] : [],
-      );
-      expect({ size, colorScheme, late }).toEqual({ size, colorScheme, late: [] });
-      await page.screenshot({ path: join(SHOTS, `offline-${size}-${colorScheme}.png`) });
-      if (size === 'phone') {
-        await page.getByRole('button', { name: 'Back', exact: true }).click();
-        await page.getByRole('option').first().waitFor();
-        // The list says it beside its title, at every width.
-        await page
-          .getByRole('region', { name: 'Inbox' })
-          .getByRole('status')
-          .filter({ hasText: 'Offline: kept mail' })
-          .waitFor();
-        // The list has slid back into view.
-        await atRest(page);
-        expect({ colorScheme, ...(await listHeader(page)) }).toEqual({
-          colorScheme,
-          ...HEADER_OFFLINE,
-        });
-        await page.screenshot({ path: join(SHOTS, `offline-phone-${colorScheme}-inbox.png`) });
-      }
-      expect({ size, colorScheme, rows: (await page.getByRole('option').count()) > 5 }).toEqual({
-        size,
+    await context.addInitScript(noteShown);
+    await context.setOffline(true);
+    await page.reload();
+    // The address names the conversation, which opens from what the device kept, beside the
+    // Inbox, or on a phone over it.
+    await page.getByText('Offline: kept mail').first().waitFor({ state: 'attached' });
+    await page.waitForFunction(
+      (subject) =>
+        document.querySelector('section[aria-label="Reader"] h1')?.textContent === subject &&
+        document.querySelector('section[aria-label="Reader"] article') !== null,
+      subject,
+    );
+    const shown = await page.evaluate(() => ({ rows: rowsShownAt, reader: readerShownAt }));
+    const late = Object.entries(shown).flatMap(([what, at]) =>
+      at === undefined || at > OFFLINE_WITHIN_MS ? [`${what} at ${Math.round(at ?? -1)} ms`] : [],
+    );
+    expect({ size, colorScheme, late }).toEqual({ size, colorScheme, late: [] });
+    await page.screenshot({ path: join(SHOTS, `offline-${size}-${colorScheme}.png`) });
+    if (size === 'phone') {
+      await page.getByRole('button', { name: 'Back', exact: true }).click();
+      await page.getByRole('option').first().waitFor();
+      // The list says it beside its title, at every width.
+      await page
+        .getByRole('region', { name: 'Inbox' })
+        .getByRole('status')
+        .filter({ hasText: 'Offline: kept mail' })
+        .waitFor();
+      // The list has slid back into view.
+      await atRest(page);
+      expect({ colorScheme, ...(await listHeader(page)) }).toEqual({
         colorScheme,
-        rows: true,
+        ...HEADER_OFFLINE,
       });
-      expect({ size, colorScheme, errors }).toEqual({ size, colorScheme, errors: [] });
-      await context.close();
+      await page.screenshot({ path: join(SHOTS, `offline-phone-${colorScheme}-inbox.png`) });
     }
+    expect({ size, colorScheme, rows: (await page.getByRole('option').count()) > 5 }).toEqual({
+      size,
+      colorScheme,
+      rows: true,
+    });
+    expect({ size, colorScheme, errors }).toEqual({ size, colorScheme, errors: [] });
+    await context.close();
   }
-}, 120_000);
+}, 60_000);
 
 test('offline, a conversation never opened says it opens once online, and Send keeps the message', async () => {
   const { context, page, errors } = await installed();

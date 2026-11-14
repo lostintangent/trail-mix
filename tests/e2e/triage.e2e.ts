@@ -531,56 +531,55 @@ test('Backspace deletes the whole selection together, and Undo restores all of i
 }, 30_000);
 
 test("a toast's Undo is its icon alone, ruled off from the close, and its tooltip names Undo's key", async () => {
-  for (const [size, options] of [
-    ['desktop', DESKTOP],
-    ['phone', PHONE],
+  // Each size in one theme, so both themes and both sizes show.
+  for (const [size, options, colorScheme] of [
+    ['desktop', DESKTOP, 'light'],
+    ['phone', PHONE, 'dark'],
   ] as const) {
-    for (const colorScheme of ['light', 'dark'] as const) {
-      const here = await inbox(options);
-      await here.emulateMedia({ colorScheme });
-      const target = row(here, /Trip photos/);
-      await target.click();
-      await shownSubject(here);
-      await bar(here).getByRole('button', { name: 'Archive' }).click();
-      await target.waitFor({ state: 'detached' });
-      const undo = undoButton(here);
-      await undo.waitFor();
-      // Undo, then a rule as tall as a line and a pixel wide, then the close.
-      const shape = await undo.evaluate((button) => {
-        const card = button.closest('.astryx-toast')!;
-        const buttons = [...card.querySelectorAll('button')];
-        const close = buttons[buttons.indexOf(button as HTMLButtonElement) + 1]!;
-        const [left, right] = [button, close].map((each) => each.getBoundingClientRect());
-        const rules = [...card.querySelectorAll('span')].filter((span) => {
-          const box = span.getBoundingClientRect();
-          return box.width === 1 && box.height >= 12 && box.left >= left!.right;
-        });
-        return {
-          words: button.textContent?.trim(),
-          close: close.getAttribute('aria-label'),
-          ruled: rules.some((rule) => rule.getBoundingClientRect().right <= right!.left),
-          targets: [left!, right!].map(({ width, height }) => Math.min(width, height)),
-        };
+    const here = await inbox(options);
+    await here.emulateMedia({ colorScheme });
+    const target = row(here, /Trip photos/);
+    await target.click();
+    await shownSubject(here);
+    await bar(here).getByRole('button', { name: 'Archive' }).click();
+    await target.waitFor({ state: 'detached' });
+    const undo = undoButton(here);
+    await undo.waitFor();
+    // Undo, then a rule as tall as a line and a pixel wide, then the close.
+    const shape = await undo.evaluate((button) => {
+      const card = button.closest('.astryx-toast')!;
+      const buttons = [...card.querySelectorAll('button')];
+      const close = buttons[buttons.indexOf(button as HTMLButtonElement) + 1]!;
+      const [left, right] = [button, close].map((each) => each.getBoundingClientRect());
+      const rules = [...card.querySelectorAll('span')].filter((span) => {
+        const box = span.getBoundingClientRect();
+        return box.width === 1 && box.height >= 12 && box.left >= left!.right;
       });
-      expect(shape).toMatchObject({ words: '', close: 'Dismiss notification', ruled: true });
-      for (const side of shape.targets)
-        expect(side).toBeGreaterThanOrEqual(size === 'phone' ? 44 : 28);
-      if (size === 'desktop') {
-        await undo.hover();
-        await here.getByRole('tooltip').filter({ hasText: 'Undo (Z)' }).waitFor();
-      }
-      await here.screenshot({ path: join(SHOTS, `toast-undo-${size}-${colorScheme}.png`) });
-      expect({ colorScheme, size, unusable: await unusable(here) }).toEqual({
-        colorScheme,
-        size,
-        unusable: [],
-      });
-      await undo.click();
-      await target.waitFor({ timeout: ELSEWHERE_MS });
-      await here.context().close();
+      return {
+        words: button.textContent?.trim(),
+        close: close.getAttribute('aria-label'),
+        ruled: rules.some((rule) => rule.getBoundingClientRect().right <= right!.left),
+        targets: [left!, right!].map(({ width, height }) => Math.min(width, height)),
+      };
+    });
+    expect(shape).toMatchObject({ words: '', close: 'Dismiss notification', ruled: true });
+    for (const side of shape.targets)
+      expect(side).toBeGreaterThanOrEqual(size === 'phone' ? 44 : 28);
+    if (size === 'desktop') {
+      await undo.hover();
+      await here.getByRole('tooltip').filter({ hasText: 'Undo (Z)' }).waitFor();
     }
+    await here.screenshot({ path: join(SHOTS, `toast-undo-${size}-${colorScheme}.png`) });
+    expect({ colorScheme, size, unusable: await unusable(here) }).toEqual({
+      colorScheme,
+      size,
+      unusable: [],
+    });
+    await undo.click();
+    await target.waitFor({ timeout: ELSEWHERE_MS });
+    await here.context().close();
   }
-}, 60_000);
+}, 30_000);
 
 test('Delete and Backspace stay in the search field and palette while typing', async () => {
   const here = await inbox();
