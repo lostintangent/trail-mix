@@ -235,6 +235,29 @@ describe('The Mailroom', () => {
     for (const device of [...devices, elsewhere]) device.close();
   }, 30_000);
 
+  test('watches the Inbox while any device is open, and checks every few minutes once none is', async () => {
+    const watching = () => ada.call<string[]>('watching');
+    const [first, second] = [ada.device(), ada.device()];
+    await Promise.all([first.opened, second.opened]);
+    await ada.until(async () => (await watching()).length > 0);
+    expect(await watching()).toEqual(['INBOX']);
+    // The alarm comes within the minute, which keeps the Mailroom in memory and its watch alive.
+    const open = await ada.call<{ alarm: number }>('wakeNow');
+    expect(open.alarm - Date.now()).toBeLessThanOrEqual(60_000);
+
+    const closes = await ada.call<number>('devicesClosed');
+    first.close();
+    await ada.until(async () => (await ada.call<number>('devicesClosed')) > closes);
+    expect(await watching()).toEqual(['INBOX']);
+    second.close();
+    await ada.until(async () => (await watching()).length === 0);
+    await ada.until(
+      async () => (await ada.call<{ alarm: number }>('wakeNow')).alarm - Date.now() > 60_000,
+    );
+    expect((await ada.call<number>('alarmAt')) - Date.now()).toBeLessThanOrEqual(5 * 60_000);
+    expect(await watching()).toEqual([]);
+  }, 60_000);
+
   test('moves to a role, and its undo by the pairs it returned restores the lists', async () => {
     const before = await ada.page({ in: 'inbox' });
     const garden = before.find((row) => row.subject === 'Garden')!;
@@ -784,6 +807,20 @@ describe('The Mailroom', () => {
       // Nor does it take what a message it doesn't replace answers.
       expect(await answered(saved)).toEqual({ inReplyTo: undefined, references: undefined });
       await ada.call('move', [saved], 'trash');
+    }, 30_000);
+
+    test('a save’s time on its mail server is its own, whatever call overlaps it', async () => {
+      const answer = (name: string, args: unknown[]) =>
+        ada.call<Answered>('answer', { name, args }, Date.now());
+      await ada.call('holdDrafts');
+      const saving = answer('saveDraft', [draft({}), null, crypto.randomUUID(), false]);
+      await ada.until(async () => (await ada.call<number>('draftsHeld')) === 1);
+      // A call that starts and ends while the save waits shows none of the save's time.
+      expect((await answer('accounts', [])).spent).toEqual([]);
+      await ada.call('letDraftsFile');
+      const saved = await saving;
+      expect(saved.spent.map(({ name }) => name)).toContain('imap');
+      await ada.call('move', [saved.value], 'trash');
     }, 30_000);
   });
 

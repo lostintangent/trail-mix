@@ -209,13 +209,43 @@ export class TestMailroom extends Mailroom {
     return Promise.resolve(this.handing.get(id)?.isUndone === true);
   }
 
+  private closes = 0;
+
+  override webSocketClose(socket: WebSocket): void {
+    super.webSocketClose(socket);
+    this.closes++;
+  }
+
+  /** How many devices' hint sockets have closed since the Mailroom started. */
+  devicesClosed(): Promise<number> {
+    return Promise.resolve(this.closes);
+  }
+
+  private readonly watched: string[] = [];
+
+  /** The folders being watched now, by path. */
+  watching(): Promise<string[]> {
+    return Promise.resolve([...this.watched]);
+  }
+
   /**
-   * Records what each folder's sync downloads, the messages it reports by path, and each body
-   * fetched from the server, and holds drafts while a test asks.
+   * Records what each folder's sync downloads, the messages it reports by path, each body fetched
+   * from the server and each folder watched, and holds drafts while a test asks.
    */
   protected override reached(provider: MailProvider): MailProvider {
     return {
       ...provider,
+      watch: (path, onChange) => {
+        const stop = provider.watch(path, onChange);
+        this.watched.push(path);
+        let isStopped = false;
+        return () => {
+          stop();
+          if (isStopped) return;
+          isStopped = true;
+          this.watched.splice(this.watched.indexOf(path), 1);
+        };
+      },
       saveDraft: async (raw) => {
         const held = this.filing;
         if (held) {
