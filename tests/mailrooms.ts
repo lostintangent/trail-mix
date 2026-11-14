@@ -52,7 +52,7 @@ export function member(name: string, worker: () => LocalWorker) {
       method: 'POST',
       body: sent instanceof FormData ? sent : JSON.stringify(sent),
     });
-    const result = (await response.json()) as { value?: T; error?: string };
+    const result: { value?: T; error?: string } = await response.json();
     if (result.error !== undefined) throw new Error(result.error);
     return result.value as T;
   };
