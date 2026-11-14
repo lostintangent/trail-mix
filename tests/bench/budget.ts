@@ -29,7 +29,7 @@ export type Slow = {
 export type Ask = { name: string; after: number; took: number; server: Record<string, number> };
 
 /** A part of Trail Mix whose budgets one module measures, under the numbers in AGENTS.md. */
-export type BenchArea = { name: string; measure: () => Promise<Measurement[]> };
+export type BenchArea = { measure: () => Promise<Measurement[]> };
 
 /** The value at fraction `p` of a set of samples, such as 0.95 for the 95th percentile. */
 export function percentile(samples: readonly number[], p: number): number {

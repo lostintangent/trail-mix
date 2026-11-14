@@ -13,8 +13,6 @@ import { mailIsIn } from '../mailIsIn.ts';
  * a key held down after it still move through the list within 50 ms, because the reader waits for
  * the selection to rest. It runs on the built app with a 50,000-message demo mailbox at the phone's
  * CPU, around the demo's Kernel Weekly, which is that newsletter.
- *
- * The first open of the same newsletter, cold, with nothing prepared, is printed beside them.
  */
 const BUDGET = { preparedMove: 200, heldKey: 50 };
 
@@ -32,7 +30,6 @@ const IDLE_MS = 3_000;
 const REPEAT_DELAY_MS = 500;
 
 export const reader: BenchArea = {
-  name: 'reader',
   measure: async () => {
     const preview = await startPreview({ DEMO_MAILBOX: MESSAGES, DEV_MEMBER: MEMBER });
     const browser = await chromium.launch();
@@ -42,18 +39,14 @@ export const reader: BenchArea = {
       await mailIsIn(filling, 180_000);
       await filling.close();
 
-      // Cold: after the app has idled as long as the prepared case does, the newsletter opened by
-      // a click, its body fetched and sanitized only then.
-      const { page: cold, watcher: coldWatcher } = await desktop(preview.url);
-      await cold.waitForTimeout(IDLE_MS);
-      await coldWatcher.steady();
-      const coldOpen = await coldWatcher.during('Cold open', () =>
-        timed(cold, () => cold.getByRole('option').filter({ hasText: NEWSLETTER }).first().click()),
-      );
-      await cold.context().close();
-
-      // Prepared: the conversation above the newsletter is open, the browser idles, then Down.
-      const { page, watcher } = await desktop(preview.url);
+      // Prepared: the conversation above the newsletter is open, the browser idles, then Down. On a
+      // desktop, the list stays in view as its selection opens.
+      const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+      const page = await context.newPage();
+      const watcher = watch(page);
+      await slowDown(page);
+      await page.goto(preview.url);
+      await page.waitForSelector('[role="option"]', { timeout: 30_000 });
       const rows = page.getByRole('option');
       const at = await rows.evaluateAll(
         (options, name) =>
@@ -83,7 +76,7 @@ export const reader: BenchArea = {
       await timed(page, () => press(page, 'ArrowDown'));
       await page.waitForTimeout(REPEAT_DELAY_MS);
       const held = await watcher.during('Holding a key', () => heldKey(page));
-      await page.context().close();
+      await context.close();
       // A hint can reorder the rows meanwhile, so what counts is the row the first repeat selected.
       if (held.shown.length > 1 || !held.shown.every((subject) => held.first.includes(subject))) {
         throw new Error(
@@ -93,9 +86,6 @@ export const reader: BenchArea = {
         );
       }
 
-      console.log(
-        `reader: the first open of the 300 KB newsletter, cold, took ${coldOpen.toFixed(0)} ms`,
-      );
       return [
         {
           area: 'reader',
@@ -115,20 +105,6 @@ export const reader: BenchArea = {
     } finally {
       await browser.close();
       await preview.stop();
-    }
-
-    /**
-     * The app on a desktop, where the list stays in view as its selection opens, slowed down, and
-     * watched from before it loads.
-     */
-    async function desktop(url: string) {
-      const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
-      const page = await context.newPage();
-      const watcher = watch(page);
-      await slowDown(page);
-      await page.goto(url);
-      await page.waitForSelector('[role="option"]', { timeout: 30_000 });
-      return { page, watcher };
     }
   },
 };

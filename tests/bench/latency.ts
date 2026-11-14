@@ -89,10 +89,10 @@ export async function inputLatency(page: Page) {
   return {
     now: () => page.evaluate(() => performance.now()),
     /**
-     * The latency of each of `count` inputs named `name` since a moment on the page's clock. Event
-     * Timing reports an input once its frame has painted, so ask a moment after the last one.
+     * The latency of the slowest input named `name` since a moment on the page's clock. Event Timing
+     * reports an input once its frame has painted, so ask a moment after it.
      */
-    of: async (name: string, since: number, count: number): Promise<number[]> => {
+    of: async (name: string, since: number): Promise<number> => {
       const reported = await page.evaluate(
         ([name, since]) =>
           (window as unknown as { timed: Timed[] }).timed
@@ -100,10 +100,7 @@ export async function inputLatency(page: Page) {
             .map(({ duration }) => duration),
         [name, since] as const,
       );
-      return [
-        ...reported,
-        ...Array<number>(Math.max(0, count - reported.length)).fill(REPORTED_FROM),
-      ];
+      return Math.max(REPORTED_FROM, ...reported);
     },
     /**
      * The latency of each input named `name` that the page saw at these timestamps, by its own

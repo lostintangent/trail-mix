@@ -54,7 +54,6 @@ const ROUNDS = 5;
 const ARCHIVES = 60;
 
 export const workbench: BenchArea = {
-  name: 'workbench',
   measure: async () => {
     const preview = await startPreview({ DEMO_MAILBOX: MESSAGES, DEV_MEMBER: MEMBER });
     const browser = await chromium.launch();
@@ -440,10 +439,10 @@ async function archives(page: Page, watching: Watch, latency: InputLatency): Pro
     const since = await latency.now();
     await watching.during(`Archive ${press + 1}`, () => archive.click());
     await page.waitForTimeout(200);
-    const [down, up, click] = await Promise.all(
-      ['pointerdown', 'pointerup', 'click'].map((name) => latency.of(name, since, 1)),
+    const latencies = await Promise.all(
+      ['pointerdown', 'pointerup', 'click'].map((name) => latency.of(name, since)),
     );
-    times.push(Math.max(...down!, ...up!, ...click!));
+    times.push(Math.max(...latencies));
   }
   return times;
 }

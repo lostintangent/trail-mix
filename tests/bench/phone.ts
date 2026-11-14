@@ -23,41 +23,31 @@ const REFERENCE_INDEX = 970;
 
 export type CpuProfile = { index: number; rate: number };
 
-let measured: Promise<CpuProfile> | undefined;
+/** The slowdown that makes this machine the phone, once `calibrate` has measured it. */
+let calibrated: number | undefined;
 
 /**
- * This machine's workload index and the slowdown that makes it the phone, measured once a run with
- * nothing throttled and printed above the budgets. It is the highest of three runs, since whatever
- * else the machine is doing can only lower a run, so a low one says the machine was busy, not that
- * it is slower.
+ * Measures this machine's workload index and the slowdown that makes it the phone, before a bench
+ * starts anything else, such as the Workers runtime, a preview server or the browser it drives, so
+ * the benchmark sees the machine quiet. It prints them above the budgets. It is the highest of three
+ * runs, since whatever else the machine is doing can only lower a run, so a low one says the
+ * machine was busy, not that it is slower.
  */
-export function cpuProfile(browser: Browser): Promise<CpuProfile> {
-  measured ??= (async () => {
-    const context = await browser.newContext();
-    const page = await context.newPage();
+export async function calibrate(): Promise<CpuProfile> {
+  const browser = await chromium.launch();
+  try {
+    const page = await browser.newPage();
     await page.evaluate(warmUp);
     const runs: number[] = [];
     for (let run = 0; run < 3; run++) runs.push(await page.evaluate(workloadIndex));
-    await context.close();
     const index = Math.max(...runs);
     const rate = Math.max(1, (PHONE_SLOWDOWN * index) / REFERENCE_INDEX);
     const [cpu] = cpus();
     console.log(
       `CPU: ${cpu?.model.trim() ?? 'unknown'}, ${availableParallelism()} cores. Workload index ${index} (${runs.join(', ')}), so the phone runs at ${rate.toFixed(2)}x slowdown.`,
     );
+    calibrated = rate;
     return { index, rate };
-  })();
-  return measured;
-}
-
-/**
- * Measures this machine before a bench starts anything else, such as the Workers runtime, a preview
- * server or the browser it drives, so the benchmark sees the machine quiet. Later calls reuse it.
- */
-export async function calibrate(): Promise<CpuProfile> {
-  const browser = await chromium.launch();
-  try {
-    return await cpuProfile(browser);
   } finally {
     await browser.close();
   }
@@ -65,9 +55,10 @@ export async function calibrate(): Promise<CpuProfile> {
 
 /** A page slowed down to the phone's CPU. */
 export async function slowDown(page: Page): Promise<void> {
-  const { rate } = await cpuProfile(page.context().browser()!);
+  if (calibrated === undefined)
+    throw new Error('A page is slowed down only once the phone is calibrated.');
   const cdp = await page.context().newCDPSession(page);
-  await cdp.send('Emulation.setCPUThrottlingRate', { rate });
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: calibrated });
 }
 
 /** A phone's screen: its size, its touch and its pixel density. */

@@ -71,7 +71,6 @@ const READS = 200;
 const INBOX = { in: 'inbox' } satisfies View;
 
 export const mailroom: BenchArea = {
-  name: 'mailroom',
   measure: async () => {
     // A server already running belongs to someone else, and is left as it is.
     const ours = running() === null;
