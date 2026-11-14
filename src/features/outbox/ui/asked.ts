@@ -8,7 +8,7 @@ import { closesAt } from '../core/standing.ts';
  * Mailroom is going, and what Undo brings back. A send asked for elsewhere trusts this device's
  * clock.
  */
-export type Asked = {
+type Asked = {
   closes: number;
   hand: Hand;
   /**

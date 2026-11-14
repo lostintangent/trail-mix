@@ -16,7 +16,7 @@ export function searchWords(text: string): string[] {
 export type Marks = readonly string[];
 
 /** One stretch of text, marked by a search or not. */
-export type Run = { text: string; isMarked: boolean };
+type Run = { text: string; isMarked: boolean };
 
 /** The words of a search, ready to mark text with. */
 export function marksOf(search: string): Marks {

@@ -43,10 +43,10 @@ export function windDownOf(restDays?: string, eraseDays?: string): WindDown {
  * How often an opening is written down. Days decide what happens, so an hour is close enough, and
  * a member reading mail doesn't write to storage with every request.
  */
-export const NOTED_EVERY_MS = 60 * 60_000;
+const NOTED_EVERY_MS = 60 * 60_000;
 
 /** Where a Mailroom stands, by how long since it was last opened. */
-export type Idleness = 'open' | 'resting' | 'erasing';
+type Idleness = 'open' | 'resting' | 'erasing';
 
 export function idlenessOf(openedAt: number, now: number, windDown: WindDown): Idleness {
   const unopened = now - openedAt;

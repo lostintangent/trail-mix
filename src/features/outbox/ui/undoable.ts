@@ -5,7 +5,7 @@ import { useSyncExternalStore } from 'react';
  * in its conversation or its toast, so Undo in the registry and its key reach it. The latest send
  * offered wins, and withdrawing an offer leaves every other standing.
  */
-export type Undoable = { id: string; takeBack: () => void };
+type Undoable = { id: string; takeBack: () => void };
 
 let offers: readonly Undoable[] = [];
 const listeners = new Set<() => void>();

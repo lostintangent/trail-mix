@@ -33,7 +33,7 @@ export type SyncQueue = ReturnType<typeof syncQueue>;
  * What sync works with. `settled` hears when an account's check finishes, or fails, and `landed`
  * hears each batch of a folder as the index takes it, in the same transaction.
  */
-export type Syncing = {
+type Syncing = {
   sql: Sql;
   store: EnvelopeIndex;
   hint: (hint: Hint) => void;

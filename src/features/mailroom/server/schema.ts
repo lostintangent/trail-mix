@@ -57,7 +57,7 @@ const WRITTEN = `instr(${TO}, '@') > 0
   AND trim(replace(${TO}, rtrim(${TO}, replace(${TO}, '@', '')), '')) <> ''
   AND lower(${TO}) NOT IN (${OWN})`;
 
-export const versions: readonly (readonly string[])[] = [
+const versions: readonly (readonly string[])[] = [
   [
     `CREATE TABLE accounts (
       id TEXT PRIMARY KEY,

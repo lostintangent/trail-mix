@@ -13,8 +13,6 @@ import type { Sql, SqlValue } from './schema.ts';
  * since either changes who counts. Noting a message again changes nothing, so the fill and the
  * fold may cross.
  */
-export type People = ReturnType<typeof peopleIn>;
-
 export function peopleIn(sql: Sql) {
   /**
    * Notes whom a message in a folder of `role` puts the member in touch with, whose addresses are

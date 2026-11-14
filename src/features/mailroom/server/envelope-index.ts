@@ -865,7 +865,7 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
  * whether or not the Avatar cache holds their picture yet, and a read names the picture only once
  * the cache does.
  */
-export function summaryOf(
+function summaryOf(
   id: ConversationId,
   messages: readonly Message[],
   mine: ReadonlySet<string> = new Set(),
@@ -979,7 +979,7 @@ type BundledRow = {
  * Search text as an FTS5 query: every word must match, each as a prefix, so results follow typing.
  * Words are runs of letters and digits, so nothing typed can be FTS5 syntax. Nothing, without one.
  */
-export function matchOf(text: string): string | undefined {
+function matchOf(text: string): string | undefined {
   const words = searchWords(text).slice(0, 16);
   return words.length ? words.map((word) => `"${word}"*`).join(' ') : undefined;
 }

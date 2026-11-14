@@ -35,7 +35,7 @@ export function laterTimes(now: Date): Later[] {
 }
 
 /** How far ahead a time is, in calendar days on the device's clock. */
-export type Ahead = 'today' | 'tomorrow' | 'week' | 'later';
+type Ahead = 'today' | 'tomorrow' | 'week' | 'later';
 
 export function aheadOf(at: Date, now: Date): Ahead {
   const start = new Date(now.getFullYear(), now.getMonth(), now.getDate());

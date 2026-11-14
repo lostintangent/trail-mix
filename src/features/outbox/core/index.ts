@@ -1,6 +1,5 @@
 export {
   HOST_FILING_SECONDS,
-  MISSING,
   RESTARTED,
   UNDO_SECONDS,
   begin,

@@ -47,7 +47,7 @@ export interface Index {
 }
 
 /** The rows to write: messages to insert or replace by ref, then refs to delete. */
-export type IndexChange = { put: Message[]; remove: MessageRef[] };
+type IndexChange = { put: Message[]; remove: MessageRef[] };
 
 export function applySyncEvent(index: Index, event: SyncEvent): IndexChange {
   switch (event.type) {

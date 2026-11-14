@@ -19,7 +19,7 @@ export type MessageBytes = {
   ) => Promise<{ body: ReadableStream<Uint8Array>; type: string; name: string } | null>;
 };
 
-export type MessageTarget = { ref: MessageRef; attachmentId?: string };
+type MessageTarget = { ref: MessageRef; attachmentId?: string };
 
 export async function serveMessageBytes(
   { ref, attachmentId }: MessageTarget,

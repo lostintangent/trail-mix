@@ -19,7 +19,7 @@ import {
 export { Mailroom } from '../features/mailroom/server/index.ts';
 export { VisitorGate } from './visitors.ts';
 
-export type Env = Omit<SignInConfig, 'VISITOR_GATE'> &
+type Env = Omit<SignInConfig, 'VISITOR_GATE'> &
   VisitorGateEnv & {
     /** One Mailroom per member, named by their verified email address. */
     MAILROOM: {

@@ -219,7 +219,7 @@ export type AccountSetup =
       password: string;
     };
 
-export type Endpoint = { host: string; port: number; secure: boolean };
+type Endpoint = { host: string; port: number; secure: boolean };
 
 /**
  * An account that signs in at its vendor instead of taking a password. The Mailroom runs the
@@ -252,7 +252,7 @@ export type SignIn = {
 } & ({ state: 'waiting' } | { state: 'checking' } | { state: 'refused'; reason: string });
 
 /** What the composer saves. The Mailroom writes it as MIME and files it in the account's Drafts. */
-export type DraftInput = {
+type DraftInput = {
   /** The From. */
   account: AccountId;
   to: Address[];

@@ -2,7 +2,7 @@ import { isPublicHost } from '../../../shared/public-host.ts';
 import type { Unsubscribed } from '../client/contract.ts';
 
 /** What carries a POST: the internet, or the demo's list servers, which stand in for it. */
-export type Post = (url: URL, init: RequestInit) => Promise<Response>;
+type Post = (url: URL, init: RequestInit) => Promise<Response>;
 
 /**
  * One-click unsubscribe (RFC 8058) as the Mailroom carries it out: one POST of

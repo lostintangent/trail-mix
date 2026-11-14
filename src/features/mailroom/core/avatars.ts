@@ -255,7 +255,7 @@ const PUBLIC_MAILBOXES = new Set([
 
 // What DNS says
 
-export type Policy = 'none' | 'quarantine' | 'reject';
+type Policy = 'none' | 'quarantine' | 'reject';
 
 /** A domain's DMARC record, as far as a logo needs it. */
 export type Dmarc = {
@@ -270,7 +270,7 @@ export type Dmarc = {
 };
 
 /** A domain's BIMI record: the SVG it names, or none when it names no logo Trail Mix can fetch. */
-export type Bimi = { logo?: string };
+type Bimi = { logo?: string };
 
 /**
  * The text of one TXT record as DNS over HTTPS gives it: one or more quoted strings, joined into

@@ -39,7 +39,7 @@ export type Press = {
   onFailed: (reason: string) => void;
 };
 
-export type Send = (press: Press) => void;
+type Send = (press: Press) => void;
 
 /** The Outbox's browser code, which the first screen goes without. */
 export const loadSending = () => import('./sending.tsx');

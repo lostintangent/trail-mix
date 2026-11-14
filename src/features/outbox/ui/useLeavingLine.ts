@@ -10,7 +10,7 @@ import { takeBack, undo as undoPress } from './undo.ts';
 import { offerUndo } from './undoable.ts';
 
 /** What a send's line in its conversation says, and the one thing it offers to do. */
-export type LeavingLine = {
+type LeavingLine = {
   standing: Standing;
   /** Where it stands, in the place its copy's time will take. */
   said: string;

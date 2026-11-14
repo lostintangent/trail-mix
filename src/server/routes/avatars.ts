@@ -8,7 +8,7 @@ import { byteHeaders, notFound } from './messages.ts';
  */
 
 /** A picture the Avatar cache holds: its type, as its first bytes showed, and its bytes. */
-export type Picture = { type: string; bytes: Uint8Array<ArrayBuffer> };
+type Picture = { type: string; bytes: Uint8Array<ArrayBuffer> };
 
 /** What the Mailroom serves of its Avatar cache. Null means it holds no picture under the key. */
 export type AvatarBytes = { avatar: (key: string) => Promise<Picture | null> };

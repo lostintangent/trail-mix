@@ -25,7 +25,7 @@ import { WAKE } from './sync.ts';
  */
 export type OutboxQueue = ReturnType<typeof outboxQueue>;
 
-export type Sending = {
+type Sending = {
   sql: Sql;
   provider: (account: AccountId) => Promise<MailProvider>;
   hint: (hint: Hint) => void;
@@ -36,10 +36,10 @@ export type Sending = {
 };
 
 /** What came of a press: its send, as the host accepted it, or its Undo, with the draft it kept. */
-export type Came = { sent: Outgoing } | { undone: MessageRef | null };
+type Came = { sent: Outgoing } | { undone: MessageRef | null };
 
 /** A press the Mailroom has taken: its send, while the Outbox holds it, and what came of it. */
-export type Pressed = { send?: Outgoing; came?: Came };
+type Pressed = { send?: Outgoing; came?: Came };
 
 /**
  * How long a press is kept from when it was taken, and for as long as its send waits after that, so

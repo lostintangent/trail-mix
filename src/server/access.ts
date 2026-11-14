@@ -45,7 +45,7 @@ export type Signed = { member: string; setCookie?: string; isLetIn?: boolean };
  * Proves who sent a request, or answers it in their place, saying why nobody could be named. A
  * request that reaches the member's Mailroom, and so may make one, says so.
  */
-export type SignIn = (
+type SignIn = (
   request: Request,
   asking: { reachesMailroom: boolean },
 ) => Promise<Signed | Response>;
@@ -93,7 +93,7 @@ function accessOf(config: SignInConfig): { team: string; audience: string } | un
  * gate are set, Access isn't, and it serves only the demo mailbox, which can't connect a real
  * account.
  */
-export function signsInVisitors(config: SignInConfig): boolean {
+function signsInVisitors(config: SignInConfig): boolean {
   return (
     !accessOf(config) &&
     Boolean(config.VISITOR_KEY) &&

@@ -78,7 +78,7 @@ export function demoImages(request: Request): Response {
 }
 
 /** An http or https address on the public internet, or null. */
-export function remoteUrl(raw: string): URL | null {
+function remoteUrl(raw: string): URL | null {
   const url = URL.parse(raw);
   if (!url || (url.protocol !== 'http:' && url.protocol !== 'https:')) return null;
   if (url.username || url.password || !isPublicHost(url.hostname)) return null;
