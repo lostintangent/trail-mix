@@ -142,10 +142,11 @@ export function ConversationList({
   const listId = useId();
   const rowHeight = useRowHeight(ruler);
   const padding = useScrollPadding(scroller, rowHeight);
-  // The row the keys move from and the list names as active: the last one picked.
+  // The row the keys move from and the list names as active: the last one picked, or the end of a
+  // range that moved last.
   const selectedIndex = useMemo(() => {
-    const { anchor } = selection;
-    return anchor === undefined ? -1 : conversations.findIndex((row) => row?.id === anchor);
+    const { active } = selection;
+    return active === undefined ? -1 : conversations.findIndex((row) => row?.id === active);
   }, [conversations, selection]);
   const selected = useMemo(() => new Set(selection.ids), [selection.ids]);
   const reportOffset = useRef<(offset: number, isScrolling: boolean) => void>(null);
@@ -223,7 +224,7 @@ export function ConversationList({
   useLayoutEffect(() => {
     if (isMovedHere.current) isMovedHere.current = false;
     else if (isSelectedListed) virtualizer.scrollToIndex(selectedAt.current, { align: 'auto' });
-  }, [virtualizer, selection.anchor, isSelectedListed]);
+  }, [virtualizer, selection.active, isSelectedListed]);
   const first = Math.max(0, (inSight?.startIndex ?? 0) - AHEAD);
   const last = (inSight?.endIndex ?? 0) + AHEAD;
   useEffect(() => {
@@ -234,7 +235,7 @@ export function ConversationList({
   const awaited = useRef<{ index: number; by: SelectBy }>(undefined);
   useEffect(() => {
     awaited.current = undefined;
-  }, [selection.anchor]);
+  }, [selection.active]);
   useLayoutEffect(() => {
     const row = awaited.current && conversations[awaited.current.index];
     if (!row || !awaited.current) return;

@@ -160,6 +160,45 @@ test('End selects the last conversation once its page arrives', async () => {
   await context.close();
 }, 30_000);
 
+test('Shift and an arrow key grow or shrink a selection at the end that moves, while the other end stays', async () => {
+  const { context, page, problems } = await open();
+  const list = page.locator('[role="listbox"][aria-multiselectable]');
+  /** The rows selected and the one the list names as active, by their places in the list. */
+  const state = () =>
+    list.evaluate((list) => ({
+      selected: Array.from(list.querySelectorAll('[role="option"][aria-selected="true"]'), (row) =>
+        Number(row.getAttribute('aria-posinset')),
+      ),
+      active: Number(
+        document
+          .getElementById(list.getAttribute('aria-activedescendant') ?? '')
+          ?.getAttribute('aria-posinset'),
+      ),
+    }));
+  const press = async (key: string, expected: Awaited<ReturnType<typeof state>>) => {
+    await page.keyboard.press(key);
+    const until = Date.now() + 2_000;
+    while (JSON.stringify(await state()) !== JSON.stringify(expected) && Date.now() < until) {
+      await page.waitForTimeout(50);
+    }
+    expect({ key, ...(await state()) }).toEqual({ key, ...expected });
+  };
+
+  await list.locator('[role="option"][aria-posinset="2"]').click();
+  await press('Shift+ArrowDown', { selected: [2, 3], active: 3 });
+  await press('Shift+ArrowDown', { selected: [2, 3, 4], active: 4 });
+  await press('Shift+ArrowDown', { selected: [2, 3, 4, 5], active: 5 });
+  await press('Shift+ArrowUp', { selected: [2, 3, 4], active: 4 });
+  // Past the row it began from, it grows the other way.
+  await press('Shift+ArrowUp', { selected: [2, 3], active: 3 });
+  await press('Shift+ArrowUp', { selected: [2], active: 2 });
+  await press('Shift+ArrowUp', { selected: [1, 2], active: 1 });
+  // An arrow alone moves on from the end that moved last.
+  await press('ArrowDown', { selected: [2], active: 2 });
+  expect(problems).toEqual([]);
+  await context.close();
+}, 30_000);
+
 test('a row leads with its sender’s picture when verified, or their initials, the same as the reader’s sheet', async () => {
   const { context, page, problems } = await open();
   // Mail from Kernel Weekly, Ada and Fieldnote Studio is verified: Kernel Weekly has a logo, Ada a

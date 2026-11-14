@@ -81,6 +81,7 @@ import {
   SearchField,
   SearchScope,
   select,
+  selectOnly,
   TriageActions,
   triageCommands,
   useBundle,
@@ -413,7 +414,7 @@ export function Workbench({
       return NOTHING_SELECTED;
     }
     if (!leaving) return selection;
-    const left = next ? { ids: [next.id], anchor: next.id } : NOTHING_SELECTED;
+    const left = next ? selectOnly(next.id) : NOTHING_SELECTED;
     setVacating({ row: leaving, at });
     startTransition(() => {
       setSelection(left);
@@ -590,9 +591,7 @@ export function Workbench({
     if (newest === undefined) return;
     setOpening(undefined);
     // A member's pick made in this same moment, as a key held for a row just arrived, wins.
-    setSelection((current) =>
-      current.ids.length > 0 ? current : { ids: [newest.id], anchor: newest.id },
-    );
+    setSelection((current) => (current.ids.length > 0 ? current : selectOnly(newest.id)));
     // Opening a bundle reads nothing.
     if (!isBundle(newest)) openedByView(newest.id);
   }, [opening, view, selected, compose, page, conversations, openedByView]);
@@ -743,7 +742,7 @@ export function Workbench({
   );
   const startPicking = useCallback((id: ConversationId) => {
     setPicking(true);
-    setSelection({ ids: [id], anchor: id });
+    setSelection(selectOnly(id));
   }, []);
   // A finger tapping a row's avatar starts picking with it, or adds it or lets it go while picking.
   const pickRow = useCallback(
@@ -906,7 +905,7 @@ export function Workbench({
 
   // The registry: every command the workbench can run now, gathered from each feature, which binds
   // their keys and feeds the palette and the shortcut sheet.
-  const anchor = placeOf(selection.anchor);
+  const active = placeOf(selection.active);
   const stepTo = (at: number) => {
     const row = conversations?.[at];
     return row && (() => pick(row.id, 'only'));
@@ -1033,15 +1032,15 @@ export function Workbench({
         ? undefined
         : thread !== undefined
           ? stepToThread(threadAt + 1)
-          : stepTo(anchor.after),
+          : stepTo(active.after),
       previous: isOverReader
         ? undefined
         : thread !== undefined
           ? threadAt > 0
             ? stepToThread(threadAt - 1)
             : undefined
-          : anchor.at > 0
-            ? stepTo(anchor.at - 1)
+          : active.at > 0
+            ? stepTo(active.at - 1)
             : undefined,
       back: page
         ? closePage
@@ -1393,7 +1392,7 @@ const opensNewest = (view: View, isPhone: boolean) => !isPhone && view.in !== 'o
 
 /** A selection of the one conversation an address opens, or of none. */
 const openOnly = (open: ConversationId | undefined): Selection =>
-  open === undefined ? NOTHING_SELECTED : { ids: [open], anchor: open };
+  open === undefined ? NOTHING_SELECTED : selectOnly(open);
 
 /**
  * The open conversation and the place, kept together. A change of view pushes the place, so Back

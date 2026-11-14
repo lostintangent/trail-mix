@@ -2,6 +2,7 @@ export {
   isSameSelection,
   NOTHING_SELECTED,
   select,
+  selectOnly,
   type SelectBy,
   type Selection,
 } from './core/selection.ts';
