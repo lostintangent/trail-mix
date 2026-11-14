@@ -145,9 +145,9 @@ export function AddAccount({
         }
         isDisabled={isBusy}
       >
-        <SegmentedControlItem value="zoho" label="Zoho" xstyle={styles.choice} />
-        <SegmentedControlItem value="outlook" label="Outlook" xstyle={styles.choice} />
-        <SegmentedControlItem value="other" label="Another IMAP host" xstyle={styles.choice} />
+        <SegmentedControlItem value="zoho" label="Zoho" xstyle={styles.control} />
+        <SegmentedControlItem value="outlook" label="Outlook" xstyle={styles.control} />
+        <SegmentedControlItem value="other" label="Another IMAP host" xstyle={styles.control} />
       </SegmentedControl>
 
       <TextInput
@@ -247,9 +247,6 @@ export function AddAccount({
 const styles = stylex.create({
   // Astryx draws a field and a segmented choice at a fixed height, which a finger needs at 44px.
   control: {
-    height: tm.target,
-  },
-  choice: {
     height: tm.target,
   },
   form: {
