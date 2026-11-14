@@ -1,6 +1,7 @@
 import type { ToastDismissFn, ToastViewportProps } from '@astryxdesign/core/Toast';
 import type { LucideIcon } from 'lucide-react';
-import { lazy, memo, Suspense, useEffect, useState, type ReactNode } from 'react';
+import { lazy, memo, Suspense, useEffect, useSyncExternalStore, type ReactNode } from 'react';
+import { listeners } from './listeners.ts';
 import { whenIdle } from './whenIdle.ts';
 
 /**
@@ -32,7 +33,7 @@ export type Toast = {
 export type ShowToast = (toast: Toast) => ToastDismissFn;
 
 let wanted = false;
-const wanters = new Set<() => void>();
+const wanting = listeners();
 let resolveShow: (show: ShowToast) => void;
 const shown = new Promise<ShowToast>((resolve) => (resolveShow = resolve));
 
@@ -46,17 +47,8 @@ export async function toast(toast: Toast): Promise<ToastDismissFn> {
 
 /** Where toasts appear, loaded a moment after the first screen or when a toast is first shown. */
 export const Toasts = memo(function Toasts({ layerInset }: Pick<ToastViewportProps, 'layerInset'>) {
-  const [isWanted, setWanted] = useState(wanted);
-  useEffect(() => {
-    if (isWanted) return;
-    const now = () => setWanted(true);
-    wanters.add(now);
-    const callOff = whenIdle(want);
-    return () => {
-      wanters.delete(now);
-      callOff();
-    };
-  }, [isWanted]);
+  const isWanted = useSyncExternalStore(wanting.subscribe, () => wanted);
+  useEffect(() => (isWanted ? undefined : whenIdle(want)), [isWanted]);
   return isWanted ? (
     <Suspense>
       <Host layerInset={layerInset} onReady={resolveShow} />
@@ -66,5 +58,5 @@ export const Toasts = memo(function Toasts({ layerInset }: Pick<ToastViewportPro
 
 function want() {
   wanted = true;
-  for (const wanter of wanters) wanter();
+  wanting.tell();
 }

@@ -1,5 +1,6 @@
 import { useQueries, useQuery } from '@tanstack/react-query';
 import { useSyncExternalStore } from 'react';
+import { listeners } from '../../../shared/listeners.ts';
 import { reasonOf } from '../../../shared/reasons.ts';
 import type { Command } from '../../commands/index.ts';
 import {
@@ -36,7 +37,7 @@ export function unsubscribe(ref: MessageRef, address: string) {
 
 /** Where unsubscribing from the list at `address` stands. */
 export function useUnsubscribing(address: string): Unsubscribing {
-  return useSyncExternalStore(listen, () => asked.get(address) ?? OFFERED);
+  return useSyncExternalStore(answers.subscribe, () => asked.get(address) ?? OFFERED);
 }
 
 /**
@@ -87,16 +88,9 @@ const offerOf = (body: Body) => body.unsubscribe;
 
 const OFFERED: Unsubscribing = { is: 'offered' };
 const asked = new Map<string, Unsubscribing>();
-const listeners = new Set<() => void>();
+const answers = listeners();
 
 function tell(address: string, standing: Unsubscribing) {
   asked.set(address, standing);
-  for (const changed of listeners) changed();
-}
-
-function listen(changed: () => void): () => void {
-  listeners.add(changed);
-  return () => {
-    listeners.delete(changed);
-  };
+  answers.tell();
 }

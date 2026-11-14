@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { hexOf, parseColor } from '../shared/color.ts';
+import { colorOf, hexOf } from '../shared/color.ts';
 import { hashOf, ICON_FOLDER, ICONS, PUBLIC, readFavicon, SOURCE_HASH } from './icons.ts';
 import { DESK, DESK_HEX, type Halves } from './theme/palette.ts';
 
@@ -68,8 +68,8 @@ test('the icons were drawn from today’s favicon and recipe', async () => {
 test('the browser’s chrome takes the desk’s colors in both themes', async () => {
   const desk: Halves = DESK_HEX;
   expect(desk).toEqual({
-    light: hexOf(parseColor(DESK.light)!),
-    dark: hexOf(parseColor(DESK.dark)!),
+    light: hexOf(colorOf(DESK.light)),
+    dark: hexOf(colorOf(DESK.dark)),
   });
   const { background_color, theme_color } = await manifest();
   expect({ background_color, theme_color }).toEqual({

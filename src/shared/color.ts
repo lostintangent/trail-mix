@@ -13,13 +13,8 @@ export type Rgb = { r: number; g: number; b: number };
 /** `#rrggbb`, as a color input gives it, or undefined for anything else. */
 export function parseHex(hex: string): Rgb | undefined {
   const match = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim());
-  if (!match) return undefined;
-  const [r, g, b] = match.slice(1).map((pair) => parseInt(pair, 16) / 255) as [
-    number,
-    number,
-    number,
-  ];
-  return { r, g, b };
+  const channel = (pair = '') => parseInt(pair, 16) / 255;
+  return match ? { r: channel(match[1]), g: channel(match[2]), b: channel(match[3]) } : undefined;
 }
 
 /** `oklch(l c h)` or `oklch(l c h / a)` as the theme writes it, its alpha set aside. */
@@ -32,10 +27,12 @@ export function parseOklch(css: string): Oklch | undefined {
   return { l, c, h };
 }
 
-/** A color as the theme writes it, `#rrggbb` or `oklch()`, in sRGB. */
-export function parseColor(css: string): Rgb | undefined {
+/** A color as the theme writes it, `#rrggbb` or `oklch()`, in sRGB. Throws on anything else. */
+export function colorOf(css: string): Rgb {
   const oklch = parseOklch(css);
-  return oklch ? rgbOf(oklch) : parseHex(css);
+  const color = oklch ? rgbOf(oklch) : parseHex(css);
+  if (!color) throw new Error(`${css} is neither #rrggbb nor oklch().`);
+  return color;
 }
 
 /**

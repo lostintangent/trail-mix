@@ -9,6 +9,7 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
+import { listeners } from './listeners.ts';
 import { whenIdle } from './whenIdle.ts';
 
 /*
@@ -23,20 +24,13 @@ import { whenIdle } from './whenIdle.ts';
 /** A control's tooltip, beside it rather than wired into it. */
 export function LaterTooltip({
   anchor,
-  content,
-  placement,
-}: {
+  ...props
+}: Pick<TooltipProps, 'content' | 'placement'> & {
   /** The control the tooltip belongs to, which keeps its own accessible name. */
   anchor: RefObject<HTMLElement | null>;
-  content: ReactNode;
-  placement?: TooltipProps['placement'];
 }) {
   const { tooltips, rests } = useArrival(anchor);
-  if (!tooltips) return null;
-  const { Tooltip } = tooltips;
-  return (
-    <Tooltip anchorRef={anchor} content={content} placement={placement} isDefaultOpen={rests()} />
-  );
+  return tooltips && <tooltips.Tooltip anchorRef={anchor} {...props} isDefaultOpen={rests()} />;
 }
 
 /** What Astryx's `Button` reads of its tooltip hook. */
@@ -129,7 +123,7 @@ function wire(ref: TooltipReturn['ref'], element: HTMLElement): () => void {
  * control as it arrives. A press ends a mouse's rest, as it shuts a tooltip already open.
  */
 function useArrival(anchor: RefObject<HTMLElement | null>) {
-  const tooltips = useSyncExternalStore(subscribe, loaded);
+  const tooltips = useSyncExternalStore(arrival.subscribe, loaded);
   const [isWaiting] = useState(() => !tooltips);
   const isMouseResting = useRef(false);
   useEffect(() => {
@@ -172,20 +166,15 @@ type Tooltips = typeof import('@astryxdesign/core/Tooltip');
 
 let tooltips: Tooltips | undefined;
 let loading: Promise<void> | undefined;
-const listeners = new Set<() => void>();
+const arrival = listeners();
 
 const loaded = () => tooltips;
-
-function subscribe(listener: () => void) {
-  listeners.add(listener);
-  return () => void listeners.delete(listener);
-}
 
 function load(): Promise<void> {
   loading ??= import('@astryxdesign/core/Tooltip').then(
     (module) => {
       tooltips = module;
-      for (const listener of listeners) listener();
+      arrival.tell();
     },
     () => {
       // Without its code a control keeps no tooltip, and the next reach asks again.

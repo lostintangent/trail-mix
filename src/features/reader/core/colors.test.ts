@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { contrast, hexOf, oklchOf, parseColor, parseHex, type Rgb } from '../../../shared/color.ts';
+import { colorOf as color, contrast, hexOf, oklchOf, parseHex } from '../../../shared/color.ts';
 import {
   isPaperWhite,
   liftedColor,
@@ -11,12 +11,6 @@ import {
   shadingOf,
   type DarkPaper,
 } from './colors.ts';
-
-const color = (css: string): Rgb => {
-  const rgb = parseColor(css);
-  if (!rgb) throw new Error(`${css} is no color`);
-  return rgb;
-};
 
 /** Charcoal paper and the ink on it, as the dark theme sets them. */
 const dark: DarkPaper = {

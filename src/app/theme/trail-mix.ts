@@ -2,7 +2,7 @@ import { defineTheme } from '@astryxdesign/core/theme';
 // The built neutral theme compiles to the same CSS as its source, and the generated module then
 // imports only the built one, without the runtime theme generator.
 import { neutralTheme } from '@astryxdesign/theme-neutral/built';
-import { hexOf, parseColor } from '../../shared/color.ts';
+import { colorOf, hexOf } from '../../shared/color.ts';
 import { DEFAULT_ACCENT, DESK, MUTED_ALPHA, PANE, PAPER, type Halves } from './palette.ts';
 
 /**
@@ -19,12 +19,7 @@ const desk = paired(DESK);
 const pane = paired(PANE);
 const paper = paired(PAPER);
 // Astryx picks the text on a toast by measuring what it lies on, and reads only hex and rgb.
-const hex = (color: string) => {
-  const rgb = parseColor(color);
-  if (!rgb) throw new Error(`${color} is not a color the theme can write in hex.`);
-  return hexOf(rgb);
-};
-const paperInHex = pair(hex(PAPER.light), hex(PAPER.dark));
+const paperInHex = pair(hexOf(colorOf(PAPER.light)), hexOf(colorOf(PAPER.dark)));
 // The accent until the member picks another, which then replaces it before first paint.
 const accent = paired(DEFAULT_ACCENT);
 // Ink in three strengths: what is read, what supports it, and what is quiet.

@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  colorOf,
   contrast,
   hexOf,
   over,
-  parseColor,
   parseHex,
   quantized,
   type Rgb,
@@ -15,7 +15,7 @@ const THEMES: Theme[] = ['light', 'dark'];
 
 /** The accent's worst contrast as text: on the desk, a pane and paper, and its tint over each. */
 function worstContrast(accent: Rgb, theme: Theme) {
-  const surfaces = [DESK, PANE, PAPER].map((halves) => parseColor(halves[theme])!);
+  const surfaces = [DESK, PANE, PAPER].map((halves) => colorOf(halves[theme]));
   const tinted = surfaces.map((surface) => over(accent, MUTED_ALPHA[theme], surface));
   return Math.min(...[...surfaces, ...tinted].map((under) => contrast(accent, under)));
 }
@@ -35,7 +35,7 @@ const PICKS = (() => {
 describe('the default', () => {
   test('ink blue reads in both themes, so it would come through unchanged', () => {
     for (const theme of THEMES) {
-      const blue = quantized(parseColor(DEFAULT_ACCENT[theme])!);
+      const blue = quantized(colorOf(DEFAULT_ACCENT[theme]));
       expect(hexOf(readableAccent(blue, theme))).toBe(hexOf(blue));
     }
   });
@@ -102,5 +102,5 @@ describe('the rule', () => {
 });
 
 test('the color picker starts at ink blue, as paper shows it', () => {
-  expect(DEFAULT_ACCENT_HEX).toBe(hexOf(parseColor(DEFAULT_ACCENT.light)!));
+  expect(DEFAULT_ACCENT_HEX).toBe(hexOf(colorOf(DEFAULT_ACCENT.light)));
 });

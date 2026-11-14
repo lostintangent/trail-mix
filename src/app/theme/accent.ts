@@ -1,4 +1,5 @@
 import { deviceStorage } from '../../shared/deviceStorage.ts';
+import { listeners } from '../../shared/listeners.ts';
 
 /**
  * The accent this device shows: ink blue by default, or a color the member picked, saved here.
@@ -47,7 +48,7 @@ export async function saveAccent(color: string | undefined): Promise<void> {
   else deviceStorage().removeItem(ACCENT_STORAGE_KEY);
   // A remade rule shows at once, though the pick it was made from is the same.
   showAccent(saved?.color);
-  for (const listener of listeners) listener();
+  saves.tell();
 }
 
 /** Calls `onChange` when this page or another tab on this device saves a pick. */
@@ -55,10 +56,10 @@ export function subscribeToAccent(onChange: () => void): () => void {
   const onStorage = (event: StorageEvent) => {
     if (event.key === ACCENT_STORAGE_KEY || event.key === null) onChange();
   };
-  listeners.add(onChange);
+  const unsubscribe = saves.subscribe(onChange);
   addEventListener('storage', onStorage);
   return () => {
-    listeners.delete(onChange);
+    unsubscribe();
     removeEventListener('storage', onStorage);
   };
 }
@@ -81,9 +82,8 @@ export function showAccent(color: string | undefined): void {
 
 function parse(saved: string | null): SavedAccent | undefined {
   try {
-    const value: unknown = JSON.parse(saved ?? 'null');
-    if (typeof value !== 'object' || value === null) return undefined;
-    const { color, css } = value as Partial<Record<keyof SavedAccent, unknown>>;
+    // Text that isn't JSON throws, as `null` does once read, and any other value lacks the fields.
+    const { color, css } = JSON.parse(saved ?? '{}') as Record<string, unknown>;
     return typeof color === 'string' && typeof css === 'string' && HEX.test(color)
       ? { color, css }
       : undefined;
@@ -95,4 +95,4 @@ function parse(saved: string | null): SavedAccent | undefined {
 /** A color as `#rrggbb`, the only way a pick is saved. */
 const HEX = /^#[0-9a-f]{6}$/i;
 
-const listeners = new Set<() => void>();
+const saves = listeners();

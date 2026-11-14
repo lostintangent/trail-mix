@@ -1,4 +1,5 @@
 import { useSyncExternalStore } from 'react';
+import { listeners } from '../../../shared/listeners.ts';
 
 /**
  * Keys pressed while a reply is on its way to its editor, as while the composer's code loads. A
@@ -10,7 +11,7 @@ import { useSyncExternalStore } from 'react';
 
 /** What the keys held have typed, while a reply is on its way. */
 let typed: string | undefined;
-const listeners = new Set<() => void>();
+const holding = listeners();
 
 /** Holds keys until the reply begun now takes them, keeping what is already held. */
 export function holdKeys() {
@@ -18,7 +19,7 @@ export function holdKeys() {
   typed = '';
   window.addEventListener('keydown', hold, { capture: true });
   window.addEventListener('focusin', drop, { capture: true });
-  tell();
+  holding.tell();
 }
 
 /** Lets keys go again, and returns what they typed while held. */
@@ -28,13 +29,13 @@ export function releaseKeys(): string {
   typed = undefined;
   window.removeEventListener('keydown', hold, { capture: true });
   window.removeEventListener('focusin', drop, { capture: true });
-  tell();
+  holding.tell();
   return was;
 }
 
 /** Whether a reply is on its way, holding keys for its editor. */
 export function useIsReplyOnItsWay(): boolean {
-  return useSyncExternalStore(listen, () => typed !== undefined);
+  return useSyncExternalStore(holding.subscribe, () => typed !== undefined);
 }
 
 function hold(event: KeyboardEvent) {
@@ -58,13 +59,4 @@ function isTypingIn(target: EventTarget | null): boolean {
     target.closest('input, textarea, select, [contenteditable]:not([contenteditable="false"])') !==
       null
   );
-}
-
-function listen(listener: () => void) {
-  listeners.add(listener);
-  return () => listeners.delete(listener);
-}
-
-function tell() {
-  for (const listener of listeners) listener();
 }

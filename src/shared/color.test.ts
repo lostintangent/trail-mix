@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  colorOf,
   contrast,
   hexOf,
   oklchOf,
   over,
-  parseColor,
   parseHex,
   parseOklch,
   quantized,
@@ -29,8 +29,9 @@ describe('reading colors', () => {
     expect(parseOklch('oklch(0.5 0.19 265)')).toEqual({ l: 0.5, c: 0.19, h: 265 });
     expect(parseOklch('oklch(0.77 0.13 265 / 0.14)')).toEqual({ l: 0.77, c: 0.13, h: 265 });
     expect(parseOklch('oklch(50% 0.19 265)')).toBeUndefined();
-    expect(hexOf(parseColor('oklch(1 0 0)')!)).toBe('#ffffff');
-    expect(parseColor('#000000')).toEqual(BLACK);
+    expect(hexOf(colorOf('oklch(1 0 0)'))).toBe('#ffffff');
+    expect(colorOf('#000000')).toEqual(BLACK);
+    expect(() => colorOf('blue')).toThrow();
   });
 });
 
@@ -89,7 +90,7 @@ test('a screen shows 8 bits a channel, and a tint mixes with what lies under it'
 
 describe('the readable shade', () => {
   const paper = parseHex('#ffffff')!;
-  const charcoal = parseColor('oklch(0.25 0 0)')!;
+  const charcoal = colorOf('oklch(0.25 0 0)');
   const readsOn = (surface: Rgb) => (shade: Rgb) => contrast(shade, surface) >= 4.5;
 
   test('of a color that already reads is the color, as the screen shows it', () => {

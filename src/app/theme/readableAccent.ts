@@ -1,8 +1,8 @@
 import {
+  colorOf,
   contrast,
   hexOf,
   over,
-  parseColor,
   parseHex,
   quantized,
   readableShade,
@@ -80,12 +80,6 @@ function worstContrast(accent: Rgb, theme: Theme): number {
 }
 
 const SURFACES: Record<Theme, Rgb[]> = {
-  light: [DESK.light, PANE.light, PAPER.light].map(surface),
-  dark: [DESK.dark, PANE.dark, PAPER.dark].map(surface),
+  light: [DESK.light, PANE.light, PAPER.light].map((css) => quantized(colorOf(css))),
+  dark: [DESK.dark, PANE.dark, PAPER.dark].map((css) => quantized(colorOf(css))),
 };
-
-function surface(css: string): Rgb {
-  const color = parseColor(css);
-  if (!color) throw new Error(`The palette has a color the accent can't measure: ${css}`);
-  return quantized(color);
-}
