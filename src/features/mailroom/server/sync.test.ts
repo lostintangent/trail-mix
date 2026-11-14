@@ -2,6 +2,7 @@ import { expect, test } from 'bun:test';
 import type { AccountId, Hint, SyncEvent } from '../../mail/core/index.ts';
 import { demoMailbox, demoServer, type MailProvider } from '../../providers/index.ts';
 import { envelopeIndex } from './envelope-index.ts';
+import { folderCommands } from './folders.ts';
 import { REREAD } from './schema.ts';
 import { syncQueue, type Budget } from './sync.ts';
 import { testSql } from './test-sql.ts';
@@ -157,6 +158,42 @@ test('a folder that goes while its sync is owed leaves the rest of the account t
   expect(room.settled).toEqual([
     { account: 'personal', messages: room.messages('personal'), error: undefined },
   ]);
+});
+
+test('a listing that shows a rename before the rename answers moves its mail rather than fetching it again', async () => {
+  let listing = () => Promise.resolve();
+  const answersLate = (provider: MailProvider): MailProvider => ({
+    ...provider,
+    async renameFolder(path, to) {
+      await provider.renameFolder(path, to);
+      await listing();
+    },
+  });
+  const room = mailroom(100, answersLate);
+  await room.sync('personal');
+  // How many messages the index holds in each folder, by its new name.
+  const held = () =>
+    Object.fromEntries(
+      room.sql
+        .all<{ path: string; n: number }>(`SELECT path, COUNT(*) AS n FROM messages GROUP BY path`)
+        .map(({ path, n }) => [path.replace(/^Projects/, 'Work'), n]),
+    );
+  const before = held();
+  // Another connection's listing answers first.
+  listing = () => room.sync('personal');
+  room.landed.length = 0;
+
+  const folders = folderCommands({
+    book: { get: () => ({}) as never },
+    provider: () => Promise.resolve(answersLate(room.servers.personal.provider)),
+    sync: room.queue,
+    owe: (owing) => Promise.resolve(owing()),
+  });
+  await folders.rename({ account: 'personal', path: 'Projects' }, 'Work');
+  await room.queue.run(ALL);
+
+  expect(held()).toEqual(before);
+  expect(room.landed.flatMap(({ events }) => events)).toEqual([]);
 });
 
 test('a step under way when its account goes lands nothing', async () => {

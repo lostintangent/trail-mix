@@ -64,7 +64,7 @@ type Job = {
   cancelled: boolean;
 };
 
-/** A folder a command renamed, from its path to its new one. */
+/** A folder a command renamed, from its path on the server to its new one. */
 type Move = { account: AccountId; from: string; to: string };
 
 /** A message moved, as a rename moves it: gone from its folder and at the same UID in `to`. */
@@ -105,7 +105,7 @@ export function syncQueue(syncing: Syncing) {
   let flying: Job | undefined;
   /** Folders whose sync failed during an account's check, with why, so the check skips them. */
   const failed = new Map<AccountId, Map<string, unknown>>();
-  /** Folders a command renamed, whose messages move when a listing shows the rename. */
+  /** Folders a command is renaming or renamed, whose messages move when a listing shows it. */
   let moves: Move[] = [];
   /** How to stop watching each account's Inbox, while a device is open. */
   const watchers = new Map<AccountId, () => void>();
@@ -143,17 +143,18 @@ export function syncQueue(syncing: Syncing) {
     if (job.cancelled) return undefined;
     const before = JSON.stringify(store.folders(account));
     const listed = new Set(folders.map(({ path }) => path));
-    const shown = new Map(
-      moves
-        .filter((move) => move.account === account && !listed.has(move.from) && listed.has(move.to))
-        .map(({ from, to }) => [from, to]),
-    );
+    // A folder renamed again before a listing showed it follows each rename to the one listed.
+    const renamedTo = (path: string, hops = moves.length): string | undefined => {
+      const to = moves.findLast((move) => move.account === account && move.from === path)?.to;
+      if (to === undefined || hops === 0) return undefined;
+      return listed.has(to) ? to : renamedTo(to, hops - 1);
+    };
     const gone = sql.transaction(() =>
       store.listFolders(account, folders).flatMap((path) => {
         for (const held of jobs) {
           if (held.account === account && held.path === path) held.cancelled = true;
         }
-        const to = shown.get(path);
+        const to = renamedTo(path);
         const changed = store.fold(
           to === undefined
             ? [{ type: 'reset', folder: { account, path } }]
@@ -354,26 +355,17 @@ export function syncQueue(syncing: Syncing) {
     checkedAt: () => checkedAt,
 
     /**
-     * Notes folders a command renamed, from where the index holds them, so the listing that shows
-     * the rename moves their messages rather than forgetting them. A folder renamed again before
-     * that listing moves once, to its latest name. Held in memory: a Mailroom that restarts first
+     * Notes folders a command is about to rename, so the listing that shows the rename moves their
+     * messages rather than forgetting them, whichever connection it answers on. Returns how to take
+     * the note back, for a rename that failed. Held in memory: a Mailroom that restarts first
      * downloads them.
      */
-    renamed(account: AccountId, renames: readonly { from: string; to: string }[]) {
-      const again = (move: Move) =>
-        move.account === account && renames.some(({ from }) => from === move.from);
-      moves = [
-        ...moves.filter((move) => !again(move)),
-        ...renames.map((rename) => ({ account, ...rename })),
-      ];
-    },
-
-    /**
-     * Where the index holds a folder the server now has at `path`: a path a command renamed it from,
-     * until a listing shows the rename, or else `path` itself.
-     */
-    heldAt(account: AccountId, path: string): string {
-      return moves.find((move) => move.account === account && move.to === path)?.from ?? path;
+    renaming(account: AccountId, renames: readonly { from: string; to: string }[]) {
+      const noted = renames.map((rename) => ({ account, ...rename }));
+      moves = [...moves, ...noted];
+      return () => {
+        moves = moves.filter((move) => !noted.includes(move));
+      };
     },
 
     /** Whether anything is owed, so another wake should follow at once. */

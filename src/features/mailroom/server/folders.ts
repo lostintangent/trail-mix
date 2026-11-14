@@ -13,7 +13,7 @@ import type { SyncQueue } from './sync.ts';
 export function folderCommands(ports: {
   book: Pick<AccountBook, 'get'>;
   provider: (account: AccountId) => Promise<MailProvider>;
-  sync: Pick<SyncQueue, 'check' | 'renamed' | 'heldAt'>;
+  sync: Pick<SyncQueue, 'check' | 'renaming'>;
   owe: (owing: () => void) => Promise<void>;
 }) {
   const { sync } = ports;
@@ -44,16 +44,19 @@ export function folderCommands(ports: {
       const problem = renameProblem(current, renamed, listed);
       if (problem) throw new Error(problem);
       if (renamed === path) return;
-      await provider.renameFolder(path, renamed);
-      // The folders inside go along, and so do the messages the index holds in them all, under
-      // the paths it holds them at, which an earlier rename not yet listed may have changed.
-      sync.renamed(
+      // The folders inside go along, and so do the messages the index holds in them all. The move
+      // is noted first, since a listing on another connection can show it before the rename answers.
+      const undo = sync.renaming(
         account,
-        [current, ...inside(current, listed)].map(({ path: at }) => ({
-          from: sync.heldAt(account, at),
-          to: `${renamed}${at.slice(path.length)}`,
+        [current, ...inside(current, listed)].map(({ path: from }) => ({
+          from,
+          to: `${renamed}${from.slice(path.length)}`,
         })),
       );
+      await provider.renameFolder(path, renamed).catch((error: unknown) => {
+        undo();
+        throw error;
+      });
       await ports.owe(() => sync.check(account));
     },
 
