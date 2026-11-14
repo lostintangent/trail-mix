@@ -50,7 +50,7 @@ function registry(isUnread: boolean): Command[] {
       showShortcuts: nothing,
     }),
     ...viewCommands(accounts, folders, nothing),
-    ...sendCommands({ onSend: nothing }),
+    ...sendCommands({ onSend: nothing, isEnabled: true, shortcut: 'Mod+Enter' }),
     ...accentCommands('#c2185b', nothing, nothing),
   ];
 }

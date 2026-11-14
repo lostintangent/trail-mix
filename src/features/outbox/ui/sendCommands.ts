@@ -13,12 +13,12 @@ export const SEND_LATER = 'outbox.later:';
  */
 export function sendCommands({
   onSend,
-  isEnabled = true,
+  isEnabled,
   shortcut,
 }: {
   onSend: (at?: string) => void;
-  isEnabled?: boolean;
-  shortcut?: string;
+  isEnabled: boolean;
+  shortcut: string;
 }): Command[] {
   // A time is worked out as it's chosen, so a menu left open doesn't send an hour early.
   const at = (label: Later['label'], offered: Date) =>
