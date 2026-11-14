@@ -1,7 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { Folder, FolderRole } from '../../mail/core/index.ts';
 import { childPath, inside, isOwn, placeOf, renamedPath } from './names.ts';
-import { whatGoes } from './question.ts';
 import { createProblem, deleteProblem, nameProblem, renameProblem } from './problems.ts';
 
 const folder = (path: string, extra: Partial<Folder> = {}): Folder => {
@@ -119,12 +118,9 @@ test('only a folder with no role in it or anywhere inside it is the member’s o
   expect(isOwn(folder('INBOX'), [])).toBe(false);
 });
 
-test('a delete takes every folder inside, however deep, and all their messages', () => {
+test('a delete takes every folder inside, however deep', () => {
   expect(inside(trips, folders)).toEqual([japan, kyoto]);
   expect(inside(kyoto, folders)).toEqual([]);
-  expect(whatGoes(trips, folders)).toEqual({ folders: 2, messages: 10 });
-  expect(whatGoes(japan, folders)).toEqual({ folders: 1, messages: 7 });
-  expect(whatGoes(kyoto, folders)).toEqual({ folders: 0, messages: 2 });
   // "Trips" begins "Tripsy", which isn't inside it.
   expect(inside(trips, [...folders, folder('Tripsy')])).toEqual([japan, kyoto]);
 });

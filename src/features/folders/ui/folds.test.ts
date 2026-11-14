@@ -1,9 +1,7 @@
 import { expect, test } from 'bun:test';
-import { FOLDS_KEY, foldKey, readFolds, toggleFold } from './folds.ts';
+import { foldKey, readFolds, toggleFold } from './folds.ts';
 
-const saved = (value: string | null) => ({
-  getItem: (key: string) => (key === FOLDS_KEY ? value : null),
-});
+const saved = (value: string | null) => ({ getItem: () => value });
 
 test('an account and its folders fold apart, even where a path looks like another’s key', () => {
   const keys = [

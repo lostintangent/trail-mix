@@ -5,10 +5,4 @@ export {
   type Notifications,
 } from './ui/useNotifications.ts';
 export { needsOf } from './ui/needs.ts';
-export {
-  clickNotification,
-  showPush,
-  type Clicked,
-  type Opening,
-  type Pushed,
-} from './ui/worker.ts';
+export { clickNotification, showPush, type Clicked, type Pushed } from './ui/worker.ts';

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import type { Envelope, MessageRef, SyncEvent } from '../../mail/core/index.ts';
-import { NEWS_FOR_MS, newsIn, type Mark } from './news.ts';
+import { newsIn, type Mark } from './news.ts';
 
 const NOW = Date.parse('2026-11-10T12:00:00Z');
 const READ = { now: NOW, movedIn: () => false };
@@ -53,8 +53,9 @@ describe('news in an Inbox already read', () => {
   });
 
   test('leaves out mail dated more than a day ago, as old mail moved in by another client', () => {
-    const old = new Date(NOW - NEWS_FOR_MS).toISOString();
-    const lately = new Date(NOW - NEWS_FOR_MS + 1).toISOString();
+    const day = 24 * 60 * 60_000;
+    const old = new Date(NOW - day).toISOString();
+    const lately = new Date(NOW - day + 1).toISOString();
     expect(
       uids(newsIn([arrived(42, { date: old }), arrived(41, { date: lately })], mark, READ)),
     ).toEqual([41]);

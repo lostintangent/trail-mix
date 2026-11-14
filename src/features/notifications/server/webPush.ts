@@ -11,7 +11,7 @@ import { fromBase64Url, toBase64Url, type Subscription } from '../core/subscript
 export type PushKey = { publicKey: string; privateKey: string; subject: string };
 
 /** How a push fared, which decides what happens to the device that was to receive it. */
-export type Delivery =
+type Delivery =
   /** The push service took it. */
   | 'sent'
   /** The subscription has ended, so the device is forgotten. */
@@ -63,7 +63,7 @@ export async function deliver(
 }
 
 /** How a push fared, by the push service's answer (RFC 8030). */
-export function deliveryOf(status: number): Delivery {
+function deliveryOf(status: number): Delivery {
   if (status >= 200 && status < 300) return 'sent';
   if (status === 404 || status === 410) return 'gone';
   if (status === 401 || status === 403) return 'refused';

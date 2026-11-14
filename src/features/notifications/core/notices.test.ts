@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { placeAt, type Message } from '../../mail/core/index.ts';
-import { MOST_NOTICES, noticesOf } from './notices.ts';
+import { noticesOf } from './notices.ts';
 import { noticeIn, pushOf } from './push.ts';
 
 const ACCOUNTS: Record<string, string> = { personal: 'Personal', work: 'Work' };
@@ -86,9 +86,9 @@ describe('more conversations with news than one wake tells one by one', () => {
     ]);
   });
 
-  test('start one past the most told one by one', () => {
-    expect(noticesOf(news.slice(0, MOST_NOTICES), nameOf)).toHaveLength(MOST_NOTICES);
-    expect(noticesOf(news.slice(0, MOST_NOTICES + 1), nameOf)).toHaveLength(1);
+  test('start past three conversations, which are told one by one', () => {
+    expect(noticesOf(news.slice(0, 3), nameOf)).toHaveLength(3);
+    expect(noticesOf(news.slice(0, 4), nameOf)).toHaveLength(1);
   });
 });
 

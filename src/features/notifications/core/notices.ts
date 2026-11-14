@@ -19,7 +19,7 @@ export type Notice = {
 };
 
 /** How many conversations one wake notifies of one by one. More are told as one summary. */
-export const MOST_NOTICES = 3;
+const MOST_NOTICES = 3;
 
 /** How much of a subject or preview a notice carries, so every push stays well inside its size. */
 const SAID_LENGTH = 200;

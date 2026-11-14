@@ -10,7 +10,7 @@ import type { FolderRef } from '../../mail/core/index.ts';
 /** What can fold: an account, or a folder with folders inside it. */
 export type Foldable = { account: string } | FolderRef;
 
-export const FOLDS_KEY = 'trail-mix.folded';
+const FOLDS_KEY = 'trail-mix.folded';
 
 /** One key per thing that folds, so an account and a folder can never share one. */
 export const foldKey = (what: Foldable): string =>

@@ -8,7 +8,7 @@ import type { Envelope, MessageRef, SyncEvent } from '../../mail/core/index.ts';
 export type Mark = { uidValidity: number; uid: number };
 
 /** How long after its date a message can still be news. Old mail turning up late stays quiet. */
-export const NEWS_FOR_MS = 24 * 60 * 60_000;
+const NEWS_FOR_MS = 24 * 60 * 60_000;
 
 /**
  * The news in one batch of an Inbox's sync, and the Inbox's mark after it. A batch that starts the

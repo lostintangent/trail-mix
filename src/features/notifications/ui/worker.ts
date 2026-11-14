@@ -20,7 +20,7 @@ export type Clicked = Extendable & {
 
 type WindowClient = { focus(): Promise<unknown>; postMessage(message: unknown): void };
 
-export type Worker = {
+type Worker = {
   registration: { showNotification(title: string, options: object): Promise<void> };
   clients: {
     matchAll(options: { type: 'window'; includeUncontrolled: boolean }): Promise<WindowClient[]>;

@@ -8,7 +8,7 @@
 export type TreeLine = { level: number; isOpen?: boolean | undefined };
 
 /** What a key does in the tree: moves to another line, or folds or unfolds the line it's on. */
-export type TreeMove = { focus: number } | { fold: true };
+type TreeMove = { focus: number } | { fold: true };
 
 /** What `key` does on the line at `at`, or nothing if it does nothing there. */
 export function treeMove(

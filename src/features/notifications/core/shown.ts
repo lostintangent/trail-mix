@@ -9,15 +9,15 @@ import { noticeIn } from './push.ts';
  */
 
 /** What a shown notification carries for a tap or a button: where it leads and its message. */
-export type Shown = { navigate: string; message?: MessageRef };
+type Shown = { navigate: string; message?: MessageRef };
 
 /** A notification's buttons, for a notice about one message, where the platform shows any. */
-export const BUTTONS = [
+const BUTTONS = [
   { action: 'archive', title: 'Archive' },
   { action: 'read', title: 'Mark read' },
 ] as const;
 
-export type Button = (typeof BUTTONS)[number]['action'];
+type Button = (typeof BUTTONS)[number]['action'];
 
 /** What shows when a push carries no notice it can read, since every push must show one. */
 const NEW_MAIL: Notice = { title: 'New mail', body: '', tag: 'news', navigate: '/' };

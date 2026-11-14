@@ -5,9 +5,6 @@ import type { Command } from '../../commands/index.ts';
 import { notifiedQuery } from '../../mailroom/client/index.ts';
 import { standingOf, subscribedAt, type Standing } from './device.ts';
 
-/** The one command that turns this device's notifications on and off. */
-export const NOTIFICATIONS = 'notifications.toggle';
-
 /**
  * Notifications on this device: whether the deployment and the browser have them at all, where the
  * device stands, whether they're on, and turning them over, which Settings' switch and the
@@ -86,7 +83,7 @@ export function notificationCommands({ isShown, isOn, isBusy, toggle }: Notifica
   if (!isShown) return [];
   return [
     {
-      id: NOTIFICATIONS,
+      id: 'notifications.toggle',
       title: isOn
         ? 'Turn off notifications on this device'
         : 'Turn on notifications on this device',

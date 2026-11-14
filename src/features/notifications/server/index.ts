@@ -1,1 +1,1 @@
-export { deliver, pushKeyOf, type Delivery, type PushKey } from './webPush.ts';
+export { deliver, pushKeyOf, type PushKey } from './webPush.ts';

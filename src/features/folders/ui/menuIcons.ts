@@ -18,7 +18,7 @@ import type { Command, MenuIconName } from '../../commands/index.ts';
  * The icons commands only menus draw, by the names they give. They load with the menus, apart from
  * the first screen. A name with no icon here, or an icon with no name, fails the type check.
  */
-export const MENU_ICONS = {
+const MENU_ICONS = {
   code: Code,
   eraser: Eraser,
   folderPen: FolderPen,
