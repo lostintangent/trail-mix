@@ -30,6 +30,7 @@ import {
   type Preset,
   type VendorRequest,
 } from '../../src/features/providers/index.ts';
+import { withoutSecrets } from '../../src/features/providers/imap/core/signin.ts';
 import { caFile, identity, ports } from '../mail-server/server.ts';
 import { startWorker } from '../workerd.ts';
 import type { CheckRequest, CheckResult } from './worker.ts';
@@ -136,7 +137,9 @@ async function runInWorkerd(request: CheckRequest, test: boolean): Promise<numbe
       method: 'POST',
       body: JSON.stringify(request),
     });
-    const redact = redactor(request);
+    // Belt and braces: nothing printed may carry the secret, as the provider's own refusals don't.
+    const redact = (text: string) =>
+      withoutSecrets(text, { user: request.user, secrets: [request.secret] });
     if (!response.ok || !response.body) {
       throw new Error(
         redact(`workerd answered ${response.status}: ${(await response.text()).slice(0, 500)}`),
@@ -182,17 +185,6 @@ async function runInWorkerd(request: CheckRequest, test: boolean): Promise<numbe
   } finally {
     workerd.stop();
   }
-}
-
-// Belt and braces: nothing printed may carry the secret, plainly or in the encodings logins use.
-function redactor({ user, secret }: CheckRequest) {
-  const forms = [
-    secret,
-    btoa(secret),
-    btoa(`\0${user}\0${secret}`),
-    btoa(`user=${user}\x01auth=Bearer ${secret}\x01\x01`),
-  ];
-  return (text: string) => forms.reduce((out, form) => out.split(form).join('[redacted]'), text);
 }
 
 async function readSecret(prompt: string): Promise<string> {

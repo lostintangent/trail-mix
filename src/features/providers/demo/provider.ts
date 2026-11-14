@@ -126,7 +126,7 @@ export function demoServer(
 
   const provider: MailProvider = {
     folders: () =>
-      settle(() =>
+      Promise.try(() =>
         mailbox.folders.map(({ path, role }): Folder => {
           const parent = path.slice(0, Math.max(0, path.lastIndexOf('/')));
           return {
@@ -142,7 +142,7 @@ export function demoServer(
       ),
 
     sync: (path, cursor, window) =>
-      settle(() => {
+      Promise.try(() => {
         const folder = server.folderOf(mailbox, path);
         if (!folder) throw new Error(`There is no folder "${path}".`);
         const inWindow = server.uidsSince(mailbox, path, window.since);
@@ -163,7 +163,7 @@ export function demoServer(
       }),
 
     body: (ref) =>
-      settle(() => {
+      Promise.try(() => {
         const found = find(ref);
         if (!found) throw new Error('The message is no longer on the server.');
         return new Blob([bytesOf(found.message.raw())]).stream();
@@ -203,7 +203,7 @@ export function demoServer(
     },
 
     findDraft: (messageId) =>
-      settle(() => {
+      Promise.try(() => {
         const drafts = roleFolder('drafts');
         const uid = messageIdIn(drafts, messageId);
         return uid === undefined ? undefined : refOf(drafts, uid);
@@ -265,7 +265,7 @@ export function demoServer(
       }),
 
     search: (path, text) =>
-      settle(() => {
+      Promise.try(() => {
         const needle = text.toLowerCase();
         const found = server.uidsIn(mailbox, path).filter((uid) => {
           const message = server.messageAt(mailbox, path, uid)!;
@@ -305,7 +305,7 @@ export function demoServer(
       await commit(server.deleteFolder(mailbox, path), [...watchers.keys()]);
     },
 
-    close: () => settle(() => watchers.clear()),
+    close: () => Promise.try(() => watchers.clear()),
   };
 
   /** Whether the server turns `asked` away, as it does the first time it is asked and never again. */
@@ -376,11 +376,6 @@ export function demoServer(
       return new Response(null, { status: 200 });
     },
   };
-}
-
-/** Runs a step that needs no waiting as a promise, so what it throws rejects the promise. */
-function settle<T>(step: () => T): Promise<T> {
-  return new Promise((resolve) => resolve(step()));
 }
 
 const NEW: Flags = { seen: false, flagged: false, answered: false, draft: false };

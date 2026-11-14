@@ -29,7 +29,7 @@ const KEEP_S = 24 * 60 * 60;
  * genpkey` writes it, with its JWT subject: the operator's address, which push services contact.
  */
 export async function pushKeyOf(pem: string, operator: string): Promise<PushKey> {
-  const der = Uint8Array.from(atob(pem.replace(/-----[^-]+-----|\s/g, '')), (c) => c.charCodeAt(0));
+  const der = Uint8Array.fromBase64(pem.replace(/-----[^-]+-----/g, ''));
   const key = await crypto.subtle.importKey(
     'pkcs8',
     der,

@@ -33,7 +33,7 @@ export function signInFailure(
  * `text` without any secret, plainly or in the encodings a sign-in sends it in: AUTH PLAIN's, and
  * XOAUTH2's for a token.
  */
-function withoutSecrets(text: string, { user, secrets }: SentCredentials) {
+export function withoutSecrets(text: string, { user, secrets }: Omit<SentCredentials, 'by'>) {
   const forms = secrets
     .filter(Boolean)
     .flatMap((secret) => [
@@ -45,4 +45,4 @@ function withoutSecrets(text: string, { user, secrets }: SentCredentials) {
   return forms.reduce((out, form) => out.split(form).join('…'), text);
 }
 
-const base64 = (text: string) => btoa(String.fromCharCode(...new TextEncoder().encode(text)));
+const base64 = (text: string) => new TextEncoder().encode(text).toBase64();

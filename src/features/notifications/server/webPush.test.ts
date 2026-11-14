@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { pushOf } from '../core/push.ts';
-import { fromBase64Url } from '../core/subscription.ts';
+import { fromBase64Url, toBase64Url } from '../core/subscription.ts';
 import { decrypt, standInPushService } from '../../../../tests/push-service.ts';
 import { deliver, pushKeyOf } from './webPush.ts';
 
@@ -133,18 +133,14 @@ async function pemOf(key?: CryptoKey): Promise<string> {
       ])) as CryptoKeyPair
     ).privateKey;
   const der = new Uint8Array((await crypto.subtle.exportKey('pkcs8', privateKey)) as ArrayBuffer);
-  const lines = btoa(String.fromCharCode(...der)).match(/.{1,64}/g)!;
+  const lines = der.toBase64().match(/.{1,64}/g)!;
   return ['-----BEGIN PRIVATE KEY-----', ...lines, '-----END PRIVATE KEY-----', ''].join('\n');
 }
 
 /** A P-256 ECDH private key from its scalar and uncompressed public point, base64url. */
 function ecdhKey(d: string, point: string): Promise<CryptoKey> {
   const bytes = fromBase64Url(point);
-  const coordinate = (from: number) =>
-    btoa(String.fromCharCode(...bytes.slice(from, from + 32)))
-      .replace(/\+/g, '-')
-      .replace(/\//g, '_')
-      .replace(/=+$/, '');
+  const coordinate = (from: number) => toBase64Url(bytes.slice(from, from + 32));
   return crypto.subtle.importKey(
     'jwk',
     { kty: 'EC', crv: 'P-256', d, x: coordinate(1), y: coordinate(33) },

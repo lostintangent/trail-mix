@@ -53,8 +53,7 @@ test('any other answer is the host’s reason for turning the sign-in away', () 
 
 test('the password never appears, even when a host repeats what it was sent', () => {
   const password = 'pässwörd';
-  const utf8 = (text: string) =>
-    btoa(Array.from(new TextEncoder().encode(text), (byte) => String.fromCharCode(byte)).join(''));
+  const utf8 = (text: string) => new TextEncoder().encode(text).toBase64();
   const plain = utf8(`\0me@example.com\0${password}`);
   const said = signInFailure(
     {
