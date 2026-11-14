@@ -74,16 +74,8 @@ export function Over({ children, onClose }: { children: ReactNode; onClose: () =
 
 /** Whether a composer lies under the conversation it answers, rather than filling the reader. */
 export function isDocked(compose: Compose): boolean {
-  switch (compose.as) {
-    case 'new':
-      return false;
-    case 'reply':
-      return true;
-    case 'draft':
-      return compose.conversation.some(({ flags }) => !flags.draft);
-    case 'resumed':
-      return compose.isDocked;
-  }
+  if (compose.as === 'draft') return compose.conversation.some(({ flags }) => !flags.draft);
+  return compose.as === 'reply' || (compose.as === 'resumed' && compose.isDocked);
 }
 
 const FOCUS_WIDTH = `calc(${borderVars['--border-width']} * 2)`;

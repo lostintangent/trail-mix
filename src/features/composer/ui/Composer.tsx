@@ -96,9 +96,9 @@ export function Composer({ compose, ...props }: ComposerProps) {
     ...bodyQuery(ref ?? NO_REF),
     enabled: ref !== undefined,
   });
-  const start = startOf(compose, props.accounts, body);
   const answering = compose.as === 'reply' ? compose : undefined;
   const account = answering && props.accounts.find(({ id }) => id === answering.to.account);
+  const start = startOf(compose, account, body);
   const recipients = useMemo(
     () => answering && account && body && recipientsOf(answering.to, body, account, answering.all),
     [answering, account, body],
@@ -135,9 +135,6 @@ export function Composer({ compose, ...props }: ComposerProps) {
       draft={compose.as === 'draft' ? refOf(compose.draft) : undefined}
       resumed={compose.as === 'resumed' ? compose.drafting : undefined}
       recipients={recipients}
-      isNew={!start.inReplyTo}
-      // A draft that answers mail the index doesn't hold stands alone, but is a reply all the same.
-      isReply={start.inReplyTo !== undefined || start.answers !== undefined}
       {...props}
     />
   );
@@ -147,16 +144,14 @@ const NO_REF: MessageRef = { account: '', path: '', uidValidity: 0, uid: 0 };
 
 function startOf(
   compose: Compose,
-  accounts: readonly Account[],
+  account: Account | undefined,
   body: Parameters<typeof reopened>[1] | undefined,
 ): Writing | undefined {
   switch (compose.as) {
     case 'new':
       return newMessage(compose.account);
-    case 'reply': {
-      const account = accounts.find(({ id }) => id === compose.to.account);
+    case 'reply':
       return account && replyTo(compose.to, body, account, compose.all);
-    }
     case 'draft':
       return body ? reopened(compose.draft, body, compose.conversation) : undefined;
     case 'resumed':
@@ -170,8 +165,6 @@ function Writer({
   draft,
   resumed,
   recipients,
-  isNew,
-  isReply,
   accounts,
   onDraft,
   onSend,
@@ -187,11 +180,7 @@ function Writer({
   /** The message a send of it was undone for, still being saved as it was. */
   resumed: Drafting | undefined;
   /** Whom a reply goes to once the parent's body says, which waits on the member's own choice. */
-  recipients?: Pick<Writing, 'to' | 'cc'> | undefined;
-  /** Whether it stands alone, filling the reader with its Subject, rather than under its parent. */
-  isNew: boolean;
-  /** Whether it answers another message, which names it a reply. */
-  isReply: boolean;
+  recipients: Pick<Writing, 'to' | 'cc'> | undefined;
 } & Omit<ComposerProps, 'compose'>) {
   const message = useWriting(start, recipients);
   const { writing } = message;
@@ -232,6 +221,10 @@ function Writer({
   const [linking, setLinking] = useState<LinkRange>();
   const band = useVisibleBand(isSheet);
 
+  // One that answers no message in the index stands alone, filling the reader with its Subject,
+  // though a draft that answers mail the index doesn't hold is a reply all the same.
+  const isNew = !start.inReplyTo;
+  const isReply = start.inReplyTo !== undefined || start.answers !== undefined;
   const title = isReply ? 'Reply' : 'New message';
   // On a coarse pointer a tap is the only way in, and a tooltip it left would stay.
   const tip = (label: string) => (isCoarse ? undefined : label);

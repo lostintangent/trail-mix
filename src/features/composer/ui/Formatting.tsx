@@ -31,42 +31,36 @@ export function Formatting({
   tip: (label: string) => string | undefined;
   onLink: (range: LinkRange) => void;
 }) {
-  // Asked of the editor as given, since the snapshot keeps none until the editor's next change.
-  const active = useEditorState({
-    editor,
-    selector: () => ({
-      bold: editor?.isActive('bold'),
-      italic: editor?.isActive('italic'),
-      code: editor?.isActive('code'),
-      link: editor?.isActive('link'),
-    }),
-  });
   const link = () => {
-    if (active?.link) {
-      editor?.chain().focus().extendMarkRange('link').unsetLink().run();
+    if (editor?.isActive('link')) {
+      editor.chain().focus().extendMarkRange('link').unsetLink().run();
     } else if (editor) {
       const { from, to } = editor.state.selection;
       onLink({ from, to });
     }
   };
-  type Mark = keyof NonNullable<typeof active>;
-  const buttons: [label: string, icon: typeof Bold, key: Mark, run: () => void][] = [
+  const buttons = [
     ['Bold', Bold, 'bold', () => editor?.chain().focus().toggleBold().run()],
     ['Italic', Italic, 'italic', () => editor?.chain().focus().toggleItalic().run()],
     ['Code', Code, 'code', () => editor?.chain().focus().toggleCode().run()],
     ['Link', LinkIcon, 'link', link],
-  ];
+  ] as const;
+  // Asked of the editor as given, since the snapshot keeps none until the editor's next change.
+  const pressed = useEditorState({
+    editor,
+    selector: () => buttons.map(([, , mark]) => editor?.isActive(mark) ?? false),
+  });
   // Pressing one leaves the focus, and so the selection it acts on, in the text.
   return (
     <span onMouseDown={(event) => event.preventDefault()} {...stylex.props(styles.contents)}>
-      {buttons.map(([label, icon, key, run]) => (
+      {buttons.map(([label, icon, , run], at) => (
         <IconButton
           key={label}
           label={label}
           tooltip={tip(label)}
           icon={<Icon icon={icon} />}
           variant="ghost"
-          aria-pressed={active?.[key] ?? false}
+          aria-pressed={pressed?.[at] ?? false}
           onClick={run}
         />
       ))}

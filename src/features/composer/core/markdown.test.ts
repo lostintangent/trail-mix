@@ -78,7 +78,7 @@ test('the HTML says what the Markdown says', () => {
     ].join('\n\n'),
   );
   expect(html).toContain('<strong>bold</strong>, <em>emphasis</em> and <del>struck</del>');
-  expect(html).toMatch(/<ol start="3"[^>]*>\s*<li[^>]*>three<\/li>\s*<li[^>]*>four<\/li>/);
+  expect(html).toMatch(/<ol[^>]*start="3"[^>]*>\s*<li[^>]*>three<\/li>\s*<li[^>]*>four<\/li>/);
   expect(html).toMatch(/<li[^>]*>☐ open<\/li>\s*<li[^>]*>☑ done<\/li>/);
   expect(html).toMatch(/<th style="[^"]*text-align: left[^"]*">left<\/th>/);
   expect(html).toMatch(/<td style="[^"]*text-align: right[^"]*">2<\/td>/);

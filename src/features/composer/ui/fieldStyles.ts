@@ -2,10 +2,7 @@ import { colorVars, typeScaleVars, typographyVars } from '@astryxdesign/core/the
 import * as stylex from '@stylexjs/stylex';
 import { tm } from '../../../app/theme/tokens.stylex.ts';
 
-/**
- * The composer's inputs: one that lies in a line of the sheet, borderless, as each field and the
- * link's address do, and one hidden from sight that a screen reader or a button still reaches.
- */
+/** A borderless input lying in a line of the sheet, as each field and the link's address do. */
 export const fieldStyles = stylex.create({
   input: {
     flexGrow: 1,
@@ -18,13 +15,5 @@ export const fieldStyles = stylex.create({
     color: colorVars['--color-text-primary'],
     fontFamily: typographyVars['--font-family-body'],
     fontSize: typeScaleVars['--text-body-size'],
-  },
-  hidden: {
-    position: 'absolute',
-    width: '1px',
-    height: '1px',
-    overflow: 'hidden',
-    clipPath: 'inset(50%)',
-    whiteSpace: 'nowrap',
   },
 });

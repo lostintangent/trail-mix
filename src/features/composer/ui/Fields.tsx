@@ -7,8 +7,9 @@ import {
   typeScaleVars,
   typographyVars,
 } from '@astryxdesign/core/theme/tokens.stylex';
+import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
 import * as stylex from '@stylexjs/stylex';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { StampDot } from '../../../app/theme/StampDot.tsx';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, AccountId } from '../../mail/core/index.ts';
@@ -47,6 +48,23 @@ export function Fields({
   const [hasCopies, setHasCopies] = useState(false);
   if (!hasCopies && (typed.cc !== '' || typed.bcc !== '')) setHasCopies(true);
   const stamp = accounts.find(({ id }) => id === account)?.stamp;
+  /** A line of the header: a label and what's typed beside it. */
+  const line = (label: string, input: ReactNode) => (
+    <label {...stylex.props(styles.field)}>
+      <span {...stylex.props(styles.label)}>{label}</span>
+      {input}
+    </label>
+  );
+  // Addresses are completed as they're typed.
+  const addresses = (field: keyof AddressText, label: string, isFocused = false) =>
+    line(
+      label,
+      <AddressInput
+        value={typed[field]}
+        onChange={(text) => onAddress(field, text)}
+        isFocused={isFocused}
+      />,
+    );
   return (
     <div {...stylex.props(styles.fields, !isSheet && styles.onPage)}>
       <div {...stylex.props(styles.row, styles.fromRow)}>
@@ -54,7 +72,7 @@ export function Fields({
           <span {...stylex.props(styles.fromLabel)}>From</span>
           <label {...stylex.props(styles.from)}>
             {stamp && <StampDot stamp={stamp} />}
-            <span {...stylex.props(fieldStyles.hidden)}>From</span>
+            <VisuallyHidden>From</VisuallyHidden>
             <select
               value={account}
               onChange={(event) => {
@@ -71,12 +89,7 @@ export function Fields({
             </select>
           </label>
         </div>
-        <Field
-          label="To"
-          value={typed.to}
-          onChange={(text) => onAddress('to', text)}
-          isFocused={isToFocused}
-        />
+        {addresses('to', 'To', isToFocused)}
         {!hasCopies && (
           <button type="button" onClick={() => setHasCopies(true)} {...stylex.props(styles.copies)}>
             Cc Bcc
@@ -85,54 +98,25 @@ export function Fields({
       </div>
       {hasCopies && (
         <>
-          <div {...stylex.props(styles.row)}>
-            <Field label="Cc" value={typed.cc} onChange={(text) => onAddress('cc', text)} />
-          </div>
-          <div {...stylex.props(styles.row)}>
-            <Field label="Bcc" value={typed.bcc} onChange={(text) => onAddress('bcc', text)} />
-          </div>
+          <div {...stylex.props(styles.row)}>{addresses('cc', 'Cc')}</div>
+          <div {...stylex.props(styles.row)}>{addresses('bcc', 'Bcc')}</div>
         </>
       )}
       {subject !== undefined && (
         <div {...stylex.props(styles.row)}>
-          <label {...stylex.props(styles.field)}>
-            <span {...stylex.props(styles.label)}>Subject</span>
+          {line(
+            'Subject',
             <input
               value={subject}
               onChange={(event) => onSubject(event.target.value)}
               autoComplete="off"
               spellCheck
               {...stylex.props(fieldStyles.input)}
-            />
-          </label>
+            />,
+          )}
         </div>
       )}
     </div>
-  );
-}
-
-/** A line of the header: a label and the addresses typed beside it, completed as they're typed. */
-function Field({
-  label,
-  value,
-  onChange,
-  isFocused = false,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  isFocused?: boolean;
-}) {
-  return (
-    <label {...stylex.props(styles.field)}>
-      <span {...stylex.props(styles.label)}>{label}</span>
-      <AddressInput
-        value={value}
-        onChange={onChange}
-        isFocused={isFocused}
-        xstyle={fieldStyles.input}
-      />
-    </label>
   );
 }
 

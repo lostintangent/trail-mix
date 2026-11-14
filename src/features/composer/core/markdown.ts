@@ -25,7 +25,13 @@ export function renderMarkdown(
   markdown: string,
   contentIds: ReadonlySet<string> = new Set(),
 ): string {
-  const marked = new Marked(DIALECT, { renderer: renderer(contentIds) });
+  const marked = new Marked(DIALECT, {
+    renderer: renderer(contentIds),
+    hooks: {
+      postprocess: (html) =>
+        html.replace(STYLED, (tag, name: keyof typeof STYLE) => `${tag} style="${STYLE[name]}"`),
+    },
+  });
   return `<div style="${STYLE.body}">${marked.parse(markdown) as string}</div>`;
 }
 
@@ -48,20 +54,23 @@ const GRAY = '#d0d7de';
 const RULE = `1px solid ${GRAY}`;
 const HEADING = 'margin: 0 0 0.5em; font-weight: 600; line-height: 1.25';
 
+const H4 = `${HEADING}; font-size: 1em`;
+
 const STYLE = {
   body: "font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; line-height: 1.5",
   p: 'margin: 0 0 1em',
-  headings: [
-    `${HEADING}; font-size: 1.5em`,
-    `${HEADING}; font-size: 1.3em`,
-    `${HEADING}; font-size: 1.15em`,
-    `${HEADING}; font-size: 1em`,
-  ],
+  h1: `${HEADING}; font-size: 1.5em`,
+  h2: `${HEADING}; font-size: 1.3em`,
+  h3: `${HEADING}; font-size: 1.15em`,
+  h4: H4,
+  h5: H4,
+  h6: H4,
   blockquote: `margin: 0 0 1em; padding: 0 0 0 1em; border-left: 3px solid ${GRAY}`,
   pre: `margin: 0 0 1em; padding: 8px 12px; border: ${RULE}; border-radius: 6px; font-family: ${MONO}; font-size: 0.9em; line-height: 1.45; white-space: pre-wrap`,
   block: `font-family: ${MONO}`,
   code: `padding: 0.1em 0.3em; border: ${RULE}; border-radius: 4px; font-family: ${MONO}; font-size: 0.9em`,
-  list: 'margin: 0 0 1em; padding: 0 0 0 1.5em',
+  ul: 'margin: 0 0 1em; padding: 0 0 0 1.5em',
+  ol: 'margin: 0 0 1em; padding: 0 0 0 1.5em',
   li: 'margin: 0.25em 0',
   table: 'margin: 0 0 1em; border-collapse: collapse',
   cell: `padding: 4px 8px; border: ${RULE}`,
@@ -69,46 +78,23 @@ const STYLE = {
   img: 'max-width: 100%; height: auto',
 };
 
+/** The tags marked writes itself, each given its style as it comes. */
+const STYLED = /<(p|h[1-6]|blockquote|ul|ol|li|table|hr)(?=[ >])/g;
+
 const LINKS = /^(?:https?:|mailto:|tel:)/i;
 const REMOTE = /^https?:\/\//i;
 
 function renderer(contentIds: ReadonlySet<string>): RendererObject<string, string> {
   return {
-    paragraph({ tokens }) {
-      return `<p style="${STYLE.p}">${this.parser.parseInline(tokens)}</p>\n`;
-    },
-    heading({ tokens, depth }) {
-      const style = STYLE.headings[Math.min(depth, 4) - 1]!;
-      return `<h${depth} style="${style}">${this.parser.parseInline(tokens)}</h${depth}>\n`;
-    },
-    blockquote({ tokens }) {
-      return `<blockquote style="${STYLE.blockquote}">\n${this.parser.parse(tokens)}</blockquote>\n`;
-    },
     code({ text }) {
       return `<pre style="${STYLE.pre}"><code style="${STYLE.block}">${escapeHtml(text)}</code></pre>\n`;
     },
     codespan({ text }) {
       return `<code style="${STYLE.code}">${escapeHtml(text)}</code>`;
     },
-    list(token) {
-      const tag = token.ordered ? 'ol' : 'ul';
-      const start =
-        token.ordered && token.start !== '' && token.start !== 1 ? ` start="${token.start}"` : '';
-      const items = token.items.map((item) => this.listitem(item)).join('');
-      return `<${tag}${start} style="${STYLE.list}">\n${items}</${tag}>\n`;
-    },
-    listitem(item) {
-      return `<li style="${STYLE.li}">${this.parser.parse(item.tokens)}</li>\n`;
-    },
     // Mail clients strip form controls, so a task's box is a character.
     checkbox({ checked }) {
       return checked ? '☑ ' : '☐ ';
-    },
-    table(token) {
-      const row = (cells: Tokens.TableCell[]) =>
-        `<tr>${cells.map((cell) => this.tablecell(cell)).join('')}</tr>\n`;
-      const body = token.rows.length ? `<tbody>\n${token.rows.map(row).join('')}</tbody>\n` : '';
-      return `<table style="${STYLE.table}">\n<thead>\n${row(token.header)}</thead>\n${body}</table>\n`;
     },
     tablecell(cell) {
       const tag = cell.header ? 'th' : 'td';
@@ -116,14 +102,9 @@ function renderer(contentIds: ReadonlySet<string>): RendererObject<string, strin
       const style = `${STYLE.cell}; text-align: ${cell.align ?? 'left'}${weight}`;
       return `<${tag} style="${style}">${this.parser.parseInline(cell.tokens)}</${tag}>`;
     },
-    hr() {
-      return `<hr style="${STYLE.hr}">\n`;
-    },
     html(token) {
       const text = escapeHtml(token.text);
-      return token.block
-        ? `<p style="${STYLE.p}">${text.trimEnd().replace(/\n/g, '<br>')}</p>\n`
-        : text;
+      return token.block ? `<p>${text.trimEnd().replace(/\n/g, '<br>')}</p>\n` : text;
     },
     link({ href, title, tokens }) {
       const text = this.parser.parseInline(tokens);

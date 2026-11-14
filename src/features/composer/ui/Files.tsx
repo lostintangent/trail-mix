@@ -7,13 +7,13 @@ import {
   spacingVars,
   typeScaleVars,
 } from '@astryxdesign/core/theme/tokens.stylex';
+import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
 import * as stylex from '@stylexjs/stylex';
 import { X, type LucideIcon } from 'lucide-react';
 import { useRef } from 'react';
 import { tm } from '../../../app/theme/tokens.stylex.ts';
 import { sizeText } from '../../../shared/size.ts';
 import type { Attached } from '../core/session.ts';
-import { fieldStyles } from './fieldStyles.ts';
 
 /** A toolbar button that picks files. */
 export function FilePicker({
@@ -39,19 +39,20 @@ export function FilePicker({
         variant="ghost"
         onClick={() => input.current?.click()}
       />
-      <input
-        ref={input}
-        type="file"
-        multiple
-        accept={accept}
-        tabIndex={-1}
-        aria-hidden
-        onChange={(event) => {
-          onFiles([...(event.target.files ?? [])]);
-          event.target.value = '';
-        }}
-        {...stylex.props(fieldStyles.hidden)}
-      />
+      <VisuallyHidden>
+        <input
+          ref={input}
+          type="file"
+          multiple
+          accept={accept}
+          tabIndex={-1}
+          aria-hidden
+          onChange={(event) => {
+            onFiles([...(event.target.files ?? [])]);
+            event.target.value = '';
+          }}
+        />
+      </VisuallyHidden>
     </>
   );
 }

@@ -65,11 +65,7 @@ export function useWriting(start: Writing, recipients: Pick<Writing, 'to' | 'cc'
           : { file },
       );
       edit((was) => ({ attachments: [...was.attachments, ...added] }));
-      return added.flatMap((attached) =>
-        'file' in attached && attached.contentId
-          ? [{ file: attached.file, contentId: attached.contentId }]
-          : [],
-      );
+      return added.filter((each): each is { file: File; contentId: string } => 'contentId' in each);
     },
     remove: (attached: Attached) =>
       edit((was) => ({ attachments: was.attachments.filter((each) => each !== attached) })),

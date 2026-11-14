@@ -7,13 +7,13 @@ import {
   typeScaleVars,
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import type { StyleXStyles } from '@stylexjs/stylex';
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Address } from '../../mail/core/index.ts';
 import { peopleQuery } from '../../mailroom/client/index.ts';
 import { completed, completionsFor, typingIn } from '../core/completion.ts';
+import { fieldStyles } from './fieldStyles.ts';
 
 /**
  * The input of an address field, To, Cc or Bcc, which completes the address being typed from the
@@ -25,12 +25,10 @@ export function AddressInput({
   value,
   onChange,
   isFocused,
-  xstyle,
 }: {
   value: string;
   onChange: (value: string) => void;
   isFocused: boolean;
-  xstyle: StyleXStyles;
 }): ReactNode {
   // Where the caret is while the field has the focus, which says which address is being typed.
   const [caret, setCaret] = useState<number>();
@@ -139,7 +137,7 @@ export function AddressInput({
         autoComplete="off"
         autoFocus={isFocused}
         spellCheck={false}
-        {...stylex.props(xstyle)}
+        {...stylex.props(fieldStyles.input)}
       />
       {people.length > 0 &&
         layer.render(
