@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { StampDot } from '../../../app/theme/StampDot.tsx';
+import { sizeText } from '../../../shared/size.ts';
 import { useMediaQuery } from '../../../shared/useMediaQuery.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import {
@@ -440,7 +441,7 @@ function Writer({
               return (
                 <li key={`${name}-${at}`} {...stylex.props(styles.file)}>
                   <span {...stylex.props(styles.fileName)}>{name}</span>
-                  <span {...stylex.props(styles.fileSize)}>{sizeOf(size)}</span>
+                  <span {...stylex.props(styles.fileSize)}>{sizeText(size)}</span>
                   <IconButton
                     label={`Remove ${name}`}
                     icon={<Icon icon={X} />}
@@ -750,12 +751,6 @@ function useVisibleBand(isWanted: boolean): Band {
     };
   }, [isWanted]);
   return band;
-}
-
-function sizeOf(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 /** Where in the text something applies, from one position to another. */

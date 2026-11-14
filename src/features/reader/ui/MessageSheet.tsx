@@ -17,6 +17,7 @@ import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-quer
 import { useMemo, useState } from 'react';
 import { SenderAvatar } from '../../../app/theme/SenderAvatar.tsx';
 import { tm } from '../../../app/theme/tokens.stylex.ts';
+import { sizeText } from '../../../shared/size.ts';
 import { CommandButton, type Command } from '../../commands/index.ts';
 import {
   isReasonOf,
@@ -238,7 +239,7 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
                   color="secondary"
                 />
                 <span {...stylex.props(styles.attachmentName)}>{attachment.name}</span>
-                <span {...stylex.props(sheetStyles.quiet)}>{size(attachment.size)}</span>
+                <span {...stylex.props(sheetStyles.quiet)}>{sizeText(attachment.size)}</span>
               </a>
             </li>
           ))}
@@ -294,12 +295,6 @@ export function when(iso: string, now = new Date()): string {
   const date = new Date(iso);
   if (date.toDateString() === now.toDateString()) return TIME.format(date);
   return `${DAY.format(date)}, ${TIME.format(date)}`;
-}
-
-function size(bytes: number): string {
-  if (bytes < 1000) return `${bytes} B`;
-  if (bytes < 1_000_000) return `${Math.round(bytes / 1000)} KB`;
-  return `${(bytes / 1_000_000).toFixed(1)} MB`;
 }
 
 const FOCUS_RING = `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`;
