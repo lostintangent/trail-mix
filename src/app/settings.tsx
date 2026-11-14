@@ -12,6 +12,7 @@ import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { needsOf, type Notifications } from '../features/notifications/index.ts';
 import type { SettingsAt } from '../features/workbench/index.ts';
 import { AccentChoice, openAccentPicker } from './theme/AccentChoice.tsx';
+import { ReaderPage } from './theme/ReaderPage.tsx';
 import { media, tm } from './theme/tokens.stylex.ts';
 
 /**
@@ -31,7 +32,6 @@ export function Settings({
   accent: string | undefined;
   onAccent: (color: string | undefined) => void;
 }) {
-  const titleId = useId();
   const accentId = useId();
   const sections = useRef(new Map<SettingsAt, HTMLElement>());
   const place = (name: SettingsAt) => (element: HTMLElement | null) => {
@@ -45,10 +45,7 @@ export function Settings({
   }, [at]);
 
   return (
-    <section aria-labelledby={titleId} {...stylex.props(styles.page)}>
-      <h1 id={titleId} {...stylex.props(styles.title)}>
-        Settings
-      </h1>
+    <ReaderPage title="Settings" xstyle={styles.page}>
       {notifications.isShown && (
         <Section title="Notifications" place={place('notifications')}>
           <Switch
@@ -85,7 +82,7 @@ export function Settings({
           </div>
         </div>
       </Section>
-    </section>
+    </ReaderPage>
   );
 }
 
@@ -112,27 +109,10 @@ function Section({
 
 const styles = stylex.create({
   page: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: spacingVars['--spacing-4'],
-    width: '100%',
-    maxWidth: tm.measure,
-    paddingInline: {
-      default: spacingVars['--spacing-6'],
-      [media.phone]: spacingVars['--spacing-3'],
-    },
-    paddingBottom: spacingVars['--spacing-6'],
     // A phone's gutter is narrower than a finger's target reaches past the swatch, so the target's
     // last few pixels lie past the screen's edge, where no finger can reach, and are cut off there
     // rather than letting the page slide sideways.
     overflowX: { default: null, [media.phone]: 'clip' },
-  },
-  title: {
-    margin: 0,
-    fontFamily: tm.serif,
-    fontSize: typeScaleVars['--text-heading-1-size'],
-    fontWeight: typeScaleVars['--text-heading-1-weight'],
-    lineHeight: typeScaleVars['--text-heading-1-leading'],
   },
   section: {
     display: 'flex',

@@ -8,7 +8,8 @@ import {
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { useId } from 'react';
-import { media, tm } from '../../../app/theme/tokens.stylex.ts';
+import { ReaderPage } from '../../../app/theme/ReaderPage.tsx';
+import { tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, AccountId } from '../../mail/core/index.ts';
 import { AddAccount } from './AddAccount.tsx';
 import { EditAccount } from './EditAccount.tsx';
@@ -51,10 +52,7 @@ export function AccountPage({
   if (page.as === 'edit' && !editing) return null;
   const vendor = editing && vendorOf(editing);
   return (
-    <section aria-labelledby="account-page-title" {...stylex.props(styles.page)}>
-      <h1 id="account-page-title" {...stylex.props(styles.title)}>
-        {editing ? editing.name : 'Add an account'}
-      </h1>
+    <ReaderPage title={editing ? editing.name : 'Add an account'}>
       {editing && vendor && editing.status === 'needs-sign-in' && (
         <SignInAgain
           // Its own key, apart from the editor's beside it, so each account's sign-in starts afresh.
@@ -103,31 +101,11 @@ export function AccountPage({
           </div>
         </section>
       )}
-    </section>
+    </ReaderPage>
   );
 }
 
 const styles = stylex.create({
-  page: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: spacingVars['--spacing-4'],
-    width: '100%',
-    maxWidth: tm.measure,
-    paddingInline: {
-      default: spacingVars['--spacing-6'],
-      [media.phone]: spacingVars['--spacing-3'],
-    },
-    paddingBottom: spacingVars['--spacing-6'],
-  },
-  title: {
-    margin: 0,
-    fontFamily: tm.serif,
-    fontSize: typeScaleVars['--text-heading-1-size'],
-    fontWeight: typeScaleVars['--text-heading-1-weight'],
-    lineHeight: typeScaleVars['--text-heading-1-leading'],
-    overflowWrap: 'anywhere',
-  },
   // Ruled off from the account above it, since it reaches beyond that account.
   everything: {
     display: 'flex',
