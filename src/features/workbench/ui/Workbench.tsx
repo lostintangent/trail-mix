@@ -259,9 +259,7 @@ export function Workbench({
   const [seeking, setSeeking] = useState(() => place.bundle ?? place.open);
   const [isPicking, setPicking] = useState(false);
   // Picking ends with the last conversation picked.
-  useEffect(() => {
-    if (isPicking && selection.ids.length === 0) setPicking(false);
-  }, [isPicking, selection.ids.length]);
+  if (isPicking && selection.ids.length === 0) setPicking(false);
   // One conversation selected is the one open in the reader. Several wait for an action together.
   const selected = selection.ids.length === 1 ? selection.ids[0] : undefined;
   const isMany = selection.ids.length > 1;
