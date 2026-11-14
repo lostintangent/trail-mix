@@ -39,6 +39,22 @@ const addressNaming = (page: Page, key: string) =>
   page.waitForFunction((key) => new URL(location.href).searchParams.has(key), key);
 /** The conversation the address opens. */
 const opened = (page: Page) => new URL(page.url()).searchParams.get('open');
+/** Notes any frame that shows the list's top row, which a list opening deep never should. */
+const watchTop = (page: Page) =>
+  page.addInitScript(() => {
+    const look = () => {
+      const list = document.querySelector('[role="listbox"][aria-multiselectable]');
+      const top = list?.querySelector('[role="option"][aria-posinset="1"]');
+      if (list && top) {
+        const [row, sheet] = [top.getBoundingClientRect(), list.getBoundingClientRect()];
+        if (row.bottom > sheet.top && row.top < sheet.bottom)
+          Object.assign(window, { sawTop: true });
+      }
+      requestAnimationFrame(look);
+    };
+    requestAnimationFrame(look);
+  });
+const sawTop = (page: Page) => page.evaluate(() => 'sawTop' in window);
 /** Opens a row's conversation and waits for the reader to show it. Returns its subject. */
 async function openRow(page: Page, row: number) {
   const option = page.getByRole('option').nth(row);
@@ -100,26 +116,14 @@ test('a conversation deep in its list opens at its page, its row in sight, and J
   const deep = page.url();
 
   // The list waits for the page holding the row, and opens there: no frame shows its top row.
-  await page.addInitScript(() => {
-    const look = () => {
-      const list = document.querySelector('[role="listbox"][aria-multiselectable]');
-      const top = list?.querySelector('[role="option"][aria-posinset="1"]');
-      if (list && top) {
-        const [row, sheet] = [top.getBoundingClientRect(), list.getBoundingClientRect()];
-        if (row.bottom > sheet.top && row.top < sheet.bottom)
-          Object.assign(window, { sawTop: true });
-      }
-      requestAnimationFrame(look);
-    };
-    requestAnimationFrame(look);
-  });
+  await watchTop(page);
   await page.reload();
   await at(70).waitFor();
   await expect(selectedRow(page).getAttribute('aria-posinset')).resolves.toBe('70');
   const [row, sheet] = await Promise.all([selectedRow(page).boundingBox(), list.boundingBox()]);
   expect(row!.y).toBeGreaterThanOrEqual(sheet!.y);
   expect(row!.y + row!.height).toBeLessThanOrEqual(sheet!.y + sheet!.height);
-  expect(await page.evaluate(() => 'sawTop' in window)).toBe(false);
+  await expect(sawTop(page)).resolves.toBe(false);
   await page.keyboard.press('j');
   await at(71).waitFor();
   await expect(selectedRow(page).getAttribute('aria-posinset')).resolves.toBe('71');
@@ -135,6 +139,55 @@ test('a conversation deep in its list opens at its page, its row in sight, and J
   ]);
   expect(again!.y).toBeGreaterThanOrEqual(screen!.y);
   expect(again!.y + again!.height).toBeLessThanOrEqual(screen!.y + screen!.height);
+
+  // Back before the page holding the row arrives still waits for it, and then shows the row.
+  const early = await (await app.context(PHONE)).newPage();
+  early.on('pageerror', (error) => errors.push(error.message));
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let asked = 0;
+  await early.route('**/_serverFn/**', async (route) => {
+    if (decodeURIComponent(route.request().url()).includes('"around"')) {
+      asked += 1;
+      await held;
+    }
+    await route.fallback();
+  });
+  await watchTop(early);
+  await early.goto(deep);
+  await subject(early).waitFor();
+  await early.getByRole('button', { name: 'Back', exact: true }).locator('visible=true').click();
+  // Meanwhile the list stands as skeleton rows.
+  const back = early.locator('[role="listbox"][aria-multiselectable]');
+  await early.waitForTimeout(500);
+  await expect(back.count()).resolves.toBe(0);
+  await expect(sawTop(early)).resolves.toBe(false);
+  expect(asked).toBeGreaterThan(0);
+  release();
+  await early.unrouteAll({ behavior: 'wait' });
+  const cameFrom = back.locator('[role="option"][aria-posinset="70"]');
+  await cameFrom.waitFor();
+  const [came, from] = await Promise.all([cameFrom.boundingBox(), back.boundingBox()]);
+  expect(came!.y).toBeGreaterThanOrEqual(from!.y);
+  expect(came!.y + came!.height).toBeLessThanOrEqual(from!.y + from!.height);
+  await expect(sawTop(early)).resolves.toBe(false);
+
+  // Archiving the conversation it opened moves on to the next, and the list stays where it is.
+  await page.reload();
+  await selectedRow(page).waitFor();
+  const archived = opened(page);
+  await list.evaluate((list) => {
+    new MutationObserver(() => {
+      if (!list.isConnected) Object.assign(window, { listLeft: true });
+    }).observe(document.body, { childList: true, subtree: true });
+  });
+  await page.keyboard.press('e');
+  await page.waitForFunction((archived) => {
+    const open = new URL(location.href).searchParams.get('open');
+    return open !== null && open !== archived;
+  }, archived);
+  await expect(page.evaluate(() => 'listLeft' in window)).resolves.toBe(false);
+  await expect(sawTop(page)).resolves.toBe(false);
 }, 60_000);
 
 test('Back and Forward step between views, and moving by key adds no history', async () => {

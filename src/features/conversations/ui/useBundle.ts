@@ -21,6 +21,8 @@ export function useBundle(id: BundleId | undefined): {
   places: ReadonlyMap<string, number>;
   /** Says which threads the reader shows, or which lie beside the one open, so they are fetched. */
   show: Show;
+  /** Whether a page the reader shows is on its way, which holds the threads as they were. */
+  isFetching: boolean;
   /** Whether the bundle is on its way, or was asked for and refused. */
   isPending: boolean;
   isError: boolean;
@@ -28,7 +30,7 @@ export function useBundle(id: BundleId | undefined): {
 } {
   const enabled = id !== undefined;
   const first = useQuery({ ...bundleQuery(id ?? NONE), enabled });
-  const { rows, show } = usePages(id ?? NONE, {
+  const { rows, isFetching, show } = usePages(id ?? NONE, {
     pageAt: (at) => bundleQuery(id ?? NONE, at),
     isFirstFetching: first.isFetching,
     enabled,
@@ -43,6 +45,7 @@ export function useBundle(id: BundleId | undefined): {
     threads,
     places,
     show,
+    isFetching,
     isPending: first.isPending,
     isError: first.isError,
     refetch: () => void first.refetch(),

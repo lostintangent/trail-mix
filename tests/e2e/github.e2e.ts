@@ -160,12 +160,41 @@ test('a thread deep in its bundle opens at its place on a reload, and J moves on
   await place.getByText(/^56 of \d+$/).waitFor();
   const threads = Number(/of (\d+)/.exec((await place.textContent())!)![1]);
   await openedOnceRested(page);
+  const address = page.url();
 
   await page.reload();
   await place.getByText(`56 of ${threads}`).waitFor();
   await shows(page, title);
   await page.keyboard.press('j');
   await place.getByText(`57 of ${threads}`).waitFor();
+
+  // Closing it before the page holding it arrives waits for that page, and the bundle opens with
+  // the thread in sight rather than at its top.
+  const early = await (await app.context(DESKTOP)).newPage();
+  early.on('pageerror', (error) => errors.push(error.message));
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  let asked = 0;
+  await early.route('**/_serverFn/**', async (route) => {
+    if (decodeURIComponent(route.request().url()).includes('"around"')) {
+      asked += 1;
+      await held;
+    }
+    await route.fallback();
+  });
+  await early.goto(address);
+  await shows(early, title);
+  await reader(early).getByRole('button', { name: TOY_BOX, exact: true }).click();
+  await early.waitForTimeout(500);
+  await expect(reader(early).locator('[data-index]').count()).resolves.toBe(0);
+  expect(asked).toBeGreaterThan(0);
+  release();
+  await early.unrouteAll({ behavior: 'wait' });
+  const sheet = reader(early).locator('[data-index="56"]');
+  await sheet.waitFor();
+  const [came, sight] = await Promise.all([sheet.boundingBox(), reader(early).boundingBox()]);
+  expect(came!.y).toBeGreaterThanOrEqual(sight!.y);
+  expect(came!.y + came!.height).toBeLessThanOrEqual(sight!.y + sight!.height);
 }, 60_000);
 
 test("a bundle's actions act on every thread in it, and Undo brings them all back", async () => {

@@ -1,6 +1,12 @@
 import { colorVars, durationVars, spacingVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { hashKey, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  hashKey,
+  useQuery,
+  useQueryClient,
+  type QueryKey,
+  type UseQueryOptions,
+} from '@tanstack/react-query';
 import {
   startTransition,
   Suspense,
@@ -41,6 +47,7 @@ import {
   outboxQuery,
   thisDeviceQuery,
   useIsCaughtUp,
+  type Page,
 } from '../../mailroom/client/index.ts';
 import {
   isDraftsView,
@@ -250,6 +257,8 @@ export function Workbench({
   const { view } = place;
   // The conversation or bundle the address opens is the one selected, from the first render.
   const [selection, setSelection] = useState<Selection>(() => openOnly(place.bundle ?? place.open));
+  // The conversation or bundle a place arrived naming, which the list looks for until it lists it.
+  const [seeking, setSeeking] = useState(() => place.bundle ?? place.open);
   const [isPicking, setPicking] = useState(false);
   // Picking ends with the last conversation picked.
   useEffect(() => {
@@ -284,6 +293,11 @@ export function Workbench({
   // The thread last open in the bundle, which the bundle shows in sight when the member returns.
   const [cameFrom, setCameFrom] = useState(threadIn);
   if (thread !== undefined && cameFrom?.open !== thread) setCameFrom(threadIn);
+  // The thread a place arrived naming, which its bundle looks for until it lists it.
+  const [seekingThread, setSeekingThread] = useState(threadIn);
+  if (seekingThread !== undefined && seekingThread.bundle !== bundleOpen) {
+    setSeekingThread(undefined);
+  }
   const stamps = useMemo(() => new Map(accounts.map(({ id, stamp }) => [id, stamp])), [accounts]);
   // A row's avatar is its newest sender other than the member, by any of their addresses.
   const selves = useMemo(
@@ -328,7 +342,10 @@ export function Workbench({
     // in the bundle, and a view that names none opens at its newest.
     arrive: ({ view, bundle, open }) => {
       setSelection(openOnly(bundle ?? open));
-      setThreadIn(bundle !== undefined && open !== undefined ? { bundle, open } : undefined);
+      setSeeking(bundle ?? open);
+      const named = bundle !== undefined && open !== undefined ? { bundle, open } : undefined;
+      setThreadIn(named);
+      setSeekingThread(named);
       setPhonePane(bundle !== undefined || open !== undefined ? 'reader' : 'list');
       setOpening(
         bundle === undefined && open === undefined && opensNewest(view, isPhone) ? view : undefined,
@@ -402,22 +419,28 @@ export function Workbench({
     [conversations, places],
   );
   // A place that arrives naming a conversation deeper in its list than the pages it holds asks for
-  // the page holding it, and the list waits for that page, and for the row it brought to be listed,
-  // so it opens there with the row in sight rather than at its top, unless the page can't be asked
-  // for, as offline, or doesn't hold the row. A thread deep in its bundle is asked for alike, so J
-  // steps on from it.
-  const isAround =
-    isArrived && selected !== undefined && conversations !== undefined && !places.has(selected);
-  const around = useQuery({
-    ...conversationsQuery(view, { around: selected ?? '' }, isUnreadOnly ? selected : undefined),
-    enabled: isAround,
-  });
-  const awaitsAround =
-    isAround && (around.isLoading || around.data?.items.some(({ id }) => id === selected) === true);
-  useQuery({
-    ...bundleQuery(bundleOpen ?? '', { around: thread ?? '' }),
-    enabled: isArrived && thread !== undefined && inBundle.threads !== undefined && threadAt < 0,
-  });
+  // the page holding it, until the list first lists it, so the row leaving the list later, as an
+  // archive takes it, asks for nothing. The list waits for that page, and for the row it brought to
+  // be listed, so it opens there with the row in sight rather than at its top, even after a phone's
+  // Back closed the conversation before the page came. It doesn't wait when the page can't be asked
+  // for, as offline, or once the list has caught up without the row, as a list of unread mail
+  // leaves out one read. A thread deep in its bundle is asked for alike, so J steps on from it, and
+  // the bundle waits for it too, so closing the thread before its page came shows it in sight.
+  const around = useAround(
+    isArrived ? seeking : undefined,
+    conversations && places,
+    isFetching,
+    conversationsQuery(view, { around: seeking ?? '' }, isUnreadOnly ? seeking : undefined),
+  );
+  if (seeking !== undefined && around.isDone) setSeeking(undefined);
+  const awaitsAround = around.awaits;
+  const threadAround = useAround(
+    seekingThread?.open,
+    inBundle.threads && inBundle.places,
+    inBundle.isFetching,
+    bundleQuery(bundleOpen ?? '', { around: seekingThread?.open ?? '' }),
+  );
+  if (seekingThread !== undefined && threadAround.isDone) setSeekingThread(undefined);
   // A conversation that leaves the list gives way to the one below it, or above it at the end. On a
   // phone, where the reader fills the screen, the list comes back instead. The list shows the
   // conversation gone at once, and the reader turns to the next one just after, so the frame that
@@ -665,7 +688,9 @@ export function Workbench({
       return;
     }
     written.current = undefined;
-    setSelection(NOTHING_SELECTED);
+    // The list stays at the row it came from, which stays the one keys move from.
+    const row = bundle ?? open;
+    setSelection(row === undefined ? NOTHING_SELECTED : { ids: [], active: row });
     setPhonePane('list');
     if (at !== undefined) move({ view }, 'replace');
   }, [onBack, move, pushed, written]);
@@ -1009,7 +1034,7 @@ export function Workbench({
           id: bundleOpen,
           label: 'Repository',
           content: (scroller) =>
-            inBundle.bundle && inBundle.threads ? (
+            inBundle.bundle && inBundle.threads && !threadAround.awaits ? (
               <Suspense fallback={<BundleSkeleton repository={repository} />}>
                 <BundleReader
                   bundle={inBundle.bundle}
@@ -1534,6 +1559,28 @@ function useAddress({
   // A search typed or a filter turned on makes a view of its own, which the place didn't name.
   const isArrived = arrived?.view === view;
   return { move, onViewChange, chooseView, written, pushed, isArrived };
+}
+
+/**
+ * Asks for the page of a list around a row it hasn't listed, and says whether the list waits for
+ * it: while the page is on its way, and once it holds the row, until the list has caught up with
+ * it. The looking is done once the list lists the row, or has caught up without it, or asking for
+ * the page failed. Offline it waits for nothing and asks again once it can.
+ */
+function useAround<Fetched extends Page, Key extends QueryKey>(
+  row: ConversationId | undefined,
+  places: ReadonlyMap<string, number> | undefined,
+  isFetching: boolean,
+  query: UseQueryOptions<Fetched, Error, Fetched, Key>,
+): { awaits: boolean; isDone: boolean } {
+  const isAsked = row !== undefined && places !== undefined && !places.has(row);
+  const around = useQuery({ ...query, enabled: isAsked });
+  const awaits =
+    isAsked &&
+    (around.isLoading || (isFetching && around.data?.items.some(({ id }) => id === row) === true));
+  const isDone =
+    row !== undefined && places !== undefined && (!isAsked || (around.isFetched && !awaits));
+  return { awaits, isDone };
 }
 
 /** The place of a view, with the bundle and the conversation open in it, if any. */
