@@ -25,6 +25,8 @@ const SIZES = {
 const THEMES = ['light', 'dark'] as const;
 /** The default, and the palest and the darkest accent a member can pick. */
 const ACCENTS = [undefined, '#ffffff', '#000000'] as const;
+/** The pixel the list keeps above its first row, where a lifted row's ring lies. */
+const RING = 1;
 
 const app = suite();
 // A test that fails leaves a screenshot of each page and what it showed, for CI to keep.
@@ -189,7 +191,8 @@ test('every row is one height, the first with no preview too, so no two overlap'
     expect({ size, preview: rows[0]?.preview }).toEqual({ size, preview: '' });
     const height = inbox[0]?.height ?? 0;
     expect(height).toBeGreaterThan(0);
-    // Rows lie on whole pixels, each the height of a row of mail rounded up.
+    // Rows lie on whole pixels, each the height of a row of mail rounded up, below the pixel the
+    // list keeps at its top for a lifted row's ring.
     const pitch = Math.ceil(height);
     for (const row of [...inbox, ...rows]) {
       expect({ size, row: row.index, height: row.height }).toEqual({
@@ -200,7 +203,7 @@ test('every row is one height, the first with no preview too, so no two overlap'
       expect({ size, row: row.index, top: row.top }).toEqual({
         size,
         row: row.index,
-        top: row.index * pitch,
+        top: RING + row.index * pitch,
       });
     }
     expect(problems).toEqual([]);
@@ -219,7 +222,7 @@ test('scrolling a long folder never changes a row’s height, moves a row alread
       .first()
       .filter({ hasText: subject })
       .waitFor();
-    const scrolled = await page.evaluate(async () => {
+    const scrolled = await page.evaluate(async (ring) => {
       const list = document.querySelector<HTMLElement>('[role="listbox"][aria-multiselectable]');
       if (!list) return { heights: [], lengths: [], misplaced: ['no list'], reached: 0 };
       const frame = () => new Promise((resolve) => requestAnimationFrame(resolve));
@@ -233,16 +236,18 @@ test('scrolling a long folder never changes a row’s height, moves a row alread
       while (still < 10 && reached < 250) {
         const canvas = list.lastElementChild?.getBoundingClientRect().top ?? 0;
         const height = list.querySelector('[role="option"]')?.getBoundingClientRect().height ?? 0;
-        // Rows lie on whole pixels, each the height of a row of mail rounded up.
+        // Rows lie on whole pixels, each the height of a row of mail rounded up, below the pixel
+        // the list keeps at its top for a lifted row's ring.
         const pitch = Math.ceil(height);
         lengths.add(list.scrollHeight);
         for (const row of list.querySelectorAll('[role="option"]')) {
           const box = row.getBoundingClientRect();
           const index = Number(row.getAttribute('aria-posinset')) - 1;
+          const top = ring + index * pitch;
           heights.add(box.height);
           reached = Math.max(reached, index);
-          if (Math.abs(box.top - canvas - index * pitch) > 0.5) {
-            misplaced.push(`row ${index} at ${box.top - canvas}, not ${index * pitch}`);
+          if (Math.abs(box.top - canvas - top) > 0.5) {
+            misplaced.push(`row ${index} at ${box.top - canvas}, not ${top}`);
           }
         }
         const before = list.scrollTop;
@@ -260,7 +265,7 @@ test('scrolling a long folder never changes a row’s height, moves a row alread
         misplaced: misplaced.slice(0, 5),
         reached,
       };
-    });
+    }, RING);
     expect({
       size,
       heights: scrolled.heights.length,

@@ -58,6 +58,12 @@ const NO_MARKS: Marks = [];
 /** A row's height before the list is first laid out: three lines of text and the row's padding. */
 const FIRST_GUESS = 72;
 
+/**
+ * A lifted row's ring, a selection's or a swipe's, lies a pixel outside it. The list keeps that
+ * pixel at both its ends, and beside a row it scrolls to, so the scroller never clips the ring.
+ */
+const RING = 1;
+
 /** How many rows beyond those in sight the list says it shows, so their pages arrive in time. */
 const AHEAD = 30;
 
@@ -154,9 +160,11 @@ export function ConversationList({
     // measured again as rows arrive.
     estimateSize: () => rowHeight,
     overscan: 6,
+    paddingStart: RING,
+    paddingEnd: RING,
     // A row scrolled to lands clear of the scroll padding, as one a browser scrolls to itself does.
-    scrollPaddingStart: padding.start,
-    scrollPaddingEnd: padding.end,
+    scrollPaddingStart: padding.start + RING,
+    scrollPaddingEnd: padding.end + RING,
     // The selected row stays drawn when it scrolls away, since the list names it as the active one.
     rangeExtractor: (range) => {
       const drawn = defaultRangeExtractor(range);
@@ -767,6 +775,7 @@ const styles = stylex.create({
   skeletons: {
     height: '100%',
     overflow: 'hidden',
+    paddingBlockStart: RING,
     paddingInline: spacingVars['--spacing-1-5'],
   },
   standing: {
