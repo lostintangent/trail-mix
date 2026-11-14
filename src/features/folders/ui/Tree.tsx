@@ -16,13 +16,20 @@ import { Pending, TextSkeleton } from '../../../app/theme/Pending.tsx';
 import { StampDot } from '../../../app/theme/StampDot.tsx';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Command } from '../../commands/index.ts';
-import type { Account, Folder, FolderRef, View } from '../../mail/core/index.ts';
+import type { Account, Folder, View } from '../../mail/core/index.ts';
 import type { FolderEdit } from './commands.ts';
-import { foldKey, type Foldable } from './folds.ts';
+import type { Foldable } from './folds.ts';
 import { ActionsMenu, NameField, preloadActionsMenu } from './lazy.ts';
 import { MoreButton } from './MoreButton.tsx';
 import { folderName } from './name.ts';
-import { folderTree, holds, unreadInAccount, unreadWithin, type FolderNode } from './tree.ts';
+import {
+  accountLine,
+  folderLine,
+  folderTree,
+  newFolderAt,
+  type FolderNode,
+  type TreeState,
+} from './tree.ts';
 import { folderIcon, UNIFIED_VIEWS, type ViewCounts } from './views.ts';
 
 /**
@@ -117,35 +124,19 @@ export const AccountSection = memo(function AccountSection({
 }) {
   const own = folders.filter((folder) => folder.account === account.id);
   const nodes = folderTree(own);
-  const editingHere =
-    editing?.do === 'create'
-      ? editing.account.id === account.id
-      : editing?.folder.account === account.id;
-  // Naming a folder unfolds whatever it's in, for as long as it's named.
-  const isOpen = !folds.has(foldKey({ account: account.id })) || editingHere;
-  const holdsView = view.in === 'folder' && view.folder.account === account.id;
+  const state = { view, folds, editing };
+  const { isListing, ...line } = accountLine(account, nodes, state);
   return (
     <section aria-label={account.name} {...stylex.props(styles.account)}>
-      <AccountLine
-        account={account}
-        isOpen={isOpen}
-        isHolding={!isOpen && holdsView}
-        unread={isOpen ? 0 : unreadInAccount(nodes)}
-        isUnreadInInbox={!isOpen && own.some(({ role, unread }) => role === 'inbox' && unread > 0)}
-        onFold={onFold}
-        accountActions={accountActions}
-      />
-      <Folding isOpen={isOpen}>
-        {own.length === 0 && isListing(account) && <FolderSkeletons account={account} />}
+      <AccountLine {...line} account={account} onFold={onFold} accountActions={accountActions} />
+      <Folding isOpen={line.isOpen}>
+        {isListing && <FolderSkeletons account={account} />}
         <FolderRows
           nodes={nodes}
           depth={0}
-          view={view}
+          state={state}
           onSelect={onSelect}
-          folds={folds}
           onFold={onFold}
-          // A folder in another account can share the path of the one being named.
-          editing={editingHere ? editing : undefined}
           folders={own}
           onEdited={onEdited}
           folderActions={folderActions}
@@ -219,12 +210,6 @@ export function troubleOf({ status }: Account): string | undefined {
   return undefined;
 }
 
-/**
- * Whether an account's folders are on their way. Every mailbox has an Inbox, so an account with none
- * has yet to be listed, unless it can't be reached, which its own status says.
- */
-const isListing = ({ status }: Account) => status === 'ready' || status === 'syncing';
-
 /** Folder lines on their way, as a new account's first sync lists them, in their shape. */
 function FolderSkeletons({ account }: { account: Account }) {
   return (
@@ -253,11 +238,9 @@ const SKELETON_WIDTHS = ['34%', '42%', '28%', '38%'] as const;
 function FolderRows({
   nodes,
   depth,
-  view,
+  state,
   onSelect,
-  folds,
   onFold,
-  editing,
   folders,
   onEdited,
   folderActions,
@@ -266,11 +249,9 @@ function FolderRows({
 }: {
   nodes: FolderNode[];
   depth: number;
-  view: View;
+  state: TreeState;
   onSelect: (view: View) => void;
-  folds: ReadonlySet<string>;
   onFold: (what: Foldable) => void;
-  editing: FolderEdit | undefined;
   /** The account's folders, whose names a new name can't take beside them. */
   folders: readonly Folder[];
   onEdited: (name: string | undefined) => void;
@@ -279,41 +260,9 @@ function FolderRows({
   /** The folder these sit inside, if any. */
   parent?: Folder;
 }) {
-  const isCreatingHere = editing?.do === 'create' && editing.parent?.path === parent?.path;
-  // A new folder is named where the member's own folders sit: first inside a folder, and at the
-  // top of an account, before Junk and Trash.
-  const bins = nodes.findIndex(({ folder }) => folder.role === 'junk' || folder.role === 'trash');
-  const fieldAt = parent ? 0 : bins < 0 ? nodes.length : bins;
-  const field = isCreatingHere && (
-    <li key="new folder">
-      <Suspense>
-        <NameField
-          label={`Name of the new folder in ${parent ? folderName(parent) : account.name}`}
-          depth={depth}
-          place={{ folders, parent: parent?.path, delimiter: parent?.delimiter }}
-          onDone={onEdited}
-        />
-      </Suspense>
-    </li>
-  );
   const row = (node: FolderNode) => {
     const { folder, children } = node;
-    const isRenaming = editing?.do === 'rename' && editing.folder.path === folder.path;
-    const isSelected = view.in === 'folder' && isFolder(view.folder, folder);
-    const isParent = editing?.do === 'create' && editing.parent?.path === folder.path;
-    const canFold = children.length > 0;
-    // Naming a folder inside it unfolds it, for as long as the folder is named.
-    const isEditingInside =
-      editing !== undefined &&
-      (editing.do === 'create'
-        ? editing.parent !== undefined && holds(node, editing.parent.path)
-        : holds(node, editing.folder.path) && editing.folder.path !== folder.path);
-    const isOpen = !folds.has(foldKey(folder)) || isEditingInside;
-    const holdsView =
-      !isOpen &&
-      view.in === 'folder' &&
-      view.folder.account === folder.account &&
-      holds(node, view.folder.path);
+    const { isRenaming, holdsNewFolder, ...line } = folderLine(node, state);
     return (
       <li key={folder.path}>
         {isRenaming ? (
@@ -333,28 +282,22 @@ function FolderRows({
           </Suspense>
         ) : (
           <FolderLine
+            {...line}
             folder={folder}
             depth={depth}
-            count={isOpen ? folder.unread : unreadWithin(node)}
-            canFold={canFold}
-            isOpen={isOpen}
-            isSelected={isSelected}
-            isHolding={holdsView}
             onSelect={onSelect}
             onFold={onFold}
             folderActions={folderActions}
           />
         )}
-        {(canFold || isParent) && (
-          <Folding isOpen={isOpen || isParent}>
+        {(line.canFold || holdsNewFolder) && (
+          <Folding isOpen={line.isOpen}>
             <FolderRows
               nodes={children}
               depth={depth + 1}
-              view={view}
+              state={state}
               onSelect={onSelect}
-              folds={folds}
               onFold={onFold}
-              editing={editing}
               folders={folders}
               onEdited={onEdited}
               folderActions={folderActions}
@@ -366,17 +309,27 @@ function FolderRows({
       </li>
     );
   };
-  return (
-    <ul {...stylex.props(styles.rows, depth > 0 && styles.inside)}>
-      {nodes.slice(0, fieldAt).map(row)}
-      {field}
-      {nodes.slice(fieldAt).map(row)}
-    </ul>
-  );
+  // One list of keyed lines, so a line keeps its place as the new folder's field comes and goes.
+  const lines = nodes.map(row);
+  const fieldAt = newFolderAt(nodes, state.editing, account.id, parent);
+  if (fieldAt !== undefined) {
+    lines.splice(
+      fieldAt,
+      0,
+      <li key="new folder">
+        <Suspense>
+          <NameField
+            label={`Name of the new folder in ${parent ? folderName(parent) : account.name}`}
+            depth={depth}
+            place={{ folders, parent: parent?.path, delimiter: parent?.delimiter }}
+            onDone={onEdited}
+          />
+        </Suspense>
+      </li>,
+    );
+  }
+  return <ul {...stylex.props(styles.rows, depth > 0 && styles.inside)}>{lines}</ul>;
 }
-
-const isFolder = (ref: FolderRef, folder: Folder) =>
-  ref.account === folder.account && ref.path === folder.path;
 
 /** A folder's own line: what opens it, the chevron that folds what's inside it, and its menu. */
 const FolderLine = memo(function FolderLine({
