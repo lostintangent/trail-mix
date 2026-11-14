@@ -27,7 +27,13 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import { StampDot } from '../../../app/theme/StampDot.tsx';
 import { useMediaQuery } from '../../../shared/useMediaQuery.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
-import { addressesIn, type Account, type Message, type MessageRef } from '../../mail/core/index.ts';
+import {
+  addressesIn,
+  refOf,
+  type Account,
+  type Message,
+  type MessageRef,
+} from '../../mail/core/index.ts';
 import { bodyQuery, partUrl } from '../../mailroom/client/index.ts';
 import { useReach } from '../../offline/index.ts';
 import { contentIdFor } from '../core/draft.ts';
@@ -750,10 +756,6 @@ function sizeOf(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function refOf({ account, path, uidValidity, uid }: MessageRef): MessageRef {
-  return { account, path, uidValidity, uid };
 }
 
 /** Where in the text something applies, from one position to another. */

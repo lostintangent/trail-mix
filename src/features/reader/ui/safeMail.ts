@@ -1,9 +1,8 @@
 import { colorVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import type { Body, Message, MessageRef } from '../../mail/core/index.ts';
+import { refKey, refOf, type Body, type MessageRef } from '../../mail/core/index.ts';
 import { imageUrl, partUrl } from '../../mailroom/client/index.ts';
 import { colorReader, type DarkPaper } from '../core/colors.ts';
-import { refKey, refOf } from './refs.ts';
 import { sanitizeMail, type SafeMail } from '../core/sanitize.ts';
 
 /**
@@ -36,12 +35,6 @@ export function safeMail(
   sanitized.set(key, mail);
   if (sanitized.size > KEPT) sanitized.delete(sanitized.keys().next().value ?? '');
   return mail;
-}
-
-/** Whether the member allowed this sender's remote images on the message's account. */
-export function imagesAllowed(message: Message, allowImagesFrom: string[]): boolean {
-  const sender = message.from.email.toLowerCase();
-  return allowImagesFrom.some((email) => email.toLowerCase() === sender);
 }
 
 /** How many sanitized messages are kept, oldest dropped first. */

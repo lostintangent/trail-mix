@@ -2,9 +2,14 @@ import { useQueries, useQuery } from '@tanstack/react-query';
 import { useSyncExternalStore } from 'react';
 import { reasonOf } from '../../../shared/reasons.ts';
 import type { Command } from '../../commands/index.ts';
-import type { Body, ConversationId, Message, MessageRef } from '../../mail/core/index.ts';
+import {
+  refOf,
+  type Body,
+  type ConversationId,
+  type Message,
+  type MessageRef,
+} from '../../mail/core/index.ts';
 import { bodyQuery, conversationQuery, mailroom } from '../../mailroom/client/index.ts';
-import { refOf } from './refs.ts';
 
 /**
  * One-click unsubscribe in the browser. A message offers it when its body names a one-click

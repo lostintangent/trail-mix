@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { messageIdOf, referencesOf } from './conversations.ts';
+import { messageIdOf, newestShown, referencesOf } from './conversations.ts';
 import { arrive, envelope, fold, threads } from './testFixtures.ts';
 
 // Linking
@@ -137,4 +137,22 @@ test('a Message-ID is read with or without brackets, and a missing one stays emp
   for (const header of [undefined, '', '   ', 'not an id', '<>']) {
     expect(messageIdOf(header)).toBe('');
   }
+});
+
+test('a conversation opens on its newest message that is not a draft, or its newest draft', () => {
+  const message = (subject: string, date: string, draft = false) => ({
+    ...envelope(subject, {
+      date,
+      flags: { seen: true, flagged: false, answered: false, draft },
+    }),
+    conversation: 'c',
+  });
+  const question = message('question', '2026-11-09T09:00:00.000Z');
+  const answer = message('answer', '2026-11-09T10:00:00.000Z');
+  const reply = message('reply', '2026-11-09T11:00:00.000Z', true);
+  const later = message('later', '2026-11-09T12:00:00.000Z', true);
+
+  expect(newestShown([reply, answer, question])?.subject).toBe('answer');
+  expect(newestShown([later, reply])?.subject).toBe('later');
+  expect(newestShown([])).toBeUndefined();
 });

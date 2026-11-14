@@ -115,7 +115,7 @@ for (const type of BROWSERS) {
     beforeAll(async () => {
       browser = await launch(type);
       for (const theme of ['light', 'dark'] as const) {
-        const page = await browser.newPage({ colorScheme: theme === 'dark' ? 'light' : 'dark' });
+        const page = await browser.newPage();
         const results = await show(
           page,
           theme,
@@ -296,7 +296,7 @@ for (const type of BROWSERS) {
     });
 
     test('choosing light paper changes an open message at once, without sanitizing it again', async () => {
-      const page = await browser.newPage({ colorScheme: 'light' });
+      const page = await browser.newPage();
       await show(page, 'dark', [mail.newsletter]);
       expect(await page.evaluate(() => window.sanitized)).toBe(1);
       const frames = await page.evaluate(
@@ -328,9 +328,8 @@ for (const type of BROWSERS) {
     });
 
     test('each HTML sheet offers light paper in the dark theme, for its sender, until turned off', async () => {
-      const page = await browser.newPage({ colorScheme: 'light' });
+      const page = await browser.newPage({ colorScheme: 'dark' });
       await page.goto(harness.origin);
-      await page.evaluate(() => window.setTheme('dark'));
       await page.evaluate((html) => window.showConversation('newsletter', html), mail.newsletter);
       const control = page.getByRole('button', { name: 'Light paper' });
       // The sheet and the frame on it both show the paper, light or dark.
@@ -355,25 +354,25 @@ for (const type of BROWSERS) {
         expect(await shows(on ? 'light' : 'dark')).toBe(true);
       }
 
-      await page.evaluate(() => window.setTheme('light'));
+      await page.emulateMedia({ colorScheme: 'light' });
       await control.waitFor({ state: 'detached' });
       await page.close();
     });
 
     test('switching the theme changes an open message at once, without sanitizing it again', async () => {
-      const page = await browser.newPage({ colorScheme: 'dark' });
+      const page = await browser.newPage();
       await show(page, 'light', [mail.github, mail.pasted]);
       expect(await page.evaluate(() => window.sanitized)).toBe(2);
-      const frames = await page.evaluate(
-        () =>
-          new Promise<number>((resolve) => {
-            const footer = () => {
-              const frame = document.querySelector<HTMLIFrameElement>('[data-mail="0"] iframe');
-              const p = frame?.contentDocument?.querySelector('p[style*="small"]');
-              return p ? getComputedStyle(p).color : '';
-            };
-            const before = footer();
-            window.setTheme('dark');
+      // Counts the frames from the moment the page hears the system's theme change.
+      await page.evaluate(() => {
+        const footer = () => {
+          const frame = document.querySelector<HTMLIFrameElement>('[data-mail="0"] iframe');
+          const p = frame?.contentDocument?.querySelector('p[style*="small"]');
+          return p ? getComputedStyle(p).color : '';
+        };
+        const before = footer();
+        window.switched = new Promise<number>((resolve) => {
+          const onChange = () => {
             let count = 0;
             const check = () => {
               count++;
@@ -381,9 +380,14 @@ for (const type of BROWSERS) {
               else requestAnimationFrame(check);
             };
             requestAnimationFrame(check);
-          }),
-      );
-      expect(frames).toBeLessThanOrEqual(2);
+          };
+          matchMedia('(prefers-color-scheme: dark)').addEventListener('change', onChange, {
+            once: true,
+          });
+        });
+      });
+      await page.emulateMedia({ colorScheme: 'dark' });
+      expect(await page.evaluate(() => window.switched)).toBeLessThanOrEqual(2);
       await page.waitForFunction(
         () =>
           [...document.querySelectorAll('iframe')].filter(
@@ -409,8 +413,8 @@ async function show(
   html: string[],
   onLight: number[] = [],
 ): Promise<Result[]> {
+  await page.emulateMedia({ colorScheme: theme });
   await page.goto(harness.origin);
-  await page.evaluate((mode) => window.setTheme(mode), theme);
   const mails: Shown[] = html.map((one, i) => ({
     html: one,
     images: 'blocked',

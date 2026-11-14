@@ -562,14 +562,6 @@ for (const colorScheme of ['light', 'dark'] as const) {
     await row(page, subject)
       .getByText('Unread', { exact: true })
       .waitFor({ state: 'attached', timeout: 1_000 });
-
-    // The source of a message, from its own menu.
-    await reader(page)
-      .getByRole('article')
-      .getByRole('button', { name: 'More for this message' })
-      .click();
-    await page.getByRole('menuitem', { name: 'View source' }).click();
-    await page.getByRole('dialog').getByText('Message-ID', { exact: true }).waitFor();
   }, 30_000);
 }
 

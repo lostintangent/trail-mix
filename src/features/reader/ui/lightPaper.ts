@@ -1,14 +1,14 @@
 import type { QueryClient } from '@tanstack/react-query';
 import { Sun } from 'lucide-react';
-import { useSyncExternalStore } from 'react';
+import { useMediaQuery } from '../../../shared/useMediaQuery.ts';
 import type { Command } from '../../commands/index.ts';
 import { faceOf } from '../../conversations/index.ts';
-import type { Account, Message } from '../../mail/core/index.ts';
+import { listed, type Account, type Message } from '../../mail/core/index.ts';
 import { accountsQuery, mailroom } from '../../mailroom/client/index.ts';
-import { isLightPaper } from '../core/lightPaper.ts';
 
 /**
- * Light paper in the browser. The Mailroom keeps the member's choice on the account, so every
+ * Light paper: in the dark theme, a sender's mail on light paper, as they designed it, instead of
+ * darkened. The Mailroom keeps the member's choice on the account, so every
  * device shows a sender's mail that way until it is turned off. It changes only the paper a
  * message's frame lies on, never the sanitized message.
  */
@@ -53,9 +53,9 @@ export function lightPaperCommand(
     sent.map(({ from }) => from),
     selves,
   )?.email;
-  const account = accounts.find(({ id }) => id === sent[0]?.account);
+  const account = accounts.find(({ id }) => id === conversation?.[0]?.account);
   const isOn =
-    account !== undefined && sender !== undefined && isLightPaper(sender, account.lightPaperFrom);
+    account !== undefined && sender !== undefined && listed(sender, account.lightPaperFrom);
   return {
     id: 'message.lightPaper',
     title: 'Light paper for this sender',
@@ -67,23 +67,7 @@ export function lightPaperCommand(
   };
 }
 
-/** Whether the dark theme shows: chosen, or followed from the system's. */
+/** Whether the dark theme shows, which follows the system's. */
 export function useDarkTheme(): boolean {
-  return useSyncExternalStore(listen, isDark);
-}
-
-function isDark(): boolean {
-  const chosen = document.documentElement.dataset['theme'];
-  return chosen ? chosen === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
-}
-
-function listen(changed: () => void): () => void {
-  const system = matchMedia('(prefers-color-scheme: dark)');
-  system.addEventListener('change', changed);
-  const mode = new MutationObserver(changed);
-  mode.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-  return () => {
-    system.removeEventListener('change', changed);
-    mode.disconnect();
-  };
+  return useMediaQuery('(prefers-color-scheme: dark)');
 }

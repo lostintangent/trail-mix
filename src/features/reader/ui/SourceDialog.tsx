@@ -10,9 +10,8 @@ import * as stylex from '@stylexjs/stylex';
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { tm } from '../../../app/theme/tokens.stylex.ts';
-import type { Message } from '../../mail/core/index.ts';
+import { refOf, type Message } from '../../mail/core/index.ts';
 import { bodyQuery, messageUrl } from '../../mailroom/client/index.ts';
-import { refOf } from './refs.ts';
 
 /** The most of a message's source shown here. The whole of it stays a download away. */
 const SHOWN = 512 * 1024;

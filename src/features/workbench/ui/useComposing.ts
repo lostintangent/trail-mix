@@ -1,6 +1,7 @@
 import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
+  newestShown,
   sameRef,
   type Account,
   type ConversationId,
@@ -82,8 +83,8 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
   /** Answers a conversation's newest message that isn't a draft. */
   const replyIn = useCallback(
     (conversation: readonly Message[], all: boolean) => {
-      const parent = newestOf(conversation);
-      if (parent) replyTo(parent, all);
+      const parent = newestShown(conversation);
+      if (parent?.flags.draft === false) replyTo(parent, all);
     },
     [replyTo],
   );
@@ -100,7 +101,7 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
       if (held) return replyIn(held, all);
       holdKeys();
       const conversation = await queryClient.ensureQueryData(query).catch(() => []);
-      if (newestOf(conversation)) replyIn(conversation, all);
+      if (newestShown(conversation)?.flags.draft === false) replyIn(conversation, all);
       else releaseKeys();
     },
     [queryClient, selected, replyIn],
@@ -204,12 +205,4 @@ export function hiddenIn(
     ...(editing ? [editing] : []),
   ]);
   return [...gone, ...written];
-}
-
-/** A conversation's newest message that isn't a draft, which its keys answer and show. */
-export function newestOf(conversation: readonly Message[]): Message | undefined {
-  return conversation
-    .filter(({ flags }) => !flags.draft)
-    .toSorted((a, b) => a.date.localeCompare(b.date))
-    .at(-1);
 }

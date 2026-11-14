@@ -1,5 +1,6 @@
 import {
   addressOf,
+  refOf,
   type AccountId,
   type ConversationId,
   type Message,
@@ -77,10 +78,3 @@ function clipped(text: string): string {
     ? `${characters.slice(0, SAID_LENGTH - 1).join('')}…`
     : text;
 }
-
-const refOf = ({ account, path, uidValidity, uid }: MessageRef): MessageRef => ({
-  account,
-  path,
-  uidValidity,
-  uid,
-});

@@ -1,8 +1,8 @@
 export * from './model.ts';
-export { addressesIn, domainOf } from './addresses.ts';
+export { addressesIn, domainOf, listed } from './addresses.ts';
 export { isVerified, oneClickUnsubscribe } from './authentication.ts';
-export { sameRef } from './refs.ts';
-export { linkIdsOf, messageIdOf, referencesOf } from './conversations.ts';
+export { refKey, refOf, sameRef } from './refs.ts';
+export { linkIdsOf, messageIdOf, newestShown, referencesOf } from './conversations.ts';
 export {
   asks,
   bundleIdOf,

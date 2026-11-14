@@ -1,5 +1,6 @@
 import {
   addressesIn,
+  refOf,
   type Account,
   type AccountId,
   type Address,
@@ -184,8 +185,4 @@ export function addressText(addresses: readonly Address[]): string {
 function header(body: Body | undefined, name: string): string | undefined {
   const wanted = name.toLowerCase();
   return body?.headers.find(([key]) => key.toLowerCase() === wanted)?.[1];
-}
-
-function refOf({ account, path, uidValidity, uid }: MessageRef): MessageRef {
-  return { account, path, uidValidity, uid };
 }

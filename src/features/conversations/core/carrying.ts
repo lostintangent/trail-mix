@@ -1,13 +1,15 @@
-import type {
-  BundleId,
-  BundleSummary,
-  Flags,
-  Folder,
-  FolderRef,
-  FolderRole,
-  Message,
-  MessageRef,
-  View,
+import {
+  refKey,
+  refOf,
+  type BundleId,
+  type BundleSummary,
+  type Flags,
+  type Folder,
+  type FolderRef,
+  type FolderRole,
+  type Message,
+  type MessageRef,
+  type View,
 } from '../../mail/core/index.ts';
 import type { Action } from './triage.ts';
 
@@ -127,10 +129,10 @@ export function undoOf(command: Command, moved: readonly Moved[] = []): Command[
  */
 export function changeMessages(messages: readonly Message[], command: Command): Message[] {
   if (!('setFlags' in command)) return [...messages];
-  const changed = new Set(command.setFlags.map(keyOf));
+  const changed = new Set(command.setFlags.map(refKey));
   const changes = Object.entries(command.change) as [keyof Flags, boolean][];
   return messages.map((message) =>
-    changed.has(keyOf(message)) && changes.some(([flag, value]) => message.flags[flag] !== value)
+    changed.has(refKey(message)) && changes.some(([flag, value]) => message.flags[flag] !== value)
       ? { ...message, flags: { ...message.flags, ...command.change } }
       : message,
   );
@@ -145,10 +147,10 @@ export function followMoves(
   messages: readonly Message[],
   moved: readonly Moved[],
 ): Message[] | undefined {
-  const now = new Map(moved.map(({ from, to }) => [keyOf(from), to]));
-  if (!messages.some((message) => now.has(keyOf(message)))) return undefined;
+  const now = new Map(moved.map(({ from, to }) => [refKey(from), to]));
+  if (!messages.some((message) => now.has(refKey(message)))) return undefined;
   return messages.map((message) => {
-    const to = now.get(keyOf(message));
+    const to = now.get(refKey(message));
     return to ? { ...message, ...refOf(to) } : message;
   });
 }
@@ -196,13 +198,3 @@ const newest = (messages: readonly Message[]) =>
     (latest, message) => (!latest || message.date > latest.date ? message : latest),
     undefined,
   );
-
-const refOf = ({ account, path, uidValidity, uid }: MessageRef): MessageRef => ({
-  account,
-  path,
-  uidValidity,
-  uid,
-});
-
-const keyOf = ({ account, path, uidValidity, uid }: MessageRef) =>
-  `${account}\n${path}\n${uidValidity}\n${uid}`;

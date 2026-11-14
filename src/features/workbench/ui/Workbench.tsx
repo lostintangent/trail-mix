@@ -25,6 +25,7 @@ import {
   bundlePartsOf,
   isBundle,
   marksOf,
+  newestShown,
   repositoryAddressOf,
   sameRef,
   threadAddressOf,
@@ -126,7 +127,7 @@ import {
   type Sender,
   type Writing,
 } from '../../composer/ui/index.ts';
-import { newestOf, useComposing } from './useComposing.ts';
+import { useComposing } from './useComposing.ts';
 
 /** No commands from outside the workbench. */
 const noCommands = (): readonly Command[] => [];
@@ -1133,7 +1134,7 @@ export function Workbench({
         ? () =>
             void queryClient
               .ensureQueryData(conversationQuery(opened))
-              .then((conversation) => setSource(newestOf(conversation)))
+              .then((conversation) => setSource(newestShown(conversation)))
         : undefined,
     ),
     lightPaperCommand(reading === undefined ? undefined : read, accounts, selves, (choice) =>

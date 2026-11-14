@@ -118,7 +118,7 @@ export function MessageFrame({ mail, quotes, title, isLightPaper = false }: Mess
 
 /**
  * The frame's colors and type, resolved from the theme on the frame's own element, and resolved
- * again when the theme mode or the system's changes, or the paper it lies on.
+ * again when the system's theme changes, or the paper it lies on.
  */
 function useLook(frame: RefObject<HTMLIFrameElement | null>, paper: SafeMail['paper']) {
   const [look, setLook] = useState<Omit<FrameLook, 'quotes'>>();
@@ -133,12 +133,7 @@ function useLook(frame: RefObject<HTMLIFrameElement | null>, paper: SafeMail['pa
     read();
     const system = matchMedia('(prefers-color-scheme: dark)');
     system.addEventListener('change', read);
-    const mode = new MutationObserver(read);
-    mode.observe(document.documentElement, { attributes: true });
-    return () => {
-      system.removeEventListener('change', read);
-      mode.disconnect();
-    };
+    return () => system.removeEventListener('change', read);
   }, [frame, paper]);
   return look;
 }

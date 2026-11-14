@@ -1,14 +1,5 @@
 import type { Address } from './model.ts';
 
-/**
- * The addresses in an address-list header, such as From, To or Reply-To, as a message carries it:
- * unfolded, but with its encoded words still encoded. Each mailbox gives one address, with its
- * display name decoded, and a group gives its members. A mailbox with no `@` gives nothing.
- *
- * It reads what mailers write as well as what RFC 5322 allows: commas inside quotes and comments,
- * a name that is only a comment after a bare address, encoded words inside quotes, and an angle
- * address that is never closed.
- */
 /** The domain of an address, after its last `@`, in lowercase, or empty when it has none. */
 export function domainOf(address: string): string {
   const at = address.lastIndexOf('@');
@@ -20,6 +11,21 @@ export function domainOf(address: string): string {
         .toLowerCase();
 }
 
+/** Whether an address is on a list of them, which ignores case as mail does. */
+export function listed(address: string, list: readonly string[]): boolean {
+  const wanted = address.toLowerCase();
+  return list.some((listing) => listing.toLowerCase() === wanted);
+}
+
+/**
+ * The addresses in an address-list header, such as From, To or Reply-To, as a message carries it:
+ * unfolded, but with its encoded words still encoded. Each mailbox gives one address, with its
+ * display name decoded, and a group gives its members. A mailbox with no `@` gives nothing.
+ *
+ * It reads what mailers write as well as what RFC 5322 allows: commas inside quotes and comments,
+ * a name that is only a comment after a bare address, encoded words inside quotes, and an angle
+ * address that is never closed.
+ */
 export function addressesIn(header: string): Address[] {
   const found: Address[] = [];
   let mailbox: Token[] = [];

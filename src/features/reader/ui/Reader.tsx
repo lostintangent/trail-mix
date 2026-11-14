@@ -1,24 +1,24 @@
 import { colorVars, fontWeightVars, spacingVars } from '@astryxdesign/core/theme/tokens.stylex';
 import { Button } from '@astryxdesign/core/Button';
-import { Icon } from '@astryxdesign/core/Icon';
 import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
 import * as stylex from '@stylexjs/stylex';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
-import { ExternalLink } from 'lucide-react';
 import { memo, useDeferredValue, useEffect, useEffectEvent, useRef, useState } from 'react';
-import { stampStyles } from '../../../app/theme/stamps.ts';
 import { useMediaQuery } from '../../../shared/useMediaQuery.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Command } from '../../commands/index.ts';
 import { numberOf } from '../../conversations/index.ts';
 import { folderName } from '../../folders/index.ts';
 import {
+  newestShown,
+  listed,
+  refKey,
+  refOf,
   threadAddressOf,
   threadOf,
   type Account,
   type ConversationId,
   type Folder,
-  type GitHubThread,
   type Message,
   type MessageRef,
 } from '../../mail/core/index.ts';
@@ -36,11 +36,10 @@ import { folderOf, receivedIn } from '../core/folder.ts';
 import { REST_MS } from '../core/rest.ts';
 import { bareSubject } from '../core/subject.ts';
 import { threadStyles } from './layout.ts';
-import { metaStyles } from './meta.ts';
+import { counted, MetaLine } from './meta.tsx';
 import { MessageKeys } from './MessageFrame.tsx';
 import { displayName, MessageSheet, when } from './MessageSheet.tsx';
-import { refKey, refOf } from './refs.ts';
-import { imagesAllowed, safeMail } from './safeMail.ts';
+import { safeMail } from './safeMail.ts';
 
 type ReaderProps = {
   /** One conversation's messages, in any order. */
@@ -146,7 +145,7 @@ const Conversation = memo(function Conversation({
     .filter((message) => !leftOut.has(refKey(message)))
     .toSorted((a, b) => a.date.localeCompare(b.date));
   const isDraft = (message: Message) => onOpenDraft !== undefined && message.flags.draft;
-  const newest = messages.findLast((message) => !isDraft(message)) ?? messages.at(-1);
+  const newest = newestShown(messages);
   // The newest opens, and the member opens earlier ones. A move gives a message a new ref, as an
   // undone archive's moves do, so an opened one is known by what it keeps: its Message-ID.
   const [opened, setOpened] = useState(() => new Set(newest ? [openedKey(newest)] : []));
@@ -171,14 +170,18 @@ const Conversation = memo(function Conversation({
   return (
     <div {...stylex.props(threadStyles.thread)}>
       <h1 {...stylex.props(threadStyles.subject)}>{github?.title ?? subjectOf(messages)}</h1>
-      <p {...stylex.props(threadStyles.meta, address !== undefined && metaStyles.wrapping)}>
-        <span aria-hidden {...stylex.props(metaStyles.stamp, stampStyles[account.stamp])} />
-        <span>
-          {[account.name, ...(folder ? [folderName(folder)] : []), size].join(' · ')}
-          {address && ' · '}
-        </span>
-        {github && address && <OnGitHub thread={github} address={address} />}
-      </p>
+      <MetaLine
+        account={account}
+        says={[account.name, ...(folder ? [folderName(folder)] : []), size]}
+        onGitHub={
+          github && address
+            ? {
+                address,
+                name: numberOf(github)?.text ?? (github.kind === 'run' ? 'Run' : 'Thread'),
+              }
+            : undefined
+        }
+      />
       {messages.map((message) =>
         isDraft(message) ? (
           <button
@@ -270,8 +273,6 @@ function OnItsWay({ shown: { leaving, preview } }: { shown: Shown }) {
   );
 }
 
-const counted = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
-
 /** How the reader remembers an opened message: by its Message-ID, or its ref if it has none. */
 const openedKey = (message: Message) => message.messageId || refKey(message);
 
@@ -304,7 +305,7 @@ async function prepareConversation(
   isCancelled: () => boolean,
 ) {
   const messages = await queryClient.ensureQueryData(conversationQuery(id));
-  const newest = messages.toSorted((a, b) => a.date.localeCompare(b.date)).at(-1);
+  const newest = newestShown(messages);
   if (!newest) return;
   const body = await queryClient.ensureQueryData(bodyQuery(refOf(newest)));
   const accounts = queryClient.getQueryData(accountsQuery.queryKey) ?? [];
@@ -312,7 +313,7 @@ async function prepareConversation(
   await idle();
   // Sanitizing a large body is one long task, so it never starts once the member has moved on.
   if (isCancelled()) return;
-  safeMail(newest, body, imagesAllowed(newest, account?.allowImagesFrom ?? []));
+  safeMail(newest, body, listed(newest.from.email, account?.allowImagesFrom ?? []));
 }
 
 /**
@@ -332,7 +333,7 @@ function useFetchAhead(account: Account) {
         .fetchQuery(bodyQuery(refOf(message)))
         .then(async (body) => {
           await idle();
-          safeMail(message, body, imagesAllowed(message, account.allowImagesFrom));
+          safeMail(message, body, listed(message.from.email, account.allowImagesFrom));
         })
         .catch(() => {});
     };
@@ -356,15 +357,6 @@ function idle(): Promise<void> {
 }
 
 /** Where a GitHub thread lives on github.com, named by its number, or by its kind when it has none. */
-function OnGitHub({ thread, address }: { thread: GitHubThread; address: string }) {
-  return (
-    <a href={address} target="_blank" rel="noopener noreferrer" {...stylex.props(metaStyles.link)}>
-      {numberOf(thread)?.text ?? (thread.kind === 'run' ? 'Run' : 'Thread')} on GitHub
-      <Icon icon={ExternalLink} size="xsm" xstyle={metaStyles.linkIcon} />
-    </a>
-  );
-}
-
 /** The conversation's subject, as its first message gave it. */
 const subjectOf = (messages: Message[]) => bareSubject(messages[0]?.subject ?? '');
 

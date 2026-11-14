@@ -6,9 +6,12 @@ import * as signing from '../../accounts/core/index.ts';
 import { messageOf } from '../../composer/index.ts';
 import { createProblem, deleteProblem, inside, renameProblem } from '../../folders/core/index.ts';
 import {
+  listed,
   messageIdOf,
   oneClickUnsubscribe,
   referencesOf,
+  refKey,
+  refOf,
   sameRef,
   writeMime,
   type Account,
@@ -541,7 +544,12 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       pendingTo = { account: held.id };
     } else {
       ({ address, preset } = checked);
-      if (this.book.all().some((account) => sameAddress(account.address, address))) {
+      if (
+        listed(
+          address,
+          this.book.all().map((account) => account.address),
+        )
+      ) {
         throw new Error(`${address} is already connected.`);
       }
       const { name, fromName } = checked;
@@ -976,14 +984,14 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 
   /** Notes a draft filed in place of the version before it, which its server now owes a discard. */
   private filed(saved: MessageRef, older: MessageRef | undefined) {
-    this.drafts.add(refKeyOf(saved));
+    this.drafts.add(refKey(saved));
     const replacing = older && !sameRef(older, saved) ? older : undefined;
     if (replacing) {
       // The member waits only for the new version. The old one is owed a discard before anything
       // else is awaited, and the next wake makes it before its sync, and lets its bytes go, so the
       // cache keeps only the newest draft's.
       this.replaced.owe(replacing);
-      this.drafts.delete(refKeyOf(replacing));
+      this.drafts.delete(refKey(replacing));
       this.store.oweBody(replacing);
       this.sending.release(replacing);
     }
@@ -1467,7 +1475,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     const held = this.notifying.mark(folder);
     const { news, mark } = newsIn(events, held, {
       now: Date.now(),
-      movedIn: (ref) => this.movedIn.delete(refKeyOf(ref)),
+      movedIn: (ref) => this.movedIn.delete(refKey(ref)),
     });
     if (mark && (mark.uid !== held?.uid || mark.uidValidity !== held.uidValidity)) {
       this.notifying.setMark(folder, mark);
@@ -1511,7 +1519,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 
   /** A message the member moved, which isn't news if its move lands it in an Inbox. */
   private noteMovedIn(ref: MessageRef) {
-    this.movedIn.add(refKeyOf(ref));
+    this.movedIn.add(refKey(ref));
     for (const oldest of this.movedIn) {
       if (this.movedIn.size <= MOVED_IN_HELD) break;
       this.movedIn.delete(oldest);
@@ -1696,7 +1704,12 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       this.tokens.set(id, tokens);
       this.setStatus(id, 'syncing');
     } else {
-      if (this.book.all().some((account) => sameAddress(account.address, address))) {
+      if (
+        listed(
+          address,
+          this.book.all().map((account) => account.address),
+        )
+      ) {
         return stop(`${address} is already connected.`);
       }
       const { name, fromName, preset } = pending.to as signing.NewAccount;
@@ -1850,12 +1863,12 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     const key = this.bodyKey(ref);
     const cached = await this.env.BODIES.get(key);
     if (cached) return new Uint8Array(await cached.arrayBuffer());
-    if (!this.known(ref) && !this.drafts.has(refKeyOf(ref))) return null;
+    if (!this.known(ref) && !this.drafts.has(refKey(ref))) return null;
     const stream = await (await this.provider(ref.account)).body(ref);
     const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
     await this.env.BODIES.put(key, bytes);
     // A draft just saved is indexed by the sync its save owes.
-    if (!this.store.reads.message(ref) && !this.drafts.has(refKeyOf(ref))) this.store.oweBody(ref);
+    if (!this.store.reads.message(ref) && !this.drafts.has(refKey(ref))) this.store.oweBody(ref);
     return bytes;
   }
 
@@ -1984,7 +1997,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       });
       const strays = page.objects.flatMap(({ key }) => {
         const ref = this.bodyRef(key);
-        const isKept = !ref || this.store.reads.message(ref) || this.drafts.has(refKeyOf(ref));
+        const isKept = !ref || this.store.reads.message(ref) || this.drafts.has(refKey(ref));
         return isKept ? [] : [key];
       });
       if (strays.length) await this.env.BODIES.delete(strays);
@@ -2004,12 +2017,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   ): MessageRef[] {
     const checked = input.messagesOf(messages);
     if (Array.isArray(checked)) return checked;
-    return bundled(checked).map(({ account, path, uidValidity, uid }) => ({
-      account,
-      path,
-      uidValidity,
-      uid,
-    }));
+    return bundled(checked).map(refOf);
   }
 
   private byAccount(refs: MessageRef[]) {
@@ -2151,8 +2159,6 @@ function notSetUp(preset: PresetName | undefined): string {
   return `${device.vendor} sign-in isn’t set up on this Trail Mix. The operator registers an app with ${device.vendor} and sets ${id}.`;
 }
 
-const sameAddress = (one: string, other: string) => one.toLowerCase() === other.toLowerCase();
-
 /** What a member reads when an account's sign-in has lapsed. */
 const lapsed = (account: Account) => `Sign in to ${account.name} again.`;
 
@@ -2220,9 +2226,6 @@ function openedAtIn(sql: Sql): number | undefined {
 function report(error: unknown) {
   console.error('Mailroom:', error instanceof Error ? error.message : error);
 }
-
-const refKeyOf = ({ account, path, uidValidity, uid }: MessageRef) =>
-  JSON.stringify([account, path, uidValidity, uid]);
 
 /** One attachment of a raw message, by its place among them, as `Body.attachments` numbers them. */
 async function attachmentOf(bytes: Uint8Array, index: number): Promise<MimeAttachment | undefined> {

@@ -1,4 +1,11 @@
-import type { AccountId, ConversationId, Envelope, FolderRef, FolderRole } from './model.ts';
+import type {
+  AccountId,
+  ConversationId,
+  Envelope,
+  FolderRef,
+  FolderRole,
+  Message,
+} from './model.ts';
 
 /**
  * Conversation linking. A conversation is the messages of one account that reply to each other,
@@ -150,4 +157,20 @@ function idsIn(header: string): string[] {
     else if (char === '"') quoted = true;
   }
   return ids;
+}
+
+/**
+ * The message a conversation opens on and is answered at: its newest that isn't a draft, or its
+ * newest draft when it holds nothing else.
+ */
+export function newestShown(messages: readonly Message[]): Message | undefined {
+  let newest: Message | undefined;
+  for (const message of messages) {
+    const isNewer =
+      !newest ||
+      (newest.flags.draft && !message.flags.draft) ||
+      (newest.flags.draft === message.flags.draft && message.date >= newest.date);
+    if (isNewer) newest = message;
+  }
+  return newest;
 }

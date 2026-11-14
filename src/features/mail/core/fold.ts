@@ -6,6 +6,7 @@ import {
   partsOf,
   rootOf,
 } from './conversations.ts';
+import { refKey, refOf } from './refs.ts';
 import type {
   AccountId,
   ConversationId,
@@ -125,11 +126,11 @@ function reflag(held: Message | undefined, flags: Flags): IndexChange {
  */
 function forget(index: Index, held: readonly Message[]): IndexChange {
   if (held.length === 0) return NOTHING;
-  const removed = new Set(held.map(keyOf));
+  const removed = new Set(held.map(refKey));
   const put: Message[] = [];
   for (const id of new Set(held.map((message) => message.conversation))) {
     const parts = partsOf(id);
-    const rest = index.conversation(id).filter((message) => !removed.has(keyOf(message)));
+    const rest = index.conversation(id).filter((message) => !removed.has(refKey(message)));
     if (!parts || rest.length === 0) continue;
     linkConversations(parts.account, parts.gathering, rest).forEach((conversation, i) => {
       const message = rest[i]!;
@@ -152,12 +153,12 @@ export function memoryIndex(
   folders: readonly (FolderRef & { role?: FolderRole })[],
   messages: readonly Message[] = [],
 ): MemoryIndex {
-  const byKey = new Map(messages.map((message) => [keyOf(message), message]));
+  const byKey = new Map(messages.map((message) => [refKey(message), message]));
   const inFolder = (folder: FolderRef) => (candidate: FolderRef) =>
     candidate.account === folder.account && candidate.path === folder.path;
   return {
     messages,
-    message: (ref) => byKey.get(keyOf(ref)),
+    message: (ref) => byKey.get(refKey(ref)),
     linkedConversations: (account, ids) => {
       const linking = new Set(ids);
       const linked = messages.filter(
@@ -170,21 +171,13 @@ export function memoryIndex(
     folder: (folder) => messages.filter(inFolder(folder)),
     role: (folder) => folders.find(inFolder(folder))?.role,
     apply: (change) => {
-      const replaced = new Set([...change.remove, ...change.put].map(keyOf));
+      const replaced = new Set([...change.remove, ...change.put].map(refKey));
       return memoryIndex(folders, [
-        ...messages.filter((message) => !replaced.has(keyOf(message))),
+        ...messages.filter((message) => !replaced.has(refKey(message))),
         ...change.put,
       ]);
     },
   };
-}
-
-function refOf({ account, path, uidValidity, uid }: MessageRef): MessageRef {
-  return { account, path, uidValidity, uid };
-}
-
-function keyOf(ref: MessageRef): string {
-  return JSON.stringify([ref.account, ref.path, ref.uidValidity, ref.uid]);
 }
 
 /** Whether two messages' flags are the same. */

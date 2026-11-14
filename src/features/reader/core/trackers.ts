@@ -78,7 +78,7 @@ export function isTrackingAddress(url: URL): boolean {
  * A length in pixels, from an attribute such as `width="1"` or a style's value such as `1px`, or
  * undefined for one that depends on more, such as `100%` or `auto`.
  */
-export function pixels(value: string | null): number | undefined {
+function pixels(value: string | null): number | undefined {
   const match = /^\s*(\d*\.?\d+)\s*(?:px)?\s*$/i.exec(value ?? '');
   return match?.[1] === undefined ? undefined : Number(match[1]);
 }

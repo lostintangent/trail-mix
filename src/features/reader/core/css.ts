@@ -17,7 +17,7 @@
  */
 
 /** Where a resource named in CSS loads from instead, or null to load nothing. */
-export type Resolve = (url: string) => string | null;
+type Resolve = (url: string) => string | null;
 
 export function rewriteCssResources(css: string, resolve: Resolve): string {
   return rewrite(css, 0, css.length, 'values', resolve).text;

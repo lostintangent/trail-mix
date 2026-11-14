@@ -13,12 +13,19 @@ import {
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { Ellipsis, FileText, ImageIcon, ImageOff, ShieldCheck, Sun } from 'lucide-react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { SenderAvatar } from '../../../app/theme/SenderAvatar.tsx';
 import { tm } from '../../../app/theme/tokens.stylex.ts';
 import { CommandButton, type Command } from '../../commands/index.ts';
-import { isReasonOf, type Account, type Address, type Message } from '../../mail/core/index.ts';
+import {
+  isReasonOf,
+  listed,
+  refOf,
+  type Account,
+  type Address,
+  type Message,
+} from '../../mail/core/index.ts';
 import {
   accountsQuery,
   bodyQuery,
@@ -27,14 +34,12 @@ import {
   partUrl,
 } from '../../mailroom/client/index.ts';
 import { foldQuote } from '../core/quotes.ts';
-import { isLightPaper } from '../core/lightPaper.ts';
 import { setLightPaper, useDarkTheme } from './lightPaper.ts';
 import { sheetStyles } from './layout.ts';
 import { MessageFrame } from './MessageFrame.tsx';
 import { PlainText } from './PlainText.tsx';
 import { BodySkeleton } from './skeletons.tsx';
-import { refOf } from './refs.ts';
-import { imagesAllowed, safeMail } from './safeMail.ts';
+import { safeMail } from './safeMail.ts';
 import { Unsubscribe } from './Unsubscribe.tsx';
 
 type MessageSheetProps = {
@@ -49,15 +54,14 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
   const ref = refOf(message);
   const { data: body, isError, refetch } = useQuery(bodyQuery(ref));
   const [showOnce, setShowOnce] = useState(false);
-  const allowed = showOnce || imagesAllowed(message, account.allowImagesFrom);
-  const allowImages = useAllowImages(account);
+  const allowed = showOnce || listed(message.from.email, account.allowImagesFrom);
   const queryClient = useQueryClient();
   // In the dark theme, the member may show someone else's mail on light paper, as designed. The
   // control stands from the first frame, so the header holds still when the body arrives.
   const isDark = useDarkTheme();
-  const isOwn = message.from.email.toLowerCase() === account.address.toLowerCase();
+  const isOwn = listed(message.from.email, [account.address]);
   const offersLightPaper = isDark && !isOwn;
-  const lightPaper = offersLightPaper && isLightPaper(message.from.email, account.lightPaperFrom);
+  const lightPaper = offersLightPaper && listed(message.from.email, account.lightPaperFrom);
   const [quotes, setQuotes] = useState<'folded' | 'shown'>('folded');
   const reply = actions.find(({ id }) => id === 'message.reply');
   const more = actions.filter((action) => action !== reply && action.isEnabled !== false);
@@ -164,7 +168,7 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
               size="sm"
               onClick={() => {
                 setShowOnce(true);
-                allowImages(message.from.email.toLowerCase());
+                allowImages(queryClient, account.id, message.from.email.toLowerCase());
               }}
             />
           </span>
@@ -248,20 +252,17 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
  * Allows a sender's remote images on an account. The account shows it at once, and the accounts
  * snapshot is refetched if the Mailroom refuses, so the change visibly undoes itself.
  */
-function useAllowImages(account: Account) {
-  const queryClient = useQueryClient();
-  return (sender: string) => {
-    queryClient.setQueryData(accountsQuery.queryKey, (accounts) =>
-      accounts?.map((each) =>
-        each.id === account.id
-          ? { ...each, allowImagesFrom: [...new Set([...each.allowImagesFrom, sender])] }
-          : each,
-      ),
-    );
-    mailroom.allowImages(account.id, sender).catch(() => {
-      void queryClient.invalidateQueries({ queryKey: accountsQuery.queryKey });
-    });
-  };
+function allowImages(queryClient: QueryClient, account: Account['id'], sender: string) {
+  queryClient.setQueryData(accountsQuery.queryKey, (accounts) =>
+    accounts?.map((each) =>
+      each.id === account
+        ? { ...each, allowImagesFrom: [...new Set([...each.allowImagesFrom, sender])] }
+        : each,
+    ),
+  );
+  mailroom.allowImages(account, sender).catch(() => {
+    void queryClient.invalidateQueries({ queryKey: accountsQuery.queryKey });
+  });
 }
 
 export function displayName({ name, email }: Address): string {

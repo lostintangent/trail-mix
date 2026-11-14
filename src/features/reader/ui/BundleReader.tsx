@@ -13,7 +13,6 @@ import { ExternalLink } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { pendingStyles } from '../../../app/theme/Pending.tsx';
-import { stampStyles } from '../../../app/theme/stamps.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import {
   Chip,
@@ -32,7 +31,7 @@ import {
   type ConversationSummary,
 } from '../../mail/core/index.ts';
 import { issueStyles, threadStyles } from './layout.ts';
-import { metaStyles } from './meta.ts';
+import { counted, MetaLine } from './meta.tsx';
 import { ThreadSkeleton } from './skeletons.tsx';
 
 type BundleReaderProps = {
@@ -146,31 +145,16 @@ function Head({
         <span {...stylex.props(styles.quiet)}>{repository.slice(0, slash)}</span>
         {repository.slice(slash)}
       </h1>
-      <p {...stylex.props(threadStyles.meta, metaStyles.wrapping)}>
-        {account && (
-          <span aria-hidden {...stylex.props(metaStyles.stamp, stampStyles[account.stamp])} />
-        )}
-        <span>
-          {[
-            ...(account ? [account.name] : []),
-            folder,
-            counted(bundle.threads, 'thread'),
-            counted(count, 'message'),
-          ].join(' · ')}
-          {address && ' · '}
-        </span>
-        {address && (
-          <a
-            href={address}
-            target="_blank"
-            rel="noopener noreferrer"
-            {...stylex.props(metaStyles.link)}
-          >
-            {repository.slice(slash)} on GitHub
-            <Icon icon={ExternalLink} size="xsm" xstyle={metaStyles.linkIcon} />
-          </a>
-        )}
-      </p>
+      <MetaLine
+        account={account}
+        says={[
+          ...(account ? [account.name] : []),
+          folder,
+          counted(bundle.threads, 'thread'),
+          counted(count, 'message'),
+        ]}
+        onGitHub={address ? { address, name: repository.slice(slash) } : undefined}
+      />
     </div>
   );
 }
@@ -237,8 +221,6 @@ function ThreadSheet({
     </article>
   );
 }
-
-const counted = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
 const styles = stylex.create({
   quiet: {

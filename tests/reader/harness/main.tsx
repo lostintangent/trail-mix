@@ -50,7 +50,8 @@ declare global {
       html?: string,
       upcoming?: ConversationId[],
     ) => void;
-    setTheme: (mode: 'light' | 'dark') => void;
+    /** How many frames an open message took to follow the system's theme, once it changed. */
+    switched?: Promise<number>;
     /** How many times a message was sanitized. */
     sanitized: number;
     /** What hostile mail calls if any of its script ever runs. */
@@ -70,9 +71,6 @@ window.pageKeys = [];
 addEventListener('keydown', (event: KeyboardEvent) => window.pageKeys.push(event.key));
 const recordKey = (event: KeyboardEvent) => window.messageKeys.push(event.key);
 window.__pwned = (id) => window.pwned.push(id);
-window.setTheme = (mode) => {
-  document.documentElement.dataset['theme'] = mode;
-};
 
 const root = createRoot(document.getElementById('root') as HTMLElement);
 
