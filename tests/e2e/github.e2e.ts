@@ -184,6 +184,8 @@ test("a bundle's actions act on every thread in it, and Undo brings them all bac
     .waitFor({ state: 'detached' });
   await undoButton(page).click();
   await row.getByText('Unread', { exact: true }).waitFor();
+  // A toast keeps its Undo until it has finished leaving, so the next Undo is Archive's alone.
+  await undoButton(page).waitFor({ state: 'detached' });
 
   await page
     .getByRole('toolbar', { name: 'Repository' })
