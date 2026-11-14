@@ -22,9 +22,6 @@ import { AccountSection, ViewRows } from './Tree.tsx';
 import { onTreeKey, preloadTreeMoves } from './treeKeys.ts';
 import type { ViewCounts } from './views.ts';
 
-/** The name at the foot of the sidebar. */
-const NAME = 'Trail Mix';
-
 /**
  * The sidebar, lying directly on the desk: on a desktop, the fold button and the search at its
  * head, then the unified views, then each account under its stamp, with its folders, and at its
@@ -164,7 +161,7 @@ export const Sidebar = memo(function Sidebar({
           {/* Where the pinned gear lands, or the gear itself where the sidebar never folds. */}
           {canFold ? <span {...stylex.props(control.target)} /> : settings}
           <span aria-hidden {...stylex.props(styles.footRule)} />
-          <span {...stylex.props(styles.name)}>{NAME}</span>
+          <span {...stylex.props(styles.name)}>Trail Mix</span>
           {/* Where the pinned New message lands. */}
           {compose && (canFold ? <span {...stylex.props(control.target)} /> : compose)}
         </div>
@@ -305,8 +302,6 @@ const styles = stylex.create({
   },
   addAccount: {
     display: 'flex',
-    flexWrap: 'wrap',
-    gap: spacingVars['--spacing-1'],
     marginTop: spacingVars['--spacing-3'],
     paddingInline: spacingVars['--spacing-1'],
   },
