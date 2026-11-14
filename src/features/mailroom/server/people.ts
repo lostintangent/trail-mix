@@ -1,7 +1,8 @@
 import type { Address, Envelope, FolderRole, Message, MessageRef } from '../../mail/core/index.ts';
 import { PEOPLE_LISTED } from '../client/contract.ts';
 import { correspondentsOf, type Correspondent } from '../core/people.ts';
-import type { Sql, SqlValue } from './schema.ts';
+import { BY_REF, keyOf, searchable } from './rows.ts';
+import type { Sql } from './schema.ts';
 
 /**
  * The people the envelope index holds, whom the composer's To, Cc and Bcc complete from. Each
@@ -214,9 +215,3 @@ type Noted = Omit<Correspondent, 'wrote'> & { wrote: number; date: string; id: s
 
 const byAddress = (a: Noted, b: Noted) =>
   a.address < b.address ? -1 : a.address > b.address ? 1 : 0;
-
-/** Text as the people search keeps it, NFKC-normalized as search's words are. */
-const searchable = (text: string) => text.normalize('NFKC');
-
-const BY_REF = 'account = ? AND path = ? AND uid_validity = ? AND uid = ?';
-const keyOf = (ref: MessageRef): SqlValue[] => [ref.account, ref.path, ref.uidValidity, ref.uid];

@@ -278,23 +278,13 @@ type Bimi = { logo?: string };
  */
 export function txtOf(data: string): string {
   if (!data.trimStart().startsWith('"')) return data;
-  let text = '';
-  let quoted = false;
-  for (let i = 0; i < data.length; i++) {
-    const char = data[i]!;
-    if (char === '"') {
-      quoted = !quoted;
-    } else if (!quoted) {
-      continue;
-    } else if (char === '\\') {
-      const digits = /^\d{3}/.exec(data.slice(i + 1))?.[0];
-      text += digits ? String.fromCharCode(Number(digits)) : (data[i + 1] ?? '');
-      i += digits ? 3 : 1;
-    } else {
-      text += char;
-    }
-  }
-  return text;
+  return [...data.matchAll(/"((?:[^"\\]|\\[\s\S]?)*)"?/g)]
+    .map(([, quoted = '']) =>
+      quoted.replace(/\\(\d{3}|[\s\S]?)/g, (_, escaped: string) =>
+        escaped.length === 3 ? String.fromCharCode(Number(escaped)) : escaped,
+      ),
+    )
+    .join('');
 }
 
 /** A domain's DMARC record from the TXT records at `_dmarc.<domain>`. More than one counts as none. */
@@ -320,7 +310,7 @@ export function bimiOf(records: readonly string[]): Bimi | undefined {
   if (!tags) return undefined;
   // A list of locations is read for its first, as the first drafts of BIMI allowed.
   const location = tags.get('l')?.split(',')[0]?.trim() ?? '';
-  return isHttps(location) ? { logo: location } : {};
+  return URL.parse(location)?.protocol === 'https:' ? { logo: location } : {};
 }
 
 /** The domains a lookup asks about for a sender's domain: it, then those above it, nearest first. */
@@ -403,15 +393,5 @@ function tagsOf(record: string): Map<string, string> {
   return tags;
 }
 
-function policy(value: string | undefined): Policy | undefined {
-  const lower = value?.toLowerCase();
-  return lower === 'none' || lower === 'quarantine' || lower === 'reject' ? lower : undefined;
-}
-
-function isHttps(location: string): boolean {
-  try {
-    return new URL(location).protocol === 'https:';
-  } catch {
-    return false;
-  }
-}
+const POLICIES: readonly Policy[] = ['none', 'quarantine', 'reject'];
+const policy = (value: string | undefined) => POLICIES.find((p) => p === value?.toLowerCase());

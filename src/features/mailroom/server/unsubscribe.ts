@@ -6,8 +6,6 @@ import type { Unsubscribed } from '../client/contract.ts';
 /** What carries a POST: the internet, or the demo's list servers, which stand in for it. */
 type Post = (url: URL, init: RequestInit) => Promise<Response>;
 
-export type OneClick = ReturnType<typeof oneClick>;
-
 /**
  * Leaving the list a message came from, by the one-click offer its body names: checked again from
  * the message itself, then posted as `unsubscribeAt` says. The demo's list servers answer it

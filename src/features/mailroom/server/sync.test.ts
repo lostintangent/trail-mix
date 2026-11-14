@@ -51,6 +51,11 @@ function mailroom(size: number, wrap = (provider: MailProvider) => provider) {
     get queue() {
       return queue;
     },
+    /** Checks each account and runs every step that owes. */
+    async sync(...accounts: AccountId[]) {
+      for (const account of accounts) queue.check(account);
+      await queue.run(ALL);
+    },
     /** A Mailroom that starts again, with only what storage holds. */
     restart() {
       queue = make();
@@ -73,9 +78,7 @@ test('a first sync lands over several wakes within budget, and gives what one lo
   expect(Math.max(...wakes)).toBeLessThanOrEqual(3);
 
   const whole = mailroom(600);
-  whole.queue.check('personal');
-  whole.queue.check('work');
-  await whole.queue.run(ALL);
+  await whole.sync('personal', 'work');
   expect(whole.queue.owing()).toBe(false);
   expect(bounded.snapshot()).toEqual(whole.snapshot());
 
@@ -119,18 +122,17 @@ test('mail a watcher reports goes ahead of a first sync still under way', async 
 
 test('a check that finds nothing new hints nothing, and new mail hints its folder and the counts', async () => {
   const room = mailroom(100);
-  room.queue.check('personal');
-  await room.queue.run(ALL);
+  await room.sync('personal');
 
   room.hints.length = 0;
-  room.queue.check('personal');
-  await room.queue.run(ALL);
+  await room.sync('personal');
   expect(room.hints).toEqual([]);
 
   await room.servers.personal.deliver(new TextEncoder().encode(raw('Arriving now')));
   room.queue.folder({ account: 'personal', path: 'INBOX' });
   await room.queue.run(ALL);
-  expect(room.hints).toEqual([
+  // The hints come in no promised order.
+  expect(room.hints.toSorted((a, b) => a.changed.localeCompare(b.changed))).toEqual([
     { changed: 'conversations', folder: { account: 'personal', path: 'INBOX' } },
     { changed: 'folders', account: 'personal' },
   ]);
@@ -140,15 +142,13 @@ test('a folder that goes while its sync is owed leaves the rest of the account t
   const room = mailroom(100);
   const { provider } = room.servers.personal;
   await provider.createFolder('Receipts');
-  room.queue.check('personal');
-  await room.queue.run(ALL);
+  await room.sync('personal');
   room.settled.length = 0;
 
   // A move into the folder owed its sync, and then it was renamed, as a member can do in a breath.
   room.queue.folder({ account: 'personal', path: 'Receipts' });
   await provider.renameFolder('Receipts', 'Receipts 2026');
-  room.queue.check('personal');
-  await room.queue.run(ALL);
+  await room.sync('personal');
 
   expect(room.queue.owing()).toBe(false);
   const paths = room.store.folders('personal').map(({ path }) => path);
@@ -199,8 +199,7 @@ function raw(subject: string) {
 
 test('a re-read folds every message again in place, so no row goes or moves until the pass lets go of what the server no longer has', async () => {
   const room = mailroom(600);
-  room.queue.check('personal');
-  await room.queue.run(ALL);
+  await room.sync('personal');
   const inbox = { account: 'personal', path: 'INBOX' };
   const rows = () =>
     room.sql
@@ -247,8 +246,7 @@ test('a re-read folds every message again in place, so no row goes or moves unti
   // It ends holding what a first sync of the same server holds, and searches as that does.
   const fresh = mailroom(600);
   await fresh.servers.personal.expunge('INBOX', oldest.messageId);
-  fresh.queue.check('personal');
-  await fresh.queue.run(ALL);
+  await fresh.sync('personal');
   expect(room.snapshot()).toEqual(fresh.snapshot());
   expect(room.sql.all(`SELECT rowid FROM search WHERE search MATCH 'stale'`)).toEqual([]);
   expect(room.sql.all(`SELECT * FROM reread`)).toEqual([]);
@@ -261,8 +259,7 @@ test('a re-read folds every message again in place, so no row goes or moves unti
 
 test('a folder its server numbers again part way through a re-read starts the pass over, and keeps nothing it numbered before', async () => {
   const room = mailroom(600);
-  room.queue.check('personal');
-  await room.queue.run(ALL);
+  await room.sync('personal');
   room.sql.run(REREAD);
   room.queue.folder({ account: 'personal', path: 'INBOX' });
   await room.queue.run({ steps: 1, ms: Infinity });
@@ -272,8 +269,7 @@ test('a folder its server numbers again part way through a re-read starts the pa
 
   const fresh = mailroom(600);
   await fresh.servers.personal.resetUidValidity('INBOX');
-  fresh.queue.check('personal');
-  await fresh.queue.run(ALL);
+  await fresh.sync('personal');
   expect(room.snapshot()).toEqual(fresh.snapshot());
   expect(room.messages('personal')).toBe(fresh.messages('personal'));
 });

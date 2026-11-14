@@ -30,6 +30,7 @@ import {
 import {
   COMMANDS,
   QUERIES,
+  type AccountChange,
   type AccountSetup,
   type Answered,
   type BundlePage,
@@ -55,34 +56,26 @@ import {
   NOTIFYING_CHECKING_MS,
   scheduleOf,
   windDownOf,
-  type WindDown,
 } from '../core/idle.ts';
 import { verifiedSenders, type Picture } from '../core/avatars.ts';
-import {
-  accountBook,
-  connectedAccounts,
-  demoSettings,
-  type AccountBook,
-  type ConnectedAccounts,
-  type DemoSettings,
-} from './accounts.ts';
-import { bodyCache, type BodyBatches, type BodyCache } from './bodies.ts';
-import { connections, type Connections, type ImapCode } from './connections.ts';
+import { accountBook, connectedAccounts, demoSettings } from './accounts.ts';
+import { bodyCache, type BodyBatches } from './bodies.ts';
+import { connections, type ImapCode } from './connections.ts';
 import { credentialsOf } from './credentials.ts';
-import { savingDrafts, type SavingDrafts } from './drafts.ts';
-import { folderCommands, type FolderCommands } from './folders.ts';
-import { notifying, type Notifying } from './notifying.ts';
-import { envelopeIndex, type EnvelopeIndex } from './envelope-index.ts';
+import { savingDrafts } from './drafts.ts';
+import { folderCommands } from './folders.ts';
+import { notifying } from './notifying.ts';
+import { envelopeIndex } from './envelope-index.ts';
 import * as input from './input.ts';
-import { messageCommands, type MessageCommands } from './messages.ts';
-import { avatars, type Avatars } from './avatars.ts';
+import { messageCommands } from './messages.ts';
+import { avatars } from './avatars.ts';
 import { upgrade, type Sql, type SqlValue } from './schema.ts';
-import { outboxCommands, outboxQueue, type OutboxCommands, type OutboxQueue } from './outbox.ts';
-import { fullTextSearch, type FullTextSearch } from './search.ts';
-import { signingIn, type SigningIn } from './sign-ins.ts';
+import { outboxCommands, outboxQueue } from './outbox.ts';
+import { fullTextSearch } from './search.ts';
+import { signingIn } from './sign-ins.ts';
 import { report } from './report.ts';
-import { syncQueue, WAKE, type SyncQueue } from './sync.ts';
-import { oneClick, type OneClick } from './unsubscribe.ts';
+import { syncQueue, WAKE } from './sync.ts';
+import { oneClick } from './unsubscribe.ts';
 
 /** Why a visitor's Mailroom keeps what it holds. */
 const VISITORS_KEEP =
@@ -104,178 +97,170 @@ const PEOPLE_FILLED = 2_000;
  * resumes from the cursors in storage, and watching starts again on the next alarm.
  */
 export class Mailroom extends DurableObject implements Contract {
-  protected readonly sql: Sql;
-  protected readonly store: EnvelopeIndex;
-  private readonly book: AccountBook;
-  private readonly avatars: Avatars;
-  private readonly connections: Connections;
-  private readonly signingIn: SigningIn;
-  private readonly connected: ConnectedAccounts;
-  private readonly fullText: FullTextSearch;
-  private readonly bodies: BodyCache;
-  private readonly oneClick: OneClick;
-  protected readonly queue: SyncQueue;
-  protected readonly sending: OutboxQueue;
-  private readonly drafts: SavingDrafts;
-  protected readonly outboxCommands: OutboxCommands;
-  private readonly folderCommands: FolderCommands;
-  private readonly messageCommands: MessageCommands;
-  /** When a signed-in device last asked for something, as storage holds it. */
-  protected openedAt: number;
+  private readonly demo = demoSettings(
+    this.env.DEMO_MAILBOX,
+    this.env.DEMO_MAILBOX_AT,
+    this.env.DEMO_HOST_FILES_SENT,
+  );
   /** How long unopened before it rests, and before it erases itself. */
-  private readonly windDown: WindDown;
-  /** Whether this instance has had anything to do yet, so the first call can say it started it. */
-  private isRunning = false;
-  private readonly notifying: Notifying;
-  private readonly demo: DemoSettings | undefined;
+  private readonly windDown = windDownOf(this.env.REST_AFTER_DAYS, this.env.ERASE_AFTER_DAYS);
   /**
    * Whether this is a visitor's Mailroom on the public demo, which checks mail only while open and
    * keeps its accounts.
    */
-  private readonly isVisitors: boolean;
+  private readonly isVisitors = Boolean(this.env.VISITOR_KEY) && this.demo !== undefined;
+  protected readonly sql = durableSql(this.ctx.storage);
+  /** The version storage was at when this instance woke, which is 0 for a new Mailroom. */
+  private readonly found = upgrade(this.sql);
+  /** When a signed-in device last asked for something, as storage holds it. */
+  protected openedAt: number;
+  /** Whether this instance has had anything to do yet, so the first call can say it started it. */
+  private isRunning = false;
+  // Each part below is made from the ones above it, and reaches a later one only through a closure.
+  protected readonly store = envelopeIndex(this.sql, () =>
+    this.book.all().map((account) => account.address),
+  );
+  private readonly book = accountBook(this.sql);
+  private readonly credentials = credentialsOf(this.env.CREDENTIALS_KEY, this.member);
+  private readonly avatars = avatars({
+    sql: this.sql,
+    hint: (hint) => this.hint(hint),
+    isDemo: this.demo !== undefined,
+    standIn: this.env.AVATARS_STAND_IN,
+  });
+  private readonly connections = connections({
+    book: this.book,
+    credentials: this.credentials,
+    demo: this.demo,
+    authServersStandIn: this.env.AUTH_SERVERS_STAND_IN,
+    accessToken: (account) => this.signingIn.accessToken(account),
+    imapCode: () => this.imapCode(),
+    reached: (provider) => this.reached(provider),
+  });
+  private readonly signingIn = signingIn({
+    sql: this.sql,
+    book: this.book,
+    credentials: this.credentials,
+    settings: this.env,
+    isDemo: this.demo !== undefined,
+    checkSignIn: (...args) => this.connections.checkSignIn(...args),
+    disconnect: (account) => this.disconnect(account),
+    unwatch: (account) => this.queue.unwatch(account),
+    setStatus: (account, status) => this.connected.setStatus(account, status),
+    hint: (hint) => this.hint(hint),
+    check: (account) => this.owe(() => this.queue.check(account)),
+    wakeBy: (at) => this.wakeBy(at),
+  });
+  private readonly connected = connectedAccounts({
+    book: this.book,
+    credentials: this.credentials,
+    demo: this.demo,
+    checkSignIn: (...args) => this.connections.checkSignIn(...args),
+    hint: (hint) => this.hint(hint),
+    check: (account) => this.owe(() => this.queue.check(account)),
+  });
+  private readonly fullText = fullTextSearch({
+    book: this.book,
+    store: this.store,
+    provider: (account) => this.connections.provider(account),
+  });
+  private readonly bodies = bodyCache({
+    bucket: this.env.BODIES,
+    member: this.member,
+    sql: this.sql,
+    store: this.store,
+    provider: (account) => this.connections.provider(account),
+    isKnown: (ref) => this.fullText.known(ref) !== undefined,
+    signersOf: (account) => this.connections.signersOf(account),
+  });
+  private readonly oneClick = oneClick({
+    bytes: (ref) => this.bodies.bytes(ref),
+    signersOf: (account) => this.connections.signersOf(account),
+    demoLists: (account) => this.connections.demoLists(account),
+    standIn: this.env.UNSUBSCRIBE_STAND_IN,
+  });
+  private readonly notifying = notifying({
+    sql: this.sql,
+    reads: this.store.reads,
+    nameOf: (account) => this.book.get(account)?.account.name,
+    settings: this.env,
+    post: (request) => this.postPush(request),
+  });
+  protected readonly queue = syncQueue({
+    sql: this.sql,
+    store: this.store,
+    hint: (hint) => this.hint(hint),
+    provider: (account) => this.connections.provider(account),
+    window: (account) => this.connected.windowOf(account),
+    settled: (account, error) => {
+      if (error) report(error);
+      // An account that needs signing in again stays so until the member does.
+      if (this.book.get(account)?.account.status === 'needs-sign-in') return;
+      this.connected.setStatus(account, error ? 'error' : 'ready');
+    },
+    landed: (folder, events) => {
+      this.notifying.note(folder, events);
+      this.avatars.note(verifiedSenders(events), Date.now());
+    },
+    wakeNow: () => this.background(this.ctx.storage.setAlarm(Date.now())),
+  });
+  protected readonly sending = outboxQueue({
+    sql: this.sql,
+    provider: (account) => this.connections.provider(account),
+    hint: (hint) => this.hint(hint),
+    sent: ({ draft }) => {
+      this.queue.folder({ account: draft.account, path: draft.path });
+      const sent = this.store.withRole(draft.account, 'sent');
+      if (sent) this.queue.folder(folderRef(sent));
+    },
+    accepted: () => this.accepted(),
+  });
+  private readonly drafts = savingDrafts({
+    sql: this.sql,
+    book: this.book,
+    store: this.store,
+    provider: (account) => this.connections.provider(account),
+    bodies: this.bodies,
+    known: (ref) => this.fullText.known(ref),
+    outbox: this.sending,
+    sync: this.queue,
+    owe: (owing) => this.owe(owing),
+    flush: () => this.ctx.storage.sync(),
+  });
+  protected readonly outboxCommands = outboxCommands({
+    queue: this.sending,
+    drafts: this.drafts,
+    book: this.book,
+    store: this.store,
+    wakeBy: (at) => this.wakeBy(at),
+  });
+  private readonly folderCommands = folderCommands({
+    book: this.book,
+    provider: (account) => this.connections.provider(account),
+    sync: this.queue,
+    owe: (owing) => this.owe(owing),
+  });
+  private readonly messageCommands = messageCommands({
+    book: this.book,
+    store: this.store,
+    provider: (account) => this.connections.provider(account),
+    sync: this.queue,
+    owe: (owing) => this.owe(owing),
+    movedIn: (ref) => this.notifying.movedIn(ref),
+  });
 
   constructor(ctx: DurableObjectState, env: Cloudflare.Env) {
     super(ctx, env);
-    this.demo = demoSettings(env.DEMO_MAILBOX, env.DEMO_MAILBOX_AT, env.DEMO_HOST_FILES_SENT);
-    this.windDown = windDownOf(env.REST_AFTER_DAYS, env.ERASE_AFTER_DAYS);
-    this.isVisitors = Boolean(env.VISITOR_KEY) && this.demo !== undefined;
-    this.sql = durableSql(ctx.storage);
-    const found = upgrade(this.sql);
     // A Mailroom new, upgraded, or erased counts as opened when it starts, so none rests at once.
-    const openedAt = openedAtIn(this.sql);
-    this.openedAt = openedAt ?? Date.now();
-    if (openedAt === undefined) this.writeOpened(this.openedAt);
-    this.store = envelopeIndex(this.sql, () => this.book.all().map((account) => account.address));
-    this.book = accountBook(this.sql);
-    const credentials = credentialsOf(env.CREDENTIALS_KEY, this.member);
-    const hint = (hint: Hint) => this.hint(hint);
-    this.avatars = avatars({
-      sql: this.sql,
-      hint,
-      isDemo: this.demo !== undefined,
-      standIn: env.AVATARS_STAND_IN,
-    });
-    const check = (account: AccountId) => this.owe(() => this.queue.check(account));
-    this.connections = connections({
-      book: this.book,
-      credentials,
-      demo: this.demo,
-      authServersStandIn: env.AUTH_SERVERS_STAND_IN,
-      accessToken: (account) => this.signingIn.accessToken(account),
-      imapCode: () => this.imapCode(),
-      reached: (provider) => this.reached(provider),
-    });
-    this.signingIn = signingIn({
-      sql: this.sql,
-      book: this.book,
-      credentials,
-      settings: env,
-      isDemo: this.demo !== undefined,
-      checkSignIn: (...args) => this.connections.checkSignIn(...args),
-      disconnect: (account) => this.disconnect(account),
-      unwatch: (account) => this.queue.unwatch(account),
-      setStatus: (account, status) => this.connected.setStatus(account, status),
-      hint,
-      check,
-      wakeBy: (at) => this.wakeBy(at),
-    });
-    this.connected = connectedAccounts({
-      book: this.book,
-      credentials,
-      demo: this.demo,
-      checkSignIn: (...args) => this.connections.checkSignIn(...args),
-      hint,
-      check,
-    });
-    const provider = (account: AccountId) => this.connections.provider(account);
-    const signersOf = (account: AccountId) => this.connections.signersOf(account);
-    this.fullText = fullTextSearch({ book: this.book, store: this.store, provider });
-    this.bodies = bodyCache({
-      bucket: env.BODIES,
-      member: this.member,
-      sql: this.sql,
-      store: this.store,
-      provider,
-      isKnown: (ref) => this.fullText.known(ref) !== undefined,
-      signersOf,
-    });
-    this.oneClick = oneClick({
-      bytes: (ref) => this.bodies.bytes(ref),
-      signersOf,
-      demoLists: (account) => this.connections.demoLists(account),
-      standIn: env.UNSUBSCRIBE_STAND_IN,
-    });
-    this.notifying = notifying({
-      sql: this.sql,
-      reads: this.store.reads,
-      nameOf: (account) => this.book.get(account)?.account.name,
-      settings: env,
-      post: (request) => this.postPush(request),
-    });
-    this.queue = syncQueue({
-      sql: this.sql,
-      store: this.store,
-      hint,
-      provider,
-      window: (account) => this.connected.windowOf(account),
-      settled: (account, error) => {
-        if (error) report(error);
-        // An account that needs signing in again stays so until the member does.
-        if (this.book.get(account)?.account.status === 'needs-sign-in') return;
-        this.connected.setStatus(account, error ? 'error' : 'ready');
-      },
-      landed: (folder, events) => {
-        this.notifying.note(folder, events);
-        this.avatars.note(verifiedSenders(events), Date.now());
-      },
-      wakeNow: () => this.background(this.ctx.storage.setAlarm(Date.now())),
-    });
-    this.sending = outboxQueue({
-      sql: this.sql,
-      provider,
-      hint,
-      sent: ({ draft }) => {
-        this.queue.folder({ account: draft.account, path: draft.path });
-        const sent = this.store.withRole(draft.account, 'sent');
-        if (sent) this.queue.folder(folderRef(sent));
-      },
-      accepted: () => this.accepted(),
-    });
-    this.drafts = savingDrafts({
-      sql: this.sql,
-      book: this.book,
-      store: this.store,
-      provider,
-      bodies: this.bodies,
-      known: (ref) => this.fullText.known(ref),
-      outbox: this.sending,
-      sync: this.queue,
-      owe: (owing) => this.owe(owing),
-      flush: () => this.ctx.storage.sync(),
-    });
-    this.outboxCommands = outboxCommands({
-      queue: this.sending,
-      drafts: this.drafts,
-      book: this.book,
-      store: this.store,
-      wakeBy: (at) => this.wakeBy(at),
-    });
-    const owe = (owing: () => void) => this.owe(owing);
-    this.folderCommands = folderCommands({ book: this.book, provider, sync: this.queue, owe });
-    this.messageCommands = messageCommands({
-      book: this.book,
-      store: this.store,
-      provider,
-      sync: this.queue,
-      owe,
-      movedIn: (ref) => this.notifying.movedIn(ref),
-    });
+    const [opened] = this.sql.all<{ at: number }>(`SELECT at FROM opened`);
+    this.openedAt = opened?.at ?? Date.now();
+    if (!opened) this.writeOpened(this.openedAt);
     // Every wake is a cold start, and this is where one begins: a send found mid-submit was cut
     // short by whatever ended the last instance.
     this.sending.recover();
     // A sign-in being checked as the last instance ended lost its tokens with it.
     this.signingIn.recover(Date.now());
-    if (found === 0 && this.demo) {
+    if (this.found === 0 && this.demo) {
       this.connected.addDemo();
       this.connected.addDemo();
       // The first look shows mail at once, rather than an empty Inbox until the alarm, a hint and
@@ -401,10 +386,7 @@ export class Mailroom extends DurableObject implements Contract {
     return this.signingIn.start(input.signInOf(to));
   }
 
-  updateAccount(
-    id: AccountId,
-    change: Partial<Pick<Account, 'name' | 'fromName' | 'stamp' | 'signature'>>,
-  ): Promise<void> {
+  updateAccount(id: AccountId, change: AccountChange): Promise<void> {
     const checked = input.accountChangeOf(change);
     this.connected.update(input.accountOf(id), checked);
     return Promise.resolve();
@@ -492,9 +474,7 @@ export class Mailroom extends DurableObject implements Contract {
     id: string,
     isAgain: boolean,
   ): Promise<MessageRef> {
-    const named = input.saveOf(id);
-    const again = input.switchOf(isAgain);
-    return this.drafts.save(draft, replaces, named, again);
+    return this.drafts.save(draft, replaces, input.saveOf(id), input.switchOf(isAgain));
   }
 
   /**
@@ -884,9 +864,3 @@ function durableSql(storage: DurableObjectStorage): Sql {
 }
 
 const folderRef = ({ account, path }: FolderRef): FolderRef => ({ account, path });
-
-/** When a signed-in device last asked this Mailroom for something, as storage holds it. */
-function openedAtIn(sql: Sql): number | undefined {
-  const [row] = sql.all<{ at: number }>(`SELECT at FROM opened`);
-  return row?.at;
-}

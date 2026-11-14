@@ -17,31 +17,41 @@ const draft = (account: string, uid: number): MessageRef => ({
   uid,
 });
 
-test('once a host fails for now, its account’s other sends wait for the next wake', async () => {
-  const tried: string[] = [];
+/**
+ * A queue whose host accepts everything, unless it is down for an account, and files its own copy,
+ * as the test asks it to.
+ */
+function hostThatAccepts(sql = testSql(), down?: string) {
+  const submitted: string[] = [];
   const provider = () =>
     Promise.resolve({
       submit: (ref: MessageRef, messageId: string) => {
-        tried.push(messageId);
-        return ref.account === 'down'
-          ? Promise.reject(new SendFailure('Couldn’t reach smtp.down.example', true))
+        submitted.push(messageId);
+        return ref.account === down
+          ? Promise.reject(new SendFailure(`Couldn’t reach smtp.${down}.example`, true))
           : Promise.resolve('sent' as const);
       },
       file: () => Promise.resolve('filed' as const),
     } as unknown as MailProvider);
-  const queue = outboxQueue({ sql: testSql(), provider, hint: () => {}, sent: () => {} });
+  const queue = outboxQueue({ sql, provider, hint: () => {}, sent: () => {} });
+  return { queue, submitted };
+}
+
+const message = (uid: number, account = 'personal') => ({
+  draft: draft(account, uid),
+  messageId: `<${uid}@example.com>`,
+  to: [],
+  subject: '',
+});
+
+test('once a host fails for now, its account’s other sends wait for the next wake', async () => {
+  const { queue, submitted: tried } = hostThatAccepts(testSql(), 'down');
   for (const [account, uid] of [
     ['down', 1],
     ['down', 2],
     ['up', 3],
   ] as const) {
-    queue.send(
-      { draft: draft(account, uid), messageId: `<${uid}@example.com>`, to: [], subject: '' },
-      NOW,
-      NOW,
-      NOW,
-      `press-${uid}`,
-    );
+    queue.send(message(uid, account), NOW, NOW, NOW, `press-${uid}`);
   }
 
   await queue.run(() => LATER);
@@ -59,28 +69,6 @@ test('once a host fails for now, its account’s other sends wait for the next w
     sendAt: SCHEDULED,
   });
   expect(queue.list().some(({ draft }) => draft.account === 'up')).toBe(false);
-});
-
-/** A queue whose host accepts everything, and files its own copy, as the test asks it to. */
-function hostThatAccepts(sql = testSql()) {
-  const submitted: string[] = [];
-  const provider = () =>
-    Promise.resolve({
-      submit: (_: MessageRef, messageId: string) => {
-        submitted.push(messageId);
-        return Promise.resolve('sent' as const);
-      },
-      file: () => Promise.resolve('filed' as const),
-    } as unknown as MailProvider);
-  const queue = outboxQueue({ sql, provider, hint: () => {}, sent: () => {} });
-  return { queue, submitted };
-}
-
-const message = (uid: number) => ({
-  draft: draft('personal', uid),
-  messageId: `<${uid}@example.com>`,
-  to: [],
-  subject: '',
 });
 
 test('a press asked again answers with its send, and once it went, as it went, and it goes once', async () => {
@@ -132,7 +120,7 @@ test('a press cut short before it scheduled anything may be taken again, but not
 test('removing an account undoes the presses of its sends', () => {
   const { queue } = hostThatAccepts();
   queue.send(message(1), NOW, undefined, NOW, 'one');
-  queue.send({ ...message(2), draft: draft('work', 2) }, NOW, undefined, NOW, 'two');
+  queue.send(message(2, 'work'), NOW, undefined, NOW, 'two');
   queue.forget('work');
   expect(queue.pressed('two')).toEqual({ came: { undone: null } });
   expect(queue.pressed('one')?.send).toMatchObject({ id: 'one' });

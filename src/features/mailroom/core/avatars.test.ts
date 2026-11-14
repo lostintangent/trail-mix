@@ -288,6 +288,10 @@ describe('what DNS says', () => {
     );
     expect(txtOf('"a \\"quoted\\" word\\059 and\\032space"')).toBe('a "quoted" word; and space');
     expect(txtOf('v=DMARC1; p=none')).toBe('v=DMARC1; p=none');
+    expect(txtOf('"a" b "c"')).toBe('ac');
+    expect(txtOf('"\\05" "9"')).toBe('059');
+    expect(txtOf('"abc" "de')).toBe('abcde');
+    expect(txtOf('"abc\\')).toBe('abc');
   });
 
   test('a DMARC record gives its policies, its share and whether it is a public suffix', () => {

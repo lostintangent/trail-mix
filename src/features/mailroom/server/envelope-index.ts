@@ -22,7 +22,17 @@ import {
 import { senderOf } from '../core/avatars.ts';
 import { listsIn } from './lists.ts';
 import { isNotedAlike, peopleIn } from './people.ts';
-import { BY_REF, COLUMNS, keyOf, matchOf, messageIn, folderKey, type Row } from './rows.ts';
+import {
+  BY_REF,
+  COLUMNS,
+  folderKey,
+  keyOf,
+  matchOf,
+  messageIn,
+  noteIn,
+  searchable,
+  type Row,
+} from './rows.ts';
 import type { Sql, SqlValue } from './schema.ts';
 
 /**
@@ -92,12 +102,7 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
   };
 
   /** Notes that the Body cache owes a message's body a delete, should it hold one. */
-  function oweBody(ref: MessageRef) {
-    sql.run(
-      `INSERT OR IGNORE INTO gone_bodies (account, path, uid_validity, uid) VALUES (?, ?, ?, ?)`,
-      ...keyOf(ref),
-    );
-  }
+  const oweBody = (ref: MessageRef) => noteIn(sql, 'gone_bodies', ref);
 
   /**
    * Writes one change: its removals, then its messages. A message already held changes in place,
@@ -171,12 +176,9 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
       people.note(message, reads.role(message), mine, met, true);
       for (const id of linkIdsOf(message)) {
         sql.run(
-          `INSERT OR IGNORE INTO links (account, id, path, uid_validity, uid) VALUES (?, ?, ?, ?, ?)`,
-          message.account,
+          `INSERT OR IGNORE INTO links (account, path, uid_validity, uid, id) VALUES (?, ?, ?, ?, ?)`,
+          ...keyOf(message),
           id,
-          message.path,
-          message.uidValidity,
-          message.uid,
         );
       }
     }
@@ -442,27 +444,20 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
      */
     noteReread(account: string, path: string, refs: readonly MessageRef[], startsOver: boolean) {
       if (startsOver) sql.run(`DELETE FROM reread WHERE account = ? AND path = ?`, account, path);
-      for (const ref of refs) {
-        sql.run(
-          `INSERT OR IGNORE INTO reread (account, path, uid_validity, uid) VALUES (?, ?, ?, ?)`,
-          ...keyOf(ref),
-        );
-      }
+      for (const ref of refs) noteIn(sql, 'reread', ref);
     },
 
     /** Ends a folder's pass, and returns what the index holds there that it didn't report. */
     endReread(account: string, path: string): MessageRef[] {
-      const left = sql
-        .all<{ uid_validity: number; uid: number }>(
-          `SELECT m.uid_validity, m.uid FROM messages m
-            WHERE m.account = ? AND m.path = ? AND NOT EXISTS (
-              SELECT 1 FROM reread r
-               WHERE r.account = m.account AND r.path = m.path
-                 AND r.uid_validity = m.uid_validity AND r.uid = m.uid)`,
-          account,
-          path,
-        )
-        .map(({ uid_validity, uid }) => ({ account, path, uidValidity: uid_validity, uid }));
+      const left = sql.all<MessageRef>(
+        `SELECT m.account, m.path, m.uid_validity AS uidValidity, m.uid FROM messages m
+          WHERE m.account = ? AND m.path = ? AND NOT EXISTS (
+            SELECT 1 FROM reread r
+             WHERE r.account = m.account AND r.path = m.path
+               AND r.uid_validity = m.uid_validity AND r.uid = m.uid)`,
+        account,
+        path,
+      );
       sql.run(`DELETE FROM reread WHERE account = ? AND path = ?`, account, path);
       sql.run(`UPDATE folders SET rereading = 0 WHERE account = ? AND path = ?`, account, path);
       return left;
@@ -600,17 +595,10 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
 
     /** Messages whose cached bodies are owed a delete, at most `most` of them. */
     owedBodies(most: number): MessageRef[] {
-      return sql
-        .all<{ account: string; path: string; uid_validity: number; uid: number }>(
-          `SELECT account, path, uid_validity, uid FROM gone_bodies LIMIT ?`,
-          most,
-        )
-        .map(({ account, path, uid_validity, uid }) => ({
-          account,
-          path,
-          uidValidity: uid_validity,
-          uid,
-        }));
+      return sql.all<MessageRef>(
+        `SELECT account, path, uid_validity AS uidValidity, uid FROM gone_bodies LIMIT ?`,
+        most,
+      );
     },
 
     /** Clears what was owed for bodies the cache has let go. */
@@ -722,25 +710,11 @@ function firstRowidOf(date: string): number {
 }
 
 /**
- * Text as the index keeps it for search. A search's words are NFKC-normalized, so what they are
- * matched against is too, and a ligature or a fullwidth letter matches its plain form either way.
+ * A message's row in the search table: its senders and its recipients, each by name and address as
+ * written, its subject and its preview.
  */
-export const searchable = (text: string) => text.normalize('NFKC');
-
-/** A message's row in the search table: its senders, recipients, subject and preview. */
-function searchRowOf(message: Message): string[] {
-  const { senders, recipients } = searchTextOf(message);
-  return [
-    searchable(senders),
-    searchable(recipients),
-    searchable(message.subject),
-    searchable(message.preview),
-  ];
-}
-
-/** What search reads of a message's people: names and addresses, each as written. */
-function searchTextOf({ from, to, cc }: Message) {
+function searchRowOf({ from, to, cc, subject, preview }: Message): string[] {
   const people = (addresses: Message['to']) =>
     addresses.map(({ name, email }) => (name ? `${name} ${email}` : email)).join(' ');
-  return { senders: people([from]), recipients: people([...to, ...cc]) };
+  return [people([from]), people([...to, ...cc]), subject, preview].map(searchable);
 }

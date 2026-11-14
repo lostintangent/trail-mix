@@ -57,6 +57,34 @@ const WRITTEN = `instr(${TO}, '@') > 0
   AND trim(replace(${TO}, rtrim(${TO}, replace(${TO}, '@', '')), '')) <> ''
   AND lower(${TO}) NOT IN (${OWN})`;
 
+/** Empties the index and every cursor, so the index rebuilds from the servers. */
+const REBUILD = [
+  `DELETE FROM messages`,
+  `DELETE FROM links`,
+  `DELETE FROM conversations`,
+  `DELETE FROM placements`,
+  `UPDATE folders SET cursor = NULL`,
+];
+
+/** Makes search again without prefix indexes, and has the index rebuild to fill it. */
+const SEARCH_AGAIN = [
+  `DROP TABLE search`,
+  `CREATE VIRTUAL TABLE search USING fts5(
+      senders, recipients, subject, preview,
+      tokenize = 'unicode61 remove_diacritics 2'
+    )`,
+  ...REBUILD,
+];
+
+/** The columns of a table that notes messages, each once by its ref. */
+const BY_MESSAGE = `(
+      account TEXT NOT NULL,
+      path TEXT NOT NULL,
+      uid_validity INTEGER NOT NULL,
+      uid INTEGER NOT NULL,
+      PRIMARY KEY (account, path, uid_validity, uid)
+    )`;
+
 const versions: readonly (readonly string[])[] = [
   [
     `CREATE TABLE accounts (
@@ -132,25 +160,12 @@ const versions: readonly (readonly string[])[] = [
     // Search results, like the folder views, read newest first, but across every conversation.
     `CREATE INDEX conversations_by_date ON conversations (date DESC, id DESC)`,
     // The index rebuilds from the servers with search filled in, since everything in it can.
-    `DELETE FROM messages`,
-    `DELETE FROM links`,
-    `DELETE FROM conversations`,
-    `DELETE FROM placements`,
-    `UPDATE folders SET cursor = NULL`,
+    ...REBUILD,
   ],
   [
     // The same search without prefix indexes. They wrote every word four times for a few
     // milliseconds of a search that typed one letter, and a word typed so far matches without them.
-    `DROP TABLE search`,
-    `CREATE VIRTUAL TABLE search USING fts5(
-      senders, recipients, subject, preview,
-      tokenize = 'unicode61 remove_diacritics 2'
-    )`,
-    `DELETE FROM messages`,
-    `DELETE FROM links`,
-    `DELETE FROM conversations`,
-    `DELETE FROM placements`,
-    `UPDATE folders SET cursor = NULL`,
+    ...SEARCH_AGAIN,
   ],
   [
     // Accounts gained the name their mail is from. A demo account's mail has always been from
@@ -165,16 +180,7 @@ const versions: readonly (readonly string[])[] = [
   ],
   [
     // Search keeps its text NFKC-normalized, as a search's words are, so the index rebuilds.
-    `DROP TABLE search`,
-    `CREATE VIRTUAL TABLE search USING fts5(
-      senders, recipients, subject, preview,
-      tokenize = 'unicode61 remove_diacritics 2'
-    )`,
-    `DELETE FROM messages`,
-    `DELETE FROM links`,
-    `DELETE FROM conversations`,
-    `DELETE FROM placements`,
-    `UPDATE folders SET cursor = NULL`,
+    ...SEARCH_AGAIN,
   ],
   [
     // A message's rowid now orders by its date, so a search reads its matches newest first and
@@ -186,11 +192,7 @@ const versions: readonly (readonly string[])[] = [
       tokenize = 'unicode61 remove_diacritics 2',
       prefix = '1'
     )`,
-    `DELETE FROM messages`,
-    `DELETE FROM links`,
-    `DELETE FROM conversations`,
-    `DELETE FROM placements`,
-    `UPDATE folders SET cursor = NULL`,
+    ...REBUILD,
   ],
   [
     // Sign-ins at a vendor while the member enters the code, one per address, each with its device
@@ -209,11 +211,7 @@ const versions: readonly (readonly string[])[] = [
     // A preview now reads like its message, without Markdown's marks, table bars or rules, so the
     // index rebuilds with every preview made again.
     `DELETE FROM search`,
-    `DELETE FROM messages`,
-    `DELETE FROM links`,
-    `DELETE FROM conversations`,
-    `DELETE FROM placements`,
-    `UPDATE folders SET cursor = NULL`,
+    ...REBUILD,
   ],
   [
     // When a signed-in device last asked this Mailroom for something, in milliseconds since the
@@ -280,13 +278,7 @@ const versions: readonly (readonly string[])[] = [
     // A folder being read again, and what its pass has reported so far. Mail indexed before
     // senders were verified, and before previews read HTML and its entities, is read once more.
     `ALTER TABLE folders ADD COLUMN rereading INTEGER NOT NULL DEFAULT 0`,
-    `CREATE TABLE reread (
-      account TEXT NOT NULL,
-      path TEXT NOT NULL,
-      uid_validity INTEGER NOT NULL,
-      uid INTEGER NOT NULL,
-      PRIMARY KEY (account, path, uid_validity, uid)
-    )`,
+    `CREATE TABLE reread ${BY_MESSAGE}`,
     REREAD,
   ],
   [
@@ -329,13 +321,7 @@ const versions: readonly (readonly string[])[] = [
     // The messages whose bodies the Body cache owes a delete: each that left the index, and each
     // opened from outside it. A wake lets their bodies go once its sync is done. Losing one only
     // keeps a body longer.
-    `CREATE TABLE gone_bodies (
-      account TEXT NOT NULL,
-      path TEXT NOT NULL,
-      uid_validity INTEGER NOT NULL,
-      uid INTEGER NOT NULL,
-      PRIMARY KEY (account, path, uid_validity, uid)
-    )`,
+    `CREATE TABLE gone_bodies ${BY_MESSAGE}`,
   ],
   [
     // How far the Body cache's sweep has come, in its one row while it is owed: the last key it
@@ -411,13 +397,7 @@ const versions: readonly (readonly string[])[] = [
   [
     // The drafts newer versions replaced, which their servers owe a discard. A save notes the old
     // version as it answers, and the next wake discards it before its sync.
-    `CREATE TABLE replaced_drafts (
-      account TEXT NOT NULL,
-      path TEXT NOT NULL,
-      uid_validity INTEGER NOT NULL,
-      uid INTEGER NOT NULL,
-      PRIMARY KEY (account, path, uid_validity, uid)
-    )`,
+    `CREATE TABLE replaced_drafts ${BY_MESSAGE}`,
   ],
   [
     // Whether a row has unread mail, so a folder or the unified Inbox lists only its unread rows

@@ -20,14 +20,16 @@ import type { LocalWorker } from '../../../../tests/workerd.ts';
 const { alice, bob } = users;
 const outlook: SignInSetup = { preset: 'outlook', name: 'Outlook', address: alice.email };
 
+/** The test mail server, where Outlook's stand-in points. */
+const hosts = {
+  imap: { host: 'localhost', port: ports.imaps, secure: true },
+  smtp: { host: 'localhost', port: ports.submission, secure: false },
+};
+
 /** Outlook, as a test reaches it: Microsoft's sign-in at the stand-in, and the test mail server. */
 const OUTLOOK = {
   MICROSOFT_CLIENT_ID: 'trail-mix-test',
-  OUTLOOK_STAND_IN: JSON.stringify({
-    authority: identity.authority,
-    imap: { host: 'localhost', port: ports.imaps, secure: true },
-    smtp: { host: 'localhost', port: ports.submission, secure: false },
-  }),
+  OUTLOOK_STAND_IN: JSON.stringify({ authority: identity.authority, ...hosts }),
 };
 
 /** The stand-in's sign-in page, where a test plays the member: approving, as someone, or declining. */
@@ -105,6 +107,23 @@ describe('Signing in to Outlook', () => {
     await expect(ada.call('signIn', outlook)).rejects.toThrow(
       `${alice.email} is already connected.`,
     );
+  }, 60_000);
+
+  test('an address connected with its password, however it’s cased, stops a sign-in for it', async () => {
+    const cy = fresh('cy');
+    const started = await cy.call<SignIn>('signIn', outlook);
+    const setup = { provider: 'imap', name: 'Alice', ...hosts, password: alice.password };
+    await cy.call('addAccount', { ...setup, address: alice.email });
+    const shouted = alice.email.toUpperCase();
+    await expect(cy.call('addAccount', { ...setup, address: shouted })).rejects.toThrow(
+      `${shouted} is already connected.`,
+    );
+    await atMicrosoft(started.code, { login_hint: alice.email });
+    await cy.until(async () => (await cy.call<SignIn[]>('signIns'))[0]?.state === 'refused');
+    expect(await cy.call('signIns')).toEqual([
+      { ...started, state: 'refused', reason: `${alice.email} is already connected.` },
+    ]);
+    expect(await cy.call('accounts')).toHaveLength(1);
   }, 60_000);
 
   test('a declined sign-in, or one Outlook refuses, keeps nothing but why', async () => {

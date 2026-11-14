@@ -56,18 +56,7 @@ export function notifying(ports: {
 
   const isAnyNotified = () => sql.all(`SELECT 1 FROM devices LIMIT 1`).length > 0;
 
-  const forget = (endpoint: string) => {
-    sql.run(`DELETE FROM devices WHERE endpoint = ?`, endpoint);
-  };
-
-  const markOf = ({ account, path }: FolderRef): Mark | undefined => {
-    const [row] = sql.all<{ mark: string }>(
-      `SELECT mark FROM news_marks WHERE account = ? AND path = ?`,
-      account,
-      path,
-    );
-    return row && (JSON.parse(row.mark) as Mark);
-  };
+  const forget = (endpoint: string) => sql.run(`DELETE FROM devices WHERE endpoint = ?`, endpoint);
 
   const setMark = ({ account, path }: FolderRef, mark: Mark) => {
     sql.run(
@@ -120,9 +109,8 @@ export function notifying(ports: {
     forget,
 
     /** Forgets an account's marks, as it goes. */
-    forgetAccount(account: AccountId) {
-      sql.run(`DELETE FROM news_marks WHERE account = ?`, account);
-    },
+    forgetAccount: (account: AccountId) =>
+      sql.run(`DELETE FROM news_marks WHERE account = ?`, account),
 
     /** A message the member moved, which isn't news if its move lands it in an Inbox. */
     movedIn(ref: MessageRef) {
@@ -140,7 +128,12 @@ export function notifying(ports: {
      */
     note(folder: FolderRef, events: readonly SyncEvent[]) {
       if (ports.reads.role(folder) !== 'inbox') return;
-      const held = markOf(folder);
+      const [row] = sql.all<{ mark: string }>(
+        `SELECT mark FROM news_marks WHERE account = ? AND path = ?`,
+        folder.account,
+        folder.path,
+      );
+      const held = row && (JSON.parse(row.mark) as Mark);
       const { news: found, mark } = newsIn(events, held, {
         now: Date.now(),
         movedIn: (ref) => movedIn.delete(refKey(ref)),

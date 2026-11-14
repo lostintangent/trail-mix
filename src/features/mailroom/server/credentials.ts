@@ -17,8 +17,16 @@ export function credentialsOf(workerSecret: string | undefined, member: string) 
     return key;
   };
   return {
+    /** The secret, sealed: a fresh 12-byte nonce, then the ciphertext and its tag. */
     async seal(secret: string, account: string): Promise<Uint8Array> {
-      return seal(await keyOf(), secret, account);
+      const iv = crypto.getRandomValues(new Uint8Array(12));
+      const sealed = await crypto.subtle.encrypt(
+        // The account is bound in, so a sealed secret cannot be moved to another account's row.
+        { name: 'AES-GCM', iv, additionalData: new TextEncoder().encode(account) },
+        await keyOf(),
+        new TextEncoder().encode(secret),
+      );
+      return new Uint8Array(await new Blob([iv, sealed]).arrayBuffer());
     },
     async open(sealed: Uint8Array, account: string): Promise<string> {
       return open(await keyOf(), sealed, account);
@@ -43,23 +51,6 @@ async function memberKey(workerSecret: string, member: string): Promise<CryptoKe
     false,
     ['encrypt', 'decrypt'],
   );
-}
-
-/** The secret, sealed: a fresh 12-byte nonce, then the ciphertext and its tag. */
-async function seal(key: CryptoKey, secret: string, account: string): Promise<Uint8Array> {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const sealed = new Uint8Array(
-    await crypto.subtle.encrypt(
-      // The account is bound in, so a sealed secret cannot be moved to another account's row.
-      { name: 'AES-GCM', iv, additionalData: new TextEncoder().encode(account) },
-      key,
-      new TextEncoder().encode(secret),
-    ),
-  );
-  const out = new Uint8Array(iv.length + sealed.length);
-  out.set(iv);
-  out.set(sealed, iv.length);
-  return out;
 }
 
 async function open(key: CryptoKey, sealed: Uint8Array, account: string): Promise<string> {

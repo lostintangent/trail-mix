@@ -39,8 +39,6 @@ export const FOUND_LIMIT = 200;
  * The member's last full-text search, asked of every folder of every account's server. Only memory
  * holds it, so a restart forgets it, and a hit it found outside the index opens until the next.
  */
-export type FullTextSearch = ReturnType<typeof fullTextSearch>;
-
 export function fullTextSearch(ports: {
   book: Pick<AccountBook, 'all'>;
   store: EnvelopeIndex;

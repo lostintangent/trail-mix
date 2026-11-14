@@ -19,8 +19,6 @@ import type { SyncQueue } from './sync.ts';
  * which are moves to a folder role. Each changes the server, account by account, and owes a sync
  * of every folder it touched, whose events the index then folds.
  */
-export type MessageCommands = ReturnType<typeof messageCommands>;
-
 export function messageCommands(ports: {
   book: Pick<AccountBook, 'get'>;
   store: Pick<EnvelopeIndex, 'bundled' | 'withRole'>;
@@ -42,14 +40,11 @@ export function messageCommands(ports: {
     return bundled(checked).map(refOf);
   };
 
-  const byAccount = (refs: MessageRef[]) => {
-    const groups = new Map<AccountId, MessageRef[]>();
-    for (const ref of input.refsOf(refs)) {
-      if (!ports.book.get(ref.account)) throw new Error('There is no such account.');
-      groups.set(ref.account, [...(groups.get(ref.account) ?? []), ref]);
-    }
-    return groups;
-  };
+  const byAccount = (refs: MessageRef[]) =>
+    Map.groupBy(input.refsOf(refs), ({ account }) => {
+      if (!ports.book.get(account)) throw new Error('There is no such account.');
+      return account;
+    });
 
   const pathWithRole = (account: AccountId, role: FolderRole) => {
     const folder = store.withRole(account, role);

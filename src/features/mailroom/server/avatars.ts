@@ -23,6 +23,7 @@ import {
   type Pictures,
 } from '../core/avatars.ts';
 import { isPublicHost } from '../../../shared/public-host.ts';
+import { sha256Hex } from '../../../shared/sha256.ts';
 import { report } from './report.ts';
 import type { Sql } from './schema.ts';
 
@@ -167,19 +168,11 @@ export function avatarCache(sql: Sql) {
 
     /** Has a lookup that couldn't finish try again later, keeping whatever pictures it had. */
     failed(which: { domain: string } | { sender: string }, now: number) {
-      if ('domain' in which) {
-        sql.run(
-          `UPDATE avatar_domains SET due_at = ? WHERE domain = ?`,
-          now + RETRY_MS,
-          which.domain,
-        );
-      } else {
-        sql.run(
-          `UPDATE avatar_senders SET due_at = ? WHERE sender = ?`,
-          now + RETRY_MS,
-          which.sender,
-        );
-      }
+      const [table, column, name] =
+        'domain' in which
+          ? ['avatar_domains', 'domain', which.domain]
+          : ['avatar_senders', 'sender', which.sender];
+      sql.run(`UPDATE ${table} SET due_at = ? WHERE ${column} = ?`, now + RETRY_MS, name);
     },
 
     /** The key of the picture each of these senders shows, for those the cache holds one for. */
@@ -225,16 +218,14 @@ export function avatarCache(sql: Sql) {
   };
 }
 
+/** The most domains and senders one wake looks up pictures for. */
+const LOOKUPS = { domains: 6, senders: 16 };
+
 /**
  * Verified senders' pictures as a Mailroom keeps and shows them: the Avatar cache, the lookups it
  * owes, a few each wake, and the key of each picture it holds named on the lists and conversations
  * a read returns, and no others.
  */
-export type Avatars = ReturnType<typeof avatars>;
-
-/** The most domains and senders one wake looks up pictures for. */
-const LOOKUPS = { domains: 6, senders: 16 };
-
 export function avatars(ports: {
   sql: Sql;
   hint: (hint: Hint) => void;
@@ -340,7 +331,7 @@ export type AvatarSources = {
 export function internetSources(network: AvatarNetwork): AvatarSources {
   return {
     domain: (domain) => lookUpDomain(domain, network),
-    sender: async (sender) => network.gravatar(await sha256Of(sender)),
+    sender: async (sender) => network.gravatar(await sha256Hex(sender)),
   };
 }
 
@@ -372,14 +363,8 @@ const svgPicture = (svg: string): Picture => ({
 
 /** A picture with its key: the SHA-256 of its bytes, in hex. */
 export async function keyed(picture: Picture): Promise<KeyedPicture> {
-  return { ...picture, key: hexOf(await crypto.subtle.digest('SHA-256', picture.bytes)) };
+  return { ...picture, key: await sha256Hex(picture.bytes) };
 }
-
-const sha256Of = async (text: string) =>
-  hexOf(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text)));
-
-const hexOf = (digest: ArrayBuffer) =>
-  [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('');
 
 /** How many of the places a site may keep its icon a lookup tries. */
 const ICON_TRIES = 4;
@@ -548,15 +533,10 @@ export function avatarNetwork(internet: Internet, isStandIn = false): AvatarNetw
       const reached = await reach(`${internet.gravatar}${hash}?s=96&d=404`, 'image/*');
       if (!reached) throw new Error('Gravatar can’t be reached.');
       const { response } = reached;
-      if (response.status === 404) {
-        await response.body?.cancel();
-        return undefined;
-      }
-      if (!response.ok) {
-        await response.body?.cancel();
-        throw new Error(`Gravatar answered ${response.status}.`);
-      }
-      return pictureFrom(response);
+      // A 404 is Gravatar keeping no photo for the hash, and `pictureFrom` lets its body go.
+      if (response.ok || response.status === 404) return pictureFrom(response);
+      await response.body?.cancel();
+      throw new Error(`Gravatar answered ${response.status}.`);
     },
 
     async home(domain) {
@@ -659,11 +639,5 @@ async function bytesWithin(
     }
     chunks.push(value);
   }
-  const bytes = new Uint8Array(size);
-  let at = 0;
-  for (const chunk of chunks) {
-    bytes.set(chunk, at);
-    at += chunk.byteLength;
-  }
-  return bytes;
+  return new Uint8Array(await new Blob(chunks).arrayBuffer());
 }

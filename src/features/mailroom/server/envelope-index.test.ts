@@ -13,6 +13,7 @@ import {
   type MemoryIndex,
   type SyncEvent,
 } from '../../mail/core/index.ts';
+import { seededRandom } from '../../../shared/random.ts';
 import type { Page, PageAt } from '../client/contract.ts';
 import { envelopeIndex, type EnvelopeIndex } from './envelope-index.ts';
 import { pageAfter } from './lists.ts';
@@ -70,6 +71,9 @@ function envelope(id: string, init: Partial<Envelope> = {}): Envelope {
 }
 const arrive = (...envelopes: Envelope[]): SyncEvent[] =>
   envelopes.map((e) => ({ type: 'message', envelope: e }));
+const TIES = ['2026-11-01', '2026-11-02', '2026-11-02', '2026-11-03', '2026-11-02'];
+/** The `i`th of a run of dates that often tie, which a list orders by something else. */
+const tied = (i: number) => `${TIES[i % 5]}T08:00:00.000Z`;
 
 /**
  * A Mailroom as the release at `version` left it, holding what `from` holds of the tables that
@@ -128,8 +132,7 @@ function expectPagesAround(
 
 /** A seeded run of arrivals, flag changes, removals and resets over threads that share ids. */
 function story(seed: number): SyncEvent[] {
-  let state = seed;
-  const random = () => (state = (state * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
+  const random = seededRandom(seed);
   const pick = <T>(items: readonly T[]) => items[Math.floor(random() * items.length)]!;
   const held: Envelope[] = [];
   const events: SyncEvent[] = [];
@@ -480,41 +483,17 @@ describe('a conversation’s row', () => {
 });
 
 describe('a list', () => {
-  test('pages newest first through every conversation once, however the dates tie', () => {
-    const store = fresh();
-    const dates = ['2026-11-01', '2026-11-02', '2026-11-02', '2026-11-03', '2026-11-02'];
-    store.fold(
-      arrive(
-        ...Array.from({ length: 23 }, (_, i) =>
-          envelope(`page-${i}`, { date: `${dates[i % 5]}T08:00:00.000Z` }),
-        ),
-      ),
-    );
-    const seen: string[] = [];
-    for (let at = 0; at < 23; at += 5) {
-      const page = store.page({ in: 'inbox' }, at, 5);
-      expect([page.at, page.total]).toEqual([at, 23]);
-      seen.push(...page.items.map((item) => `${item.date} ${item.id}`));
-    }
-    expect(store.page({ in: 'inbox' }, 25, 5)).toEqual({ items: [], at: 25, total: 23 });
-    expect(seen).toHaveLength(23);
-    expect(new Set(seen).size).toBe(23);
-    expect(seen).toEqual([...seen].sort().reverse());
-  });
-
   test('asked around a row, gives the page holding it, however the dates tie', () => {
     const store = fresh();
-    const dates = ['2026-11-01', '2026-11-02', '2026-11-02', '2026-11-03', '2026-11-02'];
-    const date = (i: number) => `${dates[i % 5]}T08:00:00.000Z`;
     store.fold(
       arrive(
         ...Array.from({ length: 23 }, (_, i) =>
-          envelope(`page-${i}`, { date: date(i), flags: { ...FLAGS, flagged: i % 2 === 0 } }),
+          envelope(`page-${i}`, { date: tied(i), flags: { ...FLAGS, flagged: i % 2 === 0 } }),
         ),
         ...Array.from({ length: 12 }, (_, i) =>
           envelope(`draft-${i}`, {
             path: 'Drafts',
-            date: date(i),
+            date: tied(i),
             flags: { ...FLAGS, seen: true, draft: true },
           }),
         ),
@@ -577,10 +556,7 @@ describe('a list', () => {
     );
     const idOf = (subject: string) =>
       conversationsIn(store.page({ in: 'inbox' })).find((item) => item.subject === subject)!.id;
-    for (const view of [
-      { in: 'inbox', unread: true },
-      { in: 'folder', folder: INBOX, unread: true },
-    ] as const) {
+    for (const view of UNREAD) {
       const listed = (keep?: string) => {
         const page = store.page(view, 0, 50, keep);
         expect(page.total).toBe(page.items.length);
@@ -628,6 +604,11 @@ function notification(repository: string, number: number, init: Partial<Envelope
 const INBOX: FolderRef = { account: 'personal', path: 'INBOX' };
 const ARCHIVE: FolderRef = { account: 'personal', path: 'Archive' };
 const at = (hour: number) => `2026-11-09T${String(hour).padStart(2, '0')}:00:00.000Z`;
+const day = (n: number) => new Date(Date.UTC(2026, 10, n, 8)).toISOString();
+const UNREAD = [
+  { in: 'inbox', unread: true },
+  { in: 'folder', folder: INBOX, unread: true },
+] as const;
 
 /** What a list shows, row by row: a conversation's subject, or a bundle's repository and threads. */
 const shown = (items: readonly ListItem[]) =>
@@ -742,13 +723,11 @@ describe('a GitHub bundle', () => {
 
   test('pages through conversations and bundles together exactly once, however the dates tie', () => {
     const store = fresh();
-    const dates = ['2026-11-01', '2026-11-02', '2026-11-02', '2026-11-03', '2026-11-02'];
-    const date = (i: number) => `${dates[i % 5]}T08:00:00.000Z`;
     store.fold(
       arrive(
-        ...Array.from({ length: 17 }, (_, i) => envelope(`page-${i}`, { date: date(i) })),
+        ...Array.from({ length: 17 }, (_, i) => envelope(`page-${i}`, { date: tied(i) })),
         ...Array.from({ length: 6 }, (_, i) =>
-          notification(`o/r${i}`, i + 1, { date: date(i + 2) }),
+          notification(`o/r${i}`, i + 1, { date: tied(i + 2) }),
         ),
       ),
     );
@@ -759,6 +738,7 @@ describe('a GitHub bundle', () => {
         expect([page.at, page.total]).toEqual([place, 23]);
         seen.push(...page.items.map((item) => `${item.date} ${item.id}`));
       }
+      expect(store.page(view, 25, 5)).toEqual({ items: [], at: 25, total: 23 });
       expect(seen).toHaveLength(23);
       expect(new Set(seen).size).toBe(23);
       expect(seen).toEqual([...seen].sort().reverse());
@@ -776,10 +756,7 @@ describe('a GitHub bundle', () => {
         envelope('lunch', { date: at(11) }),
       ),
     );
-    for (const view of [
-      { in: 'inbox', unread: true },
-      { in: 'folder', folder: INBOX, unread: true },
-    ] as const) {
+    for (const view of UNREAD) {
       expect(shown(store.page(view).items)).toEqual(['o/r ×2', 'lunch']);
       const kept = store.page(view, 0, 50, bundleIdOf('personal', 'o/s'));
       expect([shown(kept.items), kept.total]).toEqual([['o/r ×2', 'lunch', 'o/s ×1'], 3]);
@@ -788,15 +765,13 @@ describe('a GitHub bundle', () => {
 
   test('asked around a row, a conversation or a bundle, gives the page holding it', () => {
     const store = fresh();
-    const dates = ['2026-11-01', '2026-11-02', '2026-11-02', '2026-11-03', '2026-11-02'];
-    const date = (i: number) => `${dates[i % 5]}T08:00:00.000Z`;
     store.fold(
       arrive(
-        ...Array.from({ length: 17 }, (_, i) => envelope(`page-${i}`, { date: date(i) })),
+        ...Array.from({ length: 17 }, (_, i) => envelope(`page-${i}`, { date: tied(i) })),
         ...Array.from({ length: 6 }, (_, i) =>
-          notification(`o/r${i}`, i + 1, { date: date(i + 2) }),
+          notification(`o/r${i}`, i + 1, { date: tied(i + 2) }),
         ),
-        ...Array.from({ length: 7 }, (_, i) => notification('o/many', i + 1, { date: date(i) })),
+        ...Array.from({ length: 7 }, (_, i) => notification('o/many', i + 1, { date: tied(i) })),
       ),
     );
     const many = bundleIdOf('personal', 'o/many');
@@ -810,16 +785,14 @@ describe('a GitHub bundle', () => {
 
   test('asked around an unread row, or the read one kept open, gives the page holding it', () => {
     const store = fresh();
-    const dates = ['2026-11-01', '2026-11-02', '2026-11-02', '2026-11-03', '2026-11-02'];
-    const date = (i: number) => `${dates[i % 5]}T08:00:00.000Z`;
     store.fold(
       arrive(
         ...Array.from({ length: 17 }, (_, i) =>
-          envelope(`page-${i}`, { date: date(i), flags: { ...FLAGS, seen: i % 3 === 0 } }),
+          envelope(`page-${i}`, { date: tied(i), flags: { ...FLAGS, seen: i % 3 === 0 } }),
         ),
         ...Array.from({ length: 6 }, (_, i) =>
           notification(`o/r${i}`, i + 1, {
-            date: date(i + 2),
+            date: tied(i + 2),
             flags: { ...FLAGS, seen: i % 2 === 0 },
           }),
         ),
@@ -830,10 +803,7 @@ describe('a GitHub bundle', () => {
         .page({ in: 'inbox' }, 0, 50)
         .items.find((item) => !isBundle(item) && item.subject === subject)!.id;
     const [kept, other] = [idOf('page-0'), idOf('page-3')];
-    for (const view of [
-      { in: 'inbox', unread: true },
-      { in: 'folder', folder: INBOX, unread: true },
-    ] as const) {
+    for (const view of UNREAD) {
       expectPagesAround((at, size) => store.page(view, at, size, kept), 5, other);
     }
   });
@@ -959,8 +929,7 @@ describe('an upgrade to lists of unread mail', () => {
     upgrade(sql);
     const store = envelopeIndex(sql, () => []);
     for (const view of [
-      { in: 'inbox', unread: true },
-      { in: 'folder', folder: INBOX, unread: true },
+      ...UNREAD,
       { in: 'folder', folder: { account: 'personal', path: 'Projects' }, unread: true },
       { in: 'folder', folder: ARCHIVE, unread: true },
     ] as const) {
@@ -1084,7 +1053,6 @@ describe('search', () => {
 
   test('pages through every matching conversation exactly once, by its newest match', () => {
     const store = fresh();
-    const day = (n: number) => new Date(Date.UTC(2026, 10, n, 8)).toISOString();
     // Kiwi pie matches on day 10 and again on day 5, and Fig, which ends the first page, on day 9
     // and again on day 2, so each matches on both sides of a page boundary.
     const kiwi = envelope('Kiwi pie', { date: day(10) });
@@ -1119,7 +1087,6 @@ describe('search', () => {
 
   test('asked around a match, gives the page holding it among those it lists', () => {
     const store = fresh();
-    const day = (n: number) => new Date(Date.UTC(2026, 10, n, 8)).toISOString();
     store.fold(
       arrive(
         ...[1, 2, 3, 4, 5, 6, 7, 8].map((n) => envelope(`Kiwi ${n}`, { date: day(n) })),
@@ -1138,7 +1105,6 @@ describe('search', () => {
 
   test('a search lists only its newest conversations up to its limit, and counts no further', () => {
     const store = fresh();
-    const day = (n: number) => new Date(Date.UTC(2026, 10, n, 8)).toISOString();
     const kiwi = envelope('Kiwi pie', { date: day(10) });
     store.fold(
       arrive(
@@ -1166,7 +1132,6 @@ describe('search', () => {
 
   test('a message re-flagged or re-linked keeps its place', () => {
     const store = fresh();
-    const day = (n: number) => new Date(Date.UTC(2026, 10, n, 8)).toISOString();
     const pie = envelope('Kiwi pie', { date: day(8) });
     const tart = envelope('Kiwi tart', { date: day(4) });
     store.fold(arrive(pie, tart, envelope('Kiwi jam', { date: day(6) })));
@@ -1443,8 +1408,7 @@ describe('the people an address completes to', () => {
   test('the people the fold keeps are those a fill from the same mail counts, for any run of events', () => {
     const people = ['ada@example.com', 'bo@example.com', 'cy@example.org', 'noreply@example.com'];
     for (let seed = 1; seed <= 30; seed++) {
-      let state = seed;
-      const random = () => (state = (state * 1103515245 + 12345) % 2 ** 31) / 2 ** 31;
+      const random = seededRandom(seed);
       const pick = <T>(items: readonly T[]) => items[Math.floor(random() * items.length)]!;
       const held: Envelope[] = [];
       const events: SyncEvent[] = [];

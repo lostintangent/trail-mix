@@ -1,6 +1,8 @@
 import { expect, test } from 'bun:test';
 import {
   accountChangeOf,
+  accountOf,
+  conversationOf,
   draftOf,
   flagsOf,
   instantOf,
@@ -9,6 +11,8 @@ import {
   optional,
   pageAtOf,
   refOf,
+  saveOf,
+  sendOf,
   setupOf,
   signInOf,
   viewOf,
@@ -26,19 +30,14 @@ test('a ref keeps the four fields that name a message and nothing else', () => {
 });
 
 test('a view is one of the shapes a list shows, and a search carries its text', () => {
+  const lunch = { in: 'search', text: 'lunch' } as const;
   expect(viewOf({ in: 'inbox', folder: { account: 'a', path: 'INBOX' } })).toEqual({ in: 'inbox' });
-  expect(viewOf({ in: 'search', text: ' lunch ', fullText: 'yes' })).toEqual({
-    in: 'search',
-    text: 'lunch',
-  });
+  expect(viewOf({ in: 'search', text: ' lunch ', fullText: 'yes' })).toEqual(lunch);
   // Only a folder or the unified Inbox shows only its unread conversations, and only when it says so.
   expect(viewOf({ in: 'inbox', unread: true })).toEqual({ in: 'inbox', unread: true });
   expect(viewOf({ in: 'inbox', unread: 'yes' })).toEqual({ in: 'inbox' });
   expect(viewOf({ in: 'flagged', unread: true })).toEqual({ in: 'flagged' });
-  expect(viewOf({ in: 'search', text: 'lunch', unread: true })).toEqual({
-    in: 'search',
-    text: 'lunch',
-  });
+  expect(viewOf({ ...lunch, unread: true })).toEqual(lunch);
   expect(() => viewOf({ in: 'everything' })).toThrow(TypeError);
   expect(() => viewOf({ in: 'folder', folder: { account: 'a' } })).toThrow(TypeError);
   expect(() => viewOf('inbox')).toThrow(TypeError);
@@ -94,6 +93,22 @@ test('a page starts at a place, or around a row named by its id and nothing else
   }
 });
 
+test('an id is text within its length, or else says what it isn’t', () => {
+  const ids = [
+    [accountOf, 'an account', 100],
+    [conversationOf, 'a conversation', 1000],
+    [sendOf, 'a send', 100],
+    [saveOf, 'a save', 100],
+    [(around: unknown) => pageAtOf({ around }), 'a row of a list', 1000],
+  ] as const;
+  for (const [read, what, max] of ids) {
+    expect(() => read('x'.repeat(max))).not.toThrow();
+    for (const id of ['', 7, null, 'x'.repeat(max + 1)]) {
+      expect(() => read(id)).toThrow(`That isn’t ${what}.`);
+    }
+  }
+});
+
 test('a flag change names only the four flags, each on or off', () => {
   expect(flagsOf({ seen: true, flagged: false })).toEqual({ seen: true, flagged: false });
   expect(() => flagsOf({ seen: 'true' })).toThrow(TypeError);
@@ -113,17 +128,19 @@ test('an account change keeps only a name, a From name, a stamp and a signature'
   expect(() => accountChangeOf({ name: '  ' })).toThrow(TypeError);
 });
 
+const imap = { host: 'imap.example.com', port: 993, secure: true };
+const smtp = { host: 'smtp.example.com', port: 465, secure: true };
+const account = { provider: 'imap' as const, name: 'Me', address: 'me@example.com' };
+
 test('an IMAP account needs both hosts unless a preset supplies them, and keeps its password as typed', () => {
-  const host = { host: 'mail.example.com', port: 993, secure: true };
-  const account = { provider: 'imap' as const, name: 'Me', address: 'me@example.com' };
   expect(setupOf({ ...account, preset: 'zoho', password: ' p ' })).toEqual({
     ...account,
     preset: 'zoho',
     password: ' p ',
   });
-  expect(() => setupOf({ ...account, password: 'p', imap: host })).toThrow(TypeError);
+  expect(() => setupOf({ ...account, password: 'p', imap })).toThrow(TypeError);
   expect(() =>
-    setupOf({ ...account, password: 'p', imap: host, smtp: { ...host, host: 'evil host/x' } }),
+    setupOf({ ...account, password: 'p', imap, smtp: { ...smtp, host: 'evil host/x' } }),
   ).toThrow(TypeError);
   expect(() => setupOf({ ...account, preset: 'gmail', password: 'p' })).toThrow(TypeError);
   // Outlook takes no password, and signs in with signIn instead.
@@ -131,30 +148,18 @@ test('an IMAP account needs both hosts unless a preset supplies them, and keeps 
 });
 
 test('a sign-in is for a new account at a preset that signs in, or for an account', () => {
-  const account = { name: 'Outlook', address: 'me@outlook.com' };
-  expect(signInOf({ ...account, preset: 'outlook', password: 'p' })).toEqual({
-    ...account,
-    preset: 'outlook',
-  });
+  const outlook = { preset: 'outlook', name: 'Outlook', address: 'me@outlook.com' } as const;
+  expect(signInOf({ ...outlook, password: 'p' })).toEqual(outlook);
   expect(signInOf('a1')).toBe('a1');
   // Outlook's hosts are Microsoft's, whatever a browser sends.
-  const imap = { host: 'imap.evil.example', port: 993, secure: true };
-  expect(signInOf({ ...account, preset: 'outlook', imap, smtp: imap })).toEqual({
-    ...account,
-    preset: 'outlook',
-  });
-  expect(() => signInOf({ ...account, preset: 'zoho' })).toThrow(TypeError);
-  expect(() => signInOf({ ...account, preset: 'gmail' })).toThrow(TypeError);
-  expect(() => signInOf({ ...account })).toThrow(TypeError);
-  expect(() => signInOf({ preset: 'outlook', name: 'Outlook', address: 'not an address' })).toThrow(
-    TypeError,
-  );
+  expect(signInOf({ ...outlook, imap, smtp })).toEqual(outlook);
+  expect(() => signInOf({ ...outlook, preset: 'zoho' })).toThrow(TypeError);
+  expect(() => signInOf({ ...outlook, preset: 'gmail' })).toThrow(TypeError);
+  expect(() => signInOf({ ...outlook, preset: undefined })).toThrow(TypeError);
+  expect(() => signInOf({ ...outlook, address: 'not an address' })).toThrow(TypeError);
 });
 
 test('a preset keeps the hosts its account lists, both or neither', () => {
-  const imap = { host: 'imap.example.com', port: 993, secure: true };
-  const smtp = { host: 'smtp.example.com', port: 465, secure: true };
-  const account = { provider: 'imap' as const, name: 'Me', address: 'me@example.com' };
   expect(setupOf({ ...account, preset: 'zoho', password: 'p', imap, smtp })).toEqual({
     ...account,
     preset: 'zoho',
@@ -171,19 +176,13 @@ test('a preset keeps the hosts its account lists, both or neither', () => {
 });
 
 test('an account’s From name is one line, and an empty one is no name', () => {
-  const account = {
-    provider: 'imap' as const,
-    name: 'Me',
-    address: 'me@example.com',
-    preset: 'zoho' as const,
-    password: 'p',
-  };
-  expect(setupOf({ ...account, fromName: ' Ada Lovelace ' })).toEqual({
-    ...account,
+  const zoho = { ...account, preset: 'zoho' as const, password: 'p' };
+  expect(setupOf({ ...zoho, fromName: ' Ada Lovelace ' })).toEqual({
+    ...zoho,
     fromName: 'Ada Lovelace',
   });
-  expect(setupOf({ ...account, fromName: '' })).toEqual(account);
-  expect(() => setupOf({ ...account, fromName: 'Ada\nBcc: eve@example.com' })).toThrow(TypeError);
+  expect(setupOf({ ...zoho, fromName: '' })).toEqual(zoho);
+  expect(() => setupOf({ ...zoho, fromName: 'Ada\nBcc: eve@example.com' })).toThrow(TypeError);
   const outlook = { preset: 'outlook', name: 'Me', address: 'me@outlook.com' } as const;
   expect(signInOf({ ...outlook, fromName: ' Ada ' })).toEqual({ ...outlook, fromName: 'Ada' });
   expect(() => signInOf({ ...outlook, fromName: 'Ada\nBcc: eve@example.com' })).toThrow(TypeError);

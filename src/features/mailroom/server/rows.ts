@@ -6,7 +6,7 @@ import {
   type Message,
   type MessageRef,
 } from '../../mail/core/index.ts';
-import type { SqlValue } from './schema.ts';
+import type { Sql, SqlValue } from './schema.ts';
 
 /*
  * How the envelope index's tables hold what it keeps, which the fold writes and the lists read: a
@@ -24,6 +24,13 @@ export const keyOf = (ref: MessageRef): SqlValue[] => [
   ref.uidValidity,
   ref.uid,
 ];
+
+/** Notes a message, once, in a table of messages by their refs. */
+export const noteIn = (sql: Sql, table: string, ref: MessageRef) =>
+  sql.run(
+    `INSERT OR IGNORE INTO ${table} (account, path, uid_validity, uid) VALUES (?, ?, ?, ?)`,
+    ...keyOf(ref),
+  );
 
 /** A message, as the index keeps it. */
 export const messageIn = (row: Row): Message => {
@@ -43,6 +50,12 @@ export const itemIn = ({ summary }: { summary: string }) => JSON.parse(summary) 
 
 /** A folder as a map key. */
 export const folderKey = ({ account, path }: FolderRef) => JSON.stringify([account, path]);
+
+/**
+ * Text as the index keeps it for search. A search's words are NFKC-normalized, so what they are
+ * matched against is too, and a ligature or a fullwidth letter matches its plain form either way.
+ */
+export const searchable = (text: string) => text.normalize('NFKC');
 
 /**
  * Search text as an FTS5 query: every word must match, each as a prefix, so results follow typing.

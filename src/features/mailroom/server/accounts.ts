@@ -1,5 +1,5 @@
 import { DEMO_SAID } from '../../accounts/core/index.ts';
-import type { Account, AccountId, Hint, StampColor } from '../../mail/core/index.ts';
+import { listed, type Account, type AccountId, type Hint } from '../../mail/core/index.ts';
 import {
   DEMO_ACCOUNTS,
   PRESETS,
@@ -10,7 +10,7 @@ import {
   type PresetName,
   type SyncWindow,
 } from '../../providers/index.ts';
-import type { AccountSetup } from '../client/contract.ts';
+import type { AccountChange, AccountSetup } from '../client/contract.ts';
 import type { Credentials } from './credentials.ts';
 import type { Sql } from './schema.ts';
 
@@ -50,14 +50,7 @@ export function connectionOf(setup: {
 }
 
 /** Stamps go to accounts in this order, each to the first account without one in use. */
-export const STAMPS: readonly StampColor[] = [
-  'vermilion',
-  'teal',
-  'violet',
-  'amber',
-  'green',
-  'slate',
-];
+export const STAMPS = ['vermilion', 'teal', 'violet', 'amber', 'green', 'slate'] as const;
 
 export function accountBook(sql: Sql) {
   const rows = () =>
@@ -79,6 +72,13 @@ export function accountBook(sql: Sql) {
     connections: rows,
 
     get: find,
+
+    /** Whether an account has this address, however it's cased. */
+    has: (address: string) =>
+      listed(
+        address,
+        rows().map(({ account }) => account.address),
+      ),
 
     /**
      * Adds an account with the first stamp not in use, and with what it starts from: an IMAP
@@ -170,15 +170,13 @@ export function accountBook(sql: Sql) {
   };
 }
 
+/** How far back mail is indexed. Older mail stays on the server. */
+const WINDOW_DAYS = 365;
+
 /**
  * What a member does with the accounts they connect: adding one, whose password both its hosts
  * take before anything of it is kept, or one of the demo's, and changing what they see of each.
  */
-export type ConnectedAccounts = ReturnType<typeof connectedAccounts>;
-
-/** How far back mail is indexed. Older mail stays on the server. */
-const WINDOW_DAYS = 365;
-
 export function connectedAccounts(ports: {
   book: AccountBook;
   credentials: Credentials;
@@ -227,50 +225,43 @@ export function connectedAccounts(ports: {
     hint({ changed: 'accounts' });
   };
 
+  /** Adds an account that signs in with a password, once both its hosts take it. */
+  const addImap = async (setup: AccountSetup): Promise<Account> => {
+    // Preview and demo deployments hold the demo mailbox, and can never reach a real account.
+    if (ports.demo) throw new Error(DEMO_SAID);
+    if (!('password' in setup)) throw new Error('Outlook sign-in arrives with its own step.');
+    if (book.has(setup.address)) throw new Error(`${setup.address} is already connected.`);
+    const connection = connectionOf(setup);
+
+    // Nothing is kept until both hosts accept the password.
+    const id = crypto.randomUUID();
+    await ports.checkSignIn(id, connection, { pass: setup.password });
+
+    return book.add(
+      {
+        id,
+        name: setup.name,
+        address: setup.address,
+        ...(setup.fromName ? { fromName: setup.fromName } : {}),
+        provider: 'imap',
+        ...(setup.preset ? { preset: setup.preset } : {}),
+      },
+      connection,
+      { sealed: await ports.credentials.seal(setup.password, id) },
+    );
+  };
+
   return {
     async add(setup: AccountSetup): Promise<Account> {
-      if (setup.provider === 'demo') {
-        const account = addDemo();
-        hint({ changed: 'accounts' });
-        await ports.check(account.id);
-        return account;
-      }
-      // Preview and demo deployments hold the demo mailbox, and can never reach a real account.
-      if (ports.demo) throw new Error(DEMO_SAID);
-      if (!('password' in setup)) throw new Error('Outlook sign-in arrives with its own step.');
-      const address = setup.address.toLowerCase();
-      if (book.all().some((held) => held.address.toLowerCase() === address)) {
-        throw new Error(`${setup.address} is already connected.`);
-      }
-      const connection = connectionOf(setup);
-
-      // Nothing is kept until both hosts accept the password.
-      const id = crypto.randomUUID();
-      await ports.checkSignIn(id, connection, { pass: setup.password });
-
-      const account = book.add(
-        {
-          id,
-          name: setup.name,
-          address: setup.address,
-          ...(setup.fromName ? { fromName: setup.fromName } : {}),
-          provider: 'imap',
-          ...(setup.preset ? { preset: setup.preset } : {}),
-        },
-        connection,
-        { sealed: await ports.credentials.seal(setup.password, id) },
-      );
+      const account = setup.provider === 'demo' ? addDemo() : await addImap(setup);
       hint({ changed: 'accounts' });
-      await ports.check(id);
+      await ports.check(account.id);
       return account;
     },
 
     addDemo,
 
-    update(
-      id: AccountId,
-      change: Partial<Pick<Account, 'name' | 'fromName' | 'stamp' | 'signature'>>,
-    ) {
+    update(id: AccountId, change: AccountChange) {
       const { fromName, ...rest } = change;
       updated(id, ({ fromName: held, ...account }) => {
         const name = fromName ?? held;

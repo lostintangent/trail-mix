@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 import { foldForSearch, highlight, marksOf, type Envelope } from '../../mail/core/index.ts';
-import { envelopeIndex, searchable } from './envelope-index.ts';
+import { envelopeIndex } from './envelope-index.ts';
+import { searchable } from './rows.ts';
 import { testSql } from './test-sql.ts';
 
 /**

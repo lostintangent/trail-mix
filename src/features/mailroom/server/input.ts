@@ -1,6 +1,5 @@
 import {
   bundlePartsOf,
-  type Account,
   type AccountId,
   type Address,
   type BundleId,
@@ -13,6 +12,7 @@ import {
 } from '../../mail/core/index.ts';
 import type { Endpoint } from '../../providers/index.ts';
 import type {
+  AccountChange,
   AccountSetup,
   BundleScope,
   DraftUpload,
@@ -29,11 +29,7 @@ import { STAMPS } from './accounts.ts';
  * send. Each check returns a fresh value of the expected shape, holding nothing else, or throws.
  */
 
-export function accountOf(value: unknown): AccountId {
-  if (typeof value !== 'string' || !value || value.length > 100)
-    throw new TypeError('That isn’t an account.');
-  return value;
-}
+export const accountOf: (value: unknown) => AccountId = idOf('an account', 100);
 
 export function refOf(value: unknown): MessageRef {
   const { account, path, uidValidity, uid } = record(value, 'a message');
@@ -102,24 +98,13 @@ const unreadOf = (value: unknown) => (value === true ? ({ unread: true } as cons
 export function pageAtOf(value: unknown): PageAt {
   if (value === undefined || value === null) return 0;
   if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0) return value;
-  const { around } = record(value, 'a place in a list');
-  if (typeof around !== 'string' || !around || around.length > 1000) {
-    throw new TypeError('That isn’t a row of a list.');
-  }
-  return { around };
+  return { around: idOf('a row of a list', 1000)(record(value, 'a place in a list').around) };
 }
 
-export function conversationOf(value: unknown): ConversationId {
-  if (typeof value !== 'string' || !value || value.length > 1000) {
-    throw new TypeError('That isn’t a conversation.');
-  }
-  return value;
-}
+export const conversationOf: (value: unknown) => ConversationId = idOf('a conversation', 1000);
 
 /** The conversation or bundle a list keeps while it's open, if it names one. */
-export function keptOf(value: unknown): ConversationId | undefined {
-  return value === undefined || value === null ? undefined : conversationOf(value);
-}
+export const keptOf = (value: unknown) => optional(value, conversationOf);
 
 /** What was typed in an address field, which may be nothing yet. */
 export function typedOf(value: unknown): string {
@@ -168,19 +153,9 @@ export function waitedOf(value: unknown): number {
 }
 
 /** An Outbox entry's id. */
-export function sendOf(value: unknown): string {
-  if (typeof value !== 'string' || !value || value.length > 100) {
-    throw new TypeError('That isn’t a send.');
-  }
-  return value;
-}
+export const sendOf = idOf('a send', 100);
 
-export function saveOf(value: unknown): string {
-  if (typeof value !== 'string' || !value || value.length > 100) {
-    throw new TypeError('That isn’t a save.');
-  }
-  return value;
-}
+export const saveOf = idOf('a save', 100);
 
 const FLAGS: readonly (keyof Flags)[] = ['seen', 'flagged', 'answered', 'draft'];
 
@@ -195,9 +170,7 @@ export function flagsOf(value: unknown): Partial<Flags> {
   return change;
 }
 
-export function accountChangeOf(
-  value: unknown,
-): Partial<Pick<Account, 'name' | 'fromName' | 'stamp' | 'signature'>> {
+export function accountChangeOf(value: unknown): AccountChange {
   const { name, fromName, stamp, signature } = record(value, 'an account change');
   return {
     ...(name === undefined ? {} : { name: textOf(name, 'A name') }),
@@ -220,16 +193,11 @@ export function setupOf(value: unknown): AccountSetup {
     throw new TypeError('That isn’t a preset.');
   }
   const preset = setup.preset === 'zoho' ? ({ preset: 'zoho' } as const) : {};
-  if (preset.preset && setup.imap === undefined && setup.smtp === undefined) {
-    return { ...named, ...preset, password };
-  }
-  return {
-    ...named,
-    ...preset,
-    imap: endpointOf(setup.imap),
-    smtp: endpointOf(setup.smtp),
-    password,
-  };
+  const hosts =
+    preset.preset && setup.imap === undefined && setup.smtp === undefined
+      ? {}
+      : { imap: endpointOf(setup.imap), smtp: endpointOf(setup.smtp) };
+  return { ...named, ...preset, ...hosts, password };
 }
 
 /** What a sign-in is for: a new account that signs in at its vendor, or one signing in again. */
@@ -379,6 +347,16 @@ function textOf(value: unknown, what: string, max = 1000, empty = false, trim = 
   const text = trim ? value.trim() : value;
   if (!empty && !text) throw new TypeError(`${what} can’t be empty.`);
   return text;
+}
+
+/** Reads an id: text of at most `max` characters, naming `what`. */
+function idOf(what: string, max: number) {
+  return (value: unknown): string => {
+    if (typeof value !== 'string' || !value || value.length > max) {
+      throw new TypeError(`That isn’t ${what}.`);
+    }
+    return value;
+  };
 }
 
 const isCount = (value: unknown): value is number =>

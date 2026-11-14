@@ -81,10 +81,7 @@ export interface Commands<F = File> {
    */
   signIn(to: SignInSetup | AccountId): Promise<SignIn>;
   /** An empty `fromName` removes it, and mail is from the address alone. */
-  updateAccount(
-    id: AccountId,
-    change: Partial<Pick<Account, 'name' | 'fromName' | 'stamp' | 'signature'>>,
-  ): Promise<void>;
+  updateAccount(id: AccountId, change: AccountChange): Promise<void>;
   removeAccount(id: AccountId): Promise<void>;
   /** From now on, this sender's remote images load. */
   allowImages(account: AccountId, sender: string): Promise<void>;
@@ -198,6 +195,9 @@ export const MATCHES_LISTED = 1_000;
 
 /** The most people an address field completes what was typed to. */
 export const PEOPLE_LISTED = 8;
+
+/** What a member may change of an account. */
+export type AccountChange = Partial<Pick<Account, 'name' | 'fromName' | 'stamp' | 'signature'>>;
 
 /**
  * What connecting an account takes: nothing for the demo mailbox, and a password for an IMAP host.

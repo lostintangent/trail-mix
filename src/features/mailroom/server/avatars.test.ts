@@ -7,6 +7,7 @@ import {
   internetSources,
   keyed,
   lookUpDomain,
+  type AvatarCache,
   type AvatarNetwork,
   type Home,
 } from './avatars.ts';
@@ -33,6 +34,8 @@ const PHOTO = await keyed(png('photo'));
 
 const ADA = 'ada@brand.example';
 const BEA = 'bea@brand.example';
+/** What a cache owes at `now`, with room for every lookup. */
+const owed = (cache: AvatarCache, now: number) => cache.owed(now, { domains: 8, senders: 8 });
 
 describe('the Avatar cache', () => {
   test('owes a lookup for each verified sender and their domain, once however much arrives', () => {
@@ -40,7 +43,7 @@ describe('the Avatar cache', () => {
     cache.note([ADA, 'news@shop.example'], 0);
     cache.note([ADA, BEA], 5);
 
-    expect(cache.owed(10, { domains: 8, senders: 8 })).toEqual({
+    expect(owed(cache, 10)).toEqual({
       domains: ['brand.example', 'shop.example'],
       senders: [ADA, 'news@shop.example', BEA],
     });
@@ -48,7 +51,7 @@ describe('the Avatar cache', () => {
       domains: ['brand.example'],
       senders: [ADA, 'news@shop.example'],
     });
-    expect(cache.owed(-1, { domains: 8, senders: 8 })).toEqual({ domains: [], senders: [] });
+    expect(owed(cache, -1)).toEqual({ domains: [], senders: [] });
   });
 
   test('names a sender’s logo, else their photo, else their domain’s icon, by its picture’s key', () => {
@@ -102,14 +105,8 @@ describe('the Avatar cache', () => {
     cache.foundDomain('brand.example', { logo: LOGO_PICTURE }, 0);
     cache.foundSender(ADA, PHOTO, 0);
 
-    expect(cache.owed(RECHECK_MS - 1, { domains: 8, senders: 8 })).toEqual({
-      domains: [],
-      senders: [],
-    });
-    expect(cache.owed(RECHECK_MS, { domains: 8, senders: 8 })).toEqual({
-      domains: ['brand.example'],
-      senders: [ADA],
-    });
+    expect(owed(cache, RECHECK_MS - 1)).toEqual({ domains: [], senders: [] });
+    expect(owed(cache, RECHECK_MS)).toEqual({ domains: ['brand.example'], senders: [ADA] });
     expect(cache.foundDomain('brand.example', { icon: 'none' }, RECHECK_MS)).toBe(true);
     expect(cache.pictures([ADA])).toEqual(new Map([[ADA, PHOTO.key]]));
     expect(cache.foundSender(ADA, undefined, RECHECK_MS)).toBe(true);
@@ -121,12 +118,11 @@ describe('the Avatar cache', () => {
     cache.note([ADA], 0);
     cache.foundDomain('brand.example', { icon: 'none' }, 0);
     cache.foundSender(ADA, undefined, 0);
-    const owed = (now: number) => cache.owed(now, { domains: 8, senders: 8 });
 
-    expect(owed(10 * RECHECK_MS)).toEqual({ domains: [], senders: [] });
+    expect(owed(cache, 10 * RECHECK_MS)).toEqual({ domains: [], senders: [] });
     cache.note([ADA], DAY);
-    expect(owed(RECHECK_MS - 1)).toEqual({ domains: [], senders: [] });
-    expect(owed(RECHECK_MS)).toEqual({ domains: ['brand.example'], senders: [ADA] });
+    expect(owed(cache, RECHECK_MS - 1)).toEqual({ domains: [], senders: [] });
+    expect(owed(cache, RECHECK_MS)).toEqual({ domains: ['brand.example'], senders: [ADA] });
 
     // A picture it finds then comes, as one found after its mail arrived does.
     expect(cache.foundDomain('brand.example', { icon: ICON }, RECHECK_MS)).toBe(true);
@@ -139,9 +135,7 @@ describe('the Avatar cache', () => {
 
     expect(cache.foundDomain('brand.example', { icon: 'turned away' }, RECHECK_MS)).toBe(false);
     expect(cache.pictures([ADA])).toEqual(new Map([[ADA, ICON.key]]));
-    expect(cache.owed(2 * RECHECK_MS, { domains: 8, senders: 8 }).domains).toEqual([
-      'brand.example',
-    ]);
+    expect(owed(cache, 2 * RECHECK_MS).domains).toEqual(['brand.example']);
     // A site that has turned it away from the first gives no icon.
     cache.note(['cy@shop.example'], 0);
     expect(cache.foundDomain('shop.example', { icon: 'turned away' }, 0)).toBe(false);
@@ -157,14 +151,8 @@ describe('the Avatar cache', () => {
     cache.failed({ sender: ADA }, RECHECK_MS);
 
     expect(cache.pictures([ADA])).toEqual(new Map([[ADA, LOGO_PICTURE.key]]));
-    expect(cache.owed(RECHECK_MS + HOUR - 1, { domains: 8, senders: 8 })).toEqual({
-      domains: [],
-      senders: [],
-    });
-    expect(cache.owed(RECHECK_MS + HOUR, { domains: 8, senders: 8 })).toEqual({
-      domains: ['brand.example'],
-      senders: [ADA],
-    });
+    expect(owed(cache, RECHECK_MS + HOUR - 1)).toEqual({ domains: [], senders: [] });
+    expect(owed(cache, RECHECK_MS + HOUR)).toEqual({ domains: ['brand.example'], senders: [ADA] });
   });
 
   test('forgets every sender but those still sending the member’s mail, with their domains and pictures', () => {
@@ -207,7 +195,7 @@ describe('the Avatar cache', () => {
     message(5, 'nobody', true);
     upgrade(sql);
 
-    expect(avatarCache(sql).owed(0, { domains: 8, senders: 8 })).toEqual({
+    expect(owed(avatarCache(sql), 0)).toEqual({
       domains: ['brand.example', 'people.example'],
       senders: ['news@brand.example', 'pat@people.example'],
     });

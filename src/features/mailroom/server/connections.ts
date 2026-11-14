@@ -136,12 +136,10 @@ export function deviceOf(preset: PresetName | undefined): DeviceSignIn | undefin
   return held?.device;
 }
 
-function imapAccount(account: AccountId, connection: ImapConnection, secret: Secret): ImapAccount {
-  return {
-    account,
-    imap: connection.imap,
-    smtp: connection.smtp,
-    auth: { user: connection.user, ...secret },
-    filesSent: connection.filesSent,
-  };
+function imapAccount(
+  account: AccountId,
+  { imap, smtp, user, filesSent }: ImapConnection,
+  secret: Secret,
+): ImapAccount {
+  return { account, imap, smtp, auth: { user, ...secret }, filesSent };
 }

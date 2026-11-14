@@ -400,7 +400,4 @@ export function syncQueue(syncing: Syncing) {
   };
 }
 
-const rankOf = (folder: Folder) => {
-  const position = ORDER.indexOf(folder.role);
-  return position < 0 ? ORDER.indexOf(undefined) : position;
-};
+const rankOf = ({ role }: Folder) => ORDER.indexOf(ORDER.includes(role) ? role : undefined);

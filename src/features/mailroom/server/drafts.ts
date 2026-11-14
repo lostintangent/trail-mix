@@ -13,6 +13,7 @@ import {
   type Outgoing,
 } from '../../mail/core/index.ts';
 import type { MailProvider } from '../../providers/index.ts';
+import { sha256Hex } from '../../../shared/sha256.ts';
 import type { DraftUpload } from '../client/contract.ts';
 import type { AccountBook } from './accounts.ts';
 import type { BodyCache } from './bodies.ts';
@@ -253,14 +254,9 @@ export function savingDrafts(ports: {
      * it.
      */
     async addressing(draft: MessageRef): Promise<Addressing> {
-      const found = store.reads.message(draft) ?? (await parsed(draft));
-      if (!found.messageId)
-        throw new Error('That draft has no Message-ID, so it can’t be sent safely.');
-      return {
-        messageId: found.messageId,
-        to: [...found.to, ...found.cc],
-        subject: found.subject,
-      };
+      const { messageId, to, cc, subject } = store.reads.message(draft) ?? (await parsed(draft));
+      if (!messageId) throw new Error('That draft has no Message-ID, so it can’t be sent safely.');
+      return { messageId, to: [...to, ...cc], subject };
     },
 
     /**
@@ -303,9 +299,5 @@ export function savingDrafts(ports: {
  * message. An id may be any text, so it is hashed into what a Message-ID can hold.
  */
 async function messageIdFor(id: string, domain: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(id));
-  const hex = [...new Uint8Array(digest).slice(0, 16)]
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('');
-  return `<${hex}@${domain}>`;
+  return `<${(await sha256Hex(id)).slice(0, 32)}@${domain}>`;
 }

@@ -1,5 +1,5 @@
 import * as signing from '../../accounts/core/index.ts';
-import { listed, type Account, type AccountId, type Hint } from '../../mail/core/index.ts';
+import type { Account, AccountId, Hint } from '../../mail/core/index.ts';
 import {
   PRESETS,
   codeFrom,
@@ -27,15 +27,6 @@ import { report } from './report.ts';
 import type { Sql } from './schema.ts';
 
 /**
- * Signing in at a vendor, for accounts that sign in there instead of with a password. A sign-in
- * starts with a code the member enters on the vendor's page, and the wake polls the vendor until
- * they approve it. Once both hosts take its token, the account is added, or reconnected if it was
- * signing in again. Each account's access token is then kept in memory while it's fresh, and its
- * refresh token sealed beside the account.
- */
-export type SigningIn = ReturnType<typeof signingIn>;
-
-/**
  * Where each preset that can sign in finds the operator's app in the Worker's settings, and a test's
  * stand-in for its vendor.
  */
@@ -49,6 +40,13 @@ export type AppSettings = Partial<Record<(typeof APPS)[SignInPreset]['id' | 'sta
 /** How long a vendor has to answer one request of a sign-in. */
 const VENDOR_PATIENCE_MS = 15_000;
 
+/**
+ * Signing in at a vendor, for accounts that sign in there instead of with a password. A sign-in
+ * starts with a code the member enters on the vendor's page, and the wake polls the vendor until
+ * they approve it. Once both hosts take its token, the account is added, or reconnected if it was
+ * signing in again. Each account's access token is then kept in memory while it's fresh, and its
+ * refresh token sealed beside the account.
+ */
 export function signingIn(ports: {
   sql: Sql;
   book: AccountBook;
@@ -133,25 +131,17 @@ export function signingIn(ports: {
     if (held) {
       await ports.disconnect(id);
       book.reseal(id, sealed);
-      tokens.set(id, granted);
       ports.setStatus(id, 'syncing');
     } else {
-      if (
-        listed(
-          address,
-          book.all().map((account) => account.address),
-        )
-      ) {
-        return stop(`${address} is already connected.`);
-      }
+      if (book.has(address)) return stop(`${address} is already connected.`);
       const { name, fromName, preset } = pending.to as signing.NewAccount;
       book.add(
         { id, name, address, ...(fromName ? { fromName } : {}), provider: 'imap', preset },
         connection,
         { sealed },
       );
-      tokens.set(id, granted);
     }
+    tokens.set(id, granted);
     underWay.finish(pending);
     hint({ changed: 'accounts' });
     await ports.check(id);
@@ -227,14 +217,7 @@ export function signingIn(ports: {
         pendingTo = { account: held.id };
       } else {
         ({ address, preset } = to);
-        if (
-          listed(
-            address,
-            book.all().map((account) => account.address),
-          )
-        ) {
-          throw new Error(`${address} is already connected.`);
-        }
+        if (book.has(address)) throw new Error(`${address} is already connected.`);
         const { name, fromName } = to;
         pendingTo = { preset: to.preset, name, ...(fromName ? { fromName } : {}) };
       }
@@ -300,9 +283,7 @@ export function signingIn(ports: {
     },
 
     /** Forgets every token, as an erase does. */
-    clear() {
-      tokens.clear();
-    },
+    clear: () => tokens.clear(),
   };
 }
 

@@ -10,8 +10,6 @@ import type { SyncQueue } from './sync.ts';
  * listing, not the index's, which a change a moment ago may not have reached yet, and owes a check
  * of the account, whose listing records it.
  */
-export type FolderCommands = ReturnType<typeof folderCommands>;
-
 export function folderCommands(ports: {
   book: Pick<AccountBook, 'get'>;
   provider: (account: AccountId) => Promise<MailProvider>;
