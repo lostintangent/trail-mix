@@ -13,11 +13,8 @@ export function folderOf(
 ): Folder | undefined {
   const located = conversation
     .toSorted((a, b) => a.date.localeCompare(b.date))
-    .map((message) =>
-      folders.find(({ account, path }) => account === message.account && path === message.path),
-    );
-  const newest = located.at(-1);
-  return located.findLast((folder) => folder && !isOwnWriting(folder)) ?? newest;
+    .map((message) => folderFor(message, folders));
+  return located.findLast((folder) => folder && !isOwnWriting(folder)) ?? located.at(-1);
 }
 
 /**
@@ -29,13 +26,11 @@ export function receivedIn(
   conversation: readonly Message[],
   folders: readonly Folder[],
 ): Message[] {
-  return conversation.filter((message) => {
-    const folder = folders.find(
-      ({ account, path }) => account === message.account && path === message.path,
-    );
-    return !folder || !isOwnWriting(folder);
-  });
+  return conversation.filter((message) => !isOwnWriting(folderFor(message, folders)));
 }
 
 /** Whether a folder holds the member's own writing: what was sent, and what is being written. */
-const isOwnWriting = ({ role }: Folder) => role === 'sent' || role === 'drafts';
+const isOwnWriting = (folder?: Folder) => folder?.role === 'sent' || folder?.role === 'drafts';
+
+const folderFor = (message: Message, folders: readonly Folder[]) =>
+  folders.find(({ account, path }) => account === message.account && path === message.path);

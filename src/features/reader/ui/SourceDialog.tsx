@@ -8,7 +8,6 @@ import {
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { useQuery } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
 import { tm } from '../../../app/theme/tokens.stylex.ts';
 import { refOf, type Message } from '../../mail/core/index.ts';
 import { bodyQuery, messageUrl } from '../../mailroom/client/index.ts';
@@ -26,7 +25,17 @@ export function SourceDialog({ message, onClose }: SourceDialogProps) {
   const ref = refOf(message);
   const headers = useQuery(bodyQuery(ref)).data?.headers ?? [];
   const url = messageUrl(ref);
-  const source = useSource(url);
+  const source = useQuery({
+    queryKey: ['source', url],
+    queryFn: async ({ signal }) => {
+      const response = await fetch(url, { signal });
+      if (!response.ok) throw new Error(`${response.status}`);
+      const text = await response.text();
+      return { text: text.slice(0, SHOWN), truncated: text.length > SHOWN };
+    },
+    retry: false,
+    gcTime: 0,
+  });
   return (
     <Dialog
       isOpen
@@ -46,13 +55,10 @@ export function SourceDialog({ message, onClose }: SourceDialogProps) {
           ))}
         </dl>
         <pre aria-label="Raw source" {...stylex.props(styles.source)}>
-          {source.state === 'loading'
-            ? 'Loading the source…'
-            : source.state === 'failed'
-              ? 'The source could not be loaded.'
-              : source.text}
+          {source.data?.text ??
+            (source.isError ? 'The source could not be loaded.' : 'Loading the source…')}
         </pre>
-        {source.state === 'loaded' && source.truncated && (
+        {source.data?.truncated && (
           <a href={url} download="message.eml" {...stylex.props(styles.download)}>
             Download the whole source
           </a>
@@ -60,29 +66,6 @@ export function SourceDialog({ message, onClose }: SourceDialogProps) {
       </div>
     </Dialog>
   );
-}
-
-type Source =
-  | { state: 'loading' }
-  | { state: 'failed' }
-  | { state: 'loaded'; text: string; truncated: boolean };
-
-function useSource(url: string): Source {
-  const [source, setSource] = useState<Source>({ state: 'loading' });
-  useEffect(() => {
-    const abort = new AbortController();
-    fetch(url, { signal: abort.signal })
-      .then(async (response) => {
-        if (!response.ok) throw new Error(`${response.status}`);
-        const text = await response.text();
-        setSource({ state: 'loaded', text: text.slice(0, SHOWN), truncated: text.length > SHOWN });
-      })
-      .catch(() => {
-        if (!abort.signal.aborted) setSource({ state: 'failed' });
-      });
-    return () => abort.abort();
-  }, [url]);
-  return source;
 }
 
 const styles = stylex.create({

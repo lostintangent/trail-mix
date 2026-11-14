@@ -87,7 +87,7 @@ export function sanitizeMail(html: string, images: Images, dark: DarkPaper): Saf
     } else if (url.protocol === 'data:') {
       // The frame's policy allows every `data:` image, so these need no source of their own.
       return /^data:image\//i.test(url.href) ? url.href : null;
-    } else if (url.protocol === 'http:' || url.protocol === 'https:') {
+    } else if (isRemote(url)) {
       if (isTrackingAddress(url)) {
         mail.trackers.add(url.href);
         return null;
@@ -287,16 +287,14 @@ const LINK_PROTOCOLS = new Set(['http:', 'https:', 'mailto:', 'tel:']);
 
 /** Where an image would load from a server, by its `src` or else its `srcset`, if it would. */
 function remoteAddress(image: Element): URL | null {
-  const remote = (url: URL | null) =>
-    url?.protocol === 'http:' || url?.protocol === 'https:' ? url : null;
-  return (
-    remote(parseUrl(image.getAttribute('src') ?? '')) ??
-    parseSrcset(image.getAttribute('srcset') ?? '')
-      .map(({ url }) => remote(parseUrl(url)))
-      .find((url) => url !== null) ??
-    null
-  );
+  const src = parseUrl(image.getAttribute('src') ?? '');
+  if (isRemote(src)) return src;
+  const srcset = parseSrcset(image.getAttribute('srcset') ?? '');
+  return srcset.map(({ url }) => parseUrl(url)).find(isRemote) ?? null;
 }
+
+const isRemote = (url: URL | null): url is URL =>
+  url?.protocol === 'http:' || url?.protocol === 'https:';
 
 /** A URL as a browser reads it. Mail has no base, so a relative URL is no URL. */
 function parseUrl(raw: string): URL | null {
@@ -324,21 +322,15 @@ function contentIdOf(url: URL): string {
  */
 function heldImage(image: Element): string {
   const side = (name: string) => {
-    const value = /^\s*(\d+)\s*(px)?\s*$/i.exec(image.getAttribute(name) ?? '')?.[1];
-    const pixels = value === undefined ? undefined : Number(value);
-    return pixels !== undefined && pixels > 0 && pixels <= 10_000 ? pixels : undefined;
+    const pixels = Number(/^\s*(\d+)\s*(px)?\s*$/i.exec(image.getAttribute(name) ?? '')?.[1]);
+    return pixels > 0 && pixels <= 10_000 ? pixels : undefined;
   };
-  const [width, height] = [side('width'), side('height')];
-  const sized = image.hasAttribute('width') || image.hasAttribute('height');
-  const [w, h] =
-    width && height
-      ? [width, height]
-      : width
-        ? [width, Math.ceil(width / 3)]
-        : height
-          ? [height * 3, height]
-          : sized
-            ? [300, 100]
-            : [20, 20];
+  const height = side('height');
+  const width = side('width') ?? (height && height * 3);
+  const [w, h] = width
+    ? [width, height ?? Math.ceil(width / 3)]
+    : image.hasAttribute('width') || image.hasAttribute('height')
+      ? [300, 100]
+      : [20, 20];
   return `data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='${w}' height='${h}'/>`)}`;
 }

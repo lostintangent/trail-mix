@@ -14,13 +14,9 @@ export function Unsubscribe({ message, address }: { message: MessageRef; address
   const standing = useUnsubscribing(address);
   const ask = () => unsubscribe(message, address);
   const told =
-    standing.is === 'asking'
-      ? 'Unsubscribing…'
-      : standing.is === 'taken'
-        ? 'Unsubscribed'
-        : standing.is === 'refused'
-          ? `Couldn’t unsubscribe. ${standing.reason}`
-          : '';
+    standing.is === 'refused'
+      ? `Couldn’t unsubscribe. ${standing.reason}`
+      : { offered: '', asking: 'Unsubscribing…', taken: 'Unsubscribed' }[standing.is];
   // The words stand in the button's place, led by its icon, in a status that's there from the
   // first, so a screen reader hears each change.
   return (
@@ -43,13 +39,7 @@ export function Unsubscribe({ message, address }: { message: MessageRef; address
   );
 }
 
-function hostOf(address: string): string {
-  try {
-    return new URL(address).host;
-  } catch {
-    return 'the sender';
-  }
-}
+const hostOf = (address: string) => (URL.canParse(address) ? new URL(address).host : 'the sender');
 
 const styles = stylex.create({
   // Where the button's icon and label stood, at their size and the button's height, so the words

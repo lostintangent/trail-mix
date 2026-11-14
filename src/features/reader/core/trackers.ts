@@ -11,8 +11,8 @@
  * A wide spacer, such as 600 by 1, is not small, and stays.
  */
 
-/** One service's open-tracking addresses: a host and its subdomains, a path, or both. */
-type Tracking = { host?: string | RegExp; path?: RegExp };
+/** One service's open-tracking addresses: a host, a path, or both. */
+type Tracking = { host?: RegExp; path?: RegExp };
 
 /**
  * Written for Trail Mix from how each service builds the address of its open pixel. A path alone
@@ -36,41 +36,35 @@ const TRACKING: readonly Tracking[] = [
   // Mailgun, on the `email.` host a sender points at it.
   { host: /^email\./, path: /^\/o\/[\w=-]{20,}/ },
   // Mailjet.
-  { host: 'mjt.lu', path: /^\/oo\// },
+  { host: /(?:^|\.)mjt\.lu$/, path: /^\/oo\// },
   // Constant Contact.
-  { host: 'rs6.net', path: /^\/on\.jsp$/ },
+  { host: /(?:^|\.)rs6\.net$/, path: /^\/on\.jsp$/ },
   // Substack.
-  { host: 'eotrx.substackcdn.com', path: /^\/open/ },
+  { host: /(?:^|\.)eotrx\.substackcdn\.com$/, path: /^\/open/ },
   // Mailtrack's read receipts, from a site that also has pictures of its own.
-  { host: 'mailtrack.io', path: /^\/trace\// },
+  { host: /(?:^|\.)mailtrack\.io$/, path: /^\/trace\// },
   // Amazon SES.
-  { host: 'awstrack.me' },
+  { host: /(?:^|\.)awstrack\.me$/ },
   // Postmark.
-  { host: 'pstmrk.it' },
+  { host: /(?:^|\.)pstmrk\.it$/ },
   // Klaviyo.
   { host: /(?:^|\.)klclick\d?\.com$/ },
   // SparkPost.
-  { host: 'spgo.io' },
+  { host: /(?:^|\.)spgo\.io$/ },
   // Kit, once ConvertKit.
   { host: /^open\.convertkit-mail\d*\.com$/ },
   // Google Analytics, which some senders count opens with.
-  { host: 'google-analytics.com' },
+  { host: /(?:^|\.)google-analytics\.com$/ },
   // Read receipts: Superhuman, Streak and Yesware.
-  { host: 'r.superhuman.com' },
-  { host: 'mailfoogae.appspot.com' },
-  { host: 't.yesware.com' },
+  { host: /(?:^|\.)r\.superhuman\.com$/ },
+  { host: /(?:^|\.)mailfoogae\.appspot\.com$/ },
+  { host: /(?:^|\.)t\.yesware\.com$/ },
 ];
 
 /** Whether an image's address is a service's open-tracking address. */
 export function isTrackingAddress(url: URL): boolean {
-  const host = url.hostname;
   return TRACKING.some(
-    (tracking) =>
-      (tracking.host === undefined ||
-        (typeof tracking.host === 'string'
-          ? host === tracking.host || host.endsWith(`.${tracking.host}`)
-          : tracking.host.test(host))) &&
-      (tracking.path === undefined || tracking.path.test(url.pathname)),
+    ({ host, path }) => (host?.test(url.hostname) ?? true) && (path?.test(url.pathname) ?? true),
   );
 }
 

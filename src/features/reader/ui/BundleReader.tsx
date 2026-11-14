@@ -29,7 +29,7 @@ import {
   type ConversationId,
   type ConversationSummary,
 } from '../../mail/core/index.ts';
-import { issueStyles, threadStyles } from './layout.ts';
+import { issueStyles, sheetStyles, threadStyles } from './layout.ts';
 import { counted, MetaLine } from './meta.tsx';
 import { ThreadSkeleton } from './skeletons.tsx';
 
@@ -175,7 +175,7 @@ function ThreadSheet({
   const address = github && threadAddressOf(github);
   const newest = senders[0];
   return (
-    <article {...stylex.props(issueStyles.sheet, styles.sheet)}>
+    <article {...stylex.props(sheetStyles.sheet, issueStyles.sheet, styles.sheet)}>
       {github ? <Icon icon={kindIconOf(github)} xstyle={styles.kind} /> : <span />}
       <div {...stylex.props(issueStyles.head, styles.head)}>
         <button
@@ -194,13 +194,13 @@ function ThreadSheet({
             </>
           )}
         </button>
-        <time dateTime={date} {...stylex.props(styles.time)}>
+        <time dateTime={date} {...stylex.props(sheetStyles.quiet, styles.time)}>
           {formatListDate(date)}
         </time>
       </div>
       <div {...stylex.props(issueStyles.under, issueStyles.facts, styles.facts)}>
         {github && factsOf(github, isUnread).map((fact) => <Chip key={fact.label} fact={fact} />)}
-        <span {...stylex.props(styles.count)}>{counted(count, 'message')}</span>
+        <span {...stylex.props(sheetStyles.quiet, styles.count)}>{counted(count, 'message')}</span>
       </div>
       <p {...stylex.props(issueStyles.under, issueStyles.act, styles.act)}>
         {newest?.name && <b {...stylex.props(styles.actor)}>{newest.name} </b>}
@@ -297,8 +297,6 @@ const styles = stylex.create({
   },
   time: {
     flexShrink: 0,
-    color: tm.textQuiet,
-    fontSize: typeScaleVars['--text-supporting-size'],
     whiteSpace: 'nowrap',
   },
   facts: {
@@ -309,8 +307,6 @@ const styles = stylex.create({
   },
   count: {
     marginInlineStart: spacingVars['--spacing-1'],
-    color: tm.textQuiet,
-    fontSize: typeScaleVars['--text-supporting-size'],
     whiteSpace: 'nowrap',
   },
   act: {

@@ -17,7 +17,7 @@ export function foldQuote(text: string): FoldedText {
   const start = trailingQuoteStart(lines);
   if (start === null || !lines.slice(0, start).some(isMeaningful)) return { text, quote: '' };
   return {
-    text: trimTrailingBlankLines(lines.slice(0, start)).join('\n'),
+    text: lines.slice(0, blanksAbove(lines, start)).join('\n'),
     quote: lines.slice(start).join('\n'),
   };
 }
@@ -111,14 +111,12 @@ function trailingQuoteStart(lines: string[]): number | null {
   }
 
   // Otherwise the quote is the run of `>` lines at the end, with the attribution above it.
-  let end = lines.length;
-  while (end > 0 && isBlank(lines[end - 1] ?? '')) end--;
+  const end = blanksAbove(lines, lines.length);
   let start = end;
   while (start > 0 && !isMeaningful(lines[start - 1] ?? '')) start--;
   while (start < end && isBlank(lines[start] ?? '')) start++;
   if (start === end) return null;
-  let above = start;
-  while (above > 0 && isBlank(lines[above - 1] ?? '')) above--;
+  const above = blanksAbove(lines, start);
   if (above === 0 || !isAttribution(lines[above - 1] ?? '')) return start;
   // Clients wrap a long attribution, so it may begin up to two lines higher.
   for (let span = 3; span > 1; span--) {
@@ -138,10 +136,10 @@ function nextLines(lines: string[], from: number, count: number): string {
   return lines.slice(from, from + count).join(' ');
 }
 
-function trimTrailingBlankLines(lines: string[]): string[] {
-  let end = lines.length;
-  while (end > 0 && isBlank(lines[end - 1] ?? '')) end--;
-  return lines.slice(0, end);
+/** Where the blank lines just above line `at` begin, or `at` when the line above has words. */
+function blanksAbove(lines: string[], at: number): number {
+  while (at > 0 && isBlank(lines[at - 1] ?? '')) at--;
+  return at;
 }
 
 const isQuoted = (line: string) => /^\s*>/.test(line);

@@ -5,6 +5,7 @@ import * as stylex from '@stylexjs/stylex';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { memo, useDeferredValue, useEffect, useEffectEvent, useRef, useState } from 'react';
 import { useMediaQuery } from '../../../shared/useMediaQuery.ts';
+import { whenIdle } from '../../../shared/whenIdle.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Command } from '../../commands/index.ts';
 import { numberOf } from '../../conversations/index.ts';
@@ -103,19 +104,14 @@ const NONE_LEAVING: readonly Leaving[] = [];
 
 const keys = (refs: readonly MessageRef[] = NONE_HIDDEN) => refs.map(refKey).join('\u0001');
 
+/** Whether a render would show the same: the same props, and the same in the lists it makes anew. */
 function isSameReading(before: ReaderProps, after: ReaderProps): boolean {
   const ids = (props: ReaderProps) => (props.upcoming ?? []).join('\u0000');
+  const props = Object.keys({ ...before, ...after }) as (keyof ReaderProps)[];
   return (
-    before.conversation === after.conversation &&
-    before.account === after.account &&
-    before.folders === after.folders &&
-    before.actionsFor === after.actionsFor &&
-    before.onMessageKey === after.onMessageKey &&
-    before.onOpenDraft === after.onOpenDraft &&
-    before.isPassing === after.isPassing &&
-    before.leaving === after.leaving &&
     keys(before.hidden) === keys(after.hidden) &&
-    ids(before) === ids(after)
+    ids(before) === ids(after) &&
+    props.every((prop) => prop === 'hidden' || prop === 'upcoming' || before[prop] === after[prop])
   );
 }
 
@@ -168,7 +164,9 @@ const Conversation = memo(function Conversation({
 
   return (
     <div {...stylex.props(threadStyles.thread)}>
-      <h1 {...stylex.props(threadStyles.subject)}>{github?.title ?? subjectOf(messages)}</h1>
+      <h1 {...stylex.props(threadStyles.subject)}>
+        {github?.title ?? bareSubject(messages[0]?.subject ?? '')}
+      </h1>
       <MetaLine
         account={account}
         says={[account.name, ...(folder ? [folderName(folder)] : []), size]}
@@ -347,17 +345,8 @@ function useFetchAhead(account: Account) {
   };
 }
 
-/** Resolves when the browser has nothing more pressing to do. Safari has no idle callback. */
-function idle(): Promise<void> {
-  return new Promise((resolve) => {
-    if ('requestIdleCallback' in window) requestIdleCallback(() => resolve());
-    else setTimeout(resolve, 50);
-  });
-}
-
-/** Where a GitHub thread lives on github.com, named by its number, or by its kind when it has none. */
-/** The conversation's subject, as its first message gave it. */
-const subjectOf = (messages: Message[]) => bareSubject(messages[0]?.subject ?? '');
+/** Resolves when the browser has nothing more pressing to do. */
+const idle = () => new Promise<void>((resolve) => whenIdle(resolve, 0));
 
 const styles = stylex.create({
   // Nothing to open yet, so it neither lifts nor points.

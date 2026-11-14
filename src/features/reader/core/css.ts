@@ -82,7 +82,7 @@ function rewrite(css: string, from: number, to: number, mode: Mode, resolve: Res
         continue;
       }
       const images = IMAGE_FUNCTIONS.some((image) => name.endsWith(image));
-      const close = findClose(css, ident.next + 1, to);
+      const close = scanTo(css, ident.next + 1, to, ')');
       const inner = rewrite(css, ident.next + 1, close, images ? 'images' : 'values', resolve);
       if (inner.unresolved) unresolved = true;
       // The name goes out as written: decoded, an escaped `(` in it would start a new function.
@@ -104,7 +104,7 @@ function consumeUrlFunction(css: string, start: number, to: number) {
   if (c === '"' || c === "'") {
     // `url("…")` is a function whose argument is a string.
     const string = consumeString(css, i, to);
-    const close = findClose(css, string.next, to);
+    const close = scanTo(css, string.next, to, ')');
     return { value: string.bad ? null : string.value, next: Math.min(close + 1, to) };
   }
   let value = '';
@@ -200,11 +200,6 @@ function consumeEscape(css: string, start: number, to: number) {
   }
   const char = String.fromCodePoint(css.codePointAt(start) ?? 0xfffd);
   return { char, next: start + char.length };
-}
-
-/** The index of the `)` that closes a function whose arguments start at `start`, or `to`. */
-function findClose(css: string, start: number, to: number): number {
-  return scanTo(css, start, to, ')');
 }
 
 /** Where an at-rule that starts its prelude at `start` ends: after its `;` or its block. */
@@ -307,7 +302,7 @@ export function keepSafeRules(
       name === 'CSSCounterStyleRule' ||
       name === 'CSSPropertyRule'
     ) {
-      deleteRule(rule, i);
+      splice(rule, i, 1);
       continue;
     }
     if ('style' in rule && rule.style instanceof CSSStyleDeclaration) {
@@ -315,9 +310,10 @@ export function keepSafeRules(
       // Text in what the rule paints takes the light theme's ink in the dark theme, short of any
       // color the message sets on it, which `:where` lets win.
       if (needsInk && 'selectorText' in rule && typeof rule.selectorText === 'string') {
-        insertAfter(
+        splice(
           rule,
-          i,
+          i + 1,
+          0,
           `@scope (:root[${SCHEME_ATTRIBUTE}="dark"]) { :where(${rule.selectorText}) { color: ${lightInk}; } }`,
         );
       }
@@ -326,34 +322,21 @@ export function keepSafeRules(
       keepSafeRules(rule.cssRules, adapt, lightInk);
     }
     const themed = name === 'CSSMediaRule' ? schemeRule(rule as CSSMediaRule) : undefined;
-    if (themed) replaceRule(rule, i, themed);
+    if (themed) splice(rule, i, 1, themed);
   }
 }
 
-/** Puts `text` just after a rule, or nothing where a browser can't read it. */
-function insertAfter(rule: CSSRule, index: number, text: string) {
+/**
+ * Takes `remove` rules from a rule's list at `at` and puts `text` there, or changes nothing where
+ * a browser can't read `text`, as one that reads no `@scope` leaves text in the dark theme's ink.
+ */
+function splice(rule: CSSRule, at: number, remove: 0 | 1, text?: string) {
   const parent = rule.parentRule ?? rule.parentStyleSheet;
   if (!parent || !('insertRule' in parent)) return;
   try {
-    parent.insertRule(text, index + 1);
-  } catch {
-    // A browser that reads no `@scope` leaves the text in the dark theme's ink.
-  }
-}
-
-function deleteRule(rule: CSSRule, index: number) {
-  const parent = rule.parentRule ?? rule.parentStyleSheet;
-  if (parent && 'deleteRule' in parent) parent.deleteRule(index);
-}
-
-/** Puts `text` in the place of a rule, or leaves the rule as it is where a browser can't read it. */
-function replaceRule(rule: CSSRule, index: number, text: string) {
-  const parent = rule.parentRule ?? rule.parentStyleSheet;
-  if (!parent || !('insertRule' in parent)) return;
-  try {
-    parent.insertRule(text, index);
+    if (text !== undefined) parent.insertRule(text, at);
   } catch {
     return;
   }
-  parent.deleteRule(index + 1);
+  if (remove) parent.deleteRule(text === undefined ? at : at + 1);
 }

@@ -155,6 +155,11 @@ export function mailColors(dark: DarkPaper) {
 
   // A rewrite matters only for mail that declares no scheme of its own, and not on light paper.
   const adapting = () => scheme === undefined && !keepsLight;
+  /** Keeps the message on light paper, answering with `value`. */
+  const stayLight = <T>(value: T): T => {
+    keepsLight = true;
+    return value;
+  };
 
   /** The dark side of `light-dark()` for a color on text or a line, or null for one unread. */
   const liftedOf = (css: string): string | null => {
@@ -178,8 +183,8 @@ export function mailColors(dark: DarkPaper) {
    * given way to the paper, or kept as sent. Null where the message stays on light paper instead.
    */
   const painted = (css: string, hasImage: boolean, ownsInk: boolean): FromAttribute | null => {
-    const seen = KEEPS.test(css) || ADAPTS.test(css) ? undefined : read(css);
-    if (seen === undefined && !KEEPS.test(css) && !ADAPTS.test(css)) return null;
+    const seen = KEEPS.test(css) || ADAPTS.test(css) ? null : read(css);
+    if (seen === undefined) return null;
     const shown = seen && seen.alpha > 0 ? onWhite(seen) : undefined;
     // An image or a gradient shows as sent, and so must the color it lies on. With none under it,
     // nothing says what its text lies on.
@@ -222,10 +227,7 @@ export function mailColors(dark: DarkPaper) {
     const hidesColor = Array.from({ length: style.length }, (_, i) => style.item(i)).some(
       (name) => COLORED.has(name) && style.getPropertyValue(name) === '',
     );
-    if (hidesColor) {
-      keepsLight = true;
-      return unchanged;
-    }
+    if (hidesColor) return stayLight(unchanged);
     const set = (name: string, value: string) =>
       style.setProperty(name, value, style.getPropertyPriority(name));
     const ownsInk = !KEEPS.test(style.getPropertyValue('color').trim());
@@ -234,10 +236,7 @@ export function mailColors(dark: DarkPaper) {
       !KEEPS.test(style.getPropertyValue('background-image').trim()),
       ownsInk,
     );
-    if (background === null) {
-      keepsLight = true;
-      return unchanged;
-    }
+    if (background === null) return stayLight(unchanged);
     for (const [name, value] of background.declarations) set(name, value);
     // On a color kept as sent, the lines are the sender's, as they wrote them for it.
     if (style.getPropertyValue('color-scheme') === 'light') {
@@ -248,10 +247,7 @@ export function mailColors(dark: DarkPaper) {
       const value = style.getPropertyValue(name).trim();
       if (KEEPS.test(value) || ADAPTS.test(value) || read(value)?.alpha === 0) continue;
       const shade = liftedOf(value);
-      if (shade === null) {
-        keepsLight = true;
-        return unchanged;
-      }
+      if (shade === null) return stayLight(unchanged);
       lines.push([name, `light-dark(${value}, ${shade})`]);
     }
     for (const [name, value] of lines) set(name, value);
@@ -270,21 +266,13 @@ export function mailColors(dark: DarkPaper) {
     if (!adapting()) return undefined;
     const css = legacyColor(value, read);
     const seen = css === undefined ? undefined : read(css);
-    if (css === undefined || !seen) {
-      keepsLight = true;
-      return undefined;
-    }
+    if (css === undefined || !seen) return stayLight(undefined);
     if (seen.alpha === 0) return undefined;
     if (name === 'background-color') {
-      const background = painted(css, false, ownsInk);
-      if (background === null) keepsLight = true;
-      return background ?? undefined;
+      return painted(css, false, ownsInk) ?? stayLight(undefined);
     }
     const shade = liftedOf(css);
-    if (shade === null) {
-      keepsLight = true;
-      return undefined;
-    }
+    if (shade === null) return stayLight(undefined);
     return { declarations: [['color', `light-dark(${css}, ${shade})`]], needsInk: false };
   };
 

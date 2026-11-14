@@ -116,10 +116,15 @@ export const sheetStyles = stylex.create({
     color: tm.textQuiet,
     fontSize: typeScaleVars['--text-supporting-size'],
   },
+  // Light paper: mail written for it, or a sender's the member chose to show on it.
+  fixedPaper: {
+    colorScheme: 'light',
+    backgroundColor: tm.paperFixed,
+  },
 });
 
 /**
- * A bundle's thread on its own sheet, in three columns: its kind's icon, the thread, and the arrow
+ * A bundle's thread on a sheet, laid in three columns: its kind's icon, the thread, and the arrow
  * that opens it on GitHub. Its title is set large beside its arrow, and the lines under it, of what
  * GitHub said and what its newest message says, reach under the arrow too.
  */
@@ -130,18 +135,9 @@ export const issueStyles = stylex.create({
     isolation: 'isolate',
     display: 'grid',
     gridTemplateColumns: `20px minmax(0, 1fr) ${tm.target}`,
-    columnGap: spacingVars['--spacing-2'],
-    paddingBlock: spacingVars['--spacing-3'],
+    rowGap: 0,
     paddingInlineStart: spacingVars['--spacing-3'],
     paddingInlineEnd: spacingVars['--spacing-2'],
-    backgroundColor: colorVars['--color-background-card'],
-    color: colorVars['--color-text-primary'],
-    borderRadius: tm.sheetRadius,
-    boxShadow: tm.sheetEdge,
-    outline: {
-      default: null,
-      [media.forcedColors]: `${borderVars['--border-width']} solid CanvasText`,
-    },
   },
   head: {
     gridColumn: '2',

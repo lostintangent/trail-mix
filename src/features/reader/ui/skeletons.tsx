@@ -13,46 +13,41 @@ import { issueStyles, sheetStyles, threadStyles } from './layout.ts';
  * below a conversation to hold still, so its skeletons are drawn only once it is late.
  */
 export function ReaderSkeleton({ subject }: { subject?: string }) {
-  const coming = (
-    <>
-      <div {...stylex.props(threadStyles.meta)}>
-        <span>
-          <TextSkeleton width="14em" index={1} />
-        </span>
-      </div>
-      <div {...stylex.props(threadStyles.folded, styles.still)}>
-        <span {...stylex.props(styles.grow)}>
-          <TextSkeleton width="45%" index={2} />
-        </span>
-      </div>
-      <div {...stylex.props(sheetStyles.sheet)}>
-        <div {...stylex.props(sheetStyles.from)}>
-          <Skeleton width="32px" height="32px" radius="rounded" index={3} />
-          <div {...stylex.props(sheetStyles.who)}>
-            <span>
-              <TextSkeleton width="30%" index={3} />
-            </span>
-            <span {...stylex.props(sheetStyles.quiet)}>
-              <TextSkeleton width="45%" index={4} />
-            </span>
-          </div>
-        </div>
-        <BodyLines first={5} />
-      </div>
-    </>
-  );
-  return subject === undefined ? (
-    <Pending label="Opening the conversation" xstyle={threadStyles.thread} holdsPlace={false}>
-      <div {...stylex.props(threadStyles.subject)}>
-        <TextSkeleton width="55%" />
-      </div>
-      {coming}
-    </Pending>
-  ) : (
+  return (
     <div {...stylex.props(threadStyles.thread)}>
-      <h1 {...stylex.props(threadStyles.subject)}>{bareSubject(subject)}</h1>
+      {subject !== undefined && (
+        <h1 {...stylex.props(threadStyles.subject)}>{bareSubject(subject)}</h1>
+      )}
       <Pending label="Opening the conversation" xstyle={threadStyles.stack} holdsPlace={false}>
-        {coming}
+        {subject === undefined && (
+          <div {...stylex.props(threadStyles.subject)}>
+            <TextSkeleton width="55%" />
+          </div>
+        )}
+        <div {...stylex.props(threadStyles.meta)}>
+          <span>
+            <TextSkeleton width="14em" index={1} />
+          </span>
+        </div>
+        <div {...stylex.props(threadStyles.folded, styles.still)}>
+          <span {...stylex.props(styles.grow)}>
+            <TextSkeleton width="45%" index={2} />
+          </span>
+        </div>
+        <div {...stylex.props(sheetStyles.sheet)}>
+          <div {...stylex.props(sheetStyles.from)}>
+            <Skeleton width="32px" height="32px" radius="rounded" index={3} />
+            <div {...stylex.props(sheetStyles.who)}>
+              <span>
+                <TextSkeleton width="30%" index={3} />
+              </span>
+              <span {...stylex.props(sheetStyles.quiet)}>
+                <TextSkeleton width="45%" index={4} />
+              </span>
+            </div>
+          </div>
+          <BodyLines first={5} />
+        </div>
       </Pending>
     </div>
   );
@@ -86,7 +81,7 @@ export function BundleSkeleton({ repository }: { repository?: string }) {
  */
 export function ThreadSkeleton({ place }: { place: number }) {
   return (
-    <div {...stylex.props(issueStyles.sheet)}>
+    <div {...stylex.props(sheetStyles.sheet, issueStyles.sheet)}>
       <Skeleton width="18px" height="18px" radius="rounded" index={place + 2} />
       <div {...stylex.props(issueStyles.head, issueStyles.title)}>
         <TextSkeleton

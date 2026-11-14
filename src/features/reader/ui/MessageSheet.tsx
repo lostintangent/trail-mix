@@ -67,6 +67,7 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
   const more = actions.filter((action) => action !== reply && action.isEnabled !== false);
 
   const mail = useMemo(() => body && safeMail(message, body, allowed), [message, body, allowed]);
+  const onLightPaper = mail?.paper === 'light' || lightPaper;
   const text = useMemo(
     () => (body && !body.html && body.text !== undefined ? foldQuote(body.text) : undefined),
     [body],
@@ -85,10 +86,7 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
   return (
     <article
       aria-label={`Message from ${displayName(message.from)}`}
-      {...stylex.props(
-        sheetStyles.sheet,
-        (mail?.paper === 'light' || lightPaper) && styles.fixedPaper,
-      )}
+      {...stylex.props(sheetStyles.sheet, onLightPaper && sheetStyles.fixedPaper)}
     >
       <header {...stylex.props(sheetStyles.from)}>
         <SenderAvatar
@@ -118,7 +116,7 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
             }
             icon={<Icon icon={Sun} />}
             isIconOnly
-            isPressed={mail?.paper === 'light' || lightPaper}
+            isPressed={onLightPaper}
             isDisabled={mail?.paper === 'light'}
             onPressedChange={(on) =>
               setLightPaper(queryClient, { account: account.id, sender: message.from.email, on })
@@ -310,11 +308,6 @@ const styles = stylex.create({
   },
   when: {
     flexShrink: 0,
-  },
-  // Light paper: mail written for it, or a sender's the member chose to show on it.
-  fixedPaper: {
-    colorScheme: 'light',
-    backgroundColor: tm.paperFixed,
   },
   images: {
     display: 'flex',

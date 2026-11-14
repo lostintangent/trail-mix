@@ -10,11 +10,12 @@ import {
   useState,
   type RefObject,
 } from 'react';
-import { tm } from '../../../app/theme/tokens.stylex.ts';
 import { REST_MS } from '../core/rest.ts';
 import { frameDocument, type FrameLook } from '../core/frame.ts';
 import type { SafeMail } from '../core/sanitize.ts';
 import { hearsListeners, returnFocusFrom } from './focus.ts';
+import { sheetStyles } from './layout.ts';
+import { useDarkTheme } from './lightPaper.ts';
 
 /**
  * One message's HTML in its own frame, sized to fit what it shows.
@@ -110,7 +111,7 @@ export function MessageFrame({ mail, quotes, title, isLightPaper = false }: Mess
           title={title}
           sandbox={FRAME_SANDBOX}
           referrerPolicy="no-referrer"
-          {...stylex.props(styles.frame, paper === 'light' ? styles.fixedPaper : styles.paper)}
+          {...stylex.props(styles.frame, paper === 'light' ? sheetStyles.fixedPaper : styles.paper)}
         />
       </div>
     </div>
@@ -122,28 +123,22 @@ export function MessageFrame({ mail, quotes, title, isLightPaper = false }: Mess
  * again when the system's theme changes, or the paper it lies on.
  */
 function useLook(frame: RefObject<HTMLIFrameElement | null>, paper: SafeMail['paper']) {
+  const isDark = useDarkTheme();
   const [look, setLook] = useState<Omit<FrameLook, 'quotes'>>();
   useLayoutEffect(() => {
     // The frame now, since a document after the first goes into a new one.
-    const read = () => {
-      const element = frame.current;
-      if (!element) return;
-      const next = readLook(element);
-      setLook((current) => (JSON.stringify(current) === JSON.stringify(next) ? current : next));
-    };
-    read();
-    const system = matchMedia('(prefers-color-scheme: dark)');
-    system.addEventListener('change', read);
-    return () => system.removeEventListener('change', read);
-  }, [frame, paper]);
+    const element = frame.current;
+    if (!element) return;
+    const next = readLook(element, isDark);
+    setLook((current) => (JSON.stringify(current) === JSON.stringify(next) ? current : next));
+  }, [frame, paper, isDark]);
   return look;
 }
 
-function readLook(element: HTMLIFrameElement): Omit<FrameLook, 'quotes'> {
+function readLook(element: HTMLIFrameElement, isDark: boolean): Omit<FrameLook, 'quotes'> {
   const style = getComputedStyle(element);
   const schemes = style.colorScheme.split(/\s+/);
-  const prefersDark = matchMedia('(prefers-color-scheme: dark)').matches;
-  const dark = schemes.includes('dark') && (!schemes.includes('light') || prefersDark);
+  const dark = schemes.includes('dark') && (!schemes.includes('light') || isDark);
   // The light theme's ink and links, from a probe beside the frame in the light scheme.
   const probe = document.createElement('span');
   probe.className = stylex.props(styles.lightProbe).className ?? '';
@@ -261,10 +256,6 @@ const styles = stylex.create({
   },
   paper: {
     backgroundColor: colorVars['--color-background-card'],
-  },
-  fixedPaper: {
-    colorScheme: 'light',
-    backgroundColor: tm.paperFixed,
   },
   lightProbe: {
     position: 'absolute',
