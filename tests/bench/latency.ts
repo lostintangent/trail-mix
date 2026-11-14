@@ -54,38 +54,6 @@ export async function inputLatency(page: Page) {
       }
     }).observe({ type: 'long-animation-frame', buffered: true });
   }, REPORTED_FROM);
-  /**
-   * The `count` slowest of the inputs named `name` at these timestamps, each split into the wait
-   * before its handlers ran, the handlers and the wait for the frame, with the scripts that ran
-   * longest in the long frames it spanned.
-   */
-  const slowest = async (
-    name: string,
-    timestamps: readonly number[],
-    count = 5,
-  ): Promise<Slow[]> => {
-    const { timed, frames } = await page.evaluate(() => {
-      const { timed, frames } = window as unknown as { timed: Timed[]; frames: LongFrame[] };
-      return { timed, frames };
-    });
-    return timestamps
-      .flatMap((at, nth) =>
-        timed
-          .filter((entry) => entry.name === name && Math.abs(entry.start - at) < SAME_INPUT_MS)
-          .map((entry) => ({ ...entry, nth })),
-      )
-      .toSorted((a, b) => b.duration - a.duration)
-      .slice(0, count)
-      .map((entry) => ({
-        latency: entry.duration,
-        nth: entry.nth,
-        inputDelay: Math.round(entry.processingStart - entry.start),
-        processing: Math.round(entry.processingEnd - entry.processingStart),
-        presentation: Math.round(entry.start + entry.duration - entry.processingEnd),
-        scripts: scriptsDuring(frames, entry.start, entry.start + entry.duration),
-      }));
-  };
-
   return {
     now: () => page.evaluate(() => performance.now()),
     /**
@@ -119,26 +87,35 @@ export async function inputLatency(page: Page) {
           REPORTED_FROM,
       );
     },
-    slowest,
-    /** The `count` slowest inputs named `name` the page has seen, split as `slowest` splits them. */
-    slowestOf: async (name: string, count = 5): Promise<Slow[]> => {
-      const starts = await page.evaluate(
-        (name) =>
-          (window as unknown as { timed: Timed[] }).timed
-            .filter((entry) => entry.name === name)
-            .map(({ start }) => start),
-        name,
+    /**
+     * The inputs named `name` at these timestamps, or every one the page has seen, each split into
+     * the wait before its handlers ran, the handlers and the wait for the frame, with the scripts
+     * that ran longest in the long frames it spanned.
+     */
+    inputs: async (name: string, timestamps?: readonly number[]): Promise<Slow[]> => {
+      const { timed, frames } = await page.evaluate(() => {
+        const { timed, frames } = window as unknown as { timed: Timed[]; frames: LongFrame[] };
+        return { timed, frames };
+      });
+      const inputs = timed.filter((entry) => entry.name === name);
+      return (timestamps ?? inputs.map(({ start }) => start)).flatMap((at, nth) =>
+        inputs
+          .filter((entry) => Math.abs(entry.start - at) < SAME_INPUT_MS)
+          .map((entry) => ({
+            latency: entry.duration,
+            nth,
+            inputDelay: Math.round(entry.processingStart - entry.start),
+            processing: Math.round(entry.processingEnd - entry.processingStart),
+            presentation: Math.round(entry.start + entry.duration - entry.processingEnd),
+            scripts: scriptsDuring(frames, entry.start, entry.start + entry.duration),
+          })),
       );
-      return slowest(name, starts, count);
     },
     /**
-     * The slowest of these spans on this page, such as a keystroke until its matches painted, with
-     * the asks of the Mailroom that went during each and the long frames' scripts.
+     * These spans on this page, such as a keystroke until its matches painted, with the asks of the
+     * Mailroom that went during each and the long frames' scripts.
      */
-    slowestSpans: async (
-      spans: readonly { start: number; latency: number }[],
-      count = 5,
-    ): Promise<Slow[]> => {
+    spans: async (spans: readonly { start: number; latency: number }[]): Promise<Slow[]> => {
       const { frames, asks } = await page.evaluate(() => ({
         frames: (window as unknown as { frames: LongFrame[] }).frames,
         asks: (performance.getEntriesByType('resource') as PerformanceResourceTiming[])
@@ -153,23 +130,19 @@ export async function inputLatency(page: Page) {
             ),
           })),
       }));
-      return spans
-        .map((span, nth) => ({ ...span, nth }))
-        .toSorted((a, b) => b.latency - a.latency)
-        .slice(0, count)
-        .map(({ start, latency, nth }) => ({
-          latency: Math.round(latency),
-          nth,
-          asks: asks
-            .filter((ask) => ask.start >= start && ask.start < start + latency)
-            .map(({ name, start: at, end, server }): Ask => ({
-              name,
-              after: Math.round(at - start),
-              took: Math.round(end - at),
-              server,
-            })),
-          scripts: scriptsDuring(frames, start, start + latency),
-        }));
+      return spans.map(({ start, latency }, nth) => ({
+        latency: Math.round(latency),
+        nth,
+        asks: asks
+          .filter((ask) => ask.start >= start && ask.start < start + latency)
+          .map(({ name, start: at, end, server }): Ask => ({
+            name,
+            after: Math.round(at - start),
+            took: Math.round(end - at),
+            server,
+          })),
+        scripts: scriptsDuring(frames, start, start + latency),
+      }));
     },
   };
 }

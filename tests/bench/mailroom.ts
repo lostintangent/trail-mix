@@ -10,7 +10,8 @@ import {
 import { PAGE_SIZE, type Page } from '../../src/features/mailroom/client/contract.ts';
 import { caFile, ports, running, start, stop } from '../mail-server/server.ts';
 import { startWorker, type LocalWorker } from '../workerd.ts';
-import { percentile, type BenchArea, type Measurement } from './budget.ts';
+import { measuring, percentile, type BenchArea } from './budget.ts';
+import { member } from '../mailrooms.ts';
 import {
   BENCH_INBOX,
   LONG_THREAD,
@@ -59,6 +60,11 @@ const COMPLETIONS = 10;
 
 const INBOX = { in: 'inbox' } satisfies View;
 
+const measured = measuring('mailroom');
+
+/** The bench member's Mailroom, called as a browser calls it. */
+type Call = ReturnType<typeof member>['call'];
+
 export const mailroom: BenchArea = {
   measure: async () => {
     // A server already running belongs to someone else, and is left as it is.
@@ -78,44 +84,12 @@ export const mailroom: BenchArea = {
         },
         { env: { NODE_EXTRA_CA_CERTS: caFile } },
       );
-      const sync = await firstSync(worker);
-      const reads = await readTimes(worker.url);
+      const { call } = member('bench', () => worker!);
+      const sync = await firstSync(worker, call);
       return [
         measured('First sync of a 50,000-message folder', sync.total, BUDGET.firstSync),
         measured('Slowest batch of that sync, CPU', sync.slowest, BUDGET.batch),
-        measured('A page of the unified Inbox, p95', reads.page, BUDGET.inboxPage),
-        measured(
-          `The unified Inbox's last page, at ${reads.inboxLast.at}, p95`,
-          reads.inboxLast.time,
-          BUDGET.pageAnywhere,
-        ),
-        measured(
-          `The Inbox folder's last page, at ${reads.folderLast.at}, p95`,
-          reads.folderLast.time,
-          BUDGET.pageAnywhere,
-        ),
-        measured(
-          `The unified Inbox's unread last page, at ${reads.unreadLast.at}, p95`,
-          reads.unreadLast.time,
-          BUDGET.pageAnywhere,
-        ),
-        measured(
-          `A page around the unified Inbox's deepest row, p95`,
-          reads.inboxLast.around,
-          BUDGET.pageAnywhere,
-        ),
-        measured(
-          `A page around the Inbox folder's deepest row, p95`,
-          reads.folderLast.around,
-          BUDGET.pageAnywhere,
-        ),
-        measured(
-          `A page around the unified Inbox's deepest unread row, p95`,
-          reads.unreadLast.around,
-          BUDGET.pageAnywhere,
-        ),
-        measured('A 50-message conversation, p95', reads.conversation, BUDGET.conversation),
-        measured('An address completion as it is typed, p95', reads.people, BUDGET.people),
+        ...(await reads(call)),
       ];
     } finally {
       worker?.stop();
@@ -125,7 +99,7 @@ export const mailroom: BenchArea = {
 };
 
 /** Adds the bench's account with a device open, and times its first sync and every Inbox batch. */
-async function firstSync({ url, group }: LocalWorker) {
+async function firstSync({ url, group }: LocalWorker, call: Call) {
   const workerd = processesIn(group, 'workerd');
   // workerd's CPU when the account's folders were listed, which is when its Inbox starts to sync,
   // and when each Inbox batch landed.
@@ -147,7 +121,7 @@ async function firstSync({ url, group }: LocalWorker) {
   });
 
   try {
-    await call(url, 'addAccount', {
+    await call('addAccount', {
       provider: 'imap',
       name: 'Bench',
       address: benchUser.email,
@@ -157,7 +131,7 @@ async function firstSync({ url, group }: LocalWorker) {
     });
     const added = performance.now();
     const deadline = added + BUDGET.firstSync * 2;
-    while ((await call<Account[]>(url, 'accounts'))[0]?.status !== 'ready') {
+    while ((await call<Account[]>('accounts'))[0]?.status !== 'ready') {
       if (performance.now() > deadline) throw new Error('The first sync did not finish.');
       await Bun.sleep(200);
     }
@@ -196,60 +170,76 @@ function tenths(batches: readonly number[]): number[] {
 }
 
 /** Times the reads where the Mailroom runs them, once the index holds the whole Inbox. */
-async function readTimes(url: string) {
-  const thread = await longThread(url);
-  const messages = await call<unknown[]>(url, 'conversation', thread.id);
-  if (messages.length !== LONG_THREAD) {
-    throw new Error(`The long conversation holds ${messages.length} messages.`);
-  }
-  const page = await call<number[]>(url, 'timed', 'conversations', [INBOX], READS);
+async function reads(call: Call) {
+  /** The p95 of a query asked `times` times in a row with each of these arguments. */
+  const p95 = async (name: string, asked: unknown[][], times = READS) => {
+    const samples: number[] = [];
+    for (const args of asked) samples.push(...(await call<number[]>('timed', name, args, times)));
+    return percentile(samples, 0.95);
+  };
   // A page anywhere reads as quickly as the first, even the last, which passes over the most rows,
   // in a unified view and in a folder, whose placements it joins to its conversations. So does one
   // asked around the list's deepest row, as a reload naming it asks, which counts every row above.
-  const lastPage = async (view: View, keep?: string) => {
-    const { total } = await call<Page>(url, 'conversations', view, 0, keep);
+  const lastPage = async (list: string, view: View, keep?: string) => {
+    const { total } = await call<Page>('conversations', view, 0, keep);
     const at = Math.max(0, Math.floor((total - 1) / PAGE_SIZE) * PAGE_SIZE);
-    const deepest = (await call<Page>(url, 'conversations', view, at, keep)).items.at(-1)!;
+    const deepest = (await call<Page>('conversations', view, at, keep)).items.at(-1)!;
     const around = { around: deepest.id };
-    const found = await call<Page>(url, 'conversations', view, around, keep);
+    const found = await call<Page>('conversations', view, around, keep);
     if (found.at !== at) throw new Error(`The deepest row was found at ${found.at}, not ${at}.`);
-    const times = await call<number[]>(url, 'timed', 'conversations', [view, at, keep], READS);
-    const aroundTimes = await call<number[]>(
-      url,
-      'timed',
-      'conversations',
-      [view, around, keep],
-      READS,
-    );
-    return { at, time: percentile(times, 0.95), around: percentile(aroundTimes, 0.95) };
+    return [
+      measured(
+        `The ${list}'s last page, at ${at}, p95`,
+        await p95('conversations', [[view, at, keep]]),
+        BUDGET.pageAnywhere,
+      ),
+      measured(
+        `A page around the ${list}'s deepest row, p95`,
+        await p95('conversations', [[view, around, keep]]),
+        BUDGET.pageAnywhere,
+      ),
+    ];
   };
-  const [account] = await call<Account[]>(url, 'accounts');
-  const inboxLast = await lastPage(INBOX);
-  const folderLast = await lastPage({
-    in: 'folder',
-    folder: { account: account!.id, path: 'INBOX' },
-  });
-  // Nothing in the bench's Inbox is seen, so its unread list is all of it, with one kept open.
-  const unreadLast = await lastPage({ in: 'inbox', unread: true }, thread.id);
-  const conversation = await call<number[]>(url, 'timed', 'conversation', [thread.id], READS);
-  const people: number[] = [];
-  for (const typed of ADDRESSED) {
-    people.push(...(await call<number[]>(url, 'timed', 'people', [typed], COMPLETIONS)));
+  const thread = await longThread(call);
+  const messages = await call<unknown[]>('conversation', thread.id);
+  if (messages.length !== LONG_THREAD) {
+    throw new Error(`The long conversation holds ${messages.length} messages.`);
   }
-  return {
-    people: percentile(people, 0.95),
-    page: percentile(page, 0.95),
-    inboxLast,
-    folderLast,
-    unreadLast,
-    conversation: percentile(conversation, 0.95),
-  };
+  const [account] = await call<Account[]>('accounts');
+  return [
+    measured(
+      'A page of the unified Inbox, p95',
+      await p95('conversations', [[INBOX]]),
+      BUDGET.inboxPage,
+    ),
+    ...(await lastPage('unified Inbox', INBOX)),
+    ...(await lastPage('Inbox folder', {
+      in: 'folder',
+      folder: { account: account!.id, path: 'INBOX' },
+    })),
+    // Nothing in the bench's Inbox is seen, so its unread list is all of it, with one kept open.
+    ...(await lastPage('unread unified Inbox', { in: 'inbox', unread: true }, thread.id)),
+    measured(
+      'A 50-message conversation, p95',
+      await p95('conversation', [[thread.id]]),
+      BUDGET.conversation,
+    ),
+    measured(
+      'An address completion as it is typed, p95',
+      await p95(
+        'people',
+        ADDRESSED.map((typed) => [typed]),
+        COMPLETIONS,
+      ),
+      BUDGET.people,
+    ),
+  ];
 }
 
 /** The 50-message conversation, found by its subject in the unified Inbox, newest first. */
-async function longThread(url: string): Promise<ConversationSummary> {
+async function longThread(call: Call): Promise<ConversationSummary> {
   for (let at = 0, pages = 0; pages < 100; pages++) {
-    const page = await call<Page>(url, 'conversations', INBOX, at);
+    const page = await call<Page>('conversations', INBOX, at);
     const found = page.items.find(
       (item): item is ConversationSummary =>
         !isBundle(item) && item.subject.endsWith(LONG_THREAD_SUBJECT),
@@ -291,19 +281,4 @@ function cpuOf(pids: readonly number[]): number {
     .trim()
     .split('\n')
     .reduce((total, time) => total + seconds(time.trim()) * 1000, 0);
-}
-
-/** Calls the bench member's Mailroom, as the test worker lets a bench do. */
-async function call<T = unknown>(url: string, name: string, ...args: unknown[]): Promise<T> {
-  const response = await fetch(`${url}/bench/call`, {
-    method: 'POST',
-    body: JSON.stringify({ name, args }),
-  });
-  const result = await response.json<{ value?: T; error?: string }>();
-  if (result.error !== undefined) throw new Error(`${name}: ${result.error}`);
-  return result.value as T;
-}
-
-function measured(name: string, value: number, budget: number): Measurement {
-  return { area: 'mailroom', name, value, budget, unit: 'ms' };
 }

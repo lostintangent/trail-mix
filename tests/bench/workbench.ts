@@ -1,7 +1,7 @@
 import { gzipSync } from 'node:zlib';
 import { chromium, type Page, type Response } from 'playwright';
 import { startPreview } from '../e2e/preview.ts';
-import { percentile, type BenchArea, type Measurement, type Slow } from './budget.ts';
+import { measuring, percentile, type BenchArea, type Pooled, type Slow } from './budget.ts';
 import { phone, slowDown } from './phone.ts';
 import { inputLatency, type InputLatency } from './latency.ts';
 import { watch, type Watch } from './steady.ts';
@@ -53,6 +53,8 @@ const ROUNDS = 5;
 /** How many conversations are archived in a row. */
 const ARCHIVES = 60;
 
+const measured = measuring('workbench');
+
 export const workbench: BenchArea = {
   measure: async () => {
     const preview = await startPreview({ DEMO_MAILBOX: MESSAGES, DEV_MEMBER: MEMBER });
@@ -81,8 +83,6 @@ export const workbench: BenchArea = {
         await page.goto(preview.url);
         return firstRows(page);
       });
-      console.log('The cold load, step by step, in ms from navigation:');
-      console.table(await coldLoadSteps(page));
       // Only the cold load's scripts count. A reload revalidates them, and a 304 has no body.
       page.off('response', sized);
       const firstLoadJs = (await Promise.all(scripts)).reduce((sum, size) => sum + size, 0);
@@ -91,26 +91,16 @@ export const workbench: BenchArea = {
         await phoneWatch.during('Scrolling', () => scrollFrames(page)),
         0.95,
       );
-      const typed: Typed[] = [];
-      const searchSlowest: Slow[] = [];
-      for (let round = 1; round <= ROUNDS; round++) {
-        if (round > 1) {
-          await page.reload();
-          await firstRows(page);
-        }
-        // A round's spans are read on its own page, by that page's clock.
-        const timing = await inputLatency(page);
+      const search = await pooled(page, 'reload', async (timing, round) => {
         await phoneWatch.steady();
         const keystrokes = await phoneWatch.during(`Searching as it is typed, round ${round}`, () =>
           searchKeystrokes(page),
         );
-        typed.push(...keystrokes);
-        searchSlowest.push(...(await timing.slowestSpans(keystrokes)));
-      }
-      const search = percentile(
-        typed.map(({ latency }) => latency),
-        0.95,
-      );
+        return {
+          latencies: keystrokes.map(({ latency }) => latency),
+          slowest: await timing.spans(keystrokes),
+        };
+      });
       await context.close();
 
       // Keys move through the list on a desktop, where the list stays in view as its selection opens.
@@ -120,35 +110,22 @@ export const workbench: BenchArea = {
       await slowDown(desk);
       await desk.goto(preview.url);
       await firstRows(desk);
-      const moves: number[] = [];
-      const keySlowest: Slow[] = [];
-      for (let round = 1; round <= ROUNDS; round++) {
-        if (round > 1) {
-          await desk.reload();
-          await firstRows(desk);
-        }
-        const timing = await inputLatency(desk);
+      const keyMove = await pooled(desk, 'reload', async (timing, round) => {
         // The moves start from the first conversation, open, read and settled, so the read mark that
         // opening it sends lands before the moves are timed.
         await desk.getByRole('option').first().click();
         await deskWatch.steady();
         await desk.locator('[role="listbox"]').focus();
-        const keys = await deskWatch.during(`Moving by key, round ${round}`, () =>
+        return deskWatch.during(`Moving by key, round ${round}`, () =>
           keyMoves(desk, timing, DOWN, REPEATS),
         );
-        moves.push(...keys.latencies);
-        keySlowest.push(...(await timing.slowest('keydown', keys.timestamps)));
-      }
-      const keyMove = percentile(moves, 0.95);
+      });
 
-      // J steps through a bundle's threads from its first, past the page the bundle opened with.
-      const steps: number[] = [];
-      const threadSlowest: Slow[] = [];
-      for (let round = 1; round <= ROUNDS; round++) {
-        // From the Inbox's top, since a reload would keep the place the last round left.
-        await desk.goto(preview.url);
-        await firstRows(desk);
-        const timing = await inputLatency(desk);
+      // J steps through a bundle's threads from its first, past the page the bundle opened with. Each
+      // round starts from the Inbox's top, since a reload would keep the place the last round left.
+      await desk.goto(preview.url);
+      await firstRows(desk);
+      const threadMove = await pooled(desk, preview.url, async (timing, round) => {
         await openFirstThread(desk);
         await deskWatch.steady();
         const keys = await deskWatch.during(`Moving through a bundle by key, round ${round}`, () =>
@@ -160,16 +137,16 @@ export const workbench: BenchArea = {
             `Holding J ${THREAD_REPEATS} times from the first thread reached ${place}.`,
           );
         }
-        steps.push(...keys.latencies);
-        threadSlowest.push(...(await timing.slowest('keydown', keys.timestamps)));
-      }
-      const threadMove = percentile(steps, 0.95);
+        return keys;
+      });
 
       await desk.goto(preview.url);
       await firstRows(desk);
       const latency = await inputLatency(desk);
-      const archive = percentile(await archives(desk, deskWatch, latency), 0.95);
-      const archiveSlowest = await latency.slowestOf('click');
+      const archive = {
+        p95: percentile(await archives(desk, deskWatch, latency), 0.95),
+        slowest: await latency.inputs('click'),
+      };
       await desktop.close();
 
       return [
@@ -181,22 +158,10 @@ export const workbench: BenchArea = {
           BUDGET.scrollFrame + FRAME_SLACK,
           'ms',
         ),
-        measured('Moving through the list by key, p95', keyMove, BUDGET.keyMove, 'ms', keySlowest),
-        measured(
-          "Moving through a bundle's threads by key, p95",
-          threadMove,
-          BUDGET.keyMove,
-          'ms',
-          threadSlowest,
-        ),
-        measured('Archiving, p95', archive, BUDGET.archive, 'ms', archiveSlowest),
-        measured(
-          'Search showing matches as it is typed, p95',
-          search,
-          BUDGET.search,
-          'ms',
-          searchSlowest,
-        ),
+        measured('Moving through the list by key, p95', keyMove, BUDGET.keyMove),
+        measured("Moving through a bundle's threads by key, p95", threadMove, BUDGET.keyMove),
+        measured('Archiving, p95', archive, BUDGET.archive),
+        measured('Search showing matches as it is typed, p95', search, BUDGET.search),
       ];
     } finally {
       await browser.close();
@@ -205,15 +170,28 @@ export const workbench: BenchArea = {
   },
 };
 
-function measured(
-  name: string,
-  value: number,
-  budget: number,
-  unit: Measurement['unit'],
-  slowest?: Slow[],
-): Measurement {
-  const worst = slowest?.toSorted((a, b) => b.latency - a.latency).slice(0, 5);
-  return { area: 'workbench', name, value, budget, unit, ...(worst && { slowest: worst }) };
+/**
+ * Runs a round of inputs `ROUNDS` times, the first on the page as it is and each after it on a fresh
+ * page, reloaded when `from` says `reload` or else gone to it, and pools every input into one p95.
+ */
+async function pooled(
+  page: Page,
+  from: string,
+  round: (timing: InputLatency, nth: number) => Promise<{ latencies: number[]; slowest: Slow[] }>,
+): Promise<Pooled> {
+  const latencies: number[] = [];
+  const slowest: Slow[] = [];
+  for (let nth = 1; nth <= ROUNDS; nth++) {
+    if (nth > 1) {
+      await (from === 'reload' ? page.reload() : page.goto(from));
+      await firstRows(page);
+    }
+    // A round's inputs are read on its own page, by that page's clock.
+    const measured = await round(await inputLatency(page), nth);
+    latencies.push(...measured.latencies);
+    slowest.push(...measured.slowest);
+  }
+  return { p95: percentile(latencies, 0.95), slowest };
 }
 
 /**
@@ -276,36 +254,6 @@ async function firstRows(page: Page): Promise<number> {
   );
 }
 
-/**
- * Where the cold load's time went, from the page's own timings: the HTML, the scripts arriving, each
- * query to the Mailroom from start to end, and the first rows on screen.
- */
-function coldLoadSteps(page: Page): Promise<{ step: string; start: number; end: number }[]> {
-  return page.evaluate(() => {
-    const at = (ms: number) => Math.round(ms);
-    const [navigation] = performance.getEntriesByType(
-      'navigation',
-    ) as PerformanceNavigationTiming[];
-    const resources = performance.getEntriesByType('resource') as PerformanceResourceTiming[];
-    const scripts = resources.filter(({ name }) => new URL(name).pathname.endsWith('.js'));
-    const queries = resources.filter(({ name }) => name.includes('/_serverFn/'));
-    return [
-      { step: 'HTML', start: 0, end: at(navigation?.responseEnd ?? 0) },
-      {
-        step: 'Scripts',
-        start: at(Math.min(...scripts.map(({ startTime }) => startTime))),
-        end: at(Math.max(...scripts.map(({ responseEnd }) => responseEnd))),
-      },
-      ...queries.map(({ name, startTime, responseEnd }) => ({
-        step: `Query ${/"s":"(\w+)"/.exec(new URL(name).searchParams.get('payload') ?? '')?.[1]}`,
-        start: at(startTime),
-        end: at(responseEnd),
-      })),
-      { step: 'First rows', start: at(performance.now()), end: at(performance.now()) },
-    ];
-  });
-}
-
 /** The interval between each frame while the list scrolls 120 pixels a frame for three seconds. */
 function scrollFrames(page: Page): Promise<number[]> {
   return page.evaluate(
@@ -365,7 +313,7 @@ async function keyMoves(
   latency: InputLatency,
   key: Key,
   repeats: number,
-): Promise<{ latencies: number[]; timestamps: number[] }> {
+): Promise<{ latencies: number[]; slowest: Slow[] }> {
   await page.evaluate(() => {
     const seen = { keys: [] as number[], opened: [] as string[] };
     (window as unknown as { seen: typeof seen }).seen = seen;
@@ -406,7 +354,10 @@ async function keyMoves(
     throw new Error(`The reader opened ${seen.opened.length} conversations while a key was held.`);
   }
   // Each key by the page's own record of it, since its timestamp comes from this process's clock.
-  return { latencies: await latency.at('keydown', seen.keys), timestamps: seen.keys };
+  return {
+    latencies: await latency.at('keydown', seen.keys),
+    slowest: await latency.inputs('keydown', seen.keys),
+  };
 }
 
 /**

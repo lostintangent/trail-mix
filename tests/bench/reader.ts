@@ -2,16 +2,17 @@ import { chromium, type Page } from 'playwright';
 import { startPreview } from '../e2e/preview.ts';
 import { slowDown } from './phone.ts';
 import { watch } from './steady.ts';
-import { percentile, type BenchArea } from './budget.ts';
+import { measuring, percentile, type BenchArea } from './budget.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 
 /**
  * The reader's budgets, as AGENTS.md sets them. Moving by key to a conversation whose newest
  * message is 300 KB of HTML renders within 200 ms, its body fetched and sanitized ahead while the
  * browser was idle. What is timed is the frame drawn, sized and shown with the start of the
- * message, which is several screens of it. The rest of long mail follows once the member stays. That move comes after a rest, which the reader follows at once. The repeats of
- * a key held down after it still move through the list within 50 ms, because the reader waits for
- * the selection to rest. It runs on the built app with a 50,000-message demo mailbox at the phone's
+ * message, which is several screens of it. The rest of long mail follows once the member stays.
+ * That move comes after a rest, which the reader follows at once. The repeats of a key held down
+ * after it still move through the list within 50 ms, because the reader waits for the selection to
+ * rest. It runs on the built app with a 50,000-message demo mailbox at the phone's
  * CPU, around the demo's Kernel Weekly, which is that newsletter.
  */
 const BUDGET = { preparedMove: 200, heldKey: 50 };
@@ -28,6 +29,8 @@ const IDLE_MS = 3_000;
 
 /** A keyboard's usual delay between pressing a key and its first repeat. */
 const REPEAT_DELAY_MS = 500;
+
+const measured = measuring('reader');
 
 export const reader: BenchArea = {
   measure: async () => {
@@ -87,20 +90,16 @@ export const reader: BenchArea = {
       }
 
       return [
-        {
-          area: 'reader',
-          name: 'Moving to a prepared 300 KB conversation, p95',
-          value: percentile(moves, 0.95),
-          budget: BUDGET.preparedMove,
-          unit: 'ms',
-        },
-        {
-          area: 'reader',
-          name: 'Holding a key with a conversation open, p95',
-          value: percentile(held.times, 0.95),
-          budget: BUDGET.heldKey,
-          unit: 'ms',
-        },
+        measured(
+          'Moving to a prepared 300 KB conversation, p95',
+          percentile(moves, 0.95),
+          BUDGET.preparedMove,
+        ),
+        measured(
+          'Holding a key with a conversation open, p95',
+          percentile(held.times, 0.95),
+          BUDGET.heldKey,
+        ),
       ];
     } finally {
       await browser.close();

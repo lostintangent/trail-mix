@@ -28,6 +28,24 @@ export type Slow = {
 /** One ask of the Mailroom: its name, when it went after the input and how long it took, in ms. */
 export type Ask = { name: string; after: number; took: number; server: Record<string, number> };
 
+/** A p95 pooled from many inputs, with the slowest of them. */
+export type Pooled = { p95: number; slowest: Slow[] };
+
+/** How `area` measures a budget: as a value, or as a pooled p95 with its five slowest inputs. */
+export const measuring =
+  (area: string) =>
+  (name: string, measure: number | Pooled, budget: number, unit: Measurement['unit'] = 'ms') =>
+    typeof measure === 'number'
+      ? { area, name, value: measure, budget, unit }
+      : {
+          area,
+          name,
+          value: measure.p95,
+          budget,
+          unit,
+          slowest: measure.slowest.toSorted((a, b) => b.latency - a.latency).slice(0, 5),
+        };
+
 /** A part of Trail Mix whose budgets one module measures, under the numbers in AGENTS.md. */
 export type BenchArea = { measure: () => Promise<Measurement[]> };
 
