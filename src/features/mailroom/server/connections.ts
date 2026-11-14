@@ -101,8 +101,12 @@ export function connections(ports: {
     provider,
     signersOf,
 
-    /** The demo's list servers for a demo account, which its one-click unsubscribes post to. */
-    async demoLists(account: AccountId): Promise<DemoServer> {
+    /**
+     * The demo's list servers for a demo account, which its one-click unsubscribes post to, and
+     * nothing for any other account.
+     */
+    async demoLists(account: AccountId): Promise<DemoServer | undefined> {
+      if (book.get(account)?.connection.provider !== 'demo') return undefined;
       await provider(account);
       const lists = demoServers.get(account);
       if (!lists) throw new Error('There is no such account.');

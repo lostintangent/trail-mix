@@ -1,8 +1,46 @@
 import { isPublicHost } from '../../../shared/public-host.ts';
+import { oneClickUnsubscribe, type AccountId, type MessageRef } from '../../mail/core/index.ts';
+import { namesThisMachine, type DemoServer } from '../../providers/index.ts';
 import type { Unsubscribed } from '../client/contract.ts';
 
 /** What carries a POST: the internet, or the demo's list servers, which stand in for it. */
 type Post = (url: URL, init: RequestInit) => Promise<Response>;
+
+export type OneClick = ReturnType<typeof oneClick>;
+
+/**
+ * Leaving the list a message came from, by the one-click offer its body names: checked again from
+ * the message itself, then posted as `unsubscribeAt` says. The demo's list servers answer it
+ * without the network, since nothing in the demo is real.
+ */
+export function oneClick(ports: {
+  bytes: (ref: MessageRef) => Promise<Uint8Array | null>;
+  /** The names whose Authentication-Results an account's mail is verified by. */
+  signersOf: (account: AccountId) => readonly string[];
+  /** The demo's list servers, for a demo account alone. */
+  demoLists: (account: AccountId) => Promise<DemoServer | undefined>;
+  /** A test's stand-in for the senders' servers, honored only when it names this machine. */
+  standIn: string | undefined;
+}) {
+  return {
+    async unsubscribe(message: MessageRef): Promise<Unsubscribed> {
+      const bytes = await ports.bytes(message);
+      if (!bytes) throw new Error('That message is no longer in this mailbox.');
+      const address = oneClickUnsubscribe(headerOf(bytes), ports.signersOf(message.account));
+      if (!address) {
+        return { taken: false, reason: 'This message doesn’t offer to unsubscribe in one click.' };
+      }
+      const lists = await ports.demoLists(message.account);
+      if (lists) return unsubscribeAt(address, (url) => lists.unsubscribe(url.href));
+      const { standIn } = ports;
+      return unsubscribeAt(
+        address,
+        internet,
+        standIn && namesThisMachine(standIn) ? standIn : undefined,
+      );
+    },
+  };
+}
 
 /**
  * One-click unsubscribe (RFC 8058) as the Mailroom carries it out: one POST of

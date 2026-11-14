@@ -6,7 +6,6 @@ import { messageOf } from '../../composer/index.ts';
 import { createProblem, deleteProblem, inside, renameProblem } from '../../folders/core/index.ts';
 import {
   messageIdOf,
-  oneClickUnsubscribe,
   referencesOf,
   refKey,
   refOf,
@@ -93,10 +92,11 @@ import {
   type ConnectedAccounts,
   type DemoSettings,
 } from './accounts.ts';
+import { bodyCache, type BodyBatches, type BodyCache } from './bodies.ts';
 import { connections, type Connections, type ImapCode } from './connections.ts';
 import { credentialsOf } from './credentials.ts';
 import { notifying, type Notifying } from './notifying.ts';
-import { envelopeIndex, pageAfter, type EnvelopeIndex } from './envelope-index.ts';
+import { envelopeIndex, type EnvelopeIndex } from './envelope-index.ts';
 import * as input from './input.ts';
 import {
   avatarCache,
@@ -112,11 +112,11 @@ import {
 import { upgrade, type Sql, type SqlValue } from './schema.ts';
 import { outboxQueue, PRESS_KEPT_MS, type OutboxQueue } from './outbox.ts';
 import { replacedDrafts, type ReplacedDrafts } from './replaced.ts';
-import { foundOf, opened, type Found } from './search.ts';
+import { fullTextSearch, type FullTextSearch } from './search.ts';
 import { signingIn, type SigningIn } from './sign-ins.ts';
 import { report } from './report.ts';
 import { syncQueue, WAKE, type SyncQueue } from './sync.ts';
-import { headerOf, internet, unsubscribeAt } from './unsubscribe.ts';
+import { oneClick, type OneClick } from './unsubscribe.ts';
 
 export type MailroomEnv = {
   /** The body cache: raw messages, by member, account and ref. */
@@ -183,8 +183,6 @@ const VISITORS_KEEP =
 const MOVED_IN_HELD = 1_000;
 /** The most domains and senders one wake looks up pictures for. */
 const AVATAR_LOOKUPS = { domains: 6, senders: 16 };
-/** The most cached bodies one wake lets go, in deletes of at most as many keys as a bucket takes. */
-const BODIES_LET_GO = { wake: 10_000, delete: 1_000 };
 /** Where the id that names what an installed app keeps is stored. */
 const CACHE_KEY = 'cache';
 /** The most conversations one wake makes rows of again, as an upgrade asks. */
@@ -209,6 +207,9 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   private readonly connections: Connections;
   private readonly signingIn: SigningIn;
   private readonly connected: ConnectedAccounts;
+  private readonly fullText: FullTextSearch;
+  private readonly bodies: BodyCache;
+  private readonly oneClick: OneClick;
   private readonly watchers = new Map<AccountId, () => void>();
   protected readonly queue: SyncQueue;
   protected readonly sending: OutboxQueue;
@@ -219,10 +220,6 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   protected openedAt: number;
   /** How long unopened before it rests, and before it erases itself. */
   private readonly windDown: WindDown;
-  /** The last full-text search. Only memory holds it, so a restart forgets it. */
-  private found: Found | undefined;
-  /** Drafts this Mailroom filed, whose attachments the next version may carry before sync sees it. */
-  private readonly drafts = new Set<string>();
   /** Sends whose last save is being filed, by the press that named them. Memory alone holds them. */
   protected readonly handing = new Map<string, Handing>();
   /** Saves being filed, by the id they were asked under. Memory alone holds them. */
@@ -290,12 +287,30 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       hint,
       check,
     });
+    const provider = (account: AccountId) => this.connections.provider(account);
+    const signersOf = (account: AccountId) => this.connections.signersOf(account);
+    this.fullText = fullTextSearch({ book: this.book, store: this.store, provider });
+    this.bodies = bodyCache({
+      bucket: env.BODIES,
+      member: this.member,
+      sql: this.sql,
+      store: this.store,
+      provider,
+      isKnown: (ref) => this.fullText.known(ref) !== undefined,
+      signersOf,
+    });
+    this.oneClick = oneClick({
+      bytes: (ref) => this.bodies.bytes(ref),
+      signersOf,
+      demoLists: (account) => this.connections.demoLists(account),
+      standIn: env.UNSUBSCRIBE_STAND_IN,
+    });
     this.notifying = notifying(this.sql);
     this.queue = syncQueue({
       sql: this.sql,
       store: this.store,
       hint,
-      provider: (account) => this.connections.provider(account),
+      provider,
       window: (account) => this.connected.windowOf(account),
       settled: (account, error) => {
         if (error) report(error);
@@ -310,7 +325,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     });
     this.sending = outboxQueue({
       sql: this.sql,
-      provider: (account) => this.connections.provider(account),
+      provider,
       hint,
       sent: ({ draft }) => {
         this.queue.folder({ account: draft.account, path: draft.path });
@@ -383,12 +398,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       return this.named(this.store.page(checked, asked, undefined, input.keptOf(keep)));
     }
     if (!checked.fullText) return this.named(this.store.search(checked.text, asked));
-    // The first page asks the servers again. Pages further down, and a page around a result, read
-    // what that one found.
-    if (asked === 0 || this.found?.text !== checked.text) {
-      this.found = await this.searchServers(checked.text);
-    }
-    return this.named(pageAfter(this.found.rows, asked));
+    return this.named(await this.fullText.page(checked.text, asked));
   }
 
   people(typed: string): Promise<Address[]> {
@@ -408,31 +418,12 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   }
 
   conversation(id: ConversationId): Promise<Message[]> {
-    const messages = opened(input.conversationOf(id), this.store, this.found?.outside ?? []);
+    const messages = this.fullText.conversation(input.conversationOf(id));
     return Promise.resolve(namedMessages(messages, this.pictures(avatarCandidates([], messages))));
   }
 
-  async body(ref: MessageRef): Promise<Body> {
-    const bytes = await this.bytes(input.refOf(ref));
-    if (!bytes) throw new Error('That message is no longer in this mailbox.');
-    const parsed = await PostalMime.parse(bytes);
-    const unsubscribe = oneClickUnsubscribe(
-      headerOf(bytes),
-      this.connections.signersOf(ref.account),
-    );
-    return {
-      ...(parsed.html === undefined ? {} : { html: parsed.html }),
-      ...(parsed.text === undefined ? {} : { text: parsed.text }),
-      attachments: parsed.attachments.map((attachment, index) => ({
-        id: String(index),
-        name: attachment.filename ?? `Attachment ${index + 1}`,
-        type: attachment.mimeType,
-        size: sizeOf(attachment.content),
-        ...(attachment.contentId ? { contentId: attachment.contentId.replace(/^<|>$/g, '') } : {}),
-      })),
-      headers: parsed.headers.map((header) => [header.originalKey, header.value]),
-      ...(unsubscribe ? { unsubscribe } : {}),
-    };
+  body(ref: MessageRef): Promise<Body> {
+    return this.bodies.read(input.refOf(ref));
   }
 
   outbox(): Promise<Outgoing[]> {
@@ -507,7 +498,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       this.signingIn.forget(account);
       this.notifying.forgetAccount(account);
     });
-    this.found = undefined;
+    this.fullText.forget();
     this.hint({ changed: 'accounts' });
     this.hint({ changed: 'folders', account });
     for (const folder of folders)
@@ -528,32 +519,9 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     return Promise.resolve();
   }
 
-  /**
-   * Leaves the list a message came from, by the one-click offer its body names: checked again from
-   * the message itself, then posted as `unsubscribeAt` says. The demo's list servers answer it
-   * without the network, since nothing in the demo is real.
-   */
-  async unsubscribe(ref: MessageRef): Promise<Unsubscribed> {
-    const message = input.refOf(ref);
-    const bytes = await this.bytes(message);
-    if (!bytes) throw new Error('That message is no longer in this mailbox.');
-    const address = oneClickUnsubscribe(
-      headerOf(bytes),
-      this.connections.signersOf(message.account),
-    );
-    if (!address) {
-      return { taken: false, reason: 'This message doesn’t offer to unsubscribe in one click.' };
-    }
-    if (this.book.get(message.account)?.connection.provider === 'demo') {
-      const lists = await this.connections.demoLists(message.account);
-      return unsubscribeAt(address, (url) => lists.unsubscribe(url.href));
-    }
-    const standIn = this.env.UNSUBSCRIBE_STAND_IN;
-    return unsubscribeAt(
-      address,
-      internet,
-      standIn && namesThisMachine(standIn) ? standIn : undefined,
-    );
+  /** Leaves the list a message came from, by the one-click offer its body names. */
+  unsubscribe(ref: MessageRef): Promise<Unsubscribed> {
+    return this.oneClick.unsubscribe(input.refOf(ref));
   }
 
   eraseEverything(): Promise<void> {
@@ -565,7 +533,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   private async erase() {
     const accounts = this.book.all();
     for (const { id } of accounts) await this.disconnect(id);
-    this.found = undefined;
+    this.fullText.forget();
     this.signingIn.clear();
     try {
       await this.ctx.storage.deleteAlarm();
@@ -822,7 +790,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       const held = await (await this.connections.provider(account.id)).findDraft(messageId);
       if (held) return { ...this.filed(held, older), addressing };
     }
-    const known = checked.inReplyTo && this.known(checked.inReplyTo);
+    const known = checked.inReplyTo && this.fullText.known(checked.inReplyTo);
     if (checked.inReplyTo && !known && !older) {
       throw new Error('The message this replies to is gone.');
     }
@@ -835,8 +803,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
         attachments.push({ name, type, content, ...(contentId ? { contentId } : {}) });
         continue;
       }
-      const bytes = await this.bytes(attachment.in);
-      const held = bytes && (await attachmentOf(bytes, Number(attachment.id)));
+      const held = await this.bodies.attachment(attachment.in, Number(attachment.id));
       if (!held) throw new Error('An attachment this draft carried over is gone.');
       attachments.push(held);
     }
@@ -867,15 +834,14 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 
   /** Notes a draft filed in place of the version before it, which its server now owes a discard. */
   private filed(saved: MessageRef, older: MessageRef | undefined) {
-    this.drafts.add(refKey(saved));
+    this.bodies.filed(saved);
     const replacing = older && !sameRef(older, saved) ? older : undefined;
     if (replacing) {
       // The member waits only for the new version. The old one is owed a discard before anything
       // else is awaited, and the next wake makes it before its sync, and lets its bytes go, so the
       // cache keeps only the newest draft's.
       this.replaced.owe(replacing);
-      this.drafts.delete(refKey(replacing));
-      this.store.oweBody(replacing);
+      this.bodies.replaced(replacing);
       this.sending.release(replacing);
     }
     return { saved, ...(replacing ? { replacing } : {}) };
@@ -887,7 +853,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     // this save owes. Once the draft is filed, a failure here costs only that wait, so it never
     // fails the save, which a retry would file again. A copy found rather than filed was written
     // by an ask before, so only the server's bytes are its own.
-    if (raw) await this.env.BODIES.put(this.bodyKey(saved), raw).catch(report);
+    if (raw) await this.bodies.keep(saved, raw).catch(report);
     // A discard owes its folder's sync, so no sync this save asks for finds both versions.
     await this.owe(() => {
       if (replacing?.path !== saved.path) {
@@ -981,27 +947,17 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     return Promise.resolve(this.avatars.picture(key) ?? null);
   }
 
-  async source(ref: MessageRef): Promise<ReadableStream<Uint8Array> | null> {
+  source(ref: MessageRef): Promise<ReadableStream<Uint8Array> | null> {
     this.noteOpened();
-    const bytes = await this.bytes(input.refOf(ref));
-    return bytes && new Blob([bytes]).stream();
+    return this.bodies.source(input.refOf(ref));
   }
 
-  async part(
+  part(
     ref: MessageRef,
     attachmentId: string,
   ): Promise<{ body: ReadableStream<Uint8Array>; type: string; name: string } | null> {
     this.noteOpened();
-    const bytes = await this.bytes(input.refOf(ref));
-    if (!bytes || !/^\d{1,4}$/.test(String(attachmentId))) return null;
-    const attachment = await attachmentOf(bytes, Number(attachmentId));
-    if (!attachment) return null;
-    return {
-      // The Workers runtime types a Blob's stream loosely, as ReadableStream<any>, so it's named here.
-      body: new Blob([attachment.content]).stream() as ReadableStream<Uint8Array>,
-      type: attachment.type,
-      name: attachment.name,
-    };
+    return this.bodies.part(input.refOf(ref), attachmentId);
   }
 
   // The hint socket, and staying current
@@ -1447,78 +1403,8 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     await this.connections.close(account);
   }
 
-  /** Asks every folder of every account's server, and keeps what they found apart from the index. */
-  private async searchServers(text: string): Promise<Found> {
-    const hits = await Promise.all(
-      this.book.all().map(async ({ id }) => {
-        const found: Envelope[] = [];
-        try {
-          const provider = await this.connections.provider(id);
-          for (const { path } of this.store.folders(id)) {
-            // A folder the server won't search leaves out its hits, and the rest still count.
-            found.push(
-              ...(await provider.search(path, text).catch((error: unknown) => {
-                report(error);
-                return [];
-              })),
-            );
-          }
-        } catch (error) {
-          report(error);
-        }
-        return found;
-      }),
-    );
-    return foundOf(text, hits.flat(), this.store);
-  }
-
   protected get member() {
     return this.ctx.id.toString();
-  }
-
-  /**
-   * A message's raw bytes: from the cache, or from the server once and kept from then on, while
-   * the index holds the message. A draft this Mailroom saved is kept as it wrote it. A body whose
-   * message leaves the index, or that the index never held, goes at the next wake.
-   */
-  private async bytes(ref: MessageRef): Promise<Uint8Array<ArrayBuffer> | null> {
-    const key = this.bodyKey(ref);
-    const cached = await this.env.BODIES.get(key);
-    if (cached) return new Uint8Array(await cached.arrayBuffer());
-    if (!this.known(ref) && !this.drafts.has(refKey(ref))) return null;
-    const stream = await (await this.connections.provider(ref.account)).body(ref);
-    const bytes = new Uint8Array(await new Response(stream).arrayBuffer());
-    await this.env.BODIES.put(key, bytes);
-    // A draft just saved is indexed by the sync its save owes.
-    if (!this.store.reads.message(ref) && !this.drafts.has(refKey(ref))) this.store.oweBody(ref);
-    return bytes;
-  }
-
-  private bodyKey(ref: MessageRef) {
-    return `${this.member}/${ref.account}/${encodeURIComponent(ref.path)}/${ref.uidValidity}/${ref.uid}`;
-  }
-
-  /** The message a key in the cache keeps the body of, or nothing for a key of another shape. */
-  private bodyRef(key: string): MessageRef | undefined {
-    const prefix = `${this.member}/`;
-    if (!key.startsWith(prefix)) return undefined;
-    const [account, path, uidValidity = '', uid = '', ...more] = key
-      .slice(prefix.length)
-      .split('/');
-    const isNumber = (part: string) => /^\d+$/.test(part);
-    if (!account || path === undefined || more.length || !isNumber(uidValidity) || !isNumber(uid))
-      return undefined;
-    try {
-      return {
-        account,
-        path: decodeURIComponent(path),
-        uidValidity: Number(uidValidity),
-        uid: Number(uid),
-      };
-    } catch {
-      // Not a path `encodeURIComponent` wrote.
-      return undefined;
-    }
   }
 
   /**
@@ -1536,7 +1422,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   }
 
   private async parsedDraft(draft: MessageRef) {
-    const bytes = await this.bytes(draft);
+    const bytes = await this.bodies.bytes(draft);
     if (!bytes) throw new Error('That draft is gone.');
     const parsed = await PostalMime.parse(bytes);
     const addresses = (list: PostalAddress[] | undefined) =>
@@ -1563,7 +1449,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   ): Promise<Pick<Envelope, 'messageId' | 'references'> | undefined> {
     const drafts = this.store.folders(draft.account).find((folder) => folder.role === 'drafts');
     if (draft.path !== drafts?.path) return undefined;
-    const bytes = await this.bytes(draft).catch(() => null);
+    const bytes = await this.bodies.bytes(draft).catch(() => null);
     if (!bytes) return undefined;
     const { references, inReplyTo } = await PostalMime.parse(bytes);
     const thread = referencesOf(references, inReplyTo);
@@ -1573,61 +1459,16 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       : { messageId: parent, references: thread.slice(0, -1) };
   }
 
-  /** A message the index holds, or the last full-text search found. */
-  private known(ref: MessageRef) {
-    return this.store.reads.message(ref) ?? this.found?.outside.find((hit) => sameRef(hit, ref));
+  protected forgetBodies(prefix: string): Promise<void> {
+    return this.bodies.forget(prefix);
   }
 
-  protected async forgetBodies(prefix: string) {
-    for (let cursor: string | undefined; ;) {
-      const listed = await this.env.BODIES.list({ prefix, ...(cursor ? { cursor } : {}) });
-      if (listed.objects.length) await this.env.BODIES.delete(listed.objects.map((o) => o.key));
-      if (!listed.truncated) return;
-      cursor = listed.cursor;
-    }
+  protected letBodiesGo(): Promise<boolean> {
+    return this.bodies.letGo();
   }
 
-  /**
-   * Deletes the cached bodies owed a delete, a bucket's batch at a time, and clears what was owed
-   * once each batch is gone, so a wake that ends midway leaves the rest, and the batch it was
-   * deleting, for the next. Returns whether more are owed than one wake lets go.
-   */
-  protected async letBodiesGo(): Promise<boolean> {
-    for (let gone = 0; gone < BODIES_LET_GO.wake; gone += BODIES_LET_GO.delete) {
-      const refs = this.store.owedBodies(BODIES_LET_GO.delete);
-      if (refs.length === 0) return false;
-      await this.env.BODIES.delete(refs.map((ref) => this.bodyKey(ref)));
-      this.store.bodiesLetGo(refs);
-    }
-    return this.store.owedBodies(1).length > 0;
-  }
-
-  /**
-   * Sweeps the cache once, as a version asks after a release that kept each body after its message
-   * left: a page of the bucket at a time, it lets go every body whose message the index doesn't
-   * hold, unless it is a draft just saved, and notes the last key it listed, so a wake cut short or
-   * a restart goes on from there. Returns whether more is left than one wake lists.
-   */
-  protected async sweepBodies(pages = BODIES_LET_GO): Promise<boolean> {
-    for (let listed = 0; listed < pages.wake; listed += pages.delete) {
-      const [sweep] = this.sql.all<{ after: string | null }>(`SELECT after FROM body_sweep`);
-      if (!sweep) return false;
-      const page = await this.env.BODIES.list({
-        prefix: `${this.member}/`,
-        limit: pages.delete,
-        ...(sweep.after === null ? {} : { startAfter: sweep.after }),
-      });
-      const strays = page.objects.flatMap(({ key }) => {
-        const ref = this.bodyRef(key);
-        const isKept = !ref || this.store.reads.message(ref) || this.drafts.has(refKey(ref));
-        return isKept ? [] : [key];
-      });
-      if (strays.length) await this.env.BODIES.delete(strays);
-      const last = page.objects.at(-1)?.key;
-      if (!page.truncated) this.sql.run(`DELETE FROM body_sweep`);
-      else if (last) this.sql.run(`UPDATE body_sweep SET after = ?`, last);
-    }
-    return this.sql.all(`SELECT 1 FROM body_sweep`).length > 0;
+  protected sweepBodies(batches?: BodyBatches): Promise<boolean> {
+    return this.bodies.sweep(batches);
   }
 
   // The member's own accounts and folders
@@ -1768,27 +1609,8 @@ function durableSql(storage: DurableObjectStorage): Sql {
 
 const folderRef = ({ account, path }: FolderRef): FolderRef => ({ account, path });
 
-const sizeOf = (content: ArrayBuffer | Uint8Array | string) =>
-  typeof content === 'string' ? new TextEncoder().encode(content).length : content.byteLength;
-
 /** When a signed-in device last asked this Mailroom for something, as storage holds it. */
 function openedAtIn(sql: Sql): number | undefined {
   const [row] = sql.all<{ at: number }>(`SELECT at FROM opened`);
   return row?.at;
-}
-
-/** One attachment of a raw message, by its place among them, as `Body.attachments` numbers them. */
-async function attachmentOf(bytes: Uint8Array, index: number): Promise<MimeAttachment | undefined> {
-  const attachment = (await PostalMime.parse(bytes)).attachments[index];
-  if (!attachment) return undefined;
-  const content =
-    typeof attachment.content === 'string'
-      ? new TextEncoder().encode(attachment.content)
-      : new Uint8Array(attachment.content);
-  return {
-    name: attachment.filename ?? `Attachment ${index + 1}`,
-    type: attachment.mimeType,
-    content,
-    ...(attachment.contentId ? { contentId: attachment.contentId.replace(/^<|>$/g, '') } : {}),
-  };
 }

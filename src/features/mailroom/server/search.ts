@@ -1,12 +1,18 @@
 import {
   applySyncEvent,
   sameRef,
+  type AccountId,
   type ConversationId,
   type ConversationSummary,
   type Envelope,
   type Message,
+  type MessageRef,
 } from '../../mail/core/index.ts';
-import { matchedRow, type EnvelopeIndex } from './envelope-index.ts';
+import type { MailProvider } from '../../providers/index.ts';
+import type { Page, PageAt } from '../client/contract.ts';
+import type { AccountBook } from './accounts.ts';
+import { matchedRow, pageAfter, type EnvelopeIndex } from './envelope-index.ts';
+import { report } from './report.ts';
 
 /**
  * Full-text search: what the mail servers found, as rows a list shows. It reads the index to place
@@ -27,6 +33,69 @@ export type Found = {
 
 /** How many hits a full-text search keeps, the newest across every folder. */
 export const FOUND_LIMIT = 200;
+
+/**
+ * The member's last full-text search, asked of every folder of every account's server. Only memory
+ * holds it, so a restart forgets it, and a hit it found outside the index opens until the next.
+ */
+export type FullTextSearch = ReturnType<typeof fullTextSearch>;
+
+export function fullTextSearch(ports: {
+  book: Pick<AccountBook, 'all'>;
+  store: EnvelopeIndex;
+  provider: (account: AccountId) => Promise<MailProvider>;
+}) {
+  const { store } = ports;
+  let found: Found | undefined;
+
+  /** Asks every folder of every account's server, and keeps what they found apart from the index. */
+  const searchServers = async (text: string): Promise<Found> => {
+    const hits = await Promise.all(
+      ports.book.all().map(async ({ id }) => {
+        const each: Envelope[] = [];
+        try {
+          const provider = await ports.provider(id);
+          for (const { path } of store.folders(id)) {
+            // A folder the server won't search leaves out its hits, and the rest still count.
+            each.push(
+              ...(await provider.search(path, text).catch((error: unknown) => {
+                report(error);
+                return [];
+              })),
+            );
+          }
+        } catch (error) {
+          report(error);
+        }
+        return each;
+      }),
+    );
+    return foundOf(text, hits.flat(), store);
+  };
+
+  return {
+    /**
+     * A page of what the servers found for `text`. The first page asks them again. Pages further
+     * down, and a page around a result, read what that one found.
+     */
+    async page(text: string, at: PageAt): Promise<Page> {
+      if (at === 0 || found?.text !== text) found = await searchServers(text);
+      return pageAfter(found.rows, at);
+    },
+
+    /** A conversation as it opens, with any hit of the last search outside the index in it. */
+    conversation: (id: ConversationId): Message[] => opened(id, store, found?.outside ?? []),
+
+    /** A message the index holds, or the last full-text search found. */
+    known: (ref: MessageRef): Message | undefined =>
+      store.reads.message(ref) ?? found?.outside.find((hit) => sameRef(hit, ref)),
+
+    /** Forgets the last search, as removing an account or erasing does. */
+    forget() {
+      found = undefined;
+    },
+  };
+}
 
 export function foundOf(
   text: string,
