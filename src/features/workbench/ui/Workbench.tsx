@@ -889,6 +889,7 @@ export function Workbench({
       onSent: handed,
       onUndone: (draft) => {
         handed(draft);
+        drafting.resume();
         back();
       },
       onFailed: (reason) => {

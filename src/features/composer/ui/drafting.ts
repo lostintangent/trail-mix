@@ -54,10 +54,7 @@ export type Drafting = {
   hidden: () => void;
   /** Its composer closes, and won't save later, so what's owed is saved now. */
   close: () => void;
-  /**
-   * Send has it: no save starts until a composer shows it again or Send gives it back, since Send
-   * carries the last save itself.
-   */
+  /** Send has it: no save starts until Send gives it back, since Send carries the last save itself. */
   hand: () => void;
   /**
    * What Send sends, once any save on its way has answered: the draft, if it holds everything
@@ -67,7 +64,10 @@ export type Drafting = {
   last: (signal: AbortSignal) => Promise<MessageRef | LastSave>;
   /** The draft the Mailroom filed the last save Send carried as, or the one it sent. */
   took: (saved: MessageRef) => void;
-  /** Send gave it back without a draft, so what's owed is saved as a closed composer saves it. */
+  /**
+   * Send gave it back, undone or failed. The files a save it carried held take their names in the
+   * draft that save was filed as, before anything saves them again, and what's owed is saved.
+   */
   resume: () => void;
   /**
    * Stops saving and moves the draft to the Trash, once any save under way has made it, with a way
@@ -92,10 +92,25 @@ export function startDrafting(
   let retriesClosed = 0;
   let saving: Promise<void> | undefined;
   let timer: ReturnType<typeof setTimeout> | undefined;
+  // The files the save Send carries held, until they are named by the draft it was filed as. Their
+  // old names may be of a draft that filing replaced, whose bytes the Mailroom lets go.
+  let carried: readonly Attached[] | undefined;
+  let unnamed: { made: MessageRef; attachments: readonly Attached[] } | undefined;
+  // The names they took, for a composer that started from what was written before they did.
+  let named: Map<Attached, Attached> | undefined;
 
   const become = (next: SaveState) => {
     state = next;
     showing?.onState(next);
+  };
+
+  /** One step of saving at a time, which the next waits for, then a save of what came meanwhile. */
+  const step = (run: () => Promise<void>): Promise<void> => {
+    saving = run().finally(() => {
+      saving = undefined;
+      if (isOwed && timer === undefined) timer = setTimeout(() => void save(), owedWait(owedSince));
+    });
+    return saving;
   };
 
   const save = (): Promise<void> => {
@@ -104,26 +119,26 @@ export function startDrafting(
     if (saving || isDiscarded || isHanded) return saving ?? Promise.resolve();
     isOwed = false;
     become('saving');
-    const saved = writing;
-    const run = async () => {
-      const older = draft;
-      // A draft replaces only one from its own account, so one moved to another account is saved
-      // anew and the old one goes to the Trash.
-      const replaces = older?.account === saved.account ? older : undefined;
+    let saved = writing;
+    return step(async () => {
       try {
+        // Files still named by a draft a carried save replaced are named anew first, and what was
+        // written meanwhile is saved with them.
+        if (unnamed) {
+          await nameCarried();
+          isOwed = false;
+          saved = writing;
+        }
+        const older = draft;
+        // A draft replaces only one from its own account, so one moved to another account is saved
+        // anew and the old one goes to the Trash.
+        const replaces = older?.account === saved.account ? older : undefined;
         const made = await mailroom.saveDraft(draftInputOf(saved), replaces);
         draft = made;
         showing?.onDraft(made, older);
         for (const watcher of watchers) watcher(made);
         if (older && !replaces) await mailroom.move([older], 'trash').catch(() => {});
-        const body = await queryClient.fetchQuery(bodyQuery(made));
-        const named = afterSave(saved.attachments, made, body);
-        const names = new Map(saved.attachments.map((file, at) => [file, named[at]!]));
-        writing = {
-          ...writing,
-          attachments: writing.attachments.map((attached) => names.get(attached) ?? attached),
-        };
-        showing?.onNamed(names);
+        await rename(saved.attachments, made);
         become(isOwed ? 'unsaved' : 'saved');
       } catch {
         isOwed = true;
@@ -132,13 +147,31 @@ export function startDrafting(
         if (!isClosed || ++retriesClosed <= RETRIES_ONCE_CLOSED) {
           timer = setTimeout(() => void save(), RETRY_AFTER_MS);
         }
-      } finally {
-        saving = undefined;
       }
-      if (isOwed && timer === undefined) timer = setTimeout(() => void save(), owedWait(owedSince));
+    });
+  };
+
+  /**
+   * Names files as they were when saved, `attachments`, by the parts of the draft `made` that hold
+   * them, so their bytes cross once, and tells the composer showing them.
+   */
+  const rename = async (attachments: readonly Attached[], made: MessageRef) => {
+    const body = await queryClient.fetchQuery(bodyQuery(made));
+    const fresh = afterSave(attachments, made, body);
+    const names = new Map(attachments.map((file, at) => [file, fresh[at]!]));
+    writing = {
+      ...writing,
+      attachments: writing.attachments.map((attached) => names.get(attached) ?? attached),
     };
-    saving = run();
-    return saving;
+    showing?.onNamed(names);
+    return names;
+  };
+
+  const nameCarried = async () => {
+    if (!unnamed) return;
+    const { made, attachments } = unnamed;
+    named = await rename(attachments, made);
+    unnamed = undefined;
   };
 
   return {
@@ -155,9 +188,8 @@ export function startDrafting(
       showing = next;
       isClosed = false;
       retriesClosed = 0;
-      if (!isHanded) return;
-      isHanded = false;
-      if (isOwed && !saving) timer = setTimeout(() => void save(), owedWait(owedSince));
+      if (named) next.onNamed(named);
+      named = undefined;
     },
     watch: (watcher) => {
       watchers.add(watcher);
@@ -188,9 +220,13 @@ export function startDrafting(
       timer = undefined;
     },
     last: async (signal) => {
+      carried = undefined;
       while (saving) await saving;
       signal.throwIfAborted();
       if (draft && !isOwed) return draft;
+      await nameCarried();
+      signal.throwIfAborted();
+      carried = writing.attachments;
       // A draft replaces only one from its own account, as a save's does.
       const replaces = draft?.account === writing.account ? draft : undefined;
       return { save: draftInputOf(writing), ...(replaces ? { replaces } : {}) };
@@ -201,6 +237,8 @@ export function startDrafting(
       isOwed = false;
       become('saved');
       if (older && sameRef(older, saved)) return;
+      if (carried) unnamed = { made: saved, attachments: carried };
+      carried = undefined;
       showing?.onDraft(saved, older);
       for (const watcher of watchers) watcher(saved);
       if (older && older.account !== saved.account) {
@@ -210,6 +248,8 @@ export function startDrafting(
     resume: () => {
       isHanded = false;
       if (isOwed) void save();
+      // One that fails leaves them to the next save, which names them first.
+      else if (unnamed && !saving) void step(() => nameCarried().catch(() => {}));
     },
     discard: async () => {
       isDiscarded = true;

@@ -1,5 +1,6 @@
 import Paragraph from '@tiptap/extension-paragraph';
 import Image from '@tiptap/extension-image';
+import { NodeSelection, TextSelection } from '@tiptap/pm/state';
 
 /**
  * The editor's images: only those the draft carries, by `cid:`. A pasted, dropped or picked image
@@ -48,6 +49,27 @@ export const DraftImage = Image.extend<{
   },
   addOptions() {
     return { ...this.parent?.(), imageUrl: () => undefined, shown: new Set(), className: '' };
+  },
+  // Tiptap leaves an image it places selected, so the next key typed would replace it. The cursor
+  // goes to the line after it instead, as it would after a word, and that line is made when there
+  // is none to type on.
+  addCommands() {
+    return {
+      setImage:
+        (options) =>
+        ({ commands, tr, dispatch }) => {
+          if (!commands.insertContent({ type: this.name, attrs: options })) return false;
+          const placed = tr.selection;
+          if (!dispatch || !(placed instanceof NodeSelection) || placed.node.type !== this.type) {
+            return true;
+          }
+          if (!tr.doc.resolve(placed.to).nodeAfter?.isTextblock) {
+            tr.insert(placed.to, this.editor.schema.nodes['paragraph']!.create());
+          }
+          tr.setSelection(TextSelection.create(tr.doc, placed.to + 1));
+          return true;
+        },
+    };
   },
   addNodeView() {
     return ({ node }) => {

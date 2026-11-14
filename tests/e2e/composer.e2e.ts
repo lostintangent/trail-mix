@@ -144,6 +144,14 @@ test('a pasted image shows as it is pasted, once its draft is saved, and when it
   // From the pasted bytes until the draft holds them, and from the draft once it does.
   const image = text.locator('img');
   await expect(shown(image, 'blob:')).resolves.toEqual([4, 3]);
+  // What is typed next goes on the line after it, rather than in its place.
+  await page.keyboard.type('Up and to the right.');
+  await expect(
+    text
+      .locator('img + p')
+      .filter({ hasText: /^Up and to the right\.$/ })
+      .count(),
+  ).resolves.toBe(1);
   await saved(page).waitFor({ timeout: 10_000 });
   await expect(shown(image, '/messages/')).resolves.toEqual([4, 3]);
   await leave(page, composer);
@@ -227,6 +235,63 @@ test('⌘↵ sends what was written, and Undo brings the composer back as it was
     reply.getByRole('textbox', { name: 'Reply' }).textContent({ timeout: 10_000 }),
   ).resolves.toBe('On my way.');
 }, 60_000);
+
+test('Undo of a send that carried changes brings back its files, which save and show from the draft it filed', async () => {
+  const page = await inbox();
+  await page.getByRole('option').first().click();
+  await replyButton(page).click();
+  const reply = composerNamed(page, 'Reply');
+  const text = reply.getByRole('textbox', { name: 'Reply' });
+  await text.waitFor();
+  await page.keyboard.type('See you at noon. ');
+  await pasteImage(page);
+  await reply.locator('input[type="file"]:not([accept])').setInputFiles({
+    name: 'agenda.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('1. Lunch\n2. The engine\n'),
+  });
+  await saved(page).waitFor({ timeout: 10_000 });
+  const image = text.locator('img');
+  await shown(image, '/messages/');
+  const before = (await image.getAttribute('src'))!;
+
+  // Sent before the change saves, so Send carries it, and the draft it is filed as replaces the one
+  // the files were named by.
+  await page.keyboard.type(' Bring the map.');
+  const carried = page.waitForRequest((request) => {
+    const asked = request.postData() ?? '';
+    return asked.includes('"send"') && asked.includes('Bring the map.');
+  });
+  await page.keyboard.press('ControlOrMeta+Enter');
+  await reply.waitFor({ state: 'detached' });
+  await carried;
+  const line = reader(page).locator('div:has(> [data-airmail])', { hasText: 'Bring the map.' });
+  await line.getByText(/^Sending in \d+s$/).waitFor();
+  await line.getByRole('button', { name: 'Undo' }).click();
+  await expect(text.textContent({ timeout: 10_000 })).resolves.toContain('Bring the map.');
+
+  // The files are named by the draft the send filed, and still show and save once the Mailroom has
+  // let the replaced draft's bytes go.
+  await image
+    .and(page.locator(`img[src^="/messages/"]:not([src="${before}"])`))
+    .waitFor({ timeout: 10_000 });
+  const isGone = () =>
+    page.evaluate(async (was) => !(await fetch(was, { cache: 'no-store' })).ok, before);
+  for (const by = Date.now() + 30_000; !(await isGone()); await page.waitForTimeout(500)) {
+    if (Date.now() > by) throw new Error('The replaced draft’s bytes are still kept.');
+  }
+  await expect(shown(image, '/messages/')).resolves.toEqual([4, 3]);
+  const saving = page.waitForResponse((response) =>
+    Boolean(response.request().postData()?.includes('saveDraft')),
+  );
+  await text.getByText('Bring the map.').click();
+  await page.keyboard.type(' Again.');
+  await expect((await saving).text()).resolves.not.toContain('"error"');
+  await saved(page).waitFor({ timeout: 10_000 });
+  await expect(reply.getByRole('list', { name: 'Attachments' }).textContent()).resolves.toMatch(
+    /^agenda\.txt/,
+  );
+}, 90_000);
 
 test('a new message sent counts down in a toast, since it has no conversation on screen', async () => {
   const page = await inbox();
