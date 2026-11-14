@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useSyncExternalStore } from 'react';
-import { afterFirstScreen } from '../../shared/afterFirstScreen.ts';
+import { whenIdle } from '../../shared/whenIdle.ts';
 import { readAccent, saveAccent, showAccent, subscribeToAccent } from './accent.ts';
 
 /**
@@ -11,7 +11,7 @@ export function useAccent(): [string | undefined, (color: string | undefined) =>
   useLayoutEffect(() => showAccent(accent), [accent]);
   // The copy prepaint replays is remade from the pick, in case the math behind it has changed, once
   // the first screen has settled.
-  useEffect(() => afterFirstScreen(() => saveAccent(readAccent())), []);
+  useEffect(() => whenIdle(() => saveAccent(readAccent())), []);
   return [accent, pick];
 }
 

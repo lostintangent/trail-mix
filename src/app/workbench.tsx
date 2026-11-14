@@ -41,7 +41,7 @@ import {
 } from '../features/notifications/index.ts';
 import { useDraftsAway, useLeaving } from '../features/outbox/index.ts';
 import { REST_MS } from '../features/reader/index.ts';
-import { afterFirstScreen } from '../shared/afterFirstScreen.ts';
+import { whenIdle } from '../shared/whenIdle.ts';
 import { useHeldWhile } from '../shared/useHeldWhile.ts';
 import { Workbench, type SettingsAt } from '../features/workbench/index.ts';
 import { preloadable } from '../shared/preloadable.ts';
@@ -148,7 +148,7 @@ const { Component: Settings, preload: preloadSettings } = preloadable(
 
 /** Loads `load` once the first screen has had its turn and the browser is idle. */
 function usePreloadWhenIdle(load: () => Promise<unknown>) {
-  useEffect(() => afterFirstScreen(load), [load]);
+  useEffect(() => whenIdle(load), [load]);
 }
 
 /** How long a device that doesn't know whether there's mail waits before saying it's opening. */

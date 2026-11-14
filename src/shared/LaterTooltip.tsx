@@ -9,7 +9,7 @@ import {
   type ReactNode,
   type RefObject,
 } from 'react';
-import { afterFirstScreen } from './afterFirstScreen.ts';
+import { whenIdle } from './whenIdle.ts';
 
 /*
  * Tooltips that join their controls once their code arrives, apart from the first screen. A
@@ -144,7 +144,7 @@ function useArrival(anchor: RefObject<HTMLElement | null>) {
     element?.addEventListener('pointerenter', enter);
     element?.addEventListener('pointerdown', press);
     element?.addEventListener('focusin', want);
-    const callOff = afterFirstScreen(want);
+    const callOff = whenIdle(want);
     return () => {
       element?.removeEventListener('pointerenter', enter);
       element?.removeEventListener('pointerdown', press);

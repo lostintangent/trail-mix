@@ -3,9 +3,7 @@ import { preloadComposer } from '../../composer/ui/index.ts';
 import { preloadTriageMenus } from '../../conversations/index.ts';
 import { preloadSendActions } from '../../outbox/index.ts';
 import { preloadReader } from '../../reader/index.ts';
-
-/** How long after the list first shows something to open the reader starts loading. */
-const PRELOAD_AFTER_MS = 1_000;
+import { whenIdle } from '../../../shared/whenIdle.ts';
 
 /** How long the member rests from keys, pointer and scrolling before the composer loads. */
 const PRELOAD_COMPOSER_AFTER_MS = 2_000;
@@ -21,27 +19,18 @@ const MOVES = ['keydown', 'pointerdown', 'scroll'] as const;
 export function usePreloadedComposer(isWanted: boolean) {
   useEffect(() => {
     if (!isWanted) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    let idleId: number | undefined;
+    let callOff = () => {};
     const settle = () => {
-      clearTimeout(timer);
-      if (idleId !== undefined) cancelIdleCallback(idleId);
-      idleId = undefined;
-      timer = setTimeout(() => {
-        // Safari has no idle callback.
-        if ('requestIdleCallback' in window) idleId = requestIdleCallback(preload);
-        else preload();
-      }, PRELOAD_COMPOSER_AFTER_MS);
+      callOff();
+      callOff = whenIdle(preload, PRELOAD_COMPOSER_AFTER_MS);
     };
     const stop = () => {
-      clearTimeout(timer);
-      if (idleId !== undefined) cancelIdleCallback(idleId);
+      callOff();
       for (const move of MOVES) window.removeEventListener(move, settle, { capture: true });
     };
     const preload = () => {
       stop();
-      // One that fails, as offline, is loaded again when the composer opens.
-      void Promise.all([preloadComposer(), preloadSendActions()]).catch(() => {});
+      return Promise.all([preloadComposer(), preloadSendActions()]);
     };
     for (const move of MOVES) {
       window.addEventListener(move, settle, { capture: true, passive: true });
@@ -56,17 +45,9 @@ export function usePreloadedComposer(isWanted: boolean) {
  * while the browser is idle, ready for the click.
  */
 export function usePreloadedReader(isWanted: boolean) {
-  useEffect(() => {
-    if (!isWanted) return;
-    const timer = setTimeout(() => {
-      // Safari has no idle callback.
-      const load = () => {
-        // One that fails, as offline, is loaded again when a conversation opens.
-        void Promise.all([preloadReader(), preloadTriageMenus()]).catch(() => {});
-      };
-      if ('requestIdleCallback' in window) requestIdleCallback(load);
-      else load();
-    }, PRELOAD_AFTER_MS);
-    return () => clearTimeout(timer);
-  }, [isWanted]);
+  useEffect(
+    () =>
+      isWanted ? whenIdle(() => Promise.all([preloadReader(), preloadTriageMenus()])) : undefined,
+    [isWanted],
+  );
 }

@@ -1,7 +1,7 @@
 import type { ToastDismissFn, ToastViewportProps } from '@astryxdesign/core/Toast';
 import type { LucideIcon } from 'lucide-react';
 import { lazy, memo, Suspense, useEffect, useState, type ReactNode } from 'react';
-import { afterFirstScreen } from './afterFirstScreen.ts';
+import { whenIdle } from './whenIdle.ts';
 
 /**
  * Toasts, kept off the first load. Astryx's toasts carry their own layers and gestures, which the
@@ -51,7 +51,7 @@ export const Toasts = memo(function Toasts({ layerInset }: Pick<ToastViewportPro
     if (isWanted) return;
     const now = () => setWanted(true);
     wanters.add(now);
-    const callOff = afterFirstScreen(want);
+    const callOff = whenIdle(want);
     return () => {
       wanters.delete(now);
       callOff();

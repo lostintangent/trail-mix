@@ -2,7 +2,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BundleId, ConversationId, Folder, ListItem, View } from '../../mail/core/index.ts';
 import { overlaid, rowChange, type Action } from '../core/triage.ts';
-import { afterFirstScreen } from '../../../shared/afterFirstScreen.ts';
+import { whenIdle } from '../../../shared/whenIdle.ts';
 import { afterPaint } from '../../../shared/afterPaint.ts';
 import { reasonOf } from '../../../shared/reasons.ts';
 import { toast } from '../../../shared/toasts.tsx';
@@ -64,7 +64,7 @@ export function useTriage(
     [],
   );
   // What carries a triage out loads once the first screen has settled, ready before the first one.
-  useEffect(() => afterFirstScreen(loadCarrying), []);
+  useEffect(() => whenIdle(loadCarrying), []);
   // Read as a triage starts, so `triage` stays the same function as counts change, and every row
   // it's handed to doesn't draw again for a folder's count.
   const latestFolders = useLatest(folders);
