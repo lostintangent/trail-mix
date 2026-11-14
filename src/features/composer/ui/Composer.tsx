@@ -23,26 +23,17 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import {
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { StampDot } from '../../../app/theme/StampDot.tsx';
 import { useMediaQuery } from '../../../shared/useMediaQuery.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
-import type { Account, Message, MessageRef } from '../../mail/core/index.ts';
+import { addressesIn, type Account, type Message, type MessageRef } from '../../mail/core/index.ts';
 import { bodyQuery, partUrl } from '../../mailroom/client/index.ts';
 import { useReach } from '../../offline/index.ts';
 import { contentIdFor } from '../core/draft.ts';
 import { visibleBand, type Band } from '../core/keyboard.ts';
 import { linkOf } from '../core/links.ts';
 import {
-  addressesOf,
   addressText,
   newMessage,
   recipientsOf,
@@ -52,10 +43,10 @@ import {
   type Writing,
 } from '../core/session.ts';
 import { AddressInput } from './AddressInput.tsx';
-import { Editor, type EditorProps } from './Editor.tsx';
+import { Editor, placeImages, type EditorProps } from './Editor.tsx';
 import { ComposerSkeleton, isDocked, Over, sheetStyles } from './sheet.tsx';
-import { startDrafting, type Drafting } from './drafting.ts';
-import { useAutosave, type SaveState } from './useAutosave.ts';
+import { startDrafting, type Drafting, type SaveState } from './drafting.ts';
+import { useAutosave } from './useAutosave.ts';
 
 /**
  * What the member asked to write: a new message, a reply, a draft opened again, or what was being
@@ -77,7 +68,7 @@ type ComposerProps = {
    * Each draft a save makes, and the one it replaced, so the reader can leave the draft being
    * written out of the conversation it shows.
    */
-  onDraft?: (saved: MessageRef, replaced: MessageRef | undefined) => void;
+  onDraft: (saved: MessageRef, replaced: MessageRef | undefined) => void;
   /**
    * Sends the message, with what was written, and the composer closes at once. Its last save
    * finishes behind it, and the message comes back if the send is undone.
@@ -155,7 +146,7 @@ export function Composer({ compose, ...props }: ComposerProps) {
       draft={compose.as === 'draft' ? refOf(compose.draft) : undefined}
       resumed={compose.as === 'resumed' ? compose.drafting : undefined}
       recipients={recipients}
-      isNew={compose.as === 'new' || !start.inReplyTo}
+      isNew={!start.inReplyTo}
       // A draft that answers mail the index doesn't hold stands alone, but is a reply all the same.
       isReply={start.inReplyTo !== undefined || start.answers !== undefined}
       {...props}
@@ -223,7 +214,6 @@ function Writer({
   const [hasCopies, setHasCopies] = useState(start.cc.length + start.bcc.length > 0);
   const [editor, setEditor] = useState<TiptapEditor>();
   const fileUrl = useFileUrls();
-  const id = useId();
   const queryClient = useQueryClient();
   const [drafting] = useState(
     () => resumed ?? startDrafting(queryClient, { draft, writing: start }),
@@ -232,7 +222,7 @@ function Writer({
     drafting,
     writing,
     edits,
-    onDraft: (saved, replaced) => onDraft?.(saved, replaced),
+    onDraft,
     onNamed: (named) =>
       setWriting((was) => ({
         ...was,
@@ -247,7 +237,7 @@ function Writer({
   const setAddresses = (field: 'to' | 'cc' | 'bcc', text: string) => {
     hasChosen.current = true;
     setFields((was) => ({ ...was, [field]: text }));
-    edit(() => ({ [field]: addressesOf(text) }));
+    edit(() => ({ [field]: addressesIn(text) }));
   };
   // The parent's Reply-To arrives with its body. Until the member has chosen whom it's to, the
   // reply goes there instead. That alone is no change of theirs, so nothing saves for it, but once
@@ -405,11 +395,16 @@ function Writer({
           )}
           {isNew && (
             <div {...stylex.props(styles.row)}>
-              <Field
-                label="Subject"
-                value={writing.subject}
-                onChange={(subject) => edit(() => ({ subject }))}
-              />
+              <label {...stylex.props(styles.field)}>
+                <span {...stylex.props(styles.label)}>Subject</span>
+                <input
+                  value={writing.subject}
+                  onChange={(event) => edit(() => ({ subject: event.target.value }))}
+                  autoComplete="off"
+                  spellCheck
+                  {...stylex.props(styles.input)}
+                />
+              </label>
             </div>
           )}
         </div>
@@ -477,24 +472,16 @@ function Writer({
           />
         )}
         <FilePicker
-          id={`${id}-image`}
           label="Insert an image"
           tip={tip}
           icon={ImagePlus}
           accept="image/*"
           onFiles={(picked) => {
-            for (const { contentId, file } of take(picked, true)) {
-              const alt = file.name.replace(/\.[^.]+$/, '');
-              editor
-                ?.chain()
-                .focus()
-                .setImage({ src: `cid:${contentId}`, alt })
-                .run();
-            }
+            const images = take(picked, true);
+            if (editor) placeImages(editor, images);
           }}
         />
         <FilePicker
-          id={`${id}-file`}
           label="Attach files"
           tip={tip}
           icon={Paperclip}
@@ -657,14 +644,12 @@ function LinkField({
 
 /** A toolbar button that picks files. */
 function FilePicker({
-  id,
   label,
   tip,
   icon,
   accept,
   onFiles,
 }: {
-  id: string;
   label: string;
   tip: (label: string) => string | undefined;
   icon: typeof Bold;
@@ -683,7 +668,6 @@ function FilePicker({
       />
       <input
         ref={input}
-        id={id}
         type="file"
         multiple
         accept={accept}
@@ -699,10 +683,7 @@ function FilePicker({
   );
 }
 
-/**
- * One line of the header: a label and what the member types beside it, which completes addresses
- * in To, Cc and Bcc.
- */
+/** A line of the header: a label and the addresses typed beside it, completed as they're typed. */
 function Field({
   label,
   value,
@@ -717,23 +698,7 @@ function Field({
   return (
     <label {...stylex.props(styles.field)}>
       <span {...stylex.props(styles.label)}>{label}</span>
-      {label === 'Subject' ? (
-        <input
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          autoComplete="off"
-          autoFocus={isFocused}
-          spellCheck
-          {...stylex.props(styles.input)}
-        />
-      ) : (
-        <AddressInput
-          value={value}
-          onChange={onChange}
-          isFocused={isFocused}
-          xstyle={styles.input}
-        />
-      )}
+      <AddressInput value={value} onChange={onChange} isFocused={isFocused} xstyle={styles.input} />
     </label>
   );
 }

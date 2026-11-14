@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { MessageRef } from '../../mail/core/index.ts';
 import type { Attached, Writing } from '../core/session.ts';
-import type { Drafting, SaveState } from './drafting.ts';
-
-export type { SaveState };
+import type { Drafting } from './drafting.ts';
 
 /**
  * Shows a message being written in its composer: hands it what the member writes, owes a save for

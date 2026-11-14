@@ -41,7 +41,7 @@ export type EditorProps = {
   onEditor: (editor: TiptapEditor) => void;
   label: string;
   /** Whether the cursor starts in the text, as in a reply, where the recipients are already set. */
-  isFocused?: boolean;
+  isFocused: boolean;
 };
 
 export function Editor({
@@ -51,7 +51,7 @@ export function Editor({
   onFiles,
   onEditor,
   label,
-  isFocused = false,
+  isFocused,
 }: EditorProps) {
   const latest = useRef({ onChange, imageUrl, onFiles });
   useEffect(() => {
@@ -132,14 +132,7 @@ export function Editor({
     const files = [...(list ?? [])];
     const writing = current.current;
     if (!writing || files.length === 0) return false;
-    for (const { contentId, file } of latest.current.onFiles(files)) {
-      const alt = file.name.replace(/\.[^.]+$/, '');
-      writing
-        .chain()
-        .focus()
-        .setImage({ src: `cid:${contentId}`, alt })
-        .run();
-    }
+    placeImages(writing, latest.current.onFiles(files));
     return true;
   }
 
@@ -170,6 +163,18 @@ export function Editor({
   });
 
   return <EditorContent editor={editor} {...stylex.props(styles.editor)} />;
+}
+
+/** Places images the composer took where the cursor is, each named by its file. */
+export function placeImages(editor: TiptapEditor, images: { contentId: string; file: File }[]) {
+  for (const { contentId, file } of images) {
+    const alt = file.name.replace(/\.[^.]+$/, '');
+    editor
+      .chain()
+      .focus()
+      .setImage({ src: `cid:${contentId}`, alt })
+      .run();
+  }
 }
 
 /** An editor as `@tiptap/react` marks it once its container has placed its view in the page. */

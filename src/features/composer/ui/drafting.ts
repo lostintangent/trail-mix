@@ -9,7 +9,6 @@ import {
   SAVE_AFTER_MS,
   SAVE_AT_LEAST_EVERY_MS,
   type Attached,
-  type DraftInput,
   type Writing,
 } from '../core/session.ts';
 
@@ -167,7 +166,7 @@ export function startDrafting(
    * ask after one whose answer was lost finds the copy that one filed rather than filing another.
    * So nothing newer saves until it's answered or refused. Each ask that fails says so.
    */
-  const file = async (save: DraftInput, replaces: MessageRef | undefined) => {
+  const file = async (save: LastSave['save'], replaces: MessageRef | undefined) => {
     const id = crypto.randomUUID();
     let asks = 0;
     try {

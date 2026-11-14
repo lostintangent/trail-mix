@@ -43,11 +43,6 @@ export type Writing = {
   attachments: Attached[];
 };
 
-/** What a save sends, as the client contract's `DraftInput` has it. */
-export type DraftInput = Omit<Writing, 'attachments' | 'signature' | 'answers'> & {
-  attachments: ({ file: File; contentId?: string } | { in: MessageRef; id: string })[];
-};
-
 /** How long typing pauses before the draft is saved. */
 export const SAVE_AFTER_MS = 1_500;
 
@@ -129,12 +124,7 @@ export function reopened(draft: Message, body: Body, conversation: readonly Mess
  * What a save sends of the writing: the Markdown signed, and every file it carries, except an
  * image the member has taken out of the text, which leaves the draft with it.
  */
-export function draftInputOf({
-  attachments,
-  signature,
-  answers: _answers,
-  ...writing
-}: Writing): DraftInput {
+export function draftInputOf({ attachments, signature, answers: _answers, ...writing }: Writing) {
   const shown = (contentId: string | undefined) =>
     contentId === undefined || writing.markdown.includes(`cid:${contentId}`);
   return {
@@ -189,11 +179,6 @@ export function addressText(addresses: readonly Address[]): string {
       return `${quoted} <${email}>`;
     })
     .join(', ');
-}
-
-/** The addresses the member typed into a field. */
-export function addressesOf(text: string): Address[] {
-  return addressesIn(text);
 }
 
 function header(body: Body | undefined, name: string): string | undefined {

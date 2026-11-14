@@ -1,7 +1,6 @@
 import { expect, test } from 'bun:test';
-import type { Account, Body, Message } from '../../mail/core/index.ts';
+import { addressesIn, type Account, type Body, type Message } from '../../mail/core/index.ts';
 import {
-  addressesOf,
   addressText,
   afterSave,
   draftInputOf,
@@ -206,5 +205,5 @@ test('addresses read back from a field as they were written, names with commas i
   expect(addressText(written)).toBe(
     '"Liddell, Alice" <alice@example.com>, Grace Hopper <grace@example.com>, x@y.z',
   );
-  expect(addressesOf(addressText(written))).toEqual(written);
+  expect(addressesIn(addressText(written))).toEqual(written);
 });

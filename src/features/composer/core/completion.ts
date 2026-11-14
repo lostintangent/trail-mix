@@ -1,5 +1,5 @@
-import type { Address } from '../../mail/core/index.ts';
-import { addressesOf, addressText } from './session.ts';
+import { addressesIn, type Address } from '../../mail/core/index.ts';
+import { addressText } from './session.ts';
 
 /**
  * Completing an address field. A field holds addresses as the member writes them, each ended by a
@@ -45,7 +45,7 @@ export function typingIn(field: string, caret: number): Typing {
 /** The people to offer for the address being typed: those the field doesn't name elsewhere. */
 export function completionsFor(field: string, typing: Typing, people: readonly Address[]) {
   const named = new Set(
-    addressesOf(field.slice(0, typing.start) + field.slice(typing.end)).map(({ email }) =>
+    addressesIn(field.slice(0, typing.start) + field.slice(typing.end)).map(({ email }) =>
       email.toLowerCase(),
     ),
   );

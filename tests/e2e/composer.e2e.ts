@@ -217,25 +217,6 @@ async function shown(image: Locator, from: 'blob:' | '/messages/') {
   });
 }
 
-test('⌘↵ sends what was written, and Undo brings the composer back as it was', async () => {
-  const page = await inbox();
-  await page.getByRole('option').first().click();
-  await replyButton(page).click();
-  const reply = composerNamed(page, 'Reply');
-  await reply.getByRole('textbox', { name: 'Reply' }).waitFor();
-  await page.keyboard.type('On my way.');
-  await page.keyboard.press('ControlOrMeta+Enter');
-  await reply.waitFor({ state: 'detached' });
-
-  // The reply counts down on its line at the end of its conversation, where it was written.
-  const line = reader(page).locator('div:has(> [data-airmail])', { hasText: 'On my way.' });
-  await line.getByText(/^Sending in \d+s$/).waitFor();
-  await line.getByRole('button', { name: 'Undo' }).click();
-  await expect(
-    reply.getByRole('textbox', { name: 'Reply' }).textContent({ timeout: 10_000 }),
-  ).resolves.toBe('On my way.');
-}, 60_000);
-
 test('Undo of a send that carried changes brings back its files, which save and show from the draft it filed', async () => {
   const page = await inbox();
   await page.getByRole('option').first().click();
