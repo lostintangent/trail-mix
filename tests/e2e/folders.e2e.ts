@@ -165,3 +165,27 @@ test('on a phone, a folder is named in the sidebar', async () => {
   await field.press('Enter');
   await folderRow(page, '2026').waitFor();
 }, 60_000);
+
+test('a folder is renamed in its own account, though another account has one at the same path', async () => {
+  const page = await open({ ...SIZES.desktop, colorScheme: 'light' });
+  const work = page.getByRole('region', { name: 'Work' });
+  await work.getByRole('button', { name: /^Receipts( \d+)?$/ }).waitFor();
+  await page.getByRole('button', { name: 'More for Personal' }).click();
+  await page.getByRole('menuitem', { name: 'New folder in Personal' }).click();
+  await page.getByRole('textbox', { name: 'Name of the new folder in Personal' }).fill('Receipts');
+  await page.keyboard.press('Enter');
+  await folderRow(page, 'Receipts').waitFor();
+
+  // Only Personal's Receipts takes the field, which keeps the keys until the name is given.
+  await personal(page).getByRole('button', { name: 'More for Receipts' }).click();
+  await page.getByRole('menuitem', { name: 'Rename Receipts' }).click();
+  const renaming = personal(page).getByRole('textbox', { name: 'New name for Receipts' });
+  await renaming.waitFor({ timeout: 1_000 });
+  await expect(renaming.evaluate((input) => input === document.activeElement)).resolves.toBe(true);
+  await expect(work.getByRole('textbox').count()).resolves.toBe(0);
+  await renaming.fill('Bills');
+  await renaming.press('Enter');
+  await folderRow(page, 'Bills').waitFor();
+  await expect(folderRow(page, 'Receipts').count()).resolves.toBe(0);
+  await work.getByRole('button', { name: /^Receipts( \d+)?$/ }).waitFor();
+}, 60_000);

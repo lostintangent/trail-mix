@@ -144,9 +144,8 @@ export const AccountSection = memo(function AccountSection({
           onSelect={onSelect}
           folds={folds}
           onFold={onFold}
-          editing={
-            editing?.do === 'create' && editing.account.id !== account.id ? undefined : editing
-          }
+          // A folder in another account can share the path of the one being named.
+          editing={editingHere ? editing : undefined}
           folders={own}
           onEdited={onEdited}
           folderActions={folderActions}
