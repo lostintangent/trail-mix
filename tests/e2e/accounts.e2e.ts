@@ -1,9 +1,8 @@
 import { describe, expect } from 'bun:test';
 import { join } from 'node:path';
-import type { BrowserContextOptions, Page } from 'playwright';
+import type { Page } from 'playwright';
 import { expectUsable, unusable } from './usable.ts';
 import { RESULTS, SIZES, suite } from './suite.ts';
-import { mailIsIn } from '../mailIsIn.ts';
 
 /**
  * The first-run screen, as a member with no accounts sees it: the built app without the demo
@@ -115,13 +114,6 @@ describe('Erasing everything', () => {
     vars: { DEMO_MAILBOX: '200', DEV_MEMBER: `erase-${Date.now()}@trailmix.test` },
   });
 
-  async function device(options: BrowserContextOptions): Promise<Page> {
-    const page = await (await erasing.context(options)).newPage();
-    await page.goto(erasing.url);
-    await mailIsIn(page);
-    return page;
-  }
-
   async function run(page: Page, title: RegExp) {
     await page.keyboard.press('ControlOrMeta+k');
     await page.keyboard.type(title.source.replace(/^\^/, ''));
@@ -134,8 +126,8 @@ describe('Erasing everything', () => {
   erasing.test(
     'a member erases everything after saying what goes, and every device starts over',
     async () => {
-      const desktop = await device(SIZES.desktop);
-      const phone = await device({ ...SIZES.phone, colorScheme: 'dark' });
+      const desktop = await erasing.open(SIZES.desktop);
+      const phone = await erasing.open({ ...SIZES.phone, colorScheme: 'dark' });
 
       // From the palette: it says what goes and what stays, and Cancel, which has the focus, keeps it.
       await run(desktop, /^Erase everything/);

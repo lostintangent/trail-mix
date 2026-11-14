@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, beforeEach, expect, jest, test } from 'bun:test';
 import { QueryClient, QueryObserver } from '@tanstack/react-query';
 import { isCaughtUp, listen, SETTLE_MS } from './hints.ts';
 import { keys } from './queries.ts';
@@ -39,6 +39,12 @@ beforeAll(() => {
   };
 });
 afterAll(() => Object.assign(browser, held));
+// Time passes only as a test lets it, so each wait falls where the test means it to.
+beforeEach(() => jest.useFakeTimers());
+afterEach(() => jest.useRealTimers());
+// Bun's runtime lets promises settle between timers, which its types don't name yet.
+const timers = jest as typeof jest & { advanceTimersByTimeAsync(ms: number): Promise<unknown> };
+const pass = (ms: number) => timers.advanceTimersByTimeAsync(ms);
 
 /** A browser's cache holding what a page fetched before its socket opened. */
 function fetched() {
@@ -69,7 +75,7 @@ test('a burst of hints, as a first sync sends, can’t keep the list from refres
     queryKey: keys.conversations({ in: 'inbox' }),
     queryFn: async () => {
       const now = ++found;
-      await Bun.sleep(SETTLE_MS / 2);
+      await new Promise((done) => setTimeout(done, SETTLE_MS / 2));
       return now;
     },
   });
@@ -86,21 +92,21 @@ test('a burst of hints, as a first sync sends, can’t keep the list from refres
   // A hint every 20 ms for two seconds.
   for (let sent = 0; sent < 100; sent++) {
     socket!.onmessage?.({ data: hint });
-    await Bun.sleep(20);
+    await pass(20);
   }
   // The list showed fresh mail during the burst, not only after it.
   expect(shown.length).toBeGreaterThan(4);
   // And the burst's last hint is refetched for, once it has had its turn.
-  await Bun.sleep(SETTLE_MS * 2);
+  await pass(SETTLE_MS * 2);
   expect(queryClient.getQueryState(keys.conversations({ in: 'inbox' }))?.isInvalidated).toBe(false);
   expect(shown.at(-1)).toBe(found);
   unsubscribe();
   stop();
 });
 
-test('the hints one change sends refetch what they name once, together', async () => {
+/** A page whose socket has opened, with its list and counts on screen, each counting its asks. */
+async function onScreen() {
   const queryClient = new QueryClient();
-  // The list and the counts on screen, each counting how often it is asked.
   const asked = { list: 0, folders: 0 };
   const observers = [
     new QueryObserver(queryClient, {
@@ -111,21 +117,34 @@ test('the hints one change sends refetch what they name once, together', async (
   ];
   const unsubscribe = observers.map((observer) => observer.subscribe(() => {}));
   const stop = listen(queryClient);
-  const [socket] = Socket.made.slice(-1);
-  socket!.open();
-  await Bun.sleep(10);
-  const before = { ...asked };
+  const socket = Socket.made.at(-1)!;
+  socket.open();
+  await pass(10);
+  const close = () => [...unsubscribe, stop].forEach((done) => done());
+  return { asked, before: { ...asked }, socket, close };
+}
+
+test('the hints one change sends refetch what they name once, together', async () => {
+  const { asked, before, socket, close } = await onScreen();
   // A conversation read in a folder it shares with Sent, then the counts the server lists after.
-  const send = (hint: object) => socket!.onmessage?.({ data: JSON.stringify(hint) });
+  const send = (hint: object) => socket.onmessage?.({ data: JSON.stringify(hint) });
   send({ changed: 'conversations', folder: { account: 'personal', path: 'INBOX' } });
-  await Bun.sleep(2);
+  await pass(2);
   send({ changed: 'conversations', folder: { account: 'personal', path: 'Sent' } });
-  await Bun.sleep(10);
+  await pass(10);
   send({ changed: 'folders', account: 'personal' });
-  await Bun.sleep(SETTLE_MS * 2);
+  await pass(SETTLE_MS * 2);
   expect(asked).toEqual({ list: before.list + 1, folders: before.folders + 1 });
-  for (const done of unsubscribe) done();
-  stop();
+  close();
+});
+
+test('a message that isn’t a hint is ignored', async () => {
+  const { asked, before, socket, close } = await onScreen();
+  for (const data of ['{"changed":', 'null', '"folders"', '{"account":"personal"}'])
+    socket.onmessage?.({ data });
+  await pass(SETTLE_MS * 2);
+  expect(asked).toEqual(before);
+  close();
 });
 
 test('a page catches up once its socket has opened and what it held is asked again', async () => {
@@ -140,10 +159,10 @@ test('a page catches up once its socket has opened and what it held is asked aga
   expect(isCaughtUp(queryClient)).toBe(false);
   Socket.made.at(-1)!.open();
   // The list on screen is asked again, and until it answers the page hasn't caught up.
-  await Bun.sleep(10);
+  await pass(10);
   expect(isCaughtUp(queryClient)).toBe(false);
   answer(1);
-  await Bun.sleep(10);
+  await pass(0);
   expect(isCaughtUp(queryClient)).toBe(true);
   unsubscribe();
   stop();

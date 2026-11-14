@@ -12,12 +12,13 @@ import { exportJWK, generateKeyPair, SignJWT } from 'jose';
 import { fromCrossJSON, toJSON, type SerovalNode } from 'seroval';
 import {
   isBundle,
+  refOf,
   type ConversationSummary,
   type Message,
-  type MessageRef,
 } from '../../src/features/mail/core/index.ts';
 import type { Page } from '../../src/features/mailroom/client/contract.ts';
 import { messageUrl, partUrl } from '../../src/features/mailroom/client/urls.ts';
+import { until } from '../until.ts';
 import { serverFunctionIds, startPreview, type Preview } from './preview.ts';
 
 const AUD = 'trail-mix-private';
@@ -108,15 +109,6 @@ async function ask<T>(email: string, name: string, ...args: unknown[]): Promise<
 const bytes = async (email: string, path: string) =>
   (await fetch(new URL(path, preview.url), { headers: await as(email) })).status;
 
-/** Waits until a check holds, or fails once `ms` have passed without it. */
-async function until(check: () => Promise<boolean> | boolean, ms: number) {
-  const by = Date.now() + ms;
-  while (!(await check())) {
-    if (Date.now() > by) throw new Error(`Still not so after ${ms} ms.`);
-    await new Promise((done) => setTimeout(done, 100));
-  }
-}
-
 describe('Two members of one deployment', () => {
   test('the second reaches none of the first’s mail by its refs: not its list, body, source or parts', async () => {
     let rows: ConversationSummary[] = [];
@@ -130,12 +122,7 @@ describe('Two members of one deployment', () => {
     const message = (await ask<Message[]>(ADA, 'conversation', row.id)).find(
       ({ hasAttachments }) => hasAttachments,
     )!;
-    const ref: MessageRef = {
-      account: message.account,
-      path: message.path,
-      uidValidity: message.uidValidity,
-      uid: message.uid,
-    };
+    const ref = refOf(message);
     const body = await ask<{ attachments: { id: string }[] }>(ADA, 'body', ref);
     const attachment = body.attachments[0]!.id;
     // The first member reaches all of it.

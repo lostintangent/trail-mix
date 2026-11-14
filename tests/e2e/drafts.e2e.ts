@@ -1,9 +1,10 @@
 import { expect } from 'bun:test';
-import type { BrowserContextOptions, Page, Route } from 'playwright';
+import type { BrowserContextOptions, Page } from 'playwright';
+import { goTo, painted, reader, slow, toast } from './helpers.ts';
 import { expectUsable } from './usable.ts';
 import { SIZES, suite } from './suite.ts';
-import { mailIsIn } from '../mailIsIn.ts';
 import { atRest } from '../atRest.ts';
+import { until } from '../until.ts';
 
 /**
  * Mail on its way stays out of Drafts, end to end: the built app on workerd, sending the demo
@@ -17,6 +18,7 @@ import { atRest } from '../atRest.ts';
 
 const app = suite({
   vars: { DEV_MEMBER: `drafts-${Date.now()}@trailmix.test`, DEMO_HOST_FILES_SENT: 'true' },
+  scale: 2,
 });
 const { test } = app;
 
@@ -25,9 +27,7 @@ type Drawn = { at: number; drafts: string; outbox: string; rows: string[] };
 
 /** A browser on the unified Drafts, once the Mailroom has filled it, recording what it draws. */
 async function open(options: BrowserContextOptions): Promise<Page> {
-  const page = await (await app.context({ deviceScaleFactor: 2, ...options })).newPage();
-  await page.goto(app.url);
-  await mailIsIn(page);
+  const page = await app.open(options);
   await goTo(page, 'Drafts');
   await page.getByRole('option').first().waitFor();
   await page
@@ -98,33 +98,10 @@ async function drawsLast(
   }, shown);
 }
 
-/** Lets a page draw what it has been sent. */
-const drawnNext = (page: Page) =>
-  page.evaluate(
-    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
-  );
-
-const isPhone = (page: Page) => (page.viewportSize()?.width ?? 0) < 768;
-
-/** Goes to one of the sidebar's views, such as Drafts or Outbox. */
-async function goTo(page: Page, view: string) {
-  if (isPhone(page)) {
-    // A pane off a phone's screen is inert, so only the reader's own Back is in view.
-    const back = page.getByRole('button', { name: 'Back' });
-    if (await back.evaluate((button) => !button.closest('[inert]'))) await back.click();
-    await page.getByRole('button', { name: 'Folders', exact: true }).click();
-  }
-  await page
-    .getByRole('button', { name: new RegExp(`^${view}`) })
-    .first()
-    .click();
-}
-
 /** Opens a draft from the Drafts view in the composer, and sends it. */
 async function sendDraft(page: Page, subject: RegExp) {
   await page.getByRole('option', { name: subject }).click();
-  await page
-    .getByRole('region', { name: 'Reader' })
+  await reader(page)
     .getByRole('button', { name: /^Draft/ })
     .click();
   await page.getByRole('button', { name: 'Send', exact: true }).filter({ visible: true }).click();
@@ -132,9 +109,6 @@ async function sendDraft(page: Page, subject: RegExp) {
 
 /** The Drafts view's row for a conversation. */
 const row = (page: Page, subject: RegExp) => page.getByRole('option', { name: subject });
-
-/** What the undo toast says, as drawn first. Its words are also announced, in a hidden live region. */
-const toast = (page: Page, text: RegExp) => page.getByText(text).filter({ visible: true }).first();
 
 /** Each state of the sends in every snapshot of the Outbox the page is sent, with when it came. */
 function outboxSnapshots(page: Page) {
@@ -165,19 +139,6 @@ function draftsSnapshots(page: Page) {
   return snapshots;
 }
 
-/** Has the Mailroom answer each snapshot of `query` only after `ms`. */
-async function slow(page: Page, query: 'folders' | 'outbox', ms: number) {
-  await page.route('**/_serverFn/**', async (route: Route) => {
-    const asked = decodeURIComponent(route.request().url());
-    if (route.request().method() !== 'GET' || !asked.includes(`{"t":1,"s":"${query}"}`)) {
-      return route.fallback();
-    }
-    const response = await route.fetch();
-    await new Promise((resolve) => setTimeout(resolve, ms));
-    await route.fulfill({ response });
-  });
-}
-
 test('a send undone leaves Drafts at the press, and comes back to it as it was', async () => {
   const page = await open({ ...SIZES.desktop, colorScheme: 'light' });
   const [drafts] = await counted(page, 'drafts');
@@ -198,12 +159,9 @@ test('a send undone leaves Drafts at the press, and comes back to it as it was',
   await row(page, /Lunch Thursday/).waitFor();
   // The counts wait for the Outbox's snapshot after the Undo, the last thing that changes them.
   const undone = await undoneAt;
-  await waitUntil(
-    () => outbox.some(({ at, states }) => at > undone && states.length === 0),
-    20_000,
-  );
+  await until(() => outbox.some(({ at, states }) => at > undone && states.length === 0), 20_000);
   await drawsLast(page, { drafts: drafts!, outbox: '', subject: 'Lunch Thursday', isListed: true });
-  await drawnNext(page);
+  await painted(page);
   expect(await counted(page, 'drafts')).toEqual([drafts!, drafts! - 1, drafts!]);
   expect(await counted(page, 'outbox')).toEqual([0, 1, 0]);
   expect(await listed(page, 'Lunch Thursday')).toEqual([true, false, true]);
@@ -219,18 +177,17 @@ test('an accepted send waits for the server’s copy out of Drafts, its count an
   await sendDraft(page, /Lunch Thursday/);
   await row(page, /Lunch Thursday/).waitFor({ state: 'detached', timeout: 2_000 });
   // The reply leaves the list it was opened from, so the reader turns to the next draft there.
-  await page
-    .getByRole('region', { name: 'Reader' })
+  await reader(page)
     .getByRole('heading', { level: 1, name: /Offsite agenda|Cabin for the long weekend/ })
     .waitFor({ timeout: 2_000 });
 
   // The server accepts it, and its copy comes a moment later.
-  await waitUntil(() => outbox.some(({ states }) => states.includes('accepted')), 20_000);
+  await until(() => outbox.some(({ states }) => states.includes('accepted')), 20_000);
   await expectUsable(page, 'drafts-desktop-dark-accepted');
-  await waitUntil(() => outbox.at(-1)?.states.length === 0, 20_000);
+  await until(() => outbox.at(-1)?.states.length === 0, 20_000);
   // Drafts has synced since, and its count follows.
-  await waitUntil(() => server.at(-1) === drafts! - 1, 20_000);
-  await drawnNext(page);
+  await until(() => server.at(-1) === drafts! - 1, 20_000);
+  await painted(page);
 
   expect(await counted(page, 'drafts')).toEqual([drafts!, drafts! - 1]);
   expect(await counted(page, 'outbox')).toEqual([0, 1, 0]);
@@ -259,16 +216,15 @@ test('a count the folders lower before the Outbox lets the send go never drops t
   await sendDraft(page, /Offsite agenda/);
   await toast(page, /^Sending to Sofia and 2 others in \d+s$/).waitFor();
   // With nothing left to show of its conversation, the reader turns to the next draft.
-  await page
-    .getByRole('region', { name: 'Reader' })
+  await reader(page)
     .getByRole('heading', { name: /Cabin for the long weekend/ })
     .waitFor({ timeout: 2_000 });
   await row(page, /Offsite agenda/).waitFor({ state: 'detached', timeout: 2_000 });
-  await waitUntil(() => outbox.some(({ states }) => states.includes('accepted')), 20_000);
+  await until(() => outbox.some(({ states }) => states.includes('accepted')), 20_000);
   await expectUsable(page, 'drafts-desktop-light-accepted');
-  await waitUntil(() => outbox.at(-1)?.states.length === 0, 20_000);
-  await waitUntil(() => server.at(-1) === drafts! - 1, 20_000);
-  await drawnNext(page);
+  await until(() => outbox.at(-1)?.states.length === 0, 20_000);
+  await until(() => server.at(-1) === drafts! - 1, 20_000);
+  await painted(page);
 
   expect(await counted(page, 'drafts')).toEqual([drafts!, drafts! - 1]);
   expect(await listed(page, 'Offsite agenda')).toEqual([true, false]);
@@ -300,12 +256,3 @@ test('a send the server refuses is back in Drafts, and counted there again', asy
   expect(await counted(page, 'outbox')).toEqual([0, 1]);
   expect(await listed(page, 'Cabin')).toEqual([true, false, true]);
 }, 60_000);
-
-/** Waits until `isDone`, looking every 50 ms. */
-async function waitUntil(isDone: () => boolean, timeout: number) {
-  const ends = Date.now() + timeout;
-  while (!isDone()) {
-    if (Date.now() > ends) throw new Error(`Still waiting after ${timeout} ms.`);
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
-}

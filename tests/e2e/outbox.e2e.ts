@@ -1,8 +1,8 @@
 import { expect } from 'bun:test';
-import type { BrowserContextOptions, Page } from 'playwright';
+import type { Page } from 'playwright';
+import { goTo, hold, reader, slow, toast } from './helpers.ts';
 import { expectUsable } from './usable.ts';
 import { SIZES, suite } from './suite.ts';
-import { mailIsIn } from '../mailIsIn.ts';
 
 /**
  * The Outbox, end to end: the built app on workerd, sending the demo mailbox's drafts. The undo toast
@@ -11,40 +11,15 @@ import { mailIsIn } from '../mailIsIn.ts';
  * fresh member each run starts from the seeded drafts.
  */
 
-const app = suite({ vars: { DEV_MEMBER: `outbox-${Date.now()}@trailmix.test` } });
+const app = suite({ vars: { DEV_MEMBER: `outbox-${Date.now()}@trailmix.test` }, scale: 2 });
 // A test that fails leaves a screenshot of each page and what it showed, for CI to keep.
 const { test } = app;
-
-/** A browser on the unified Inbox, once the Mailroom has filled it. */
-async function open(options: BrowserContextOptions): Promise<Page> {
-  const page = await (await app.context({ deviceScaleFactor: 2, ...options })).newPage();
-  await page.goto(app.url);
-  await mailIsIn(page);
-  return page;
-}
-
-const isPhone = (page: Page) => (page.viewportSize()?.width ?? 0) < 768;
-
-/** Goes to one of the sidebar's views, such as Drafts or Outbox. */
-async function goTo(page: Page, view: string) {
-  if (isPhone(page)) {
-    // A pane off a phone's screen is inert, so only the reader's own Back is in view.
-    const back = page.getByRole('button', { name: 'Back' });
-    if (await back.evaluate((button) => !button.closest('[inert]'))) await back.click();
-    await page.getByRole('button', { name: 'Folders', exact: true }).click();
-  }
-  await page
-    .getByRole('button', { name: new RegExp(`^${view}`) })
-    .first()
-    .click();
-}
 
 /** Opens a draft from the Drafts view in the composer, ready to send. */
 async function openDraft(page: Page, subject: RegExp) {
   await goTo(page, 'Drafts');
   await page.getByRole('option', { name: subject }).click();
-  await page
-    .getByRole('region', { name: 'Reader' })
+  await reader(page)
     .getByRole('button', { name: /^Draft/ })
     .click();
   await send(page).waitFor();
@@ -53,9 +28,6 @@ async function openDraft(page: Page, subject: RegExp) {
 /** The composer's Send button. */
 const send = (page: Page) =>
   page.getByRole('button', { name: 'Send', exact: true }).filter({ visible: true });
-
-/** What the undo toast says, as drawn first. Its words are also announced, in a hidden live region. */
-const toast = (page: Page, text: RegExp) => page.getByText(text).filter({ visible: true }).first();
 
 /** The `sendAt` the Mailroom stored for the next send this page asks for. */
 function storedSendAt(page: Page): Promise<number> {
@@ -123,7 +95,7 @@ const retrying = (page: Page) =>
   });
 
 test('the countdown matches the time the Mailroom stored, and Undo leaves the draft unsent', async () => {
-  const page = await open({ ...SIZES.desktop, colorScheme: 'light' });
+  const page = await app.open({ ...SIZES.desktop, colorScheme: 'light' });
   await openDraft(page, /Lunch Thursday/);
   const stored = storedSendAt(page);
   await send(page).click();
@@ -152,8 +124,8 @@ test('the countdown matches the time the Mailroom stored, and Undo leaves the dr
 }, 60_000);
 
 test('a send undone on another device says so in its toast here', async () => {
-  const page = await open({ ...SIZES.desktop, colorScheme: 'light' });
-  const other = await open({ ...SIZES.desktop, colorScheme: 'dark' });
+  const page = await app.open({ ...SIZES.desktop, colorScheme: 'light' });
+  const other = await app.open({ ...SIZES.desktop, colorScheme: 'dark' });
   await goTo(other, 'Outbox');
   await openDraft(page, /Lunch Thursday/);
   await send(page).click();
@@ -167,18 +139,10 @@ test('a send undone on another device says so in its toast here', async () => {
 }, 60_000);
 
 test('a send pressed while a save is on its way waits for it, and leaves when the window from the press closes', async () => {
-  const page = await open({ ...SIZES.desktop, colorScheme: 'dark' });
+  const page = await app.open({ ...SIZES.desktop, colorScheme: 'dark' });
   await openDraft(page, /Lunch Thursday/);
   // Each save answers three seconds late, so the Mailroom hears of the send only after one.
-  await page.route('**/_serverFn/**', async (route) => {
-    const request = route.request();
-    if (request.method() !== 'POST' || !request.postData()?.includes('saveDraft')) {
-      return route.fallback();
-    }
-    const response = await route.fetch();
-    await new Promise((done) => setTimeout(done, 3_000));
-    await route.fulfill({ response });
-  });
+  await slow(page, 'saveDraft', 3_000);
   const saving = page.waitForRequest((request) => !!request.postData()?.includes('saveDraft'));
   // Lunch Thursday is a reply, so its body is the reply's.
   await page.getByRole('textbox', { name: /^(Reply|Message)$/ }).click();
@@ -212,7 +176,7 @@ async function write(page: Page, subject: string) {
 const isSend = (body: string | null) => !!body?.includes('"send"');
 
 test('Send carries what was written since the last save in one request, and goes though the page closes before the answer', async () => {
-  const page = await open({ ...SIZES.phone, colorScheme: 'light' });
+  const page = await app.open({ ...SIZES.phone, colorScheme: 'light' });
   const subject = `Gone at once ${Date.now()}`;
   const asked: string[] = [];
   page.on('request', (request) => {
@@ -234,7 +198,7 @@ test('Send carries what was written since the last save in one request, and goes
     asked.filter((body) => body.includes('"send"') && body.includes('Bring the map.')),
   ).toHaveLength(1);
 
-  const again = await open({ ...SIZES.desktop, colorScheme: 'light' });
+  const again = await app.open({ ...SIZES.desktop, colorScheme: 'light' });
   await again
     .getByRole('navigation', { name: 'Mailboxes' })
     .getByRole('region', { name: 'Personal' })
@@ -244,7 +208,7 @@ test('Send carries what was written since the last save in one request, and goes
 }, 60_000);
 
 test('a Send whose answer is lost asks again under its press, and goes once, with no composer back', async () => {
-  const page = await open({ ...SIZES.desktop, colorScheme: 'dark' });
+  const page = await app.open({ ...SIZES.desktop, colorScheme: 'dark' });
   const subject = `Asked again ${Date.now()}`;
   let asks = 0;
   // The Mailroom has the first ask, and its answer is lost on the way back.
@@ -267,25 +231,22 @@ test('a Send whose answer is lost asks again under its press, and goes once, wit
     .getByRole('button', { name: /^Sent( \d+)?$/ })
     .click();
   await page.getByRole('option', { name: new RegExp(subject) }).click({ timeout: 30_000 });
-  const reader = page.getByRole('region', { name: 'Reader' });
-  await reader.getByRole('heading', { level: 1, name: subject }).waitFor();
-  await reader.getByRole('article').first().waitFor();
-  await expect(reader.getByRole('article').count()).resolves.toBe(1);
+  const shown = reader(page);
+  await shown.getByRole('heading', { level: 1, name: subject }).waitFor();
+  await shown.getByRole('article').first().waitFor();
+  await expect(shown.getByRole('article').count()).resolves.toBe(1);
   await goTo(page, 'Drafts');
   await expect(page.getByRole('option', { name: new RegExp(subject) }).count()).resolves.toBe(0);
 }, 60_000);
 
 test('an Undo that reaches the Mailroom before its Send stops the send there, and nothing goes', async () => {
-  const page = await open({ ...SIZES.phone, colorScheme: 'light' });
+  const page = await app.open({ ...SIZES.phone, colorScheme: 'light' });
   const subject = `Overtaken ${Date.now()}`;
   // The Send reaches the Mailroom only once the Undo has been answered.
-  const undone = Promise.withResolvers<void>();
+  const sending = await hold(page, 'send');
   let asks = 0;
-  await page.route('**/_serverFn/**', async (route) => {
-    if (!isSend(route.request().postData())) return route.fallback();
-    asks++;
-    await undone.promise;
-    await route.continue();
+  page.on('request', (request) => {
+    if (isSend(request.postData())) asks++;
   });
   await write(page, subject);
   await send(page).click();
@@ -299,7 +260,7 @@ test('an Undo that reaches the Mailroom before its Send stops the send there, an
   await expect(page.getByRole('textbox', { name: 'Subject' }).inputValue()).resolves.toBe(subject);
 
   const refused = page.waitForResponse((response) => isSend(response.request().postData()));
-  undone.resolve();
+  await sending.release();
   expect(await (await refused).text()).toContain('The send was undone.');
   // The refusal is the Undo's own, so the message stays as it was, and isn't asked for again. This
   // proves no second ask and no failure come: one taken as unanswered is asked again after a second.
@@ -313,14 +274,7 @@ test('a send straight after a cold load counts down, though toasts and their the
   const page = await (await app.context({ ...SIZES.desktop, colorScheme: 'dark' })).newPage();
   // Toasts, and Astryx's theme generator with them, are held back until the send has been answered,
   // so the countdown is asked for before anything can show it.
-  let release = () => {};
-  const released = new Promise<void>((done) => (release = done));
-  let held = 0;
-  await page.route('**/assets/toast-host-*.js', async (route) => {
-    held++;
-    await released;
-    await route.continue();
-  });
+  const toasts = await hold(page, /\/assets\/toast-host-[^/]*\.js$/);
   await page.goto(app.url);
   await openDraft(page, /Lunch Thursday/);
   const stored = storedSendAt(page);
@@ -328,7 +282,8 @@ test('a send straight after a cold load counts down, though toasts and their the
   await stored;
   // The page has taken the answer once the sidebar's Outbox counts the send.
   await page.getByRole('button', { name: /^Outbox\s?1$/ }).waitFor();
-  release();
+  await toasts.requested;
+  await toasts.release();
 
   const counting = toast(page, /^Sending to Jonas in \d+s$/);
   await counting.waitFor();
@@ -339,14 +294,13 @@ test('a send straight after a cold load counts down, though toasts and their the
   // Once it has slid into place, so its words are read where they stay.
   await counting.click({ trial: true });
   await expectUsable(page, 'outbox-desktop-dark-first-toast');
-  expect(held).toBeGreaterThan(0);
 
   await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
   await toast(page, /^Undone\. Nothing was sent to Jonas\.$/).waitFor();
 }, 60_000);
 
 test('an Undo that reaches the Mailroom after the send’s time is refused, and says so', async () => {
-  const page = await open({ ...SIZES.phone, colorScheme: 'dark' });
+  const page = await app.open({ ...SIZES.phone, colorScheme: 'dark' });
   await openDraft(page, /Lunch Thursday/);
   const stored = storedSendAt(page);
   await send(page).click();
@@ -354,12 +308,10 @@ test('an Undo that reaches the Mailroom after the send’s time is refused, and 
   await expectUsable(page, 'outbox-phone-dark-counting');
   // Hold the Undo back until the send's time has passed.
   const due = await stored;
-  await page.route('**/_serverFn/**', async (route) => {
-    if (route.request().postData()?.includes('"cancelSend"'))
-      await new Promise((done) => setTimeout(done, due - Date.now() + 1_000));
-    await route.continue();
-  });
+  const undo = await hold(page, 'cancelSend');
   await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
+  await page.waitForTimeout(due - Date.now() + 1_000);
+  await undo.release();
   await toast(page, /^Too late to undo\. (Sending to Jonas…|Sent to Jonas)$/).waitFor({
     timeout: 20_000,
   });
@@ -374,7 +326,7 @@ test('an Undo that reaches the Mailroom after the send’s time is refused, and 
 
 test('a send the server refuses keeps its reason in the Outbox, and Retry sends it', async () => {
   // The demo refuses a message's first try only, so one size sees the refusal.
-  const page = await open({ ...SIZES.phone, colorScheme: 'light' });
+  const page = await app.open({ ...SIZES.phone, colorScheme: 'light' });
   await openDraft(page, /Cabin/);
   // Seen first as a send that tries again on its own, then as the refusal it is.
   await retrying(page);
@@ -400,7 +352,7 @@ test('a send the server refuses keeps its reason in the Outbox, and Retry sends 
 }, 60_000);
 
 test('a send later says when on a phone, across its toast, and Undo keeps the draft', async () => {
-  const page = await open({ ...SIZES.phone, colorScheme: 'dark' });
+  const page = await app.open({ ...SIZES.phone, colorScheme: 'dark' });
   await openDraft(page, /Offsite agenda/);
   await page.getByRole('button', { name: 'Send later' }).filter({ visible: true }).click();
   await page
@@ -418,7 +370,7 @@ test('a send later says when on a phone, across its toast, and Undo keeps the dr
 }, 60_000);
 
 test('a send at a picked time waits for it in the Outbox, under airmail', async () => {
-  const page = await open({ ...SIZES.desktop, colorScheme: 'light' });
+  const page = await app.open({ ...SIZES.desktop, colorScheme: 'light' });
   await openDraft(page, /Offsite agenda/);
   // The next whole minute at least 20 seconds off, in the browser's own time zone, which the test
   // runner's may not share.

@@ -7,6 +7,10 @@ import type { Locator, Page, Request, Route } from 'playwright';
 
 export const reader = (page: Page) => page.getByRole('region', { name: 'Reader' });
 
+/** What a toast says, as drawn first. Its words are also announced, in a hidden live region. */
+export const toast = (page: Page, text: RegExp) =>
+  page.getByText(text).filter({ visible: true }).first();
+
 /** Whether a control is on screen and can be used. A pane off a phone's screen is inert. */
 export async function reachable(control: Locator): Promise<boolean> {
   return (await control.isVisible()) && control.evaluate((element) => !element.closest('[inert]'));
