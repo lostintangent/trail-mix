@@ -1,8 +1,7 @@
 import start from '@tanstack/react-start/server-entry';
 import type { Mailroom, Timed } from '../features/mailroom/client/contract.ts';
 import { readAvatarPath, readMessagePath } from '../features/mailroom/client/urls.ts';
-import { CLOUDFLARE_API, cloudflareApi, membersFor } from '../features/members/server/index.ts';
-import { signInFor, signsInDevelopers, type SignInConfig } from './access.ts';
+import { signInFor, type SignInConfig } from './access.ts';
 import { demoImages, proxyImage } from './routes/images.ts';
 import { serveAvatar, type AvatarBytes } from './routes/avatars.ts';
 import { serveMessageBytes, type MessageBytes } from './routes/messages.ts';
@@ -28,13 +27,6 @@ type Env = Omit<SignInConfig, 'VISITOR_GATE'> &
     };
     /** The commit this deployment runs. */
     VERSION?: string;
-    /** Who manages members. Without it, nobody does. */
-    OPERATOR_EMAIL?: string;
-    /** The account Access belongs to, and the operator's token that edits its member list. */
-    CLOUDFLARE_ACCOUNT_ID?: string;
-    ACCESS_API_TOKEN?: string;
-    /** A stand-in for Cloudflare's API, which only a developer's own deployment heeds. */
-    CLOUDFLARE_API?: string;
     /** The public demo's visitor gate, and its limit on each network's changes. Only the demo has them. */
     VISITORS?: Parameters<typeof gateOf>[0];
     VISITOR_CHANGES?: RateLimit;
@@ -76,6 +68,7 @@ export default {
     if (reachesMailroom && !(await isChangeAllowed(env.VISITOR_CHANGES, request))) {
       return answer(tooManyChanges());
     }
+    if (asksIfOperator(url)) return answer(Response.json({ result: false }));
     // The app's responses say where their time went, so a member's browser can show it.
     const timing: Timed[] = [
       ...(isFirst ? [{ name: 'isolate', note: 'The Worker started for this request' }] : []),
@@ -98,7 +91,6 @@ export default {
     const response = await start.fetch(request, {
       context: {
         mailroom,
-        members: membersOf(env, member),
         timing,
         received,
         waitUntil: (work) => ctx.waitUntil(work),
@@ -109,6 +101,19 @@ export default {
     );
   },
 };
+
+/**
+ * Whether a page opened before Members went is asking, by that server function's id, whether its
+ * member is the operator. Nobody is now, so it hides Members rather than show it failing. Its id is
+ * the hash of where the function was, so it stays the same in every build.
+ */
+function asksIfOperator(url: URL): boolean {
+  return (
+    url.pathname ===
+      '/_serverFn/a6969e39de41deb4e8b9de8cb827341a0bd2092320434bc9d73e01414913a09c' &&
+    url.searchParams.get('payload')?.includes('"isOperator"') === true
+  );
+}
 
 /**
  * A response that sets the cookie sign-in keeps, where it keeps one. A socket's upgrade goes as it
@@ -140,22 +145,6 @@ function withTiming(response: Response, timing: readonly Timed[]): Response {
       .join(', '),
   );
   return timed;
-}
-
-/**
- * Members' side for the signed-in member. It answers the operator alone, and only its
- * removal of a member names that member's Mailroom, as the rule "Every request is a member" allows.
- */
-function membersOf(env: Env, member: string) {
-  const { CLOUDFLARE_ACCOUNT_ID: account, ACCESS_API_TOKEN: token } = env;
-  const base = signsInDevelopers(env) && env.CLOUDFLARE_API ? env.CLOUDFLARE_API : CLOUDFLARE_API;
-  return membersFor({
-    caller: member,
-    operator: env.OPERATOR_EMAIL,
-    audience: env.ACCESS_AUD?.trim(),
-    api: account && token ? cloudflareApi({ base, account, token }) : undefined,
-    mailroomOf: (removed) => env.MAILROOM.get(env.MAILROOM.idFromName(removed)),
-  });
 }
 
 /**

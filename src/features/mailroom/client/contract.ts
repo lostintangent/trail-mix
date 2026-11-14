@@ -18,7 +18,6 @@ import type {
   Outgoing,
   View,
 } from '../../mail/core/index.ts';
-import type { Members } from '../../members/core/index.ts';
 import type { Subscription } from '../../notifications/core/index.ts';
 // Brings Start's `Register` in, so the declaration below can add to it in either program.
 import type {} from '@tanstack/react-start';
@@ -294,8 +293,7 @@ export type DraftUpload = Omit<DraftInput, 'attachments'> & {
 export type LastUpload = { save: DraftUpload; replaces?: MessageRef };
 
 /**
- * The Mailroom as the Worker reaches it: its queries and commands, the hint socket by `fetch`, and
- * closing its devices, which only the operator's removal of this member asks for.
+ * The Mailroom as the Worker reaches it: its queries and commands, and the hint socket by `fetch`.
  */
 export type Mailroom = Queries &
   Omit<Commands, 'saveDraft' | 'send'> & {
@@ -322,7 +320,6 @@ export type Mailroom = Queries &
       received?: number,
     ): Promise<Answered>;
     fetch(request: Request): Promise<Response>;
-    closeDevices(): Promise<void>;
   };
 
 /**
@@ -352,13 +349,12 @@ declare module '@tanstack/react-start' {
     server: {
       /**
        * The Worker hands each request a way to reach its signed-in member's Mailroom, a new stub
-       * each time, and nothing that names them, Members' side for them, which answers the operator alone, and the parts of the
-       * request's time, which a call adds to and the Worker sends as Server-Timing. `waitUntil`
-       * keeps the request's work running after its browser has gone, as a closed page has.
+       * each time, and nothing that names them, and the parts of the request's time, which a call
+       * adds to and the Worker sends as Server-Timing. `waitUntil` keeps the request's work running
+       * after its browser has gone, as a closed page has.
        */
       requestContext: {
         mailroom: () => Mailroom;
-        members: Members;
         timing: Timed[];
         /** When the request reached the Worker, before its body had, by the Worker's clock. */
         received: number;

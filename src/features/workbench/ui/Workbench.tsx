@@ -132,13 +132,12 @@ import {
   RemoveQuestion,
   type AccountPageOf,
 } from '../../accounts/index.ts';
-import { memberCommands, operatorQuery } from '../../members/index.ts';
 
 /**
  * Where Settings opens: at one of its sections, or at the accent, whose picker it opens too. It opens
  * at its top otherwise.
  */
-export type SettingsAt = 'notifications' | 'accent' | 'members';
+export type SettingsAt = 'notifications' | 'accent';
 
 /** What can lie on the reader's sheet in place of a conversation. */
 type SheetPage = AccountPageOf | { as: 'settings'; at?: SettingsAt };
@@ -618,12 +617,6 @@ export function Workbench({
     (at?: SettingsAt) => openPage(at ? { as: 'settings', at } : { as: 'settings' }),
     [openPage],
   );
-  // Only the operator has Members, in Settings.
-  const isOperator = useQuery(operatorQuery).data === true;
-  const openMembers = useMemo(
-    () => (isOperator ? () => openSettings('members') : undefined),
-    [isOperator, openSettings],
-  );
   // A removed account's page closes, and so does a view of its folders.
   const removed = (account: Account) => {
     if (page?.as === 'edit' && page.account === account.id) closePage();
@@ -849,7 +842,6 @@ export function Workbench({
     ...outbox.commands,
     ...folderEditing.commands,
     ...accountsCommands,
-    ...memberCommands(openMembers),
     ...sending.commands,
     ...extraCommands(openSettings),
   ]);

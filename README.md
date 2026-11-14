@@ -52,23 +52,18 @@ Cloudflare Access stands in front of Trail Mix and emails each person a one-time
 
    Save it, and copy the **Audience (AUD) Tag** from its overview. Use an application like this one, not the Worker's **Protect this Worker** switch, which refuses the connection each open Trail Mix tab keeps.
 
-4. In **Workers & Pages**, open **trail-mix → Settings → Variables and Secrets**, add these two as **Text**, and select **Deploy**:
+4. In **Workers & Pages**, open **trail-mix → Settings → Variables and Secrets**, add these as **Text**, and select **Deploy**:
    - `ACCESS_TEAM_DOMAIN`: `<team>.cloudflareaccess.com`
    - `ACCESS_AUD`: the tag you copied
+   - `OPERATOR_EMAIL`: your address, which push services write to about Trail Mix's notifications, and which turns them on
 5. Open your address again, enter your email and then the code Cloudflare sends. Trail Mix welcomes you.
 
-### 3. Name yourself the operator
+### 3. Invite people
 
-The operator invites and removes people from **Members**, in Trail Mix's **Settings**, which edits the Access policy from step 2 for you.
+The policy from step 2 is the list of who may sign in, and you keep it in Cloudflare's dashboard.
 
-1. Under **My Profile → API Tokens**, create a **Custom token** named "Trail Mix members", for your account alone, with exactly these four **Account** permissions:
-   - Access: Apps Read
-   - Access: Policies Write
-   - Access: Audit Logs Read
-   - Access: Organizations Revoke
-2. In **Variables and Secrets**, add `OPERATOR_EMAIL` as **Text**, the address you sign in with, and `ACCESS_API_TOKEN` as **Secret**, the token. Select **Deploy**.
-
-Reload Trail Mix, and **Members** appears in **Settings**, which the gear at the foot of the sidebar opens, and in its command palette. Each person you invite signs in with a code and gets a Mailroom of their own, with mail nobody else can see.
+- **To invite someone,** open **Zero Trust → Access controls → Policies**, edit the policy for Trail Mix, add their address under **Emails**, and save. They sign in with a code and get a Mailroom of their own, with mail nobody else can see.
+- **To remove someone,** take their address out of that policy, then under **Team & Resources → Users**, tick them and choose **Action → Revoke → Revoke sessions**, so the devices they already signed in on are refused too. Their Mailroom stops checking mail after 30 days unopened and erases itself after 90. Before you remove them, they can erase it themselves from the command palette or the foot of any account's page.
 
 ### 4. Add your mail
 

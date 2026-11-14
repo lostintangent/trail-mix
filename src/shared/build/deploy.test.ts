@@ -3,7 +3,6 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync, existsSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  accountOf,
   commitOf,
   deploy,
   DeployStopped,
@@ -28,13 +27,13 @@ describe('the secrets a deploy makes', () => {
 
   test('are only a missing push key, for a deployed Worker that has its credentials key', () => {
     expect(secretsToMake(found(true, 'CREDENTIALS_KEY', 'PUSH_KEY'), production)).toEqual([]);
-    expect(secretsToMake(found(true, 'CREDENTIALS_KEY', 'ACCESS_API_TOKEN'), production)).toEqual([
+    expect(secretsToMake(found(true, 'CREDENTIALS_KEY', 'SOMETHING_ELSE'), production)).toEqual([
       'PUSH_KEY',
     ]);
   });
 
   test('never include a new credentials key for a Worker that has been deployed', () => {
-    for (const held of [[], ['PUSH_KEY'], ['ACCESS_API_TOKEN', 'credentials_key']]) {
+    for (const held of [[], ['PUSH_KEY'], ['SOMETHING_ELSE', 'credentials_key']]) {
       expect(() => secretsToMake(found(true, ...held), production)).toThrow(DeployStopped);
     }
     expect(() => secretsToMake(found(true), production)).toThrow('Put the key it had back');
@@ -80,23 +79,6 @@ test('the commit /health names is CI’s, else a clean checkout’s, else develo
   expect(commitOf({ GITHUB_SHA: 'b2' }, () => 'c3')).toBe('b2');
   expect(commitOf({}, () => 'c3')).toBe('c3');
   expect(commitOf({}, () => undefined)).toBe('development');
-});
-
-test('the account is the environment’s, or the only one Wrangler reaches', async () => {
-  const whoami =
-    (accounts: unknown[]): Wrangler =>
-    () =>
-      Promise.resolve({
-        status: 0,
-        stdout: JSON.stringify({ loggedIn: true, accounts }),
-        stderr: '',
-      });
-  expect(await accountOf({ CLOUDFLARE_ACCOUNT_ID: 'mine' }, whoami([]))).toBe('mine');
-  expect(await accountOf({}, whoami([{ id: 'only', name: 'Mine' }]))).toBe('only');
-  expect(await accountOf({}, whoami([{ id: 'a' }, { id: 'b' }]))).toBeUndefined();
-  const signedOut: Wrangler = () =>
-    Promise.resolve({ status: 1, stdout: '', stderr: 'Not logged in' });
-  expect(await accountOf({}, signedOut)).toBeUndefined();
 });
 
 /**
@@ -292,26 +274,16 @@ describe('a deploy', () => {
     await deploy({
       config: built('trail-mix'),
       args: ['--dry-run', '--message', 'Commit a1'],
-      env: {
-        WORKERS_CI_COMMIT_SHA: 'a1',
-        ACCESS_API_TOKEN: 'members-token',
-        CLOUDFLARE_ACCOUNT_ID: 'an-account',
-      },
+      env: { WORKERS_CI_COMMIT_SHA: 'a1' },
       wrangler: run,
       log: (line) => lines.push(line),
     });
 
     expect(buckets).toEqual(new Set(['trail-mix-bodies']));
     const [made] = deploys;
-    expect(Object.keys(made!.secrets).sort()).toEqual([
-      'ACCESS_API_TOKEN',
-      'CREDENTIALS_KEY',
-      'PUSH_KEY',
-    ]);
-    expect(made!.secrets.ACCESS_API_TOKEN).toBe('members-token');
+    expect(Object.keys(made!.secrets).sort()).toEqual(['CREDENTIALS_KEY', 'PUSH_KEY']);
     expect(made!.mode).toBe(0o600);
     expect(made!.args).toContain('VERSION:a1');
-    expect(made!.args).toContain('CLOUDFLARE_ACCOUNT_ID:an-account');
     expect(made!.args.slice(-3)).toEqual(['--dry-run', '--message', 'Commit a1']);
     // No secret is an argument, a line of the log, or in the environment Wrangler deploys with.
     const told = JSON.stringify([made!.args, lines, made!.env]);

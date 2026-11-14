@@ -1,8 +1,6 @@
 import { expect, mock, spyOn, test } from 'bun:test';
-import { exportJWK, generateKeyPair, SignJWT } from 'jose';
+import { generateKeyPair, SignJWT } from 'jose';
 import type { Mailroom, Timed } from '../features/mailroom/client/contract.ts';
-import type { Members } from '../features/members/core/index.ts';
-import { cloudflareStandIn, STAND_IN_AUD } from '../../tests/cloudflare-stand-in.ts';
 import type { AvatarBytes } from './routes/avatars.ts';
 import type { MessageBytes } from './routes/messages.ts';
 
@@ -11,16 +9,12 @@ import type { MessageBytes } from './routes/messages.ts';
  * development member stands in for a verified sign-in, which `access.test.ts` covers.
  */
 
-const reachedApp: { url: string; mailroom: unknown; members: Members }[] = [];
-type Context = { mailroom: () => unknown; members: Members; timing: Timed[] };
+const reachedApp: { url: string; mailroom: unknown }[] = [];
+type Context = { mailroom: () => unknown; timing: Timed[] };
 await mock.module('@tanstack/react-start/server-entry', () => ({
   default: {
     fetch(request: Request, { context }: { context: Context }) {
-      reachedApp.push({
-        url: request.url,
-        mailroom: tried(context.mailroom),
-        members: context.members,
-      });
+      reachedApp.push({ url: request.url, mailroom: tried(context.mailroom) });
       // A call notes its parts of the request's time, as `rpc.ts` does.
       if (request.url.includes('/_serverFn/')) {
         context.timing.push({ name: 'mailroom', ms: 12.34, note: 'conversation' });
@@ -81,14 +75,6 @@ function mailrooms() {
               ? { type: 'image/png', bytes: new TextEncoder().encode(`${name}'s picture`) }
               : null,
           );
-        },
-        closeDevices: () => {
-          did.push([name, 'closeDevices']);
-          return Promise.resolve();
-        },
-        eraseEverything: () => {
-          did.push([name, 'eraseEverything']);
-          return Promise.resolve();
         },
         answer: (call: { name: string; args: unknown[] }) => {
           did.push([name, JSON.stringify(call)]);
@@ -210,6 +196,24 @@ test('the signed-in member’s Mailroom is the only one the app is handed, whoev
     'ada@example.com',
     'ada@example.com',
   ]);
+});
+
+test('a page from before Members went is told its member isn’t the operator, and reaches no Mailroom', async () => {
+  const { env, opened } = developer();
+  reachedApp.length = 0;
+  // Its call, as Start's client sends it.
+  const call =
+    '{"t":{"t":10,"i":0,"p":{"k":["data"],"v":[{"t":10,"i":1,"p":{"k":["name","args"],"v":[{"t":1,"s":"isOperator"},{"t":9,"i":2,"a":[],"o":0}]},"o":0}]},"o":0},"f":127,"m":[]}';
+  const response = await worker.fetch(
+    new Request(
+      `${LOCAL}/_serverFn/a6969e39de41deb4e8b9de8cb827341a0bd2092320434bc9d73e01414913a09c?payload=${encodeURIComponent(call)}`,
+    ),
+    env,
+  );
+
+  expect(await response.json()).toEqual({ result: false });
+  expect(opened).toEqual([]);
+  expect(reachedApp).toEqual([]);
 });
 
 test('a command or a socket that another site started is refused before sign-in is consulted', async () => {
@@ -524,109 +528,4 @@ test('the demo takes only so many changes a minute from one network, and counts 
   expect((await worker.fetch(from('203.0.113.7', 'GET'), env)).status).toBe(200);
   expect((await worker.fetch(new Request('https://demo.example.com/'), env)).status).toBe(200);
   expect(Object.fromEntries(counted)).toEqual({ '203.0.113.7': 4, '198.51.100.1': 1 });
-});
-
-/**
- * Members' side, as the Worker hands it to the app for a member Access signed in, with
- * Cloudflare's API and Access's certificates answered by stand-ins.
- */
-async function signedInMembers(env: Record<string, unknown>, team: string) {
-  const standIn = cloudflareStandIn({ members: ['ada@example.com', 'bea@example.com'] });
-  const { privateKey, publicKey } = await generateKeyPair('RS256');
-  const certificate = { ...(await exportJWK(publicKey)), kid: 'access', alg: 'RS256' };
-  const reached: string[] = [];
-  const network = spyOn(globalThis, 'fetch').mockImplementation(((
-    input: RequestInfo | URL,
-    init?: RequestInit,
-  ) => {
-    const request = new Request(input, init);
-    if (request.url === `https://${team}/cdn-cgi/access/certs`) {
-      return Promise.resolve(Response.json({ keys: [certificate] }));
-    }
-    reached.push(request.url);
-    return standIn.handle(request);
-  }) as typeof fetch);
-  const as = async (email: string) => {
-    const token = await new SignJWT({ email })
-      .setProtectedHeader({ alg: 'RS256', kid: 'access' })
-      .setIssuer(`https://${team}`)
-      .setAudience(STAND_IN_AUD)
-      .setExpirationTime('5m')
-      .sign(privateKey);
-    reachedApp.length = 0;
-    await worker.fetch(new Request(`${SITE}/`, { headers: { 'Cf-Access-Jwt-Assertion': token } }), {
-      ...env,
-      ACCESS_TEAM_DOMAIN: team,
-      ACCESS_AUD: STAND_IN_AUD,
-    } as never);
-    return reachedApp[0]!.members;
-  };
-  return { as, standIn, reached, done: () => network.mockRestore() };
-}
-
-const MEMBERS_SET_UP = {
-  OPERATOR_EMAIL: 'ada@example.com',
-  CLOUDFLARE_ACCOUNT_ID: 'account',
-  ACCESS_API_TOKEN: 'token',
-  // A deployment that signs people in through Access never heeds a stand-in.
-  CLOUDFLARE_API: 'https://stand-in.invalid/client/v4',
-};
-
-test('only the operator removes a member, which reaches that member’s Mailroom alone, to close and erase it', async () => {
-  const rooms = mailrooms();
-  const { as, standIn, reached, done } = await signedInMembers(
-    { ...rooms, ...MEMBERS_SET_UP },
-    'members.cloudflareaccess.com',
-  );
-
-  // Bea isn't the operator, so naming anyone reaches neither Cloudflare nor any Mailroom of theirs.
-  const bea = await as('bea@example.com');
-  expect(await bea.isOperator()).toBe(false);
-  await expect(bea.remove('ada@example.com', true)).rejects.toThrow(
-    'Only the operator can manage members.',
-  );
-  await expect(bea.members()).rejects.toThrow('Only the operator can manage members.');
-  expect(reached).toEqual([]);
-  expect(rooms.opened).toEqual(['bea@example.com']);
-  expect(rooms.did).toEqual([]);
-
-  // Ada is, so removing Bea reaches Bea's Mailroom, and only to close it and erase it.
-  const ada = await as('ADA@example.com');
-  expect(await ada.isOperator()).toBe(true);
-  await ada.remove('bea@example.com', true);
-  expect(standIn.members).toEqual(['ada@example.com']);
-  expect(rooms.opened).toEqual(['bea@example.com', 'ada@example.com', 'bea@example.com']);
-  expect(rooms.did).toEqual([
-    ['bea@example.com', 'closeDevices'],
-    ['bea@example.com', 'eraseEverything'],
-  ]);
-  expect(reached.every((url) => url.startsWith('https://api.cloudflare.com/client/v4/'))).toBe(
-    true,
-  );
-  done();
-});
-
-test('only a developer’s own deployment reaches the stand-in for Cloudflare it names', async () => {
-  const rooms = mailrooms();
-  const asked: string[] = [];
-  const network = spyOn(globalThis, 'fetch').mockImplementation(((
-    input: RequestInfo | URL,
-    init?: RequestInit,
-  ) => {
-    const request = new Request(input, init);
-    asked.push(request.url);
-    return cloudflareStandIn().handle(request);
-  }) as typeof fetch);
-  reachedApp.length = 0;
-  await worker.fetch(new Request(`${LOCAL}/`), {
-    ...rooms,
-    ...MEMBERS_SET_UP,
-    OPERATOR_EMAIL: 'ada@example.com',
-    DEV_MEMBER: 'ada@example.com',
-    ACCESS_AUD: STAND_IN_AUD,
-  });
-  await reachedApp[0]!.members.members();
-  expect(asked.length).toBeGreaterThan(0);
-  expect(asked.every((url) => url.startsWith('https://stand-in.invalid/client/v4/'))).toBe(true);
-  network.mockRestore();
 });

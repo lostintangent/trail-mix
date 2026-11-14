@@ -29,7 +29,7 @@ env:
   USER_AGENT: trail-mix-deploy (+https://github.com/${{ github.repository }})
 
 jobs:
-  # Whether this repository can deploy, and whether its Access and Members settings are usable.
+  # Whether this repository can deploy, and whether its settings are usable.
   settings:
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -65,18 +65,17 @@ jobs:
             exit 1
           fi
 
-      # The Members page needs both: the operator who may use it, and the token it edits Access with.
-      - name: Check the Members settings
+      # Push services write to the operator about the deployment's notifications, which stay off
+      # until it names an address.
+      - name: Check the operator's address
         env:
           OPERATOR_EMAIL: ${{ vars.OPERATOR_EMAIL }}
-          HAS_TOKEN: ${{ secrets.ACCESS_API_TOKEN != '' }}
         run: |
-          if [ -n "$OPERATOR_EMAIL" ] && ! [[ "$OPERATOR_EMAIL" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]; then
-            echo "::error::OPERATOR_EMAIL is one email address, the one you sign in to Access with."
+          if [ -z "$OPERATOR_EMAIL" ]; then
+            echo "::notice::OPERATOR_EMAIL isn't set, so Trail Mix sends no notifications."
+          elif ! [[ "$OPERATOR_EMAIL" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]; then
+            echo "::error::OPERATOR_EMAIL is one email address, where push services can reach you."
             exit 1
-          fi
-          if [ -z "$OPERATOR_EMAIL" ] || [ "$HAS_TOKEN" != true ]; then
-            echo "::notice::The Members page needs both OPERATOR_EMAIL and ACCESS_API_TOKEN. Until then it says it isn't set up."
           fi
 
       # Outlook accounts sign in at Microsoft through the app the operator registered in Entra.
@@ -172,9 +171,8 @@ jobs:
       # `bun run deploy`, as every copy's Deploy to Cloudflare builds run it: it makes any bucket the
       # Worker binds, gives a Worker never deployed its CREDENTIALS_KEY and any Worker without one its
       # PUSH_KEY, and stops rather than give a deployed Worker a new CREDENTIALS_KEY. It names the
-      # commit and the account, and passes ACCESS_API_TOKEN on with every deploy while the repository
-      # has it, so a token replaced in GitHub reaches the Worker next time. It logs the names of the
-      # secrets production keeps, never a value. Variables a deploy doesn't name stay as they were.
+      # commit, and logs the names of the secrets production keeps, never a value. Variables a deploy
+      # doesn't name stay as they were.
       - name: Deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -183,7 +181,6 @@ jobs:
           ACCESS_AUD: ${{ vars.ACCESS_AUD }}
           OPERATOR_EMAIL: ${{ vars.OPERATOR_EMAIL }}
           MICROSOFT_CLIENT_ID: ${{ vars.MICROSOFT_CLIENT_ID }}
-          ACCESS_API_TOKEN: ${{ secrets.ACCESS_API_TOKEN }}
         run: |
           args=(--message "Commit $COMMIT")
           if [ -n "$ACCESS_TEAM_DOMAIN" ]; then
@@ -423,7 +420,7 @@ jobs:
           done
 
       # A preview takes nothing from production, so it gets the Access settings here, and never a
-      # secret: no CREDENTIALS_KEY, no ACCESS_API_TOKEN. Its own settings are the `previews` block of
+      # secret: no CREDENTIALS_KEY, no PUSH_KEY. Its own settings are the `previews` block of
       # wrangler.jsonc.
       - name: Deploy the preview
         id: deploy

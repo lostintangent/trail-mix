@@ -93,7 +93,7 @@ describe('The Mailroom', () => {
     await fay.call('restart').catch(() => {});
     expect(await answer('folders')).toMatchObject({ value: [], cold: true });
     // Only what a browser may ask: the Worker's own calls and a test's are refused.
-    for (const name of ['closeDevices', 'restart', 'alarm']) {
+    for (const name of ['restart', 'alarm']) {
       await expect(answer(name)).rejects.toThrow('That isn’t something a browser can ask');
     }
   });
@@ -1116,7 +1116,7 @@ describe('The Mailroom with the demo mailbox', () => {
   }, 120_000);
   afterAll(() => worker?.stop());
 
-  test('a removed member’s devices are closed, and erasing leaves nothing of theirs in storage', async () => {
+  test('erasing the demo mailbox leaves nothing of it in storage', async () => {
     const dee = member('dee', () => worker);
     const device = dee.device();
     await device.opened;
@@ -1124,9 +1124,6 @@ describe('The Mailroom with the demo mailbox', () => {
     // An opened message's body is cached, so there is something in the bucket to erase too.
     const [row] = await dee.page({ in: 'inbox' });
     await dee.call('body', (await dee.call<Message[]>('conversation', row!.id))[0]);
-
-    await dee.call('closeDevices');
-    expect(await device.closed).toBe(1008);
 
     await dee.call('eraseEverything');
     const { tables, bodies } = await dee.call<{ tables: Record<string, unknown[]>; bodies: [] }>(
@@ -1138,6 +1135,7 @@ describe('The Mailroom with the demo mailbox', () => {
         ([name, rows]) => name !== 'schema' && !/^(people_)?search_/.test(name) && rows.length,
       ),
     ).toEqual([]);
+    device.close();
   }, 60_000);
 
   test('what devices keep has one name until an erase, which every open device hears', async () => {

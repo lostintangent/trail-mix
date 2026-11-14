@@ -19,8 +19,8 @@ import { join } from 'node:path';
  * - `VISITOR_KEY`, which signs the public demo's visitor cookies, is made whenever the demo has
  *   none. The demo stores no password and sends no notification, so it gets neither of the others.
  *
- * It passes on `ACCESS_API_TOKEN` when the environment has one, and names the commit and the
- * account. A deploy adds to the Worker's secrets and removes none, and it never prints a value.
+ * It names the commit. A deploy adds to the Worker's secrets and removes none, and it never prints
+ * a value.
  */
 
 /** The secrets a deployment makes for itself. */
@@ -129,22 +129,6 @@ export async function makeBuckets(
   return made;
 }
 
-/** The account to deploy to, as the environment names it or as the only one Wrangler can reach. */
-export async function accountOf(
-  env: NodeJS.ProcessEnv,
-  wrangler: Wrangler,
-): Promise<string | undefined> {
-  if (env.CLOUDFLARE_ACCOUNT_ID) return env.CLOUDFLARE_ACCOUNT_ID;
-  const whoami = await wrangler(['whoami', '--json']);
-  if (whoami.status !== 0) return undefined;
-  const accounts = (jsonOf(whoami.stdout, 'who Wrangler signed in as') as { accounts?: unknown[] })
-    ?.accounts;
-  const [only] = Array.isArray(accounts) && accounts.length === 1 ? accounts : [];
-  return typeof (only as { id?: unknown })?.id === 'string'
-    ? (only as { id: string }).id
-    : undefined;
-}
-
 /** The commit being deployed, as CI names it or as a clean checkout is at, for `/health`. */
 export function commitOf(env: NodeJS.ProcessEnv, git = gitCommit): string {
   return env.WORKERS_CI_COMMIT_SHA || env.GITHUB_SHA || git() || 'development';
@@ -163,10 +147,8 @@ type Deploy = {
 export async function deploy({ config, args, env, wrangler, log }: Deploy): Promise<void> {
   const built = jsonOf(readFile(config), config) as Built;
   const worker = built.name;
-  const account = await accountOf(env, wrangler);
-  // Wrangler finds the account itself, unless it can reach several and must be told.
-  const accountEnv = account ? { ...env, CLOUDFLARE_ACCOUNT_ID: account } : env;
-  const run: Wrangler = (more, extra) => wrangler(more, extra ?? accountEnv);
+  // Wrangler finds the account itself, unless it can reach several and the environment names one.
+  const run: Wrangler = (more, extra) => wrangler(more, extra ?? env);
 
   const found = await lookUp(worker, run);
   log(
@@ -185,18 +167,16 @@ export async function deploy({ config, args, env, wrangler, log }: Deploy): Prom
   const secrets: Record<string, string> = Object.fromEntries(
     make.map((name) => [name, mint(name)]),
   );
-  if (env.ACCESS_API_TOKEN) secrets.ACCESS_API_TOKEN = env.ACCESS_API_TOKEN;
   if (make.length > 0) log(`This deploy makes ${make.join(' and ')}, once.`);
 
   const vars = ['--var', `VERSION:${commitOf(env)}`];
-  if (account) vars.push('--var', `CLOUDFLARE_ACCOUNT_ID:${account}`);
   // Secrets reach Wrangler in a file only this user can read, never as an argument, and the
   // environment can't override them, as Wrangler would let it.
   const folder = mkdtempSync(join(tmpdir(), 'trail-mix-deploy-'));
   try {
     const file = join(folder, 'secrets.json');
     writeFileSync(file, JSON.stringify(secrets), { mode: 0o600 });
-    const deployEnv = { ...accountEnv };
+    const deployEnv = { ...env };
     for (const name of Object.keys(secrets)) delete deployEnv[name];
     const deployed = await run(
       ['deploy', '--config', config, ...vars, '--secrets-file', file, ...args],

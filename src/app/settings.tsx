@@ -8,18 +8,15 @@ import {
   typeScaleVars,
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { useQuery } from '@tanstack/react-query';
-import { Suspense, useEffect, useId, useRef, type ReactNode } from 'react';
-import { MembersSettings, operatorQuery, preloadMembers } from '../features/members/index.ts';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { needsOf, type Notifications } from '../features/notifications/index.ts';
 import type { SettingsAt } from '../features/workbench/index.ts';
 import { AccentChoice, openAccentPicker } from './theme/AccentChoice.tsx';
-import { TextSkeleton } from './theme/Pending.tsx';
 import { media, tm } from './theme/tokens.stylex.ts';
 
 /**
  * Settings, on the reader's sheet, as the gear at the foot of the sidebar opens it: notifications
- * for this device, where the deployment has them, the accent, and, for the operator alone, Members.
+ * for this device, where the deployment has them, and the accent.
  * It gathers what each feature offers onto one page, and loads apart from the first screen. Opened
  * at a section, it brings that section into view, and opened at the accent it opens the picker too.
  */
@@ -36,10 +33,6 @@ export function Settings({
 }) {
   const titleId = useId();
   const accentId = useId();
-  const isOperator = useQuery(operatorQuery).data === true;
-  useEffect(() => {
-    if (isOperator) void preloadMembers();
-  }, [isOperator]);
   const sections = useRef(new Map<SettingsAt, HTMLElement>());
   const place = (name: SettingsAt) => (element: HTMLElement | null) => {
     if (element) sections.current.set(name, element);
@@ -49,7 +42,7 @@ export function Settings({
     if (!at) return;
     sections.current.get(at)?.scrollIntoView({ block: 'start' });
     if (at === 'accent') openAccentPicker();
-  }, [at, isOperator]);
+  }, [at]);
 
   return (
     <section aria-labelledby={titleId} {...stylex.props(styles.page)}>
@@ -92,20 +85,6 @@ export function Settings({
           </div>
         </div>
       </Section>
-      {isOperator && (
-        <Section title="Members" place={place('members')}>
-          <Suspense
-            fallback={
-              <div {...stylex.props(styles.pending)}>
-                <TextSkeleton width="90%" />
-                <TextSkeleton width="60%" />
-              </div>
-            }
-          >
-            <MembersSettings />
-          </Suspense>
-        </Section>
-      )}
     </section>
   );
 }
@@ -188,10 +167,5 @@ const styles = stylex.create({
     flexShrink: 0,
     gap: spacingVars['--spacing-1'],
     marginInlineEnd: `calc((${tm.swatch} - ${sizeVars['--size-element-sm']}) / 2)`,
-  },
-  pending: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: spacingVars['--spacing-2'],
   },
 });

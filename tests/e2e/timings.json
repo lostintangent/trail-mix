@@ -11,8 +11,6 @@
     "tests/e2e/github.e2e.ts": 12000,
     "tests/e2e/install.e2e.ts": 32600,
     "tests/e2e/list.e2e.ts": 30100,
-    "tests/e2e/members-refused.e2e.ts": 4400,
-    "tests/e2e/members.e2e.ts": 8900,
     "tests/e2e/notifications.e2e.ts": 11100,
     "tests/e2e/outbox.e2e.ts": 94400,
     "tests/e2e/previews.e2e.ts": 2700,
