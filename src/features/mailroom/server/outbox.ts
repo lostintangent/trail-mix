@@ -131,18 +131,19 @@ export function outboxQueue(sending: Sending) {
 
     /**
      * Schedules a draft, to go when the undo window that opened at the press, `opened`, closes, or
-     * at `at` if later, as the press `id` names, or a new one. Sending a draft that is already on
-     * its way returns that send, as it was scheduled. A failed one starts over. A press that has
-     * come to something already answers with that, so one undone while it was taken is never sent.
+     * at `at` if later, as the press `id` names, unless another send has that id. Sending a draft
+     * that is already on its way returns that send, as it was scheduled. A failed one starts over.
+     * A press that has come to something already answers with that, so one undone while it was
+     * taken is never sent.
      */
     send(
       draft: Pick<Outgoing, 'draft' | 'messageId' | 'to' | 'subject'>,
       now: string,
-      at?: string,
-      opened?: string,
-      id?: string,
+      at: string | undefined,
+      opened: string,
+      id: string,
     ): Outgoing {
-      const was = id === undefined ? undefined : pressed(id);
+      const was = pressed(id);
       if (was?.send) return was.send;
       if (was?.came) {
         if ('sent' in was.came) return was.came.sent;
@@ -150,20 +151,15 @@ export function outboxQueue(sending: Sending) {
       }
       const held = all().find((entry) => sameRef(entry.draft, draft.draft));
       // An id another send already has never takes its place.
-      const named = id !== undefined && !get(id) ? id : undefined;
+      const named = get(id) ? crypto.randomUUID() : id;
       const outgoing =
         held && held.state !== 'failed'
           ? held
-          : outbox.schedule(
-              { id: held?.id ?? named ?? crypto.randomUUID(), ...draft },
-              now,
-              at,
-              opened,
-            );
+          : outbox.schedule({ id: held?.id ?? named, ...draft }, now, at, opened);
       sql.run(
         `INSERT INTO presses (id, at, send) VALUES (?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET send = excluded.send`,
-        id ?? outgoing.id,
+        id,
         Date.parse(now),
         outgoing.id,
       );

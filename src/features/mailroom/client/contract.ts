@@ -118,19 +118,24 @@ export interface Commands {
    */
   saveDraft(
     draft: DraftInput,
-    replaces?: MessageRef,
-    id?: string,
-    isAgain?: boolean,
+    replaces: MessageRef | undefined,
+    id: string,
+    isAgain: boolean,
   ): Promise<MessageRef>;
   /**
    * At the press of Send plus the undo window, unless given a later time. The press came `waited`
-   * milliseconds before the call, while any save already on its way finished, and is now if not
-   * given. A message with changes still unsaved carries its last save, which the Mailroom files
-   * before it schedules the send, so the press needs this one request. `id` names the press, and
-   * the send it schedules. The Mailroom keeps a press for a week, so asking again answers as the
-   * first ask did, with the send as it stands or as it went, and is refused once it was undone.
+   * milliseconds before the call, while any save already on its way finished. A message with
+   * changes still unsaved carries its last save, which the Mailroom files before it schedules the
+   * send, so the press needs this one request. `id` names the press, and the send it schedules.
+   * The Mailroom keeps a press for a week, so asking again answers as the first ask did, with the
+   * send as it stands or as it went, and is refused once it was undone.
    */
-  send(draft: MessageRef | LastSave, at?: string, waited?: number, id?: string): Promise<Outgoing>;
+  send(
+    draft: MessageRef | LastSave,
+    at: string | undefined,
+    waited: number,
+    id: string,
+  ): Promise<Outgoing>;
   /**
    * Undo, by a press or its send. Returns the draft, untouched. Refused once the send is due,
    * unless it failed. A send whose last save is still being filed is never scheduled, and returns
@@ -295,15 +300,15 @@ export type Mailroom = Queries &
   Omit<Commands, 'saveDraft' | 'send'> & {
     saveDraft(
       draft: DraftUpload,
-      replaces?: MessageRef,
-      id?: string,
-      isAgain?: boolean,
+      replaces: MessageRef | undefined,
+      id: string,
+      isAgain: boolean,
     ): Promise<MessageRef>;
     send(
       draft: MessageRef | { save: DraftUpload; replaces?: MessageRef },
-      at?: string,
-      waited?: number,
-      id?: string,
+      at: string | undefined,
+      waited: number,
+      id: string,
     ): Promise<Outgoing>;
     /**
      * Runs a query or command a browser sent, which is how the Worker asks for every one, and says

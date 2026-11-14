@@ -39,6 +39,8 @@ test('once a host fails for now, its account’s other sends wait for the next w
       { draft: draft(account, uid), messageId: `<${uid}@example.com>`, to: [], subject: '' },
       NOW,
       NOW,
+      NOW,
+      `press-${uid}`,
     );
   }
 

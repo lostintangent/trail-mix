@@ -567,8 +567,7 @@ describe('The Mailroom', () => {
       const lunch = await held('Re: Lunch');
       const markdown =
         'Thursday works,  \n**café** at noon 🙂\n\n![chart](cid:chart@trailmix.invalid)\n';
-      const saved = await ada.call<MessageRef>(
-        'saveDraft',
+      const saved = await ada.save(
         draft({
           subject: 'Re: Lunch',
           markdown,
@@ -637,18 +636,14 @@ describe('The Mailroom', () => {
     }, 30_000);
 
     test('each save replaces the last and carries its attachments over without their bytes', async () => {
-      const first = await ada.call<MessageRef>(
-        'saveDraft',
-        draft({ attachments: [{ file: notes() }] }),
-      );
+      const first = await ada.save(draft({ attachments: [{ file: notes() }] }));
       // Saved a moment ago and not yet in the index, it answers what it holds all the same, as it
       // wrote it, without waiting on the server behind the sync the save owes.
       const [held] = (await ada.call<Body>('body', first)).attachments;
       expect(held).toMatchObject({ name: 'notes.txt' });
       expect(await ada.call<MessageRef[]>('fetchLog')).not.toContainEqual(first);
 
-      const second = await ada.call<MessageRef>(
-        'saveDraft',
+      const second = await ada.save(
         draft({
           markdown: 'Thursday works, see the notes.\n',
           attachments: [{ in: first, id: held!.id }],
@@ -684,13 +679,12 @@ describe('The Mailroom', () => {
     }, 30_000);
 
     test('a restart before the wake leaves a replaced draft owed, and the next wake discards it before its sync', async () => {
-      const first = await ada.call<MessageRef>('saveDraft', draft({ subject: 'Owed' }));
+      const first = await ada.save(draft({ subject: 'Owed' }));
       await ada.until(async () => (await ada.page({ in: 'drafts' })).length === 1);
 
       // The save answers with both versions on the server, and storage owes the old one a discard.
       await ada.call('holdWakes');
-      const second = await ada.call<MessageRef>(
-        'saveDraft',
+      const second = await ada.save(
         draft({ subject: 'Owed', markdown: 'Thursday works, still.\n' }),
         first,
       );
@@ -740,17 +734,9 @@ describe('The Mailroom', () => {
       const reopened = await checked(subject);
 
       // The composer names no parent, since the conversation holds none.
-      const first = await ada.call<MessageRef>(
-        'saveDraft',
-        draft({ subject, markdown: 'Not this time.\n' }),
-        reopened,
-      );
+      const first = await ada.save(draft({ subject, markdown: 'Not this time.\n' }), reopened);
       expect(await answered(first)).toEqual(thread);
-      const second = await ada.call<MessageRef>(
-        'saveDraft',
-        draft({ subject, markdown: 'Not this time, sorry.\n' }),
-        first,
-      );
+      const second = await ada.save(draft({ subject, markdown: 'Not this time, sorry.\n' }), first);
       expect(await answered(second)).toEqual(thread);
       await ada.call('move', [second], 'trash');
     }, 30_000);
@@ -762,7 +748,7 @@ describe('The Mailroom', () => {
       const picnic = await checked('Picnic');
       const reply = (markdown: string) =>
         draft({ subject: 'Re: Picnic', markdown, inReplyTo: picnic });
-      const first = await ada.call<MessageRef>('saveDraft', reply('Count me in.\n'));
+      const first = await ada.save(reply('Count me in.\n'));
       await ada.call('move', [picnic], 'trash');
       await ada.until(() =>
         ada.call('body', picnic).then(
@@ -772,22 +758,18 @@ describe('The Mailroom', () => {
       );
 
       // The composer still names the parent it began with.
-      const second = await ada.call<MessageRef>(
-        'saveDraft',
-        reply('Count me in, rain or shine.\n'),
-        first,
-      );
+      const second = await ada.save(reply('Count me in, rain or shine.\n'), first);
       expect(await answered(second)).toEqual({
         inReplyTo: '<picnic@trailmix.test>',
         references: '<picnic@trailmix.test>',
       });
-      await expect(ada.call('saveDraft', reply('Me too.\n'))).rejects.toThrow(/replies to is gone/);
+      await expect(ada.save(reply('Me too.\n'))).rejects.toThrow(/replies to is gone/);
       await ada.call('move', [second], 'trash');
     }, 30_000);
 
     test('writes From with the name the account was last given, or the address alone', async () => {
       const from = async () => {
-        const saved = await ada.call<MessageRef>('saveDraft', draft({}));
+        const saved = await ada.save(draft({}));
         const written = await PostalMime.parse((await draftOnServer(saved)).source);
         await ada.call('move', [saved], 'trash');
         return written.from;
@@ -805,10 +787,10 @@ describe('The Mailroom', () => {
 
     test('a draft replaces only a draft of its own account', async () => {
       const lunch = await held('Re: Lunch');
-      await expect(
-        ada.call('saveDraft', draft({}), { ...lunch, account: 'elsewhere' }),
-      ).rejects.toThrow(/only a draft of the account/);
-      const saved = await ada.call<MessageRef>('saveDraft', draft({}), lunch);
+      await expect(ada.save(draft({}), { ...lunch, account: 'elsewhere' })).rejects.toThrow(
+        /only a draft of the account/,
+      );
+      const saved = await ada.save(draft({}), lunch);
       await discarded();
       expect(await onServer('INBOX')).toContainKey('<lunch-reply@trailmix.test>');
       // Nor does it take what a message it doesn't replace answers.
@@ -1067,7 +1049,7 @@ describe('The Mailroom', () => {
     const [row] = await cam.page({ in: 'inbox' });
     await cam.call('body', (await cam.call<Message[]>('conversation', row!.id))[0]);
     // A send for tomorrow, so the Outbox holds it and the alarm waits for it.
-    const saved = await cam.call<MessageRef>('saveDraft', {
+    const saved = await cam.save({
       account: added.id,
       to: [{ name: 'Bob', email: bob.email }],
       cc: [],
@@ -1076,7 +1058,7 @@ describe('The Mailroom', () => {
       markdown: 'This goes nowhere.\n',
       attachments: [],
     });
-    await cam.call('send', saved, new Date(Date.now() + DAY).toISOString());
+    await cam.send(saved, new Date(Date.now() + DAY).toISOString());
     expect(await cam.call('outbox')).toHaveLength(1);
     expect(await cam.call('alarmAt')).not.toBeNull();
     expect((await cam.call<{ bodies: string[] }>('stored')).bodies).not.toEqual([]);
@@ -1295,7 +1277,7 @@ describe('The Mailroom with the demo mailbox', () => {
   test('saves a draft with its files in a demo account, where the composer finds it', async () => {
     const cy = member('cy', () => worker);
     const [, work] = await cy.call<Account[]>('accounts');
-    const saved = await cy.call<MessageRef>('saveDraft', {
+    const saved = await cy.save({
       account: work!.id,
       to: [{ email: 'sam@example.com' }],
       cc: [],
@@ -1377,7 +1359,7 @@ describe('The Mailroom with the demo mailbox', () => {
     const [row] = await ivy.page({ in: 'inbox' });
     await ivy.call('body', (await ivy.call<Message[]>('conversation', row!.id))[0]);
     const [personal] = await ivy.call<Account[]>('accounts');
-    await ivy.call('saveDraft', {
+    await ivy.save({
       account: personal!.id,
       to: [{ email: 'sam@example.com' }],
       cc: [],
@@ -1517,7 +1499,7 @@ for (const profile of ['full', 'outlook'] as const satisfies Profile[]) {
       const saved = await drafted('Undone');
       const before = (await draftOnServer(saved)).source;
       const pressed = Date.now();
-      const sending = await cal.call<Outgoing>('send', saved);
+      const sending = await cal.send(saved);
       expect(sending).toMatchObject({
         draft: saved,
         to: [{ name: 'Bob', email: bob.email }],
@@ -1545,12 +1527,14 @@ for (const profile of ['full', 'outlook'] as const satisfies Profile[]) {
 
     test('a draft on its way can’t be replaced until its send is undone', async () => {
       const saved = await drafted('Steady');
-      const { id } = await cal.call<Outgoing>('send', saved);
-      await expect(cal.call('saveDraft', draftOf('Steady'), saved)).rejects.toThrow(
+      const { id } = await cal.send(saved);
+      await expect(cal.save(draftOf('Steady'), saved)).rejects.toThrow(
         'That draft is on its way. Undo the send to change it.',
       );
       await cal.call('cancelSend', id);
-      await cal.call('saveDraft', draftOf('Steady, changed'), saved);
+      await cal.save(draftOf('Steady, changed'), saved);
+      // The save owes the draft it replaced a discard, which the next wake makes.
+      await cal.until(async () => (await whereIs('Steady')).drafts === 0);
       expect(await whereIs('Steady')).toMatchObject({ delivered: 0, drafts: 0 });
     }, 60_000);
 
@@ -1612,7 +1596,7 @@ for (const profile of ['full', 'outlook'] as const satisfies Profile[]) {
       const id = crypto.randomUUID();
       const save = draftOf('Saved before the restart');
       await cal.call('cutNextFiling', 'restart');
-      await expect(cal.call('saveDraft', save, undefined, id)).rejects.toThrow();
+      await expect(cal.call('saveDraft', save, undefined, id, false)).rejects.toThrow();
       const saved = await cal.call<MessageRef>('saveDraft', save, undefined, id, true);
       expect(new TextDecoder().decode((await draftOnServer(saved)).source)).toContain(
         'About Saved before the restart.',
@@ -1628,7 +1612,7 @@ for (const profile of ['full', 'outlook'] as const satisfies Profile[]) {
       const id = crypto.randomUUID();
       const save = draftOf('Asked meanwhile');
       await cal.call('holdDrafts');
-      const first = cal.call<MessageRef>('saveDraft', save, undefined, id);
+      const first = cal.call<MessageRef>('saveDraft', save, undefined, id, false);
       let again: Promise<MessageRef>;
       try {
         await cal.until(async () => (await cal.call<number>('draftsHeld')) === 1);
@@ -1751,7 +1735,7 @@ for (const profile of ['full', 'outlook'] as const satisfies Profile[]) {
     test('a send scheduled ahead goes at its time, with no device open', async () => {
       const saved = await drafted('Scheduled');
       const at = new Date(Date.now() + 20_000).toISOString();
-      const sending = await cal.call<Outgoing>('send', saved, at);
+      const sending = await cal.send(saved, at);
       expect(sending.sendAt).toBe(at);
       // Saving another draft wakes the Mailroom to sync it, and that wake keeps the send's time.
       await drafted('Meanwhile');
@@ -1763,7 +1747,7 @@ for (const profile of ['full', 'outlook'] as const satisfies Profile[]) {
     test('a send the server refuses stays failed with its reason, and goes on Retry', async () => {
       pauseSending(alice.email, true);
       const saved = await drafted('Refused');
-      const { id } = await cal.call<Outgoing>('send', saved);
+      const { id } = await cal.send(saved);
       await cal.until(async () => (await outbox())[0]?.state === 'failed', 60_000);
       const [failed] = await outbox();
       expect(failed).toMatchObject({ id, state: 'failed', attempts: 1 });
@@ -1780,14 +1764,14 @@ for (const profile of ['full', 'outlook'] as const satisfies Profile[]) {
       pauseSending(alice.email, true);
       const saved = await drafted('Fixed');
       try {
-        await cal.call<Outgoing>('send', saved);
+        await cal.send(saved);
         await cal.until(async () => (await outbox())[0]?.state === 'failed', 60_000);
       } finally {
         pauseSending(alice.email, false);
       }
-      const fixed = await cal.call<MessageRef>('saveDraft', draftOf('Fixed, again'), saved);
+      const fixed = await cal.save(draftOf('Fixed, again'), saved);
       expect(await outbox()).toEqual([]);
-      const sending = await cal.call<Outgoing>('send', fixed);
+      const sending = await cal.send(fixed);
       try {
         // The sync the save owed may fold the draft in between, naming its conversation as well.
         expect(await outbox()).toMatchObject([{ id: sending.id, draft: fixed, state: 'waiting' }]);
@@ -1799,7 +1783,7 @@ for (const profile of ['full', 'outlook'] as const satisfies Profile[]) {
     test('a restart before the Outbox records acceptance holds the send, saying it may have gone', async () => {
       const saved = await drafted('Interrupted');
       await cal.call('restartWhenAccepted');
-      const { id } = await cal.call<Outgoing>('send', saved);
+      const { id } = await cal.send(saved);
       await cal.until(async () => (await outbox())[0]?.state === 'failed', 60_000);
       expect((await outbox())[0]).toMatchObject({ id, state: 'failed', error: RESTARTED });
       // The host had the message, and the draft waits as it was.
@@ -1839,14 +1823,14 @@ describe('The Outbox, on Zoho, which files its own copy in Sent when it likes', 
 
   /** Sends a draft, and comes back once the host has accepted it and the Outbox waits on filing. */
   async function accepted(subject: string) {
-    await dee.call<Outgoing>('send', await drafted(subject));
+    await dee.send(await drafted(subject));
     await dee.until(async () => (await outbox())[0]?.state === 'accepted', 60_000);
   }
   const gone = () => dee.until(async () => (await outbox()).length === 0, 60_000);
 
   test('a copy Zoho files before it replies is the only one in Sent', async () => {
     fileSentCopies(alice.email, 'at-once');
-    await dee.call<Outgoing>('send', await drafted('At once'));
+    await dee.send(await drafted('At once'));
     await gone();
     expect(await whereIs('At once')).toEqual({ delivered: 1, sent: 1, drafts: 0 });
   }, 60_000);
@@ -1913,7 +1897,7 @@ function sendingAs(person: ReturnType<typeof member>, account: () => Account) {
   }
   return {
     draftOf,
-    drafted: (subject: string) => person.call<MessageRef>('saveDraft', draftOf(subject)),
+    drafted: (subject: string) => person.save(draftOf(subject)),
     outbox: () => person.call<Outgoing[]>('outbox'),
     copiesOf,
     /** The same, once the host has filed every copy of its own it owes. */

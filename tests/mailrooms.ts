@@ -8,6 +8,8 @@ import {
   type Folder,
   type Hint,
   type Message,
+  type MessageRef,
+  type Outgoing,
   type View,
 } from '../src/features/mail/core/index.ts';
 import { sendable, type BundlePage, type Page } from '../src/features/mailroom/client/contract.ts';
@@ -76,6 +78,14 @@ export function member(name: string, worker: () => LocalWorker) {
   return {
     call,
     page,
+
+    /** Saves a draft as the composer first does, under an id of its own. */
+    save: (draft: unknown, replaces?: MessageRef) =>
+      call<MessageRef>('saveDraft', draft, replaces, crypto.randomUUID(), false),
+
+    /** Presses Send on a draft, or on the save it carries, under an id of its own. */
+    send: (draft: unknown, at?: string) =>
+      call<Outgoing>('send', draft, at, 0, crypto.randomUUID()),
 
     /** What a browser would show: folders, the unified Inbox, and each folder's conversations. */
     async snapshot() {

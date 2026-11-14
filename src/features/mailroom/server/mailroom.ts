@@ -746,32 +746,25 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
    */
   async saveDraft(
     draft: DraftUpload,
-    replaces?: MessageRef,
-    id?: string,
-    isAgain?: boolean,
+    replaces: MessageRef | undefined,
+    id: string,
+    isAgain: boolean,
   ): Promise<MessageRef> {
-    const named = input.optional(id, input.saveOf);
-    const again = input.optional(isAgain, input.switchOf) ?? false;
-    if (named === undefined) return this.savedDraft(draft, replaces);
+    const named = input.saveOf(id);
+    const again = input.switchOf(isAgain);
     const asked = this.saving.get(named);
     if (asked) return asked;
-    const saving = this.savedDraft(draft, replaces, {
-      id: named,
-      mayBeFiled: again,
-      isPress: false,
-    }).finally(() => this.saving.delete(named));
+    const saving = (async () => {
+      const filed = await this.fileDraft(draft, replaces, {
+        id: named,
+        mayBeFiled: again,
+        isPress: false,
+      });
+      await this.keepFiled(filed);
+      return filed.saved;
+    })().finally(() => this.saving.delete(named));
     this.saving.set(named, saving);
     return saving;
-  }
-
-  private async savedDraft(
-    draft: DraftUpload,
-    replaces?: MessageRef,
-    asked?: Asked,
-  ): Promise<MessageRef> {
-    const filed = await this.fileDraft(draft, replaces, asked);
-    await this.keepFiled(filed);
-    return filed.saved;
   }
 
   /**
@@ -788,39 +781,34 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
    */
   async send(
     draft: MessageRef | LastUpload,
-    at?: string,
-    waited?: number,
-    id?: string,
+    at: string | undefined,
+    waited: number,
+    id: string,
   ): Promise<Outgoing> {
     const arrived = Math.min(calling.getStore()?.received ?? Date.now(), Date.now());
     const sent = input.sentOf(draft);
     const when = input.optional(at, input.instantOf);
-    const ago = input.optional(waited, input.waitedOf) ?? 0;
-    const press = input.optional(id, input.sendOf);
+    const ago = input.waitedOf(waited);
+    const press = input.sendOf(id);
     const opened = new Date(arrived - Math.min(ago, UNDO_SECONDS * 1000)).toISOString();
-    let isCutShort = false;
-    if (press !== undefined) {
-      const handing = this.handing.get(press);
-      if (handing) return handing.sent;
-      const known = this.sending.pressed(press);
-      if (known?.send) return this.placed(known.send);
-      if (known?.came) {
-        if ('sent' in known.came) return this.placed(known.came.sent);
-        throw new Error('The send was undone.');
-      }
-      // A press the Outbox no longer keeps may have gone. One it keeps unanswered was cut short by
-      // a restart, before it scheduled anything, and is taken again.
-      if (!known && ago >= PRESS_KEPT_MS) {
-        throw new Error('Send was pressed over a week ago, so it wasn’t sent.');
-      }
-      isCutShort = known !== undefined;
-      this.sending.press(press, new Date(arrived).toISOString());
+    const handing = this.handing.get(press);
+    if (handing) return handing.sent;
+    const known = this.sending.pressed(press);
+    if (known?.send) return this.placed(known.send);
+    if (known?.came) {
+      if ('sent' in known.came) return this.placed(known.came.sent);
+      throw new Error('The send was undone.');
     }
+    // A press the Outbox no longer keeps may have gone. One it keeps unanswered was cut short by a
+    // restart, before it scheduled anything, and is taken again.
+    if (!known && ago >= PRESS_KEPT_MS) {
+      throw new Error('Send was pressed over a week ago, so it wasn’t sent.');
+    }
+    this.sending.press(press, new Date(arrived).toISOString());
     if ('save' in sent) {
-      if (press === undefined) throw new TypeError('A send that carries its save needs an id.');
       return this.sendLastSave(sent, when, opened, {
         id: press,
-        mayBeFiled: isCutShort,
+        mayBeFiled: known !== undefined,
         isPress: true,
       });
     }
@@ -838,7 +826,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       await this.wakeBy(Date.parse(outgoing.sendAt));
       return this.placed(outgoing);
     } catch (error) {
-      if (press !== undefined) this.sending.unpress(press);
+      this.sending.unpress(press);
       throw error;
     }
   }
@@ -917,8 +905,8 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
    */
   private async fileDraft(
     draft: DraftUpload,
-    replaces?: MessageRef,
-    asked?: Asked,
+    replaces: MessageRef | undefined,
+    asked: Asked,
   ): Promise<FiledDraft> {
     const checked = input.draftOf(draft);
     const older = input.optional(replaces, input.refOf);
@@ -928,14 +916,12 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       throw new TypeError('A draft replaces only a draft of the account it is from.');
     }
     const domain = account.address.split('@')[1]!;
-    const messageId = asked
-      ? await messageIdFor(asked.id, domain)
-      : `<${crypto.randomUUID()}@${domain}>`;
+    const messageId = await messageIdFor(asked.id, domain);
     const addressing = { messageId, to: [...checked.to, ...checked.cc], subject: checked.subject };
     if (older && this.sending.holds(older)) {
       throw new Error('That draft is on its way. Undo the send to change it.');
     }
-    if (asked?.mayBeFiled) {
+    if (asked.mayBeFiled) {
       const held = await (await this.provider(account.id)).findDraft(messageId);
       if (held) return { ...this.filed(held, older), addressing };
     }
@@ -973,7 +959,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     const raw = new TextEncoder().encode(writeMime(message));
     const provider = await this.provider(account.id);
     // A restart before the press is on disk would leave its second ask not knowing to look.
-    if (asked?.isPress) await this.ctx.storage.sync();
+    if (asked.isPress) await this.ctx.storage.sync();
     const saved = await provider.saveDraft(raw).catch(async (error: unknown) => {
       const held = await provider.findDraft(messageId).catch(() => undefined);
       if (!held) throw error;
