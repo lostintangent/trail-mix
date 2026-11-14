@@ -146,28 +146,36 @@ async function runInWorkerd(request: CheckRequest, test: boolean): Promise<numbe
     const expected = request.watchSeconds > 0 ? 3 : 2;
     let [reported, failed] = [0, 0];
     let pending = '';
-    for await (const chunk of response.body.pipeThrough(new TextDecoderStream())) {
-      const lines = (pending + chunk).split('\n');
-      pending = lines.pop() ?? '';
-      for (const line of lines.filter(Boolean)) {
-        const message = JSON.parse(line) as CheckResult | { runtime: string };
-        if ('runtime' in message) {
-          const hosts = new Set([request.imap.host, request.smtp.host]);
-          console.log(`On ${message.runtime}, as ${request.user}, at ${[...hosts].join(' and ')}:`);
-          continue;
+    // A workerd that stops resets the response, rather than ending it.
+    let reset = '';
+    try {
+      for await (const chunk of response.body.pipeThrough(new TextDecoderStream())) {
+        const lines = (pending + chunk).split('\n');
+        pending = lines.pop() ?? '';
+        for (const line of lines.filter(Boolean)) {
+          const message = JSON.parse(line) as CheckResult | { runtime: string };
+          if ('runtime' in message) {
+            const hosts = new Set([request.imap.host, request.smtp.host]);
+            console.log(
+              `On ${message.runtime}, as ${request.user}, at ${[...hosts].join(' and ')}:`,
+            );
+            continue;
+          }
+          reported++;
+          if (!message.ok) failed++;
+          const outcome = message.ok ? JSON.stringify(message.detail) : message.error;
+          console.log(
+            redact(
+              `${message.ok ? 'PASS' : 'FAIL'} ${`${message.ms}ms`.padStart(8)}  ${message.check}  ${outcome}`,
+            ),
+          );
         }
-        reported++;
-        if (!message.ok) failed++;
-        const outcome = message.ok ? JSON.stringify(message.detail) : message.error;
-        console.log(
-          redact(
-            `${message.ok ? 'PASS' : 'FAIL'} ${`${message.ms}ms`.padStart(8)}  ${message.check}  ${outcome}`,
-          ),
-        );
       }
+    } catch (error) {
+      reset = `: ${String(error)}`;
     }
     if (reported < expected) {
-      console.log(`FAIL workerd stopped after ${reported} of ${expected} checks`);
+      console.log(redact(`FAIL workerd stopped after ${reported} of ${expected} checks${reset}`));
       return 1;
     }
     return failed ? 1 : 0;

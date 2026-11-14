@@ -43,6 +43,23 @@ export async function startWorker(
   // that exits at once starts Node, so the Worker runs on its own: when a test times out, Bun ends
   // the processes its tests and hooks started, and a Worker started from a hook would go with it.
   // Everything stays in the shell's process group, which `stop` ends.
+  //
+  // Node runs Wrangler's dev server as `wrangler dev` does, except that it watches nothing: `wrangler
+  // dev` restarts workerd when any file the Worker bundles is written, and that resets every request
+  // in flight, so a save or a `git pull --autostash` would fail a running test.
+  const dev = {
+    config: join(scratch, 'wrangler.json'),
+    dev: {
+      watch: false,
+      // Wrangler takes free ports, for the Worker and for its inspector, as it binds them. A port
+      // found free beforehand could be taken in between, by another Worker starting or by one of the
+      // ports Wrangler and workerd bind for themselves.
+      server: { hostname: '127.0.0.1', port: 0 },
+      inspector: { hostname: '127.0.0.1', port: 0 },
+      persist: join(scratch, 'state'),
+    },
+  };
+  const wrangler = join(import.meta.dir, '../node_modules/wrangler/wrangler-dist/cli.js');
   const workerd = spawn(
     '/bin/sh',
     [
@@ -50,24 +67,10 @@ export async function startWorker(
       '"$@" &',
       'sh',
       'node',
-      join(import.meta.dir, '../node_modules/wrangler/bin/wrangler.js'),
-      'dev',
-      '--config',
-      join(scratch, 'wrangler.json'),
-      // Wrangler takes free ports, for the Worker and for its inspector, as it binds them. A port
-      // found free beforehand could be taken in between, by another Worker starting or by one of the
-      // ports Wrangler and workerd bind for themselves.
-      '--port',
-      '0',
-      '--inspector-port',
-      '0',
-      '--ip',
-      '127.0.0.1',
-      '--persist-to',
-      join(scratch, 'state'),
-      // Where it listens is said at `info`.
-      '--log-level',
-      logs ? 'log' : 'info',
+      '--input-type=module',
+      '--eval',
+      `const { unstable_startWorker } = await import(${JSON.stringify(wrangler)});
+      await unstable_startWorker(${JSON.stringify(dev)});`,
     ],
     {
       cwd: scratch,
@@ -75,6 +78,8 @@ export async function startWorker(
       stdio: ['ignore', written, written],
       env: {
         ...process.env,
+        // Where it listens is said at `info`.
+        WRANGLER_LOG: logs ? 'log' : 'info',
         // Wrangler otherwise keeps a debug log of every run in its own folder.
         WRANGLER_WRITE_LOGS: 'false',
         WRANGLER_SEND_METRICS: 'false',
