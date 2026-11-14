@@ -94,7 +94,7 @@ const retrying = (page: Page) =>
     await route.fulfill({ response, body });
   });
 
-test('the countdown matches the time the Mailroom stored, and Undo leaves the draft unsent', async () => {
+test('the countdown matches the time the Mailroom stored, and its row’s Undo brings the message back unsent', async () => {
   const page = await app.open({ ...SIZES.desktop, colorScheme: 'light' });
   await openDraft(page, /Lunch Thursday/);
   const stored = storedSendAt(page);
@@ -116,9 +116,12 @@ test('the countdown matches the time the Mailroom stored, and Undo leaves the dr
   expect(await hasAirmail(page, /To Jonas Weber/)).toBe(true);
   await expectUsable(page, 'outbox-desktop-light-counting');
 
-  await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
+  await row.getByRole('button', { name: 'Undo', exact: true }).click();
   await toast(page, /^Undone\. Nothing was sent to Jonas\.$/).waitFor();
   await page.getByRole('heading', { name: 'Nothing is leaving' }).waitFor();
+  // Back in the composer, as the toast's Undo brings it.
+  await send(page).waitFor();
+  await page.getByText('Thursday works. I will meet you there.').waitFor();
   await goTo(page, 'Drafts');
   await page.getByRole('option', { name: /Lunch Thursday/ }).waitFor();
 }, 60_000);

@@ -84,9 +84,10 @@ export default function LeavingToast({
   });
   const isInSent = isUnsureItWent && holdsCopy(messages ?? [], outgoing?.messageId);
 
-  // Until the Outbox shows the send, this device may still be asking the Mailroom for it.
+  // Undone once Undo has brought its message back, here or from its row in the Outbox. Until the
+  // Outbox shows the send, this device may still be asking the Mailroom for it.
   const standing: Standing =
-    undo === 'done'
+    undo === 'done' || hand?.is === 'stopped'
       ? { is: 'undone' }
       : seen
         ? standingOfFollowed(seen, closes, now, isInSent)

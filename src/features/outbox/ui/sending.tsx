@@ -14,6 +14,7 @@ import type { Leaving } from '../core/leaving.ts';
 import { briefly, type Standing } from '../core/standing.ts';
 import { askedFor, fail, handed, unreached, type Answer, type Press } from './asked.ts';
 import LeavingToast, { said } from './LeavingToast.tsx';
+import { takeBack } from './undo.ts';
 
 /**
  * What the browser does with the Outbox, loaded when it's first wanted rather than with the first
@@ -145,7 +146,11 @@ export function putAwayLeavingToast(id: string) {
   following.dismiss?.();
 }
 
-/** Undo, Retry and Edit for a send the Outbox holds. Edit takes the send back, so its draft opens. */
+/**
+ * Undo, Retry and Edit for a send the Outbox holds. Undo is the one a send's line and toast offer,
+ * which brings back the message this device asked to send. Edit takes the send back, so its draft
+ * opens.
+ */
 export function outboxActions(queryClient: QueryClient) {
   const update = (change: (held: Outgoing[]) => Outgoing[]) =>
     queryClient.setQueryData(outboxQuery.queryKey, (held) => held && change(held));
@@ -153,19 +158,21 @@ export function outboxActions(queryClient: QueryClient) {
     void toast({ type: 'error', body: `Couldn’t ${doing}. ${reasonOf(error)}` });
     void queryClient.invalidateQueries({ queryKey: outboxQuery.queryKey });
   };
-  const takeBack = async (outgoing: Outgoing, doing: string) => {
-    try {
-      await mailroom.cancelSend(outgoing.id);
-      update((held) => held.filter(({ id }) => id !== outgoing.id));
-      return true;
-    } catch (error) {
-      refused(doing, error);
-      return false;
-    }
-  };
   return {
-    undo: (outgoing: Outgoing) => takeBack(outgoing, 'undo'),
-    edit: (outgoing: Outgoing) => takeBack(outgoing, 'take it back to edit'),
+    undo: async (outgoing: Outgoing) => {
+      const refusal = await takeBack(queryClient, outgoing);
+      if (refusal !== undefined) void toast({ type: 'error', body: refusal });
+    },
+    edit: async (outgoing: Outgoing) => {
+      try {
+        await mailroom.cancelSend(outgoing.id);
+        update((held) => held.filter(({ id }) => id !== outgoing.id));
+        return true;
+      } catch (error) {
+        refused('take it back to edit', error);
+        return false;
+      }
+    },
     retry: async (outgoing: Outgoing) => {
       try {
         const retried = await mailroom.retrySend(outgoing.id);
