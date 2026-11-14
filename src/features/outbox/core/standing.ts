@@ -108,17 +108,6 @@ export function standingOfFollowed(
 }
 
 /**
- * Whether a followed send is under way by `now` on this device's clock: its window has closed, or
- * the Outbox has begun it, failed it or seen it go. A send that failed was past its window, even if
- * this device's countdown last looked a moment before it closed.
- */
-export const isUnderWay = (seen: Followed, closes: number, now: number): boolean =>
-  seen.goneAt !== undefined ||
-  seen.last.state !== 'waiting' ||
-  seen.last.error !== undefined ||
-  now >= closes;
-
-/**
  * Where a press stands while this device keeps asking the Mailroom to take it: as it would, until
  * asking again has failed for a while, and then unreached, for what failed last, until an ask
  * lands. Only a press the Mailroom hasn't shown in its Outbox.
