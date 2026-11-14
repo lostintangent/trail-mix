@@ -1,8 +1,8 @@
 // Replying without waiting: the composer opens under its conversation at once, however slowly the
 // server answers, says what it's saving in a place of its own, and a sent reply takes its place at
 // the end of its conversation while it leaves, saying there all there is to say of its send, with no
-// toast while the member stays. Each at a desktop's size and a phone's, as a member of their own, in
-// both themes.
+// toast while the member stays. At a desktop's size and, where a phone differs, a phone's, as a
+// member of their own, in both themes.
 import { describe, expect } from 'bun:test';
 import { join } from 'node:path';
 import type { BrowserContextOptions, Page, Route } from 'playwright';
@@ -42,6 +42,8 @@ for (const [size, options] of Object.entries(SIZES)) {
   describe(`Replying at a ${size}’s size`, () => {
     const app = suite({ vars: { DEV_MEMBER: `reply-${size}-${Date.now()}@trailmix.test` } });
     const { test } = app;
+    // `it` checks at a desktop's size alone what a phone does no differently.
+    const it = size === 'desktop' ? test : () => {};
 
     /**
      * The Inbox, which opens at its newest and prepares the conversations beside it. What `before`
@@ -61,7 +63,7 @@ for (const [size, options] of Object.entries(SIZES)) {
       await reader(page).getByRole('heading', { level: 1, name: subject, exact: false }).waitFor();
     }
 
-    test('Reply opens at once while the server is slow, and goes to the list once the parent says', async () => {
+    it('Reply opens at once while the server is slow, and goes to the list once the parent says', async () => {
       // The parent's body comes only once the reply has been saved, addressed as it was before.
       const saves = (page: Page, to: 'sender' | 'list') =>
         page.waitForResponse((response) => {
@@ -93,7 +95,7 @@ for (const [size, options] of Object.entries(SIZES)) {
       await expectUsable(page, `reply-${size}-light-opened`);
     }, 60_000);
 
-    test('a key pressed straight after R goes to the reply, though nothing else has run', async () => {
+    it('a key pressed straight after R goes to the reply, though nothing else has run', async () => {
       const page = await inbox('dark');
       await open(page);
       await composerLoaded(page);
@@ -118,12 +120,12 @@ for (const [size, options] of Object.entries(SIZES)) {
       expect(await composer(page).count()).toBe(1);
     }, 60_000);
 
-    test('the composer’s code loads ahead once the first screen rests, with nothing open', async () => {
+    it('the composer’s code loads ahead once the first screen rests, with nothing open', async () => {
       const page = await inbox('light');
       await composerLoaded(page);
     }, 60_000);
 
-    test('keys pressed while a reply’s code loads wait for it, and what they type is the reply’s', async () => {
+    it('keys pressed while a reply’s code loads wait for it, and what they type is the reply’s', async () => {
       // The composer's code comes only once the test lets it, past any worker that keeps it.
       let code!: Awaited<ReturnType<typeof hold>>;
       const page = await inbox('light', { serviceWorkers: 'block' }, async (page) => {
@@ -218,7 +220,7 @@ for (const [size, options] of Object.entries(SIZES)) {
       });
     }, 60_000);
 
-    test('whom the member chose a reply is to stays chosen when the parent’s Reply-To comes', async () => {
+    it('whom the member chose a reply is to stays chosen when the parent’s Reply-To comes', async () => {
       const page = await inbox('dark');
       await slowBodies(page);
       const bodyCame = page.waitForResponse((response) =>
@@ -274,7 +276,7 @@ for (const [size, options] of Object.entries(SIZES)) {
       );
     }, 60_000);
 
-    test('a reply closed untouched leaves nothing on the server', async () => {
+    it('a reply closed untouched leaves nothing on the server', async () => {
       const page = await inbox('light');
       await open(page);
       await composerLoaded(page);
@@ -292,7 +294,7 @@ for (const [size, options] of Object.entries(SIZES)) {
       expect({ saves, drafts: await drafts.count() }).toEqual({ saves: 0, drafts: before });
     }, 60_000);
 
-    test('a reply’s draft never shows above its composer, though the hint brings it before its save answers', async () => {
+    it('a reply’s draft never shows above its composer, though the hint brings it before its save answers', async () => {
       const page = await inbox(size === 'desktop' ? 'light' : 'dark');
       await open(page);
       await composerLoaded(page);
@@ -327,7 +329,7 @@ for (const [size, options] of Object.entries(SIZES)) {
       });
     }, 60_000);
 
-    test('Send closes a reply at once while its last save is on its way, and Undo then brings back every word in one draft', async () => {
+    it('Send closes a reply at once while its last save is on its way, and Undo then brings back every word in one draft', async () => {
       const page = await inbox(size === 'desktop' ? 'dark' : 'light');
       await open(page);
       await composerLoaded(page);
@@ -497,7 +499,7 @@ for (const [size, options] of Object.entries(SIZES)) {
         .waitFor();
     }, 60_000);
 
-    test('airmail runs while a reply leaves, and stands still, still drawn, when motion is reduced', async () => {
+    it('airmail runs while a reply leaves, and stands still, still drawn, when motion is reduced', async () => {
       for (const motion of ['no-preference', 'reduce'] as const) {
         const page = await inbox('light', { reducedMotion: motion, forcedColors: 'active' });
         await open(page);

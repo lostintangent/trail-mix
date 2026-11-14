@@ -320,15 +320,20 @@ test('verified list mail offers to unsubscribe in one click, and says whether th
   await expectUsable(dark, 'reader-desktop-dark-unsubscribed');
 }, 60_000);
 
-for (const colorScheme of ['light', 'dark'] as const) {
-  test(`on a phone, in ${colorScheme}, a newsletter's sheet offers to unsubscribe, and says the sender took it`, async () => {
-    const page = await open({ ...SIZES.phone, colorScheme });
-    await row(page, 'Kernel Weekly').click();
-    const sheet = reader(page).getByRole('article').last();
-    await sheet.getByRole('button', { name: 'Unsubscribe', exact: true }).tap();
-    await sheet.getByText('Unsubscribed', { exact: true }).waitFor();
-    await expectUsable(page, `reader-phone-${colorScheme}-unsubscribed`);
-  }, 30_000);
+test("on a phone, a newsletter's sheet offers to unsubscribe, and says the sender took it", async () => {
+  const page = await open({ ...SIZES.phone, colorScheme: 'light' });
+  await row(page, 'Kernel Weekly').click();
+  const sheet = reader(page).getByRole('article').last();
+  await sheet.getByRole('button', { name: 'Unsubscribe', exact: true }).tap();
+  await sheet.getByText('Unsubscribed', { exact: true }).waitFor();
+  await usableInBoth(page, (colorScheme) => `reader-phone-${colorScheme}-unsubscribed`);
+}, 30_000);
+
+/** Checks a screen reads in the light theme, and again once the system turns dark. */
+async function usableInBoth(page: Page, screen: (colorScheme: 'light' | 'dark') => string) {
+  await expectUsable(page, screen('light'));
+  await page.emulateMedia({ colorScheme: 'dark' });
+  await expectUsable(page, screen('dark'));
 }
 
 /**
@@ -355,102 +360,82 @@ async function offered(page: Page, { run = false } = {}): Promise<boolean> {
   return isOffered;
 }
 
-for (const colorScheme of ['light', 'dark'] as const) {
-  test(`in ${colorScheme}, the demo newsletter’s images, once shown, are its own pictures, and its open pixel stays blocked`, async () => {
-    const page = await open({ ...SIZES.desktop, colorScheme });
-    // Each remote image the page asked the Worker for, by the address it names.
-    const asked: { url: string; status: number }[] = [];
-    page.on('response', (response) => {
-      const url = new URL(response.url());
-      if (url.pathname !== '/images') return;
-      asked.push({ url: url.searchParams.get('url') ?? '', status: response.status() });
-    });
-    await row(page, 'Kernel Weekly').click();
-    const newest = reader(page).getByRole('article').last();
-    await newest.getByText('Images from Kernel Weekly are hidden.').waitFor();
-    await newest.getByRole('button', { name: 'Show', exact: true }).click();
+test('the demo newsletter’s images, once shown, are its own pictures, and its open pixel stays blocked', async () => {
+  const page = await open({ ...SIZES.desktop, colorScheme: 'light' });
+  // Each remote image the page asked the Worker for, by the address it names.
+  const asked: { url: string; status: number }[] = [];
+  page.on('response', (response) => {
+    const url = new URL(response.url());
+    if (url.pathname !== '/images') return;
+    asked.push({ url: url.searchParams.get('url') ?? '', status: response.status() });
+  });
+  await row(page, 'Kernel Weekly').click();
+  const newest = reader(page).getByRole('article').last();
+  await newest.getByText('Images from Kernel Weekly are hidden.').waitFor();
+  await newest.getByRole('button', { name: 'Show', exact: true }).click();
 
-    // Every remote image in the newest message's frame comes in as a picture, not a broken box.
-    await page.waitForFunction(
-      () => {
-        const frame = [...document.querySelectorAll('iframe')].at(-1)?.contentDocument;
-        const remote = [...(frame?.images ?? [])].filter(
-          (image) => new URL(image.src).pathname === '/images',
-        );
-        return (
-          remote.length >= 3 && remote.every((image) => image.complete && image.naturalWidth > 0)
-        );
-      },
-      undefined,
-      { timeout: 15_000 },
-    );
-    expect(asked.some(({ url }) => url.endsWith('/masthead.svg'))).toBe(true);
-    expect(asked.filter(({ status }) => status !== 200)).toEqual([]);
-    expect(asked.filter(({ url }) => url.includes('/open/'))).toEqual([]);
-    await expectUsable(page, `reader-desktop-${colorScheme}-newsletter-images`);
-  }, 30_000);
-}
+  // Every remote image in the newest message's frame comes in as a picture, not a broken box.
+  await page.waitForFunction(
+    () => {
+      const frame = [...document.querySelectorAll('iframe')].at(-1)?.contentDocument;
+      const remote = [...(frame?.images ?? [])].filter(
+        (image) => new URL(image.src).pathname === '/images',
+      );
+      return (
+        remote.length >= 3 && remote.every((image) => image.complete && image.naturalWidth > 0)
+      );
+    },
+    undefined,
+    { timeout: 15_000 },
+  );
+  expect(asked.some(({ url }) => url.endsWith('/masthead.svg'))).toBe(true);
+  expect(asked.filter(({ status }) => status !== 200)).toEqual([]);
+  expect(asked.filter(({ url }) => url.includes('/open/'))).toEqual([]);
+  await usableInBoth(page, (colorScheme) => `reader-desktop-${colorScheme}-newsletter-images`);
+}, 30_000);
 
-for (const colorScheme of ['light', 'dark'] as const) {
-  test(`on a phone, in ${colorScheme}, a sheet keeps its time whole, and a new message’s title sits on its buttons’ line`, async () => {
-    const page = await open({ ...SIZES.phone, colorScheme });
-    await row(page, 'Q4 planning').click();
-    const header = reader(page).getByRole('article').last().locator('header');
-    await header.locator('time').waitFor();
-    // The time is one line, on the recipients' line, however long the recipients are.
-    const line = await header.evaluate((element) => {
-      const time = element.querySelector('time');
-      const to = time?.closest('small')?.firstElementChild;
-      return {
-        timeLines: time?.getClientRects().length,
-        sameLine:
-          Math.abs(
-            (time?.getBoundingClientRect().top ?? 0) - (to?.getBoundingClientRect().top ?? -1),
-          ) < 2,
-      };
-    });
-    expect(line).toEqual({ timeLines: 1, sameLine: true });
-    await page.screenshot({ path: join(RESULTS, `reader-phone-${colorScheme}-time.png`) });
+test('on a phone, a sheet keeps its time whole, and a new message’s title sits on its buttons’ line', async () => {
+  const page = await open({ ...SIZES.phone, colorScheme: 'light' });
+  await row(page, 'Q4 planning').click();
+  const header = reader(page).getByRole('article').last().locator('header');
+  await header.locator('time').waitFor();
+  // The time is one line, on the recipients' line, however long the recipients are.
+  const line = await header.evaluate((element) => {
+    const time = element.querySelector('time')!;
+    const to = time.closest('small')!.firstElementChild!;
+    return {
+      timeLines: time.getClientRects().length,
+      sameLine: Math.abs(time.getBoundingClientRect().top - to.getBoundingClientRect().top) < 2,
+    };
+  });
+  expect(line).toEqual({ timeLines: 1, sameLine: true });
+  await page.screenshot({ path: join(RESULTS, 'reader-phone-light-time.png') });
 
-    await page.keyboard.press('c');
-    const sheet = page.locator('section[aria-label="New message"]');
-    await sheet.waitFor();
-    // Places are measured from the header's top, since the sheet may still be rising.
-    const centers = await sheet.locator('header').evaluate((element) => {
-      const middle = (found: Element | null | undefined) => {
-        const box = found?.getBoundingClientRect();
-        return box
-          ? Math.round(box.top + box.height / 2 - element.getBoundingClientRect().top)
-          : NaN;
-      };
+  await page.keyboard.press('c');
+  const sheet = page.locator('section[aria-label="New message"] header');
+  // Middles are measured from the header's top, since the sheet may still be rising.
+  const measure = () =>
+    sheet.evaluate((header) => {
+      const box = (selector: string) => header.querySelector(selector)?.getBoundingClientRect();
+      const [whole, title, said] = [header.getBoundingClientRect(), box('h2'), box('h2 + *')];
+      const middle = (of?: DOMRect) => of && Math.round(of.top + of.height / 2 - whole.top);
       return {
-        title: middle(element.querySelector('h2')),
-        close: middle(element.querySelector('button')),
+        title: middle(title),
+        close: middle(box('button')),
+        under: !!said && !!title && said.top >= title.bottom - 1,
+        inside: !!said && said.bottom <= whole.bottom,
       };
     });
-    expect(Math.abs(centers.title - centers.close)).toBeLessThanOrEqual(1);
-    // What saving says lies under the title, inside the header, and moves the title nowhere, at
-    // its longest. Only its place matters here, so it's written in rather than saved for.
-    await sheet.locator('header h2 + [role="status"]').evaluate((said) => {
-      said.textContent = 'Couldn’t save. Trying again…';
-    });
-    const placed = await sheet.locator('header').evaluate((element) => {
-      const box = (found: Element | null) => found?.getBoundingClientRect();
-      const [header, title, said] = [
-        element,
-        element.querySelector('h2'),
-        element.querySelector('h2 + [role="status"]'),
-      ].map(box);
-      return {
-        under: (said?.top ?? 0) >= (title?.bottom ?? 0) - 1,
-        inside: (said?.bottom ?? Infinity) <= (header?.bottom ?? 0),
-        titleMiddle: Math.round((title?.top ?? 0) + (title?.height ?? 0) / 2 - (header?.top ?? 0)),
-      };
-    });
-    expect(placed).toEqual({ under: true, inside: true, titleMiddle: centers.title });
-    await page.screenshot({ path: join(RESULTS, `composer-phone-${colorScheme}-title.png`) });
-  }, 30_000);
-}
+  const { title, close } = await measure();
+  expect(Math.abs(title! - close!)).toBeLessThanOrEqual(1);
+  // What saving says lies under the title, inside the header, and moves the title nowhere, at
+  // its longest. Only its place matters here, so it's written in rather than saved for.
+  await sheet.locator('h2 + [role="status"]').evaluate((said) => {
+    said.textContent = 'Couldn’t save. Trying again…';
+  });
+  expect(await measure()).toMatchObject({ under: true, inside: true, title });
+  await page.screenshot({ path: join(RESULTS, 'composer-phone-light-title.png') });
+}, 30_000);
 
 test('a conversation the Mailroom won’t give says so under its subject, and Try again opens it', async () => {
   const page = await open({ ...SIZES.desktop, colorScheme: 'light' });
@@ -479,154 +464,143 @@ test('the Outbox’s empty reader asks for a send', async () => {
   await reader(page).getByText('Choosing a send opens its conversation here.').waitFor();
 });
 
-for (const colorScheme of ['light', 'dark'] as const) {
-  test(`on a phone, in ${colorScheme}, the top of the screen marks and the island files`, async () => {
-    const page = await open({ ...SIZES.phone, colorScheme });
-    // Each scheme marks a conversation of its own, as both share the member's mailbox.
-    const subject = colorScheme === 'light' ? 'Workers migration plan' : 'Lunch Thursday?';
-    await row(page, subject).click();
-    const top = page.getByRole('toolbar', { name: 'Marks' });
-    const island = page.getByRole('toolbar', { name: 'Conversation' });
-    await top.getByRole('button', { name: 'Flag', exact: true }).waitFor();
-    await expectUsable(page, `reader-phone-${colorScheme}`);
+test('on a phone, the top of the screen marks and the island files', async () => {
+  const page = await open({ ...SIZES.phone, colorScheme: 'light' });
+  const subject = 'Workers migration plan';
+  await row(page, subject).click();
+  const top = page.getByRole('toolbar', { name: 'Marks' });
+  const island = page.getByRole('toolbar', { name: 'Conversation' });
+  await top.getByRole('button', { name: 'Flag', exact: true }).waitFor();
+  await usableInBoth(page, (colorScheme) => `reader-phone-${colorScheme}`);
 
-    /** Each button's name, from its label or else its word. */
-    const names = (toolbar: typeof top) =>
-      toolbar
-        .getByRole('button')
-        .evaluateAll((buttons) =>
-          buttons.map((button) => button.getAttribute('aria-label') ?? button.textContent?.trim()),
-        );
-    await expect(names(top)).resolves.toEqual(['Flag', 'More']);
-    await expect(names(island)).resolves.toEqual(['Archive', 'Delete', 'Move to', 'Reply']);
-    expect(await reader(page).getByRole('button', { name: 'Back', exact: true }).isVisible()).toBe(
-      true,
-    );
-
-    await top.getByRole('button', { name: 'Flag', exact: true }).click();
-    await top.getByRole('button', { name: 'Unflag', exact: true }).waitFor({ timeout: 1_000 });
-    await top.getByRole('button', { name: 'More' }).click();
-    await page.getByRole('menuitem', { name: 'Mark unread' }).click();
-    await row(page, subject)
-      .getByText('Unread', { exact: true })
-      .waitFor({ state: 'attached', timeout: 1_000 });
-  }, 30_000);
-}
-
-for (const [size, options] of Object.entries({ desktop: SIZES.desktop, phone: SIZES.phone })) {
-  for (const colorScheme of ['light', 'dark'] as const) {
-    test(`mail on its way shows skeletons where it will lie, and mail that comes quickly shows none, ${size} ${colorScheme}`, async () => {
-      // The composer's code is held from the start, before anything could load it ahead.
-      let composerCode!: Awaited<ReturnType<typeof hold>>;
-      const page = await open(
-        { ...options, colorScheme },
-        { before: async (page) => (composerCode = await hold(page, /\/assets\/Composer-/)) },
+  /** Each button's name, from its label or else its word. */
+  const names = (toolbar: typeof top) =>
+    toolbar
+      .getByRole('button')
+      .evaluateAll((buttons) =>
+        buttons.map((button) => button.getAttribute('aria-label') ?? button.textContent?.trim()),
       );
-      const shot = (screen: string) =>
-        page.screenshot({ path: join(RESULTS, `skeleton-${screen}-${size}-${colorScheme}.png`) });
+  await expect(names(top)).resolves.toEqual(['Flag', 'More']);
+  await expect(names(island)).resolves.toEqual(['Archive', 'Delete', 'Move to', 'Reply']);
+  expect(await reader(page).getByRole('button', { name: 'Back', exact: true }).isVisible()).toBe(
+    true,
+  );
 
-      // A new message while the composer's code is on its way shows its sheet with lines.
-      await page.keyboard.press('c');
-      await shown(page, 'section[aria-label="Message"] [role="status"][aria-busy="true"]');
-      await shot('composer');
-      await composerCode.release();
-      await page.locator('section[aria-label="New message"]').waitFor();
-      await page.keyboard.press('Escape');
-      await page.locator('section[aria-label="New message"]').waitFor({ state: 'detached' });
-      await watchSkeletons(page);
+  await top.getByRole('button', { name: 'Flag', exact: true }).click();
+  await top.getByRole('button', { name: 'Unflag', exact: true }).waitFor({ timeout: 1_000 });
+  await top.getByRole('button', { name: 'More' }).click();
+  await page.getByRole('menuitem', { name: 'Mark unread' }).click();
+  await row(page, subject)
+    .getByText('Unread', { exact: true })
+    .waitFor({ state: 'attached', timeout: 1_000 });
+}, 30_000);
 
-      // Mail that answers within the skeletons' delay, if not at once: a conversation, an older
-      // message, another view.
-      const quick = await slow(page, isQuery, QUICK_MS);
-      await openRow(page, 'Q4 planning');
-      await bodiesShown(page);
-      await unfold(page);
-      await bodiesShown(page);
-      await goTo(page, 'Sent', 'Personal');
-      await page.getByRole('option').first().waitFor();
-      await quick.restore();
-      expect({ quick: await skeletonsSeen(page) }).toEqual({ quick: 0 });
+// The theme reaches only the screenshots, so each size takes one of them.
+for (const [size, colorScheme] of [
+  ['desktop', 'light'],
+  ['phone', 'dark'],
+] as const) {
+  test(`mail on its way shows skeletons where it will lie, and mail that comes quickly shows none, ${size} ${colorScheme}`, async () => {
+    // The composer's code is held from the start, before anything could load it ahead.
+    let composerCode!: Awaited<ReturnType<typeof hold>>;
+    const page = await open(
+      { ...SIZES[size], colorScheme },
+      { before: async (page) => (composerCode = await hold(page, /\/assets\/Composer-/)) },
+    );
+    const shot = (screen: string) =>
+      page.screenshot({ path: join(RESULTS, `skeleton-${screen}-${size}-${colorScheme}.png`) });
 
-      // A view not yet loaded shows rows that the first page lands on exactly.
-      const list = await hold(page, 'conversations');
-      await goTo(page, 'Archive', 'Personal');
-      const rows = await shown(page, '[role="status"][aria-busy="true"] > div');
-      await shot('list');
-      await list.release();
-      await page.getByRole('option').first().waitFor();
-      const first = await boxOf(page, '[role="option"]');
-      expect(first).toEqual(rows);
+    // A new message while the composer's code is on its way shows its sheet with lines.
+    await page.keyboard.press('c');
+    await shown(page, 'section[aria-label="Message"] [role="status"][aria-busy="true"]');
+    await shot('composer');
+    await composerCode.release();
+    await page.locator('section[aria-label="New message"]').waitFor();
+    await page.keyboard.press('Escape');
+    await page.locator('section[aria-label="New message"]').waitFor({ state: 'detached' });
+    await watchSkeletons(page);
 
-      // A conversation opened while the Mailroom is slow shows its subject in the click's own
-      // frame, its sheets as skeletons, and never the empty reader. Its subject stays put.
-      const slowly = await slow(page, isQuery, SLOW_MS);
-      const target = page.getByRole('option').nth(4);
-      const listed = await target.evaluate((row) => row.lastElementChild?.children[1]?.textContent);
-      await watchOpening(page);
-      await target.click();
-      const opening = await openingSeen(page);
-      expect(opening.clicked).toEqual({ subject: bareSubject(listed ?? ''), pending: true });
-      await shown(page, 'section[aria-label="Reader"] [role="status"][aria-busy="true"]');
-      await shot('reader');
-      await reader(page)
-        .getByRole('article')
-        .first()
-        .waitFor({ timeout: SLOW_MS * 3 });
-      await slowly.restore();
-      expect((await openingSeen(page)).empty).toBe(false);
-      expect(await boxOf(page, 'section[aria-label="Reader"] h1')).toEqual(opening.subjectBox);
+    // Mail that answers within the skeletons' delay, if not at once: a conversation, an older
+    // message, another view.
+    const quick = await slow(page, isQuery, QUICK_MS);
+    await openRow(page, 'Q4 planning');
+    await bodiesShown(page);
+    await unfold(page);
+    await bodiesShown(page);
+    await goTo(page, 'Sent', 'Personal');
+    await page.getByRole('option').first().waitFor();
+    await quick.restore();
+    expect({ quick: await skeletonsSeen(page) }).toEqual({ quick: 0 });
 
-      // An older message's body on its way shows lines on its sheet, and the sheet holds still.
-      const body = await hold(page, 'body');
-      await openRow(page, 'Workers migration plan');
-      await unfold(page);
-      const sheet = 'section[aria-label="Reader"] article:first-of-type header';
-      await shown(page, 'section[aria-label="Reader"] article [role="status"][aria-busy="true"]');
-      const header = await boxOf(page, sheet);
-      // Its controls are there from the start, so none arrives with the body to squeeze its line.
-      const controls = () =>
-        page
-          .locator(sheet)
-          .getByRole('button')
-          .evaluateAll((buttons) => buttons.map((button) => button.getAttribute('aria-label')));
-      const waiting = await controls();
-      await shot('body');
-      await body.release();
-      await bodiesShown(page);
-      expect(await boxOf(page, sheet)).toEqual(header);
-      expect(await controls()).toEqual(waiting);
+    // A view not yet loaded shows rows that the first page lands on exactly.
+    const list = await hold(page, 'conversations');
+    await goTo(page, 'Archive', 'Personal');
+    const rows = await shown(page, '[role="status"][aria-busy="true"] > div');
+    await shot('list');
+    await list.release();
+    await page.getByRole('option').first().waitFor();
+    const first = await boxOf(page, '[role="option"]');
+    expect(first).toEqual(rows);
 
-      // A draft opened while its words are on their way shows the composer's sheet with lines.
-      const words = await hold(page, 'body');
-      await goTo(page, 'Drafts', 'Personal');
-      await page.getByRole('option').first().click();
-      await reader(page)
-        .getByRole('button', { name: /^Draft/ })
-        .click();
-      await shown(page, 'section[aria-label="Message"] [role="status"][aria-busy="true"]');
-      await shot('draft');
-      expect(await page.getByText('Opening…').count()).toBe(0);
-      await words.release();
-      await page
-        .getByRole('button', { name: 'Send', exact: true })
-        .filter({ visible: true })
-        .waitFor();
-    }, 60_000);
-  }
+    // A conversation opened while the Mailroom is slow shows its subject in the click's own
+    // frame, its sheets as skeletons, and never the empty reader. Its subject stays put.
+    const slowly = await slow(page, isQuery, SLOW_MS);
+    const target = page.getByRole('option').nth(4);
+    const listed = await target.evaluate((row) => row.lastElementChild?.children[1]?.textContent);
+    await watchOpening(page);
+    await target.click();
+    const opening = await openingSeen(page);
+    expect(opening.clicked).toEqual({ subject: bareSubject(listed ?? ''), pending: true });
+    await shown(page, 'section[aria-label="Reader"] [role="status"][aria-busy="true"]');
+    await shot('reader');
+    await reader(page)
+      .getByRole('article')
+      .first()
+      .waitFor({ timeout: SLOW_MS * 3 });
+    await slowly.restore();
+    expect((await openingSeen(page)).empty).toBe(false);
+    expect(await boxOf(page, 'section[aria-label="Reader"] h1')).toEqual(opening.subjectBox);
+
+    // An older message's body on its way shows lines on its sheet, and the sheet holds still.
+    const body = await hold(page, 'body');
+    await openRow(page, 'Workers migration plan');
+    await unfold(page);
+    const sheet = 'section[aria-label="Reader"] article:first-of-type header';
+    await shown(page, 'section[aria-label="Reader"] article [role="status"][aria-busy="true"]');
+    const header = await boxOf(page, sheet);
+    // Its controls are there from the start, so none arrives with the body to squeeze its line.
+    const controls = () =>
+      page
+        .locator(sheet)
+        .getByRole('button')
+        .evaluateAll((buttons) => buttons.map((button) => button.getAttribute('aria-label')));
+    const waiting = await controls();
+    await shot('body');
+    await body.release();
+    await bodiesShown(page);
+    expect(await boxOf(page, sheet)).toEqual(header);
+    expect(await controls()).toEqual(waiting);
+
+    // A draft opened while its words are on their way shows the composer's sheet with lines.
+    const words = await hold(page, 'body');
+    await goTo(page, 'Drafts', 'Personal');
+    await page.getByRole('option').first().click();
+    await reader(page)
+      .getByRole('button', { name: /^Draft/ })
+      .click();
+    await shown(page, 'section[aria-label="Message"] [role="status"][aria-busy="true"]');
+    await shot('draft');
+    expect(await page.getByText('Opening…').count()).toBe(0);
+    await words.release();
+    await page
+      .getByRole('button', { name: 'Send', exact: true })
+      .filter({ visible: true })
+      .waitFor();
+  }, 60_000);
 }
 
 test('an older message’s body is asked for as the pointer rests on its line or it takes the focus', async () => {
-  let asksAlone!: () => Promise<void>;
-  const page = await open(
-    { ...SIZES.desktop, colorScheme: 'light' },
-    {
-      before: (page) => (asksAlone = askingAlone(page)),
-    },
-  );
-  await openRow(page, 'Workers migration plan');
-  await bodiesShown(page);
-  // The conversations either side are prepared while the browser is idle, which this waits out.
-  await asksAlone();
+  const page = await settled('light', (page) => openRow(page, 'Workers migration plan'));
   const asked: string[] = [];
   page.on('request', (request) => {
     if (request.url().includes(encodeURIComponent('"body"'))) asked.push(request.url());
@@ -637,10 +611,7 @@ test('an older message’s body is asked for as the pointer rests on its line or
   const [first, second] = [lines.nth(0), lines.nth(1)];
 
   // A pointer passing over a line asks for nothing.
-  const box = await first.boundingBox();
-  await page.mouse.move(box!.x + 20, box!.y + box!.height / 2);
-  await page.mouse.move(0, 0);
-  await page.waitForTimeout(PAST_A_REST_MS);
+  await passOver(first);
   expect(asked).toEqual([]);
 
   // One that rests there asks for its body, and focus asks at once.
@@ -652,17 +623,7 @@ test('an older message’s body is asked for as the pointer rests on its line or
 
 // The dark theme offers light paper for the conversation open, which must ask for nothing itself.
 test('a held key in the dark theme asks for no conversation it passes', async () => {
-  let asksAlone!: () => Promise<void>;
-  const page = await open(
-    { ...SIZES.desktop, colorScheme: 'dark' },
-    {
-      before: (page) => (asksAlone = askingAlone(page)),
-    },
-  );
-  await page.getByRole('option').first().click();
-  await bodiesShown(page);
-  // The conversations either side are prepared while the browser is idle, which this waits out.
-  await asksAlone();
+  const page = await settled('dark', (page) => page.getByRole('option').first().click());
   const asked = new Set<string>();
   page.on('request', (request) => {
     const url = decodeURIComponent(request.url());
@@ -678,17 +639,7 @@ test('a held key in the dark theme asks for no conversation it passes', async ()
 }, 30_000);
 
 test('a conversation is asked for as the pointer rests on its row, and its newest body as the row is pressed', async () => {
-  let asksAlone!: () => Promise<void>;
-  const page = await open(
-    { ...SIZES.desktop, colorScheme: 'light' },
-    {
-      before: (page) => (asksAlone = askingAlone(page)),
-    },
-  );
-  // The newest conversation opens, and those either side are prepared while the browser is idle,
-  // which this waits out.
-  await bodiesShown(page);
-  await asksAlone();
+  const page = await settled('light');
   const asked: string[] = [];
   page.on('request', (request) => {
     const url = decodeURIComponent(request.url());
@@ -698,10 +649,7 @@ test('a conversation is asked for as the pointer rests on its row, and its newes
   const target = page.getByRole('option').nth(6);
 
   // A pointer passing over a row asks for nothing.
-  const box = await target.boundingBox();
-  await page.mouse.move(box!.x + 40, box!.y + box!.height / 2);
-  await page.mouse.move(0, 0);
-  await page.waitForTimeout(PAST_A_REST_MS);
+  await passOver(target);
   expect(asked).toEqual([]);
 
   // One that rests asks for the conversation, and a press for its newest body, before the click.
@@ -833,39 +781,43 @@ async function unfold(page: Page) {
 }
 
 /**
- * Follows what a page asks for from its first request, and gives a wait for it to stop asking on its
- * own, as it does while idle for the conversations either side of the one open: until nothing is on
- * its way and three idle periods in a row ask for nothing new.
+ * A desktop page at the conversation `opening` opens, or else its newest, once it has stopped asking
+ * on its own for the conversations either side, as it does while idle: once nothing is on its way
+ * and three idle periods in a row ask for nothing new. What it asks for after is a test's doing.
  */
-function askingAlone(page: Page): () => Promise<void> {
+async function settled(colorScheme: 'light' | 'dark', opening?: (page: Page) => Promise<unknown>) {
   const onTheirWay = new Set<Request>();
   let asked = 0;
-  page.on('request', (request) => {
-    onTheirWay.add(request);
-    asked++;
-  });
   const arrived = (request: Request) => onTheirWay.delete(request);
-  page.on('requestfinished', arrived);
-  page.on('requestfailed', arrived);
-  return async () => {
-    for (let quiet = 0; quiet < 3;) {
-      const before = asked;
-      await page.evaluate(
-        () =>
-          new Promise<void>((resolve) => {
-            if ('requestIdleCallback' in window) requestIdleCallback(() => resolve());
-            else setTimeout(resolve, 50);
-          }),
-      );
-      quiet = onTheirWay.size === 0 && asked === before ? quiet + 1 : 0;
-    }
-  };
+  const page = await open(
+    { ...SIZES.desktop, colorScheme },
+    {
+      before: (page) =>
+        page
+          .on('request', (request) => onTheirWay.add(request) && asked++)
+          .on('requestfinished', arrived)
+          .on('requestfailed', arrived),
+    },
+  );
+  await opening?.(page);
+  await bodiesShown(page);
+  for (let quiet = 0; quiet < 3;) {
+    const before = asked;
+    await page.evaluate(() => new Promise((resolve) => requestIdleCallback(resolve)));
+    quiet = onTheirWay.size === 0 && asked === before ? quiet + 1 : 0;
+  }
+  return page;
 }
 
 /**
- * Nothing shows a pointer that only passed asking for nothing, so a test waits longer than the rest
- * that would have asked.
+ * Passes the pointer over an element and away, then waits longer than a rest there would have
+ * taken to ask, since nothing shows a pointer that only passed asking for nothing.
  */
-const PAST_A_REST_MS = REST_MS + 250;
+async function passOver(element: Locator) {
+  const box = (await element.boundingBox())!;
+  await element.page().mouse.move(box.x + 40, box.y + box.height / 2);
+  await element.page().mouse.move(0, 0);
+  await element.page().waitForTimeout(REST_MS + 250);
+}
 /** The pace of a held key, quicker than a rest. */
 const HELD_KEY_MS = 30;
