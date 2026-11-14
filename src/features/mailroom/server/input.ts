@@ -72,8 +72,9 @@ export function viewOf(value: unknown): View {
   const view = record(value, 'a view');
   switch (view.in) {
     case 'folder':
-      return { in: 'folder', folder: folderOf(view.folder) };
+      return { in: 'folder', folder: folderOf(view.folder), ...unreadOf(view.unread) };
     case 'inbox':
+      return { in: 'inbox', ...unreadOf(view.unread) };
     case 'flagged':
     case 'drafts':
     case 'outbox':
@@ -89,6 +90,9 @@ export function viewOf(value: unknown): View {
   }
 }
 
+/** Whether a view shows only its unread conversations, as nothing does unless it says so. */
+const unreadOf = (value: unknown) => (value === true ? ({ unread: true } as const) : {});
+
 /** A place in a list, with 0 the newest, or the start of the list when there is none. */
 export function placeOf(value: unknown): number {
   if (value === undefined || value === null) return 0;
@@ -103,6 +107,11 @@ export function conversationOf(value: unknown): ConversationId {
     throw new TypeError('That isn’t a conversation.');
   }
   return value;
+}
+
+/** The conversation or bundle a list keeps while it's open, if it names one. */
+export function keptOf(value: unknown): ConversationId | undefined {
+  return value === undefined || value === null ? undefined : conversationOf(value);
 }
 
 /** What was typed in an address field, which may be nothing yet. */

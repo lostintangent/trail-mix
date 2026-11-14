@@ -10,6 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type { ConversationId, ListItem, View } from '../../mail/core/index.ts';
 import { conversationsQuery, PAGE_SIZE, type Page } from '../../mailroom/client/index.ts';
 import { listOf, pagesCovering, type Listed } from '../core/pages.ts';
+import { unreadOnly } from '../core/triage.ts';
 import { listKeyOf, useTriagedList, type ListOf } from './overlays.ts';
 
 /**
@@ -25,11 +26,19 @@ const FIRST_PAGE: readonly number[] = [0];
  * A view's rows as the member should see them, at the list's true length from its first
  * page on, and how the list says which rows it shows, so the pages they lie on are fetched. While a
  * search is typed, its results so far stay until the next arrive, so the list doesn't blink between
- * keystrokes.
+ * keystrokes. A list of unread mail also holds the conversation `keep` names, read or not, until the
+ * member leaves it.
  */
 export function useConversations(
   view: View,
-  { enabled = true }: { enabled?: boolean } = {},
+  {
+    enabled = true,
+    keep,
+  }: {
+    enabled?: boolean;
+    /** The conversation or bundle open in the list. */
+    keep?: ConversationId | undefined;
+  } = {},
 ): {
   conversations: Listed<ListItem> | undefined;
   /** Whether a page the list shows is on its way. */
@@ -37,8 +46,10 @@ export function useConversations(
   /** Says which rows the list shows: from `first` to `last`, and the one at `selected`, if any. */
   show: Show;
 } {
+  const isUnread = 'unread' in view && view.unread === true;
+  const kept = isUnread ? keep : undefined;
   const first = useQuery({
-    ...conversationsQuery(view),
+    ...conversationsQuery(view, 0, kept),
     enabled,
     placeholderData: (previous, previousQuery) =>
       view.in === 'search' && previousQuery?.queryKey[1].in === 'search' ? previous : undefined,
@@ -49,12 +60,40 @@ export function useConversations(
     [placeholder],
   );
   const { rows, isFetching, show } = usePages(view, {
-    pageAt: (at) => conversationsQuery(view, at),
+    pageAt: (at) => conversationsQuery(view, at, kept),
     isFirstFetching: first.isFetching,
     placeheld,
     enabled,
   });
-  return { conversations: useTriagedList(view, rows), isFetching, show };
+  useKeptListed(view, kept, rows, isFetching);
+  const triaged = useTriagedList(view, rows);
+  const conversations = useMemo(
+    () => (triaged && isUnread ? unreadOnly(triaged, kept) : triaged),
+    [triaged, isUnread, kept],
+  );
+  return { conversations, isFetching, show };
+}
+
+/**
+ * Asks again for a list of unread mail whose pages, fetched before a conversation was kept in it,
+ * don't hold that conversation, as when it was read elsewhere and is opened from an address. Once
+ * for each conversation kept, so one that has gone doesn't ask forever.
+ */
+function useKeptListed(
+  view: View,
+  kept: ConversationId | undefined,
+  rows: Listed<ListItem> | undefined,
+  isFetching: boolean,
+) {
+  const queryClient = useQueryClient();
+  const asked = useRef<string>(undefined);
+  useEffect(() => {
+    if (!kept || !rows || isFetching || rows.some((row) => row?.id === kept)) return;
+    const key = hashKey([listKeyOf(view), kept]);
+    if (asked.current === key) return;
+    asked.current = key;
+    void queryClient.invalidateQueries({ queryKey: listKeyOf(view) });
+  }, [queryClient, view, kept, rows, isFetching]);
 }
 
 /**

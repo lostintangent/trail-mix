@@ -983,7 +983,7 @@ test('search finds mail as it is typed, marks what matched, and reads bodies onl
   await context.close();
 }, 30_000);
 
-test('the list header only names its view, and the reader bar holds triage and place together', async () => {
+test('the list header names its view and holds only what acts on it, and the reader bar holds triage and place together', async () => {
   const { context, page, problems } = await open(SIZES.desktop);
   const list = page.locator('section[aria-labelledby]').first();
   const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
@@ -1001,7 +1001,7 @@ test('the list header only names its view, and the reader bar holds triage and p
     const [header, row] = await icons();
     expect(header).toBe(row);
   }
-  // The Outbox lists sends. No list header carries actions.
+  // The Outbox lists sends, with nothing to press in its header.
   await expect(list.locator('header [role="toolbar"], header button').count()).resolves.toBe(0);
   await page
     .getByRole('region', { name: 'Personal' })
@@ -1045,7 +1045,7 @@ test('the list header only names its view, and the reader bar holds triage and p
   const more = (await header.getByRole('button', { name: 'More' }).boundingBox())!;
   const placeBounds = (await place.boundingBox())!;
   expect(more.x + more.width).toBeLessThan(placeBounds.x);
-  await expect(list.locator('header [role="toolbar"], header button').count()).resolves.toBe(0);
+  expect(await headerButtons(list)).toEqual(['Unread only']);
 
   // A selection of several keeps its own toolbar in its reader sheet.
   const rows = page.getByRole('option');
@@ -1056,7 +1056,7 @@ test('the list header only names its view, and the reader bar holds triage and p
     .getByRole('toolbar', { name: 'Selected conversations' })
     .getByRole('button', { name: 'Archive' })
     .waitFor();
-  await expect(list.locator('header [role="toolbar"], header button').count()).resolves.toBe(0);
+  expect(await headerButtons(list)).toEqual(['Unread only']);
   await selection.getByRole('button', { name: 'Clear selection' }).click();
 
   // With the list folded to its rail, the same reader bar still holds actions and place.
@@ -1099,6 +1099,136 @@ test('a folder view keeps its own menu beside the title while the sidebar is fol
   await page.keyboard.press('Escape');
   await page.screenshot({ path: join(SHOTS, 't75-folder-menu-folded.png') });
   expect({ unreadable: await unreadableText(page) }).toEqual({ unreadable: [] });
+  expect(problems).toEqual([]);
+  await context.close();
+}, 30_000);
+
+test('the list shows only unread mail while its filter is on, and keeps the one open until the member leaves it', async () => {
+  const { context, page, problems } = await open(SIZES.desktop);
+  const list = page.locator('section[aria-labelledby]').first();
+  const toggle = list.getByRole('button', { name: 'Unread only' });
+  const rows = page.getByRole('option');
+  const selected = page.locator('[role="option"][aria-selected="true"]');
+  const subject = page.locator('section[aria-label="Reader"] h1');
+  const listed = async () => Number(await rows.first().getAttribute('aria-setsize'));
+  const listing = (length: number) =>
+    page.waitForFunction(
+      (length) =>
+        Number(document.querySelector('[role="option"]')?.getAttribute('aria-setsize')) === length,
+      length,
+    );
+  const isFiltered = (url: URL) => url.searchParams.get('unread') === '1';
+  await rows.first().waitFor();
+  await expect(toggle.getAttribute('aria-pressed')).resolves.toBe('false');
+  const all = await listed();
+
+  // Pressed, the list holds only its unread conversations and the one open, and the address says so.
+  await toggle.click();
+  await page.waitForURL(isFiltered);
+  await expect(toggle.getAttribute('aria-pressed')).resolves.toBe('true');
+  await page.waitForFunction(
+    (all) => Number(document.querySelector('[role="option"]')?.getAttribute('aria-setsize')) < all,
+    all,
+  );
+  const drawnRead = await rows.evaluateAll(
+    (all) =>
+      all.filter(
+        (row) =>
+          row.getAttribute('aria-selected') !== 'true' && !row.textContent.includes('Unread'),
+      ).length,
+  );
+  expect(drawnRead).toBe(0);
+  await page.screenshot({ path: join(SHOTS, 't90-desktop-light-unread.png') });
+
+  // A conversation read under the filter stays listed, and the reader stays on it.
+  await rows.filter({ hasText: 'Unread' }).filter({ hasNotText: 'trailmix-demo/' }).first().click();
+  await subject.waitFor();
+  const opened = await subject.textContent();
+  await page.waitForFunction(
+    () =>
+      !document
+        .querySelector('[role="option"][aria-selected="true"]')
+        ?.textContent.includes('Unread'),
+  );
+  // Long enough for the read to reach the Mailroom and the list to be fetched again.
+  await page.waitForTimeout(1_500);
+  await expect(selected.count()).resolves.toBe(1);
+  await expect(subject.textContent()).resolves.toBe(opened);
+  const read = await selected.textContent();
+
+  // A reload keeps the filter, and the conversation open stays listed, though it has been read.
+  await page.reload({ waitUntil: 'networkidle' });
+  await selected.waitFor();
+  expect(isFiltered(new URL(page.url()))).toBe(true);
+  await expect(toggle.getAttribute('aria-pressed')).resolves.toBe('true');
+  await expect(selected.textContent()).resolves.toBe(read);
+  const readListed = await listed();
+
+  // Leaving it drops it.
+  await page.keyboard.press('j');
+  await page.waitForFunction(
+    (read) =>
+      ![...document.querySelectorAll('[role="option"]')].some((row) => row.textContent === read),
+    read,
+  );
+  await listing(readListed - 1);
+
+  // The palette turns it off as the toggle does, and the whole Inbox comes back.
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.keyboard.type('show all conversations');
+  await page.keyboard.press('Enter');
+  await page.waitForURL((url) => !isFiltered(url));
+  await expect(toggle.getAttribute('aria-pressed')).resolves.toBe('false');
+  await listing(all);
+
+  // A view chosen from the sidebar opens unfiltered.
+  await toggle.click();
+  await page.waitForURL(isFiltered);
+  await page
+    .getByRole('region', { name: 'Personal' })
+    .getByRole('button', { name: /^Inbox/ })
+    .click();
+  await page.waitForURL((url) => url.searchParams.has('folder') && !isFiltered(url));
+  await expect(toggle.getAttribute('aria-pressed')).resolves.toBe('false');
+  expect(problems).toEqual([]);
+  await context.close();
+}, 60_000);
+
+test('a folder with nothing unread, listed only for its unread mail, says so in the list and the reader', async () => {
+  const { context, page, problems } = await open(SIZES.desktop);
+  const list = page.locator('section[aria-labelledby]').first();
+  const toggle = list.getByRole('button', { name: 'Unread only' });
+  await page
+    .getByRole('region', { name: 'Personal' })
+    .getByRole('button', { name: /^Sent/ })
+    .click();
+  await page.getByRole('heading', { name: 'Sent', level: 2 }).waitFor();
+  await page.getByRole('option').first().waitFor();
+  // With nothing unread, the filter isn't offered, though an address can still name it.
+  await expect(toggle.count()).resolves.toBe(0);
+  const filtered = new URL(page.url());
+  filtered.searchParams.delete('open');
+  filtered.searchParams.set('unread', '1');
+  for (const colorScheme of THEMES) {
+    await page.emulateMedia({ colorScheme });
+    await page.goto(filtered.href, { waitUntil: 'networkidle' });
+    await list.getByRole('heading', { name: 'Nothing unread' }).waitFor();
+    await page
+      .locator('section[aria-label="Reader"]')
+      .getByText('Everything here is read.')
+      .waitFor();
+    await expect(toggle.getAttribute('aria-pressed')).resolves.toBe('true');
+    await page.screenshot({ path: join(SHOTS, `t90-desktop-${colorScheme}-nothing-unread.png`) });
+    expect({ colorScheme, unreadable: await unreadableText(page) }).toEqual({
+      colorScheme,
+      unreadable: [],
+    });
+  }
+
+  // Turned off, the folder lists its mail again, and with nothing unread the filter goes.
+  await toggle.click();
+  await page.getByRole('option').first().waitFor();
+  await expect(toggle.count()).resolves.toBe(0);
   expect(problems).toEqual([]);
   await context.close();
 }, 30_000);
@@ -1151,7 +1281,7 @@ test('reader triage sits at the left of its bar, with place at the right, in bot
       .getByRole('toolbar', { name: 'Conversation' })
       .getByRole('button', { name: 'Archive' })
       .waitFor();
-    await expect(list.locator('header [role="toolbar"], header button').count()).resolves.toBe(0);
+    expect(await headerButtons(list)).toEqual(['Unread only']);
     await screenshot(page, `t75-phone-${colorScheme}`);
     expect(problems).toEqual([]);
     await context.close();
@@ -1206,7 +1336,7 @@ test('a narrow list’s header gives up its unread count, whole, before a letter
   }
 }, 60_000);
 
-test('on a phone, the list’s header has no buttons, and the reader’s island files what’s open', async () => {
+test('on a phone, the list’s header holds no triage, and the reader’s island files what’s open', async () => {
   const { context, page, problems } = await open(SIZES.phone);
   await expect(page.getByRole('toolbar', { name: 'Conversation' }).count()).resolves.toBe(0);
   await openConversation(page, 1);
@@ -1389,6 +1519,13 @@ async function scrollbarsShown(page: Page) {
     return Object.values(panes).every(Boolean) && panes;
   });
   return shown.jsonValue();
+}
+
+/** The names of the buttons in a list's header, which hold only what acts on its view. */
+function headerButtons(list: Locator): Promise<(string | null)[]> {
+  return list
+    .locator('header button')
+    .evaluateAll((all) => all.map((button) => button.getAttribute('aria-label')));
 }
 
 /** Whether a control is in a pane on screen. A pane off a phone's screen is inert. */

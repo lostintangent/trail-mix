@@ -76,13 +76,20 @@ const arrive = (...envelopes: Envelope[]): SyncEvent[] =>
  */
 function heldAsOf(version: number, from: Sql): Sql {
   const sql = testSql(version);
-  for (const table of ['accounts', 'folders', 'messages', 'links', 'conversations', 'placements']) {
-    const columns = [
-      ...(table === 'messages' ? ['rowid'] : []),
-      ...sql
-        .all<{ name: string }>(`SELECT name FROM pragma_table_info(?)`, table)
-        .map((c) => c.name),
-    ];
+  for (const table of [
+    'accounts',
+    'folders',
+    'messages',
+    'links',
+    'conversations',
+    'placements',
+    'bundles',
+  ]) {
+    const held = sql
+      .all<{ name: string }>(`SELECT name FROM pragma_table_info(?)`, table)
+      .map((c) => c.name);
+    if (held.length === 0) continue;
+    const columns = [...(table === 'messages' ? ['rowid'] : []), ...held];
     for (const row of from.all<Record<string, SqlValue>>(
       `SELECT ${columns.join(', ')} FROM ${table}`,
     )) {
@@ -497,6 +504,59 @@ describe('a list', () => {
     expect(subjects({ in: 'drafts' })).toEqual(['draft']);
     expect(subjects({ in: 'flagged' })).toEqual(['work']);
   });
+
+  test('of unread mail holds the unread conversations, and the one kept open whether or not it is', () => {
+    const store = fresh();
+    const seen = { ...FLAGS, seen: true };
+    const read = envelope('read', { date: at(10), flags: seen });
+    store.fold(
+      arrive(
+        envelope('older', { date: at(9) }),
+        read,
+        envelope('newer', { date: at(11) }),
+        envelope('read too', { date: at(12), flags: seen }),
+        // Unread only in its Archive, as Archive's count says and the Inbox's doesn't.
+        envelope('answered', { date: at(7), flags: seen }),
+        envelope('answered', {
+          messageId: '<reply@example.com>',
+          path: 'Archive',
+          date: at(8),
+          references: ['<answered@example.com>'],
+        }),
+      ),
+    );
+    const idOf = (subject: string) =>
+      conversationsIn(store.page({ in: 'inbox' })).find((item) => item.subject === subject)!.id;
+    for (const view of [
+      { in: 'inbox', unread: true },
+      { in: 'folder', folder: INBOX, unread: true },
+    ] as const) {
+      const listed = (keep?: string) => {
+        const page = store.page(view, 0, 50, keep);
+        expect(page.total).toBe(page.items.length);
+        return shown(page.items);
+      };
+      expect(listed()).toEqual(['newer', 'older']);
+      expect(listed(idOf('read'))).toEqual(['newer', 'read', 'older']);
+      // One unread already listed isn't listed twice, and one the view doesn't hold isn't added.
+      expect(listed(idOf('newer'))).toEqual(['newer', 'older']);
+      expect(listed('personal:nowhere')).toEqual(['newer', 'older']);
+      // Pages through them exactly once, the one kept open among them.
+      const pages = [0, 2].flatMap((place) =>
+        shown(store.page(view, place, 2, idOf('read')).items),
+      );
+      expect(pages).toEqual(['newer', 'read', 'older']);
+    }
+    expect(shown(store.page({ in: 'folder', folder: ARCHIVE, unread: true }).items)).toEqual([
+      'answered',
+    ]);
+    store.fold([{ type: 'flags', ref: read, flags: FLAGS }]);
+    expect(shown(store.page({ in: 'inbox', unread: true }).items)).toEqual([
+      'newer',
+      'read',
+      'older',
+    ]);
+  });
 });
 
 /** A verified notification of a repository's pull request, as GitHub sends one. */
@@ -516,6 +576,7 @@ function notification(repository: string, number: number, init: Partial<Envelope
 }
 
 const INBOX: FolderRef = { account: 'personal', path: 'INBOX' };
+const ARCHIVE: FolderRef = { account: 'personal', path: 'Archive' };
 const at = (hour: number) => `2026-11-09T${String(hour).padStart(2, '0')}:00:00.000Z`;
 
 /** What a list shows, row by row: a conversation's subject, or a bundle's repository and threads. */
@@ -654,6 +715,27 @@ describe('a GitHub bundle', () => {
     }
   });
 
+  test('is listed as unread mail while a thread of it is unread, or while it is kept open', () => {
+    const store = fresh();
+    const seen = { ...FLAGS, seen: true };
+    store.fold(
+      arrive(
+        notification('o/r', 1, { date: at(9) }),
+        notification('o/r', 2, { date: at(12), flags: seen }),
+        notification('o/s', 3, { date: at(10), flags: seen }),
+        envelope('lunch', { date: at(11) }),
+      ),
+    );
+    for (const view of [
+      { in: 'inbox', unread: true },
+      { in: 'folder', folder: INBOX, unread: true },
+    ] as const) {
+      expect(shown(store.page(view).items)).toEqual(['o/r ×2', 'lunch']);
+      const kept = store.page(view, 0, 50, bundleIdOf('personal', 'o/s'));
+      expect([shown(kept.items), kept.total]).toEqual([['o/r ×2', 'lunch', 'o/s ×1'], 3]);
+    }
+  });
+
   test('folding the same events again changes nothing', () => {
     const store = fresh();
     const events = arrive(
@@ -699,6 +781,7 @@ describe('an upgrade that makes rows again', () => {
         envelope('lunch', { date: at(9) }),
       ),
     );
+    // Version 20 brought bundles.
     const sql = heldAsOf(19, current);
     sql.run(`UPDATE conversations SET summary = json_remove(summary, '$.github')`);
     upgrade(sql);
@@ -745,6 +828,46 @@ describe('an upgrade that makes rows again', () => {
 
   test('a new Mailroom has no rows to make again', () => {
     expect(testSql().all(`SELECT * FROM resummarize`)).toEqual([]);
+  });
+});
+
+describe('an upgrade to lists of unread mail', () => {
+  test('lists the conversations and bundles that were unread before it, as a new fold would', () => {
+    const current = testSql();
+    const now = fresh([], current);
+    const seen = { ...FLAGS, seen: true };
+    now.fold(
+      arrive(
+        envelope('unread', { date: at(9) }),
+        envelope('read', { date: at(10), flags: seen }),
+        envelope('filed', { path: 'Projects', date: at(11) }),
+        notification('o/r', 1, { date: at(12) }),
+        notification('o/s', 2, { date: at(13), flags: seen }),
+        envelope('answered', { date: at(7), flags: seen }),
+        envelope('answered', {
+          messageId: '<reply@example.com>',
+          path: 'Archive',
+          date: at(8),
+          references: ['<answered@example.com>'],
+        }),
+      ),
+    );
+    // Version 23 brought lists of unread mail.
+    const sql = heldAsOf(22, current);
+    upgrade(sql);
+    const store = envelopeIndex(sql, () => []);
+    for (const view of [
+      { in: 'inbox', unread: true },
+      { in: 'folder', folder: INBOX, unread: true },
+      { in: 'folder', folder: { account: 'personal', path: 'Projects' }, unread: true },
+      { in: 'folder', folder: ARCHIVE, unread: true },
+    ] as const) {
+      expect(store.page(view)).toEqual(now.page(view));
+    }
+    expect(shown(store.page({ in: 'inbox', unread: true }).items)).toEqual(['o/r ×1', 'unread']);
+    expect(shown(store.page({ in: 'folder', folder: ARCHIVE, unread: true }).items)).toEqual([
+      'answered',
+    ]);
   });
 });
 

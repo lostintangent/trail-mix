@@ -139,11 +139,15 @@ export const outboxQuery = queryOptions({
   queryFn: () => mailroom.outbox(),
 });
 
-/** The page of a view's list from its place `at`, newest first, with how long the list is. */
-export const conversationsQuery = (view: View, at = 0) =>
+/**
+ * The page of a view's list from its place `at`, newest first, with how long the list is. A list of
+ * unread mail also holds the conversation or bundle `keep` names, which the member has open. The
+ * page is kept under the view's key alone, whatever it kept, since keeping changes only that row.
+ */
+export const conversationsQuery = (view: View, at = 0, keep?: ConversationId) =>
   queryOptions({
     queryKey: keys.page(view, at),
-    queryFn: () => mailroom.conversations(view, at),
+    queryFn: () => mailroom.conversations(view, at, keep),
   });
 
 /** A page of a bundle's threads, newest first, from the place `at`, with the bundle's row. */

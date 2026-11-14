@@ -212,9 +212,11 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
     const summary: ConversationSummary = github ? { ...row, github } : row;
     const bundle = github ? bundleIdOf(summary.account, github.repository) : null;
     if (bundle !== null) bundles.push(bundle);
+    // Where its unread mail is, which is where it is listed as unread, as each folder counts it.
+    const unreadIn = new Set(messages.filter((m) => !m.flags.seen).map(placeOf));
     sql.run(
-      `INSERT OR REPLACE INTO conversations (id, date, summary, inbox, drafts, flagged, bundle)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT OR REPLACE INTO conversations (id, date, summary, inbox, drafts, flagged, bundle, unread)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       summary.date,
       JSON.stringify(summary),
@@ -222,6 +224,7 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
       Number(messages.some((m) => roleOf(m) === 'drafts')),
       Number(summary.flagged),
       bundle,
+      Number(inbox.some((m) => unreadIn.has(placeOf(m)))),
     );
     const latest = new Map<string, Message>();
     for (const message of messages) {
@@ -231,12 +234,14 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
     }
     for (const message of latest.values()) {
       sql.run(
-        `INSERT INTO placements (account, path, conversation, date, bundle) VALUES (?, ?, ?, ?, ?)`,
+        `INSERT INTO placements (account, path, conversation, date, bundle, unread)
+         VALUES (?, ?, ?, ?, ?, ?)`,
         message.account,
         message.path,
         id,
         message.date,
         roleOf(message) === 'inbox' ? bundle : null,
+        Number(unreadIn.has(placeOf(message))),
       );
     }
     return { placed: [...latest.values()], bundles };
@@ -278,13 +283,19 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
       sql.run(`DELETE FROM bundles WHERE id = ?`, id);
       return was;
     }
+    const [{ unread } = { unread: 0 }] = sql.all<{ unread: number }>(
+      `SELECT EXISTS (SELECT 1 FROM conversations WHERE bundle = ? AND unread = 1) AS unread`,
+      id,
+    );
     sql.run(
-      `INSERT OR REPLACE INTO bundles (id, account, path, date, summary) VALUES (?, ?, ?, ?, ?)`,
+      `INSERT OR REPLACE INTO bundles (id, account, path, date, summary, unread)
+       VALUES (?, ?, ?, ?, ?, ?)`,
       id,
       newest.account,
       newest.path,
       summary.date,
       JSON.stringify(summary),
+      unread,
     );
     return [...was, newest];
   }
@@ -326,33 +337,46 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
   }
 
   /**
-   * One page of a list that merges conversations and bundles, each a query of `id` and `date`
-   * taking `params`, newest first: `size` rows from place `at`, and how many both hold.
+   * One page of a list that merges conversations and bundles, each a query of `id` and `date`,
+   * newest first: `size` rows from place `at`, and how many both hold.
    */
-  function merged(
-    conversations: string,
-    bundles: string,
-    params: readonly SqlValue[],
-    at: number,
-    size: number,
-  ): Page {
+  function merged(conversations: Part, bundles: Part, at: number, size: number): Page {
+    const params = [...conversations.params, ...bundles.params];
     const [{ total } = { total: 0 }] = sql.all<{ total: number }>(
-      `SELECT (SELECT COUNT(*) FROM (${conversations})) + (SELECT COUNT(*) FROM (${bundles})) AS total`,
-      ...params,
+      `SELECT (SELECT COUNT(*) FROM (${conversations.sql})) + (SELECT COUNT(*) FROM (${bundles.sql})) AS total`,
       ...params,
     );
     const rows = sql.all<{ summary: string }>(
       `SELECT coalesce(c.summary, b.summary) AS summary FROM (
-         ${conversations} UNION ALL ${bundles}
+         ${conversations.sql} UNION ALL ${bundles.sql}
          ORDER BY date DESC, id DESC LIMIT ? OFFSET ?
        ) p LEFT JOIN conversations c ON c.id = p.id LEFT JOIN bundles b ON b.id = p.id
        ORDER BY p.date DESC, p.id DESC`,
-      ...params,
       ...params,
       size,
       at,
     );
     return { items: rows.map(itemIn), at, total };
+  }
+
+  /**
+   * The query of a list's rows of one kind, as `id` and `date`: those `select` reads that meet every
+   * condition in `where`, or, of a list of unread mail, the unread ones and beside them the read one
+   * whose `key` is `keep`, which stays listed while it is open. Each is its own range of an index,
+   * so the list still merges them newest first.
+   */
+  function part(
+    { select, key, where, params }: PartOf,
+    unread: { keep: string | undefined } | undefined,
+  ): Part {
+    const query = (...more: string[]) =>
+      [select, [...where, ...more].join(' AND ')].filter(Boolean).join(' WHERE ');
+    if (!unread) return { sql: query(), params };
+    if (unread.keep === undefined) return { sql: query('unread = 1'), params };
+    return {
+      sql: `${query('unread = 1')} UNION ALL ${query('unread = 0', `${key} = ?`)}`,
+      params: [...params, ...params, unread.keep],
+    };
   }
 
   /** Whether a folder is being read again, as `REREAD` asks, and its pass hasn't ended. */
@@ -509,24 +533,46 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
      * One page of a view, newest first: `size` rows from its place `at`, with 0 the newest, and how
      * many the view holds. An Inbox view lists the conversations no bundle holds and the bundles
      * beside them, merging the two as far as `at` by id alone, and reads only the page's own rows.
+     * A view of unread mail lists its unread rows, and the read one `keep` names, if it holds it.
      */
-    page(view: Exclude<View, { in: 'search' } | { in: 'outbox' }>, at = 0, size = PAGE_SIZE): Page {
-      if (view.in === 'folder') {
-        const { account, path } = view.folder;
+    page(
+      view: Exclude<View, { in: 'search' } | { in: 'outbox' }>,
+      at = 0,
+      size = PAGE_SIZE,
+      keep?: ConversationId,
+    ): Page {
+      if (view.in === 'folder' || view.in === 'inbox') {
+        const unread = view.unread ? { keep } : undefined;
+        const bundles = { select: `SELECT id, date FROM bundles`, key: 'id' };
+        if (view.in === 'folder') {
+          const { account, path } = view.folder;
+          const where = ['account = ?', 'path = ?'];
+          return merged(
+            part(
+              {
+                select: `SELECT conversation AS id, date FROM placements`,
+                key: 'conversation',
+                where: [...where, 'bundle IS NULL'],
+                params: [account, path],
+              },
+              unread,
+            ),
+            part({ ...bundles, where, params: [account, path] }, unread),
+            at,
+            size,
+          );
+        }
         return merged(
-          `SELECT conversation AS id, date FROM placements
-           WHERE account = ? AND path = ? AND bundle IS NULL`,
-          `SELECT id, date FROM bundles WHERE account = ? AND path = ?`,
-          [account, path],
-          at,
-          size,
-        );
-      }
-      if (view.in === 'inbox') {
-        return merged(
-          `SELECT id, date FROM conversations WHERE inbox = 1 AND bundle IS NULL`,
-          `SELECT id, date FROM bundles`,
-          [],
+          part(
+            {
+              select: `SELECT id, date FROM conversations`,
+              key: 'id',
+              where: ['inbox = 1', 'bundle IS NULL'],
+              params: [],
+            },
+            unread,
+          ),
+          part({ ...bundles, where: [], params: [] }, unread),
           at,
           size,
         );
@@ -825,6 +871,20 @@ const summaryIn = ({ summary }: { summary: string }) => JSON.parse(summary) as C
 
 /** A conversation's or a bundle's row, as the index keeps it. */
 const itemIn = ({ summary }: { summary: string }) => JSON.parse(summary) as ListItem;
+
+/** A query of a list's rows of one kind, and the values it takes. */
+type Part = { sql: string; params: readonly SqlValue[] };
+
+/**
+ * What a list's rows of one kind are read from: a `SELECT` of `id` and `date`, the column that
+ * names a row, the conditions a row meets, and the values they take.
+ */
+type PartOf = {
+  select: string;
+  key: string;
+  where: readonly string[];
+  params: readonly SqlValue[];
+};
 
 /** What a bundle's row is made from, of each conversation it holds. */
 type BundledRow = {

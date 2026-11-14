@@ -34,9 +34,11 @@ export interface Queries {
   folders(): Promise<Folder[]>;
   /**
    * A stretch of a view's list from its place `at`, with 0 the newest, and how long the list is,
-   * so any stretch of it can be asked for. A search's list holds the conversations that match.
+   * so any stretch of it can be asked for. A search's list holds the conversations that match. A
+   * view of unread mail holds its unread rows, and the conversation or bundle `keep` names, which
+   * the member has open, whether or not it is read.
    */
-  conversations(view: View, at?: number): Promise<Page>;
+  conversations(view: View, at?: number, keep?: ConversationId): Promise<Page>;
   /** A stretch of a bundle's conversations, as `conversations` gives a view's. */
   bundle(id: BundleId, at?: number): Promise<BundlePage>;
   conversation(id: ConversationId): Promise<Message[]>;

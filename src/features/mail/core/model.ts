@@ -223,10 +223,15 @@ export type Body = {
   unsubscribe?: string;
 };
 
-/** What a list shows: one folder, a unified view across every account, or a search. */
+/**
+ * What a list shows: one folder, a unified view across every account, or a search. A folder or the
+ * unified Inbox may show only its unread conversations, those with unread mail in it, as its count
+ * of unread mail counts them.
+ */
 export type View =
-  | { in: 'folder'; folder: FolderRef }
-  | { in: 'inbox' | 'flagged' | 'drafts' | 'outbox' }
+  | { in: 'folder'; folder: FolderRef; unread?: true }
+  | { in: 'inbox'; unread?: true }
+  | { in: 'flagged' | 'drafts' | 'outbox' }
   | { in: 'search'; text: string; fullText?: boolean };
 
 /**

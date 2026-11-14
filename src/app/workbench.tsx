@@ -66,7 +66,9 @@ export const Route = createFileRoute('/')({
     void queryClient.prefetchQuery(accountsQuery);
     void queryClient.prefetchQuery(foldersQuery);
     void queryClient.prefetchQuery(outboxQuery);
-    if (view.in !== 'outbox') void queryClient.prefetchQuery(conversationsQuery(view));
+    // A list of unread mail holds the conversation open in it, read or not.
+    const keep = 'unread' in view && view.unread ? (bundle ?? open) : undefined;
+    if (view.in !== 'outbox') void queryClient.prefetchQuery(conversationsQuery(view, 0, keep));
     if (bundle !== undefined) void queryClient.prefetchQuery(bundleQuery(bundle));
     if (open !== undefined) void queryClient.prefetchQuery(conversationQuery(open));
   },
@@ -256,6 +258,7 @@ function Desk({
     show,
   } = useConversations(view, {
     enabled: view.in !== 'outbox',
+    keep: place.bundle ?? place.open,
   });
   const conversations = useMemo(() => withoutAway(listed, view), [withoutAway, listed, view]);
 

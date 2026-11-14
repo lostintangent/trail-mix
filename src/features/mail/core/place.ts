@@ -11,6 +11,8 @@ import type { AccountId, Place, View } from './model.ts';
  * - `/?in=flagged`, and the same for `drafts` and `outbox`
  * - `/?account=<id>&folder=<path>` for a folder
  * - `/?q=<text>` for a search, and `&bodies=1` when it reads message bodies too
+ * - `&unread=1` after the unified Inbox or a folder that shows only its unread conversations, which
+ *   for the unified Inbox is `/?unread=1`
  * - `&bundle=<bundle>` after the unified Inbox or a folder of the bundle's account, which an Inbox
  *   view lists
  * - `&open=<conversation>` after any of them, of the bundle's account when one is open
@@ -19,7 +21,7 @@ import type { AccountId, Place, View } from './model.ts';
 /** An address's parameters, each at most once, in the order an address writes them. */
 export type PlaceParams = Partial<Record<(typeof KEYS)[number], string>>;
 
-const KEYS = ['in', 'account', 'folder', 'q', 'bodies', 'bundle', 'open'] as const;
+const KEYS = ['in', 'account', 'folder', 'q', 'bodies', 'unread', 'bundle', 'open'] as const;
 const UNIFIED = ['inbox', 'flagged', 'drafts', 'outbox'] as const;
 
 const INBOX: Place = { view: { in: 'inbox' } };
@@ -34,8 +36,10 @@ export function paramsOf({ view, bundle, open }: Place): PlaceParams {
         : view.in === 'inbox'
           ? {}
           : { in: view.in };
+  const unread = (view.in === 'folder' || view.in === 'inbox') && view.unread;
   return {
     ...params,
+    ...(unread ? { unread: '1' } : {}),
     ...(bundle === undefined ? {} : { bundle }),
     ...(open === undefined ? {} : { open }),
   };
@@ -69,10 +73,11 @@ function viewOf(text: (key: (typeof KEYS)[number]) => string | undefined): View 
       ? { in: 'search', text: q, fullText: true }
       : { in: 'search', text: q };
   }
+  const unread = text('unread') === '1' ? ({ unread: true } as const) : {};
   if (account !== undefined && folder !== undefined) {
-    return { in: 'folder', folder: { account, path: folder } };
+    return { in: 'folder', folder: { account, path: folder }, ...unread };
   }
-  if (unified === undefined) return { in: 'inbox' };
+  if (unified === undefined || unified === 'inbox') return { in: 'inbox', ...unread };
   return isUnified(unified) ? { in: unified } : undefined;
 }
 

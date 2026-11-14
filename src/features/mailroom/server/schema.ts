@@ -419,6 +419,32 @@ export const versions: readonly (readonly string[])[] = [
       PRIMARY KEY (account, path, uid_validity, uid)
     )`,
   ],
+  [
+    // Whether a row has unread mail, so a folder or the unified Inbox lists only its unread rows
+    // from an index of them. A placement has while its folder holds an unread message of its
+    // conversation, as the folder's own count says, a conversation while an Inbox does, and a
+    // bundle while one of its conversations does.
+    `ALTER TABLE conversations ADD COLUMN unread INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE placements ADD COLUMN unread INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE bundles ADD COLUMN unread INTEGER NOT NULL DEFAULT 0`,
+    `UPDATE placements SET unread = 1 WHERE EXISTS (
+      SELECT 1 FROM messages m
+      WHERE m.conversation = placements.conversation
+        AND m.account = placements.account AND m.path = placements.path
+        AND json_extract(m.message, '$.flags.seen') = 0
+    )`,
+    `UPDATE conversations SET unread = 1 WHERE EXISTS (
+      SELECT 1 FROM placements p JOIN folders f ON f.account = p.account AND f.path = p.path
+      WHERE p.conversation = conversations.id AND p.unread = 1 AND f.role = 'inbox'
+    )`,
+    `UPDATE bundles SET unread = 1 WHERE EXISTS (
+      SELECT 1 FROM conversations WHERE bundle = bundles.id AND unread = 1
+    )`,
+    `CREATE INDEX conversations_unread_in_inbox ON conversations (date DESC, id DESC)
+      WHERE inbox = 1 AND bundle IS NULL AND unread = 1`,
+    `CREATE INDEX placements_unread_by_date ON placements (account, path, date DESC, conversation DESC)
+      WHERE bundle IS NULL AND unread = 1`,
+  ],
 ];
 
 /**

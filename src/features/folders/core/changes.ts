@@ -58,7 +58,8 @@ export function isShown(folders: readonly Folder[], change: FolderChange): boole
 
 /**
  * Where a view goes when a change is made: from a renamed folder, or one inside it, to its new path,
- * and from a deleted one to the Inbox. Any other view stays.
+ * still listing only its unread mail if it did, and from a deleted one to the Inbox. Any other view
+ * stays.
  */
 export function followed(view: View, change: FolderChange): View {
   if (view.in !== 'folder' || change.do === 'create') return view;
@@ -71,7 +72,7 @@ export function followed(view: View, change: FolderChange): View {
   if (!isWithin) return view;
   if (change.do === 'delete') return { in: 'inbox' };
   return {
-    in: 'folder',
+    ...view,
     folder: { account, path: `${change.to}${path.slice(folder.path.length)}` },
   };
 }

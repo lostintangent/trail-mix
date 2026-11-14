@@ -383,11 +383,13 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     return Promise.resolve(this.store.folders());
   }
 
-  async conversations(view: View, at?: number): Promise<Page> {
+  async conversations(view: View, at?: number, keep?: ConversationId): Promise<Page> {
     const checked = input.viewOf(view);
     const place = input.placeOf(at);
     if (checked.in === 'outbox') throw new TypeError('The Outbox is listed by outbox().');
-    if (checked.in !== 'search') return this.named(this.store.page(checked, place));
+    if (checked.in !== 'search') {
+      return this.named(this.store.page(checked, place, undefined, input.keptOf(keep)));
+    }
     if (!checked.fullText) return this.named(this.store.search(checked.text, place));
     // The first page asks the servers again. Pages further down read what that one found.
     if (place === 0 || this.found?.text !== checked.text) {

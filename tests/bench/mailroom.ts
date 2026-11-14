@@ -106,6 +106,11 @@ export const mailroom: BenchArea = {
           reads.folderLast.time,
           BUDGET.pageAnywhere,
         ),
+        measured(
+          `The unified Inbox's unread last page, at ${reads.unreadLast.at}, p95`,
+          reads.unreadLast.time,
+          BUDGET.pageAnywhere,
+        ),
         measured('A 50-message conversation, p95', reads.conversation, BUDGET.conversation),
         measured('Search as it is typed, p95', reads.search, BUDGET.search),
         measured('An address completion as it is typed, p95', reads.people, BUDGET.people),
@@ -198,10 +203,10 @@ async function readTimes(url: string) {
   const page = await call<number[]>(url, 'timed', 'conversations', [INBOX], READS);
   // A page anywhere reads as quickly as the first, even the last, which passes over the most rows,
   // in a unified view and in a folder, whose placements it joins to its conversations.
-  const lastPage = async (view: View) => {
+  const lastPage = async (view: View, keep?: string) => {
     const { total } = await call<Page>(url, 'conversations', view);
     const at = Math.max(0, Math.floor((total - 1) / PAGE_SIZE) * PAGE_SIZE);
-    const times = await call<number[]>(url, 'timed', 'conversations', [view, at], READS);
+    const times = await call<number[]>(url, 'timed', 'conversations', [view, at, keep], READS);
     return { at, time: percentile(times, 0.95) };
   };
   const [account] = await call<Account[]>(url, 'accounts');
@@ -210,6 +215,8 @@ async function readTimes(url: string) {
     in: 'folder',
     folder: { account: account!.id, path: 'INBOX' },
   });
+  // Nothing in the bench's Inbox is seen, so its unread list is all of it, with one kept open.
+  const unreadLast = await lastPage({ in: 'inbox', unread: true }, thread.id);
   const conversation = await call<number[]>(url, 'timed', 'conversation', [thread.id], READS);
   const search: number[] = [];
   for (const text of TYPED) {
@@ -226,6 +233,7 @@ async function readTimes(url: string) {
     page: percentile(page, 0.95),
     inboxLast,
     folderLast,
+    unreadLast,
     conversation: percentile(conversation, 0.95),
     search: percentile(search, 0.95),
   };

@@ -13,6 +13,7 @@ const bundle = (account: string) => bundleIdOf(account, 'TrailMix-Demo/toy.box_2
 
 const VIEWS: View[] = [
   { in: 'inbox' },
+  { in: 'inbox', unread: true },
   { in: 'flagged' },
   { in: 'drafts' },
   { in: 'outbox' },
@@ -21,6 +22,7 @@ const VIEWS: View[] = [
   { in: 'folder', folder: { account: PERSONAL, path: '[Airmail]/Send Later' } },
   { in: 'folder', folder: { account: PERSONAL, path: 'a&b=c?d#e%f+g' } },
   { in: 'folder', folder: { account: PERSONAL, path: 'Reçus/Ελληνικά 📬' } },
+  { in: 'folder', folder: { account: PERSONAL, path: 'Projects/Toy Box' }, unread: true },
   { in: 'search', text: 'lunch thu' },
   { in: 'search', text: 'from:ada@example.com & "q4 plan" 100%+' },
   { in: 'search', text: 'pacing', fullText: true },
@@ -59,6 +61,10 @@ test('an address reads plainly, and the unified Inbox with nothing open is the r
   expect(addressOf({ view: { in: 'search', text: 'lunch thu', fullText: true } })).toBe(
     '/?q=lunch%20thu&bodies=1',
   );
+  expect(addressOf({ view: { in: 'inbox', unread: true } })).toBe('/?unread=1');
+  expect(
+    addressOf({ view: { in: 'folder', folder: { account: WORK, path: 'INBOX' }, unread: true } }),
+  ).toBe(`/?account=${WORK}&folder=INBOX&unread=1`);
 });
 
 test('an address that names nothing it can open reads as the unified Inbox with nothing open', () => {
@@ -102,6 +108,10 @@ test('a part of an address that doesn’t fit is left out, and the rest still op
     view: { in: 'inbox' },
     open: conversation(WORK),
   });
+  // Only a folder or the unified Inbox shows only its unread conversations.
+  expect(placeAt('/?in=flagged&unread=1')).toEqual({ view: { in: 'flagged' } });
+  expect(placeAt('/?q=lunch&unread=1')).toEqual({ view: { in: 'search', text: 'lunch' } });
+  expect(placeAt('/?unread=yes')).toEqual({ view: { in: 'inbox' } });
   // Only the first of a repeated parameter counts.
   expect(placeAt('/?in=flagged&in=drafts')).toEqual({ view: { in: 'flagged' } });
 });

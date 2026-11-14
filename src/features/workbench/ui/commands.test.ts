@@ -44,6 +44,7 @@ function registry(isUnread: boolean): Command[] {
       back: nothing,
       undo: nothing,
       focusSearch: nothing,
+      unread: { isOn: false, toggle: nothing },
       fold: { isFolded: false, toggle: nothing },
       openSettings: nothing,
       showShortcuts: nothing,

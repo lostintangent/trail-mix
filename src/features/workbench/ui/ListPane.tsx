@@ -33,10 +33,11 @@ import type {
 import { StampDot } from '../../../app/theme/StampDot.tsx';
 
 /**
- * The conversation list's sheet, under the view's icon, title and unread count, with the folder's
- * menu at the header's end. On a desktop the whole pane is the sheet, and collapsed to its rail it
- * keeps only a way to open it again. On a phone the title sits on the desk, the sheet starts below
- * it, and the way back to the folders floats at the bottom with the pane's other actions.
+ * The conversation list's sheet, under the view's icon, title and unread count, with the toggle
+ * that lists only unread mail and the folder's menu at the header's end. On a desktop the whole
+ * pane is the sheet, and collapsed to its rail it keeps only a way to open it again. On a phone the
+ * title sits on the desk, the sheet starts below it, and the way back to the folders floats at the
+ * bottom with the pane's other actions.
  */
 export function ListPane({
   id,
@@ -48,6 +49,7 @@ export function ListPane({
   below,
   list,
   viewIn,
+  isUnreadOnly = false,
   listKey,
   conversations,
   isUpdating,
@@ -88,6 +90,8 @@ export function ListPane({
   list?: ReactNode;
   /** What kind of view the list shows, which says what an empty list means. */
   viewIn: View['in'];
+  /** Whether the list shows only the view's unread mail, and the conversation open. */
+  isUnreadOnly?: boolean;
   /** Names the view's list. Another list starts at its top. */
   listKey: string;
   /** The view's whole list, with places not yet fetched empty. Nothing until its first page arrives. */
@@ -117,7 +121,7 @@ export function ListPane({
   onShowFolders: () => void;
   /** On a phone, what the island holds after the way to the folders: search, then Write. */
   island?: ReactNode;
-  /** What can be done to the folder in view, at the header's end. */
+  /** What can be done to the view, at the header's end: a filter, and a folder's own menu. */
   actions?: ReactNode;
 }) {
   const titleId = useId();
@@ -181,7 +185,7 @@ export function ListPane({
         {list ? (
           list
         ) : conversations?.length === 0 ? (
-          <Empty viewIn={viewIn} icon={icon} title={title} />
+          <Empty viewIn={isUnreadOnly ? 'unread' : viewIn} icon={icon} title={title} />
         ) : conversations ? (
           <ConversationList
             label={title}
@@ -245,9 +249,21 @@ const EMPTY = {
     title: () => 'No matches',
     description: 'Nothing in any account matches every word you typed.',
   },
-} satisfies Record<Exclude<View['in'], 'outbox'>, unknown>;
+  unread: {
+    title: () => 'Nothing unread',
+    description: 'Mail you haven’t read gathers here, and stays while you read it.',
+  },
+} satisfies Record<Exclude<View['in'], 'outbox'> | 'unread', unknown>;
 
-function Empty({ viewIn, icon, title }: { viewIn: View['in']; icon: LucideIcon; title: string }) {
+function Empty({
+  viewIn,
+  icon,
+  title,
+}: {
+  viewIn: View['in'] | 'unread';
+  icon: LucideIcon;
+  title: string;
+}) {
   // The Outbox lists its own sends, and says when there are none.
   const empty = EMPTY[viewIn === 'outbox' ? 'inbox' : viewIn];
   return (
@@ -313,7 +329,8 @@ const styles = stylex.create({
     alignSelf: 'center',
     color: colorVars['--color-text-secondary'],
   },
-  // The folder's own menu, at the header's end on a desktop, and after the account's chip on a phone.
+  // The unread toggle and the folder's own menu, at the header's end on a desktop, and after the
+  // account's chip on a phone.
   actions: {
     display: 'flex',
     alignSelf: 'center',

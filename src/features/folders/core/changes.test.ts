@@ -83,6 +83,11 @@ test('a view in a renamed folder follows it, and one in a deleted folder goes to
     in: 'folder',
     folder: { account: 'personal', path: 'Travel/Japan/Kyoto' },
   });
+  expect(followed({ ...inKyoto, unread: true }, rename)).toEqual({
+    in: 'folder',
+    folder: { account: 'personal', path: 'Travel/Japan/Kyoto' },
+    unread: true,
+  });
   expect(followed(inKyoto, { do: 'delete', folder: japan })).toEqual({ in: 'inbox' });
   // Another account's folder of the same path, a folder whose name merely begins with the path,
   // and a unified view all stay.

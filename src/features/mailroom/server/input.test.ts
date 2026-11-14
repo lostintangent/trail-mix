@@ -4,6 +4,7 @@ import {
   draftOf,
   flagsOf,
   instantOf,
+  keptOf,
   messagesOf,
   optional,
   refOf,
@@ -29,9 +30,25 @@ test('a view is one of the shapes a list shows, and a search carries its text', 
     in: 'search',
     text: 'lunch',
   });
+  // Only a folder or the unified Inbox shows only its unread conversations, and only when it says so.
+  expect(viewOf({ in: 'inbox', unread: true })).toEqual({ in: 'inbox', unread: true });
+  expect(viewOf({ in: 'inbox', unread: 'yes' })).toEqual({ in: 'inbox' });
+  expect(viewOf({ in: 'flagged', unread: true })).toEqual({ in: 'flagged' });
+  expect(viewOf({ in: 'search', text: 'lunch', unread: true })).toEqual({
+    in: 'search',
+    text: 'lunch',
+  });
   expect(() => viewOf({ in: 'everything' })).toThrow(TypeError);
   expect(() => viewOf({ in: 'folder', folder: { account: 'a' } })).toThrow(TypeError);
   expect(() => viewOf('inbox')).toThrow(TypeError);
+});
+
+test('a list keeps open a conversation or a bundle it names, or nothing', () => {
+  expect(keptOf(undefined)).toBeUndefined();
+  expect(keptOf(null)).toBeUndefined();
+  expect(keptOf('a:inbox:%3Cx%40y%3E')).toBe('a:inbox:%3Cx%40y%3E');
+  for (const kept of ['', 42, ['a'], 'x'.repeat(1001)])
+    expect(() => keptOf(kept)).toThrow(TypeError);
 });
 
 test('a command’s messages are refs, or a bundle’s through the instant its row showed', () => {

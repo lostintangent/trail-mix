@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test';
 import type { Folder, FolderRole, Message, View } from '../../mail/core/index.ts';
 import { changeMessages, commandFor, followMoves, undoOf, type Command } from './carrying.ts';
-import { changeRows, isShown, overlaid, putBack, rowChange } from './triage.ts';
+import { changeRows, isShown, overlaid, putBack, rowChange, unreadOnly } from './triage.ts';
 
 const ROLES: Partial<Record<string, FolderRole>> = {
   INBOX: 'inbox',
@@ -213,6 +213,17 @@ test('a row change reaches the triaged conversations and no others', () => {
     { id: 'b', unread: 1, flagged: false },
     { id: 'c', unread: 0, flagged: true },
   ]);
+});
+
+test('a list of unread mail shows its unread rows and the one kept open, read or not', () => {
+  const row = (id: string, unread: number) => ({ id, unread });
+  const rows = [row('a', 2), row('b', 0), undefined, row('c', 0), row('d', 1)];
+
+  expect(unreadOnly(rows, 'b')).toEqual([row('a', 2), row('b', 0), undefined, row('d', 1)]);
+  expect(unreadOnly(rows, undefined)).toEqual([row('a', 2), undefined, row('d', 1)]);
+  // Marked read under the filter, the open one stays, and the rest go.
+  const read = changeRows(rows, new Set(['a', 'd']), { unread: 0 });
+  expect(unreadOnly(read, 'a')).toEqual([row('a', 0), undefined]);
 });
 
 test('putting rows back returns each to its place by date, and restores what changed in place', () => {

@@ -94,6 +94,7 @@ import {
 import { PickedActions, SelectionPane } from './SelectionPane.tsx';
 import { OPEN_SETTINGS, workbenchCommands } from './commands.ts';
 import { FoldToggle } from './FoldToggle.tsx';
+import { UnreadToggle } from './UnreadToggle.tsx';
 import {
   CommandButton,
   RegisteredCommandButton,
@@ -341,7 +342,23 @@ export function Workbench({
       setPhonePane('list');
     },
   });
-  const { search, marks, searchBodies } = useSearch(view, onViewChange);
+  const { search, marks, searchBodies, returnTo } = useSearch(view, onViewChange);
+  // A folder or the unified Inbox may list only its unread mail, offered while it has some. The
+  // conversation open stays open, and the list keeps it while it is. A search offers it for the
+  // view it began from, since the palette's field goes back there before it runs a command.
+  const isUnreadOnly = 'unread' in view && view.unread === true;
+  const listed = view.in === 'search' ? returnTo : view;
+  const isListedUnreadOnly = 'unread' in listed && listed.unread === true;
+  const listedUnread =
+    listed === view ? unread : describeView(listed, accounts, folders, counts).unread;
+  const unreadOnly =
+    (listed.in === 'folder' || listed.in === 'inbox') &&
+    (isListedUnreadOnly || (listedUnread ?? 0) > 0)
+      ? {
+          isOn: isListedUnreadOnly,
+          toggle: () => onViewChange(listing(listed, !isListedUnreadOnly), 'replace'),
+        }
+      : undefined;
   // On a desktop New message and the search field top the sidebar. Folded to its rail, New message
   // leads the rail and the field sits above the list, as it does on a phone.
   const isFieldInSidebar = !isPhone && !sidebar.isCollapsed;
@@ -1044,6 +1061,7 @@ export function Workbench({
       // While a send can still be taken back, Undo takes it back first.
       undo: outbox.undoSend ?? (canUndo ? undoLast : undefined),
       focusSearch,
+      unread: unreadOnly,
       fold: isPhone
         ? undefined
         : {
@@ -1244,11 +1262,17 @@ export function Workbench({
                     {newMessage && <CommandButton command={newMessage} primary="Write" />}
                   </>
                 }
+                isUnreadOnly={isUnreadOnly}
                 actions={
-                  view.in === 'folder' && (
-                    <Suspense>
-                      <FolderMenu commands={folderEditing.commands} />
-                    </Suspense>
+                  (view.in === 'folder' || view.in === 'inbox') && (
+                    <>
+                      <UnreadToggle />
+                      {view.in === 'folder' && (
+                        <Suspense>
+                          <FolderMenu commands={folderEditing.commands} />
+                        </Suspense>
+                      )}
+                    </>
                   )
                 }
               />
@@ -1292,7 +1316,9 @@ export function Workbench({
                   choose={
                     view.in === 'outbox'
                       ? 'Choosing a send opens its conversation here.'
-                      : undefined
+                      : isUnreadOnly && conversations?.length === 0
+                        ? 'Everything here is read.'
+                        : undefined
                   }
                   page={
                     page?.as === 'settings' ? (
@@ -1455,10 +1481,11 @@ function useAddress({
   }, [arrived, shown, move]);
 
   // The view changes under the open conversation, as a search typed or a folder renamed changes it.
+  // A filter turned on or off takes the place of the view it filters.
   const onViewChange = useCallback(
-    (next: View) => {
+    (next: View, history?: 'push' | 'replace') => {
       const { view, bundle, open } = latest.current;
-      move(placeIn(next, bundle, open), historyFrom(view));
+      move(placeIn(next, bundle, open), history ?? historyFrom(view));
     },
     [move],
   );
@@ -1485,13 +1512,21 @@ const placeIn = (
   ...(open === undefined ? {} : { open }),
 });
 
+/** A folder's or the unified Inbox's view, listing only its unread mail or all of it. */
+function listing(view: View & { in: 'folder' | 'inbox' }, unreadOnly: boolean): View {
+  const unread = unreadOnly ? ({ unread: true } as const) : {};
+  return view.in === 'folder'
+    ? { in: 'folder', folder: view.folder, ...unread }
+    : { in: 'inbox', ...unread };
+}
+
 /** A step to a new view is pushed, so Back returns, except from a search, which it takes the place of. */
 const historyFrom = (view: View) => (view.in === 'search' ? 'replace' : 'push');
 
 /**
  * What the member searches for, as the view holds it, and how typing changes the view. Typing turns
  * the list into the search's results, clearing the field goes back to the view the search began
- * from, and asking for message bodies keeps the text and searches the servers too.
+ * from, which it names, and asking for message bodies keeps the text and searches the servers too.
  */
 function useSearch(view: View, onViewChange: (view: View) => void) {
   const queryClient = useQueryClient();
@@ -1500,16 +1535,17 @@ function useSearch(view: View, onViewChange: (view: View) => void) {
   useLayoutEffect(() => {
     latest.current = view;
   });
-  const returnTo = useRef<View>(view.in === 'search' ? { in: 'inbox' } : view);
+  const [returnTo, setReturnTo] = useState<View>(view.in === 'search' ? { in: 'inbox' } : view);
   const onSearch = useCallback(
     (next: string) => {
-      if (latest.current.in !== 'search') returnTo.current = latest.current;
-      const searched: View = next === '' ? returnTo.current : { in: 'search', text: next };
+      const from = latest.current.in === 'search' ? returnTo : latest.current;
+      if (from !== returnTo) setReturnTo(from);
+      const searched: View = next === '' ? from : { in: 'search', text: next };
       // The matches are asked for as the key goes down, not once the keystroke has been drawn.
       void queryClient.prefetchQuery(conversationsQuery(searched));
       onViewChange(searched);
     },
-    [onViewChange, queryClient],
+    [onViewChange, queryClient, returnTo],
   );
   const search = useMemo(() => ({ text, onSearch }), [text, onSearch]);
   const marks = useMemo(() => marksOf(text), [text]);
@@ -1517,7 +1553,7 @@ function useSearch(view: View, onViewChange: (view: View) => void) {
     () => onViewChange({ in: 'search', text, fullText: true }),
     [onViewChange, text],
   );
-  return { search, marks, searchBodies };
+  return { search, marks, searchBodies, returnTo };
 }
 
 /**
