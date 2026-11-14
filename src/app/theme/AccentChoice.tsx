@@ -1,13 +1,13 @@
 import { Icon } from '@astryxdesign/core/Icon';
 import { IconButton } from '@astryxdesign/core/IconButton';
-import { colorVars, focusVars, radiusVars, sizeVars } from '@astryxdesign/core/theme/tokens.stylex';
+import { colorVars, radiusVars, sizeVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { useRef } from 'react';
 import { LaterTooltip } from '../../shared/LaterTooltip.tsx';
 import { RotateCcw } from 'lucide-react';
 import { preloadAccentMath } from './accent.ts';
 import { DEFAULT_ACCENT_HEX } from './palette.ts';
-import { tm } from './tokens.stylex.ts';
+import { focusRing, tm } from './tokens.stylex.ts';
 
 /**
  * The accent this device shows: a swatch of it that opens the system's color picker, and, once the
@@ -106,10 +106,9 @@ const styles = stylex.create({
     // of whatever the target's reach past it runs into.
     outline: {
       default: null,
-      [stylex.when.siblingBefore(':focus-visible')]:
-        `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`,
+      [stylex.when.siblingBefore(':focus-visible')]: focusRing.line,
     },
-    outlineOffset: focusVars['--focus-outline-offset'],
+    outlineOffset: focusRing.outside,
   },
   // Over the whole target, unseen, so a press anywhere on it opens the picker.
   input: {

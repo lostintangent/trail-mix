@@ -17,7 +17,7 @@ import {
 import * as stylex from '@stylexjs/stylex';
 import { ChevronDown, Send } from 'lucide-react';
 import { useEffect, useId, useState } from 'react';
-import { media, tm } from '../../../app/theme/tokens.stylex.ts';
+import { focusRing, media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { isApple, primaryShortcut, shortcutLabel, type Command } from '../../commands/index.ts';
 import { instantOf } from '../core/later.ts';
 import { SEND, SEND_LATER } from './sendCommands.ts';
@@ -193,7 +193,7 @@ const styles = stylex.create({
     outline: 'none',
     boxShadow: {
       default: 'none',
-      ':focus': `inset 0 0 0 2px ${colorVars['--color-accent-muted']}`,
+      ':focus': focusRing.field,
     },
     backgroundColor: colorVars['--color-background-surface'],
     color: colorVars['--color-text-primary'],

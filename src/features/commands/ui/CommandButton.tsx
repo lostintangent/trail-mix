@@ -1,16 +1,11 @@
 import { Button } from '@astryxdesign/core/Button';
 import { Icon } from '@astryxdesign/core/Icon';
 import { IconButton } from '@astryxdesign/core/IconButton';
-import {
-  colorVars,
-  durationVars,
-  focusVars,
-  radiusVars,
-} from '@astryxdesign/core/theme/tokens.stylex';
+import { colorVars, durationVars, radiusVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import type { StyleXStyles } from '@stylexjs/stylex';
 import { memo, useRef } from 'react';
-import { media, tm } from '../../../app/theme/tokens.stylex.ts';
+import { focusRing, media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { LaterTooltip } from '../../../shared/LaterTooltip.tsx';
 import { tooltipOf, useCommands, type Command } from '../registry.ts';
 
@@ -150,9 +145,8 @@ const styles = stylex.create({
     forcedColorAdjust: 'none',
     outline: {
       default: null,
-      [stylex.when.ancestor(':focus-visible')]:
-        `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`,
+      [stylex.when.ancestor(':focus-visible')]: focusRing.line,
     },
-    outlineOffset: focusVars['--focus-outline-offset'],
+    outlineOffset: focusRing.outside,
   },
 });

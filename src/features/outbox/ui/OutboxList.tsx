@@ -14,7 +14,7 @@ import { Send } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { stampStyles } from '../../../app/theme/stamps.ts';
 import { ConversationListSkeleton } from '../../conversations/index.ts';
-import { media, tm } from '../../../app/theme/tokens.stylex.ts';
+import { focusRing, media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { AccountId, ConversationId, Outgoing, StampColor } from '../../mail/core/index.ts';
 import { outboxQuery } from '../../mailroom/client/index.ts';
 import { formatAhead } from '../core/later.ts';
@@ -129,7 +129,7 @@ function Row({
         aria-current={isSelected || undefined}
         disabled={conversation === undefined}
         onClick={() => conversation && onOpen(conversation)}
-        {...stylex.props(styles.open)}
+        {...stylex.props(styles.open, stylex.defaultMarker())}
       >
         <span {...stylex.props(styles.top)}>
           <span {...stylex.props(styles.to, styles.clip)}>To {fully(to)}</span>
@@ -255,6 +255,9 @@ const styles = stylex.create({
     paddingInlineEnd: spacingVars['--spacing-2'],
     borderRadius: radiusVars['--radius-element'],
     overflow: 'hidden',
+    // The row clips what it holds, so the ring of the button that opens it is drawn here instead.
+    outline: { default: 'none', [stylex.when.descendant(':focus-visible')]: focusRing.line },
+    outlineOffset: focusRing.inside,
     color: colorVars['--color-text-primary'],
     fontSize: typeScaleVars['--text-body-size'],
     lineHeight: typeScaleVars['--text-body-leading'],
@@ -298,9 +301,7 @@ const styles = stylex.create({
     font: 'inherit',
     textAlign: 'start',
     cursor: { default: 'pointer', ':disabled': 'default' },
-    outline: { default: 'none', ':focus-visible': `2px solid ${colorVars['--color-accent']}` },
-    outlineOffset: '2px',
-    borderRadius: radiusVars['--radius-element'],
+    outline: 'none',
   },
   top: {
     display: 'flex',

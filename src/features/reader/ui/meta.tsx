@@ -1,7 +1,6 @@
 import {
   borderVars,
   colorVars,
-  focusVars,
   fontWeightVars,
   radiusVars,
   spacingVars,
@@ -10,7 +9,7 @@ import { Icon } from '@astryxdesign/core/Icon';
 import * as stylex from '@stylexjs/stylex';
 import { ExternalLink } from 'lucide-react';
 import { stampStyles } from '../../../app/theme/stamps.ts';
-import { media } from '../../../app/theme/tokens.stylex.ts';
+import { focusRing, media } from '../../../app/theme/tokens.stylex.ts';
 import type { Account } from '../../mail/core/index.ts';
 import { threadStyles } from './layout.ts';
 
@@ -82,8 +81,9 @@ const styles = stylex.create({
     borderRadius: radiusVars['--radius-inner'],
     outline: {
       default: null,
-      ':focus-visible': `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`,
+      ':focus-visible': focusRing.line,
     },
+    outlineOffset: focusRing.outside,
   },
   linkIcon: {
     color: 'inherit',

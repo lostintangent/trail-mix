@@ -15,7 +15,7 @@ import * as stylex from '@stylexjs/stylex';
 import { useQueryClient } from '@tanstack/react-query';
 import { useId, useState } from 'react';
 import { stampStyles } from '../../../app/theme/stamps.ts';
-import { media, tm } from '../../../app/theme/tokens.stylex.ts';
+import { focusRing, media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, StampColor } from '../../mail/core/index.ts';
 import { VISITOR_SAID } from '../core/said.ts';
 import { accountsQuery, mailroom } from '../../mailroom/client/index.ts';
@@ -184,8 +184,6 @@ function shownAs(account: Account, change: ReturnType<typeof changeOf>): Account
   return { ...rest, ...(fromName ? { fromName } : {}) };
 }
 
-const FOCUS_RING = `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`;
-
 const styles = stylex.create({
   // Astryx draws a field at a fixed height, which a finger needs at 44px.
   control: {
@@ -231,10 +229,10 @@ const styles = stylex.create({
     outline: {
       default: null,
       ':checked': `${focusVars['--focus-outline-width']} solid ${colorVars['--color-text-primary']}`,
-      ':focus-visible': FOCUS_RING,
+      ':focus-visible': focusRing.line,
       [media.forcedColors]: `${borderVars['--border-width']} solid CanvasText`,
     },
-    outlineOffset: focusVars['--focus-outline-offset'],
+    outlineOffset: focusRing.outside,
   },
   // Astryx's text area brings plural messages the app's formatter can't read, so this one is ours,
   // drawn as Astryx draws its fields.
@@ -266,8 +264,8 @@ const styles = stylex.create({
     // A phone zooms into a field whose text is smaller than 16px, so the body size holds there.
     fontSize: typeScaleVars['--text-body-size'],
     resize: 'vertical',
-    outline: { default: null, ':focus-visible': FOCUS_RING },
-    outlineOffset: focusVars['--focus-outline-offset'],
+    outline: { default: null, ':focus-visible': focusRing.line },
+    outlineOffset: focusRing.outside,
   },
   actions: {
     display: 'flex',

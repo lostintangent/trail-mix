@@ -8,7 +8,7 @@ import {
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { useId, useState, type KeyboardEvent } from 'react';
-import { media, tm } from '../../../app/theme/tokens.stylex.ts';
+import { focusRing, media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { nameProblem } from '../core/problems.ts';
 
 /**
@@ -115,7 +115,7 @@ const styles = stylex.create({
     borderColor: { default: colorVars['--color-accent'], [media.forcedColors]: 'Highlight' },
     borderRadius: radiusVars['--radius-element'],
     outline: 'none',
-    boxShadow: `inset 0 0 0 2px ${colorVars['--color-accent-muted']}`,
+    boxShadow: focusRing.field,
     backgroundColor: colorVars['--color-background-surface'],
     color: colorVars['--color-text-primary'],
     fontFamily: typographyVars['--font-family-body'],

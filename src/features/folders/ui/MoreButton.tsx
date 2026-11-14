@@ -1,14 +1,9 @@
 import { Icon } from '@astryxdesign/core/Icon';
-import {
-  colorVars,
-  durationVars,
-  focusVars,
-  radiusVars,
-} from '@astryxdesign/core/theme/tokens.stylex';
+import { colorVars, durationVars, radiusVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { Ellipsis } from 'lucide-react';
 import type { ComponentProps } from 'react';
-import { media, tm } from '../../../app/theme/tokens.stylex.ts';
+import { focusRing, media, tm } from '../../../app/theme/tokens.stylex.ts';
 
 /**
  * The `…` at the end of a sidebar row, always shown, in a quiet tone, so what can be done to the
@@ -53,10 +48,9 @@ const styles = stylex.create({
     cursor: 'pointer',
     outline: {
       default: null,
-      // The focus ring every Astryx control draws.
-      ':focus-visible': `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`,
+      ':focus-visible': focusRing.line,
     },
-    outlineOffset: '-2px',
+    outlineOffset: focusRing.inside,
     transitionProperty: 'background-color, color',
     transitionDuration: {
       default: durationVars['--duration-fast'],

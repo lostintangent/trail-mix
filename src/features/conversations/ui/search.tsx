@@ -25,7 +25,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { media, tm } from '../../../app/theme/tokens.stylex.ts';
+import { focusRing, media, tm } from '../../../app/theme/tokens.stylex.ts';
 import {
   bestCommandFor,
   CommandMatches,
@@ -274,7 +274,7 @@ const styles = stylex.create({
     backgroundColor: colorVars['--color-background-surface'],
     boxShadow: {
       default: 'none',
-      ':focus-within': `inset 0 0 0 2px ${colorVars['--color-accent-muted']}`,
+      ':focus-within': focusRing.field,
     },
     transitionProperty: 'border-color, box-shadow',
     transitionDuration: {

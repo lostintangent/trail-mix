@@ -1,21 +1,18 @@
 import {
   borderVars,
   colorVars,
-  focusVars,
   fontWeightVars,
   spacingVars,
   typeScaleVars,
   typographyVars,
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { media, tm } from '../../../app/theme/tokens.stylex.ts';
+import { focusRing, media, tm } from '../../../app/theme/tokens.stylex.ts';
 
 /**
  * The shapes a conversation is laid out in, shared by the conversation and the skeletons that
  * stand in for it, so nothing moves when it arrives.
  */
-
-const FOCUS_RING = `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`;
 
 /**
  * A conversation: its subject, the line under it, and its messages, folded or open. On a desktop
@@ -75,9 +72,9 @@ export const threadStyles = stylex.create({
     outline: {
       default: null,
       [media.forcedColors]: `${borderVars['--border-width']} solid CanvasText`,
-      ':focus-visible': FOCUS_RING,
+      ':focus-visible': focusRing.line,
     },
-    outlineOffset: focusVars['--focus-outline-offset'],
+    outlineOffset: focusRing.outside,
   },
 });
 

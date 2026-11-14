@@ -86,6 +86,20 @@ export const tm = stylex.defineVars({
 });
 
 /**
+ * The focus Astryx draws on its own controls, for the ones Trail Mix draws itself. A control takes
+ * its ring `inside` its edge where something about it would clip a ring, as a scroller does, and
+ * `outside` it elsewhere. A field takes Astryx's input focus instead, a muted ring in its edge.
+ * Constants, so the first load carries no names for them. StyleX takes only static values here, so
+ * they name Astryx's focus variables as its stylesheet declares them.
+ */
+export const focusRing = stylex.defineConsts({
+  line: 'var(--focus-outline-width) var(--focus-outline-style) var(--focus-outline-color)',
+  inside: 'calc(-1 * var(--focus-outline-width))',
+  outside: 'var(--focus-outline-offset)',
+  field: 'inset 0 0 0 2px var(--color-accent-muted)',
+});
+
+/**
  * How far the conversation list fades into its sheet at an end it can still scroll toward, and over
  * how much scrolling it grows to that, as Toy Box's lists do. Constants, so the first load carries
  * no names for them.

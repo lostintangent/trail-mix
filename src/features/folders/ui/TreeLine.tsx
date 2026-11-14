@@ -3,7 +3,6 @@ import { Skeleton } from '@astryxdesign/core/Skeleton';
 import {
   colorVars,
   durationVars,
-  focusVars,
   fontWeightVars,
   radiusVars,
   spacingVars,
@@ -14,7 +13,7 @@ import { ChevronRight, type LucideIcon } from 'lucide-react';
 import { memo, Suspense, useReducer, useState, type ReactNode, type SyntheticEvent } from 'react';
 import { Pending, TextSkeleton } from '../../../app/theme/Pending.tsx';
 import { StampDot } from '../../../app/theme/StampDot.tsx';
-import { media, tm } from '../../../app/theme/tokens.stylex.ts';
+import { focusRing, media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Command } from '../../commands/index.ts';
 import type { Account, Folder, View } from '../../mail/core/index.ts';
 import type { Foldable } from './folds.ts';
@@ -378,10 +377,9 @@ const styles = stylex.create({
     cursor: 'pointer',
     outline: {
       default: null,
-      // The focus ring every Astryx control draws.
-      ':focus-visible': `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`,
+      ':focus-visible': focusRing.line,
     },
-    outlineOffset: '-2px',
+    outlineOffset: focusRing.inside,
   },
   // A folder's icon starts after the column its chevron takes, a step further in for each folder
   // it sits inside. Its line still spans the sidebar, so a selected one lifts as wide as the views.
@@ -414,10 +412,9 @@ const styles = stylex.create({
     cursor: 'pointer',
     outline: {
       default: null,
-      // The focus ring every Astryx control draws.
-      ':focus-visible': `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`,
+      ':focus-visible': focusRing.line,
     },
-    outlineOffset: '-2px',
+    outlineOffset: focusRing.inside,
   },
   foldAt: (depth: number) => ({
     insetInlineStart: `calc(${depth} * ${STEP})`,

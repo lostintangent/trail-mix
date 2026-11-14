@@ -5,7 +5,6 @@ import { ToggleButton } from '@astryxdesign/core/ToggleButton';
 import {
   borderVars,
   colorVars,
-  focusVars,
   radiusVars,
   spacingVars,
   typeScaleVars,
@@ -16,7 +15,7 @@ import { Ellipsis, FileText, ImageIcon, ImageOff, ShieldCheck, Sun } from 'lucid
 import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useMemo, useState } from 'react';
 import { SenderAvatar } from '../../../app/theme/SenderAvatar.tsx';
-import { tm } from '../../../app/theme/tokens.stylex.ts';
+import { focusRing, tm } from '../../../app/theme/tokens.stylex.ts';
 import { sizeText } from '../../../shared/size.ts';
 import { CommandButton, type Command } from '../../commands/index.ts';
 import {
@@ -297,8 +296,6 @@ export function when(iso: string, now = new Date()): string {
   return `${DAY.format(date)}, ${TIME.format(date)}`;
 }
 
-const FOCUS_RING = `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`;
-
 const styles = stylex.create({
   line: {
     display: 'flex',
@@ -380,8 +377,8 @@ const styles = stylex.create({
     fontFamily: typographyVars['--font-family-body'],
     fontSize: typeScaleVars['--text-supporting-size'],
     cursor: 'pointer',
-    outline: { default: null, ':focus-visible': FOCUS_RING },
-    outlineOffset: focusVars['--focus-outline-offset'],
+    outline: { default: null, ':focus-visible': focusRing.line },
+    outlineOffset: focusRing.outside,
   },
   attachments: {
     display: 'flex',
@@ -403,8 +400,8 @@ const styles = stylex.create({
     color: colorVars['--color-text-primary'],
     textDecoration: 'none',
     backgroundColor: { default: 'transparent', ':hover': colorVars['--color-overlay-hover'] },
-    outline: { default: null, ':focus-visible': FOCUS_RING },
-    outlineOffset: focusVars['--focus-outline-offset'],
+    outline: { default: null, ':focus-visible': focusRing.line },
+    outlineOffset: focusRing.outside,
   },
   attachmentName: {
     overflow: 'hidden',

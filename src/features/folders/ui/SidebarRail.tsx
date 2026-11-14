@@ -1,16 +1,11 @@
 import { Icon } from '@astryxdesign/core/Icon';
-import {
-  colorVars,
-  focusVars,
-  radiusVars,
-  spacingVars,
-} from '@astryxdesign/core/theme/tokens.stylex';
+import { colorVars, radiusVars, spacingVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { MailPlus } from 'lucide-react';
 import { memo, useRef, type ReactNode } from 'react';
 import { LaterTooltip } from '../../../shared/LaterTooltip.tsx';
 import { StampDot } from '../../../app/theme/StampDot.tsx';
-import { media, tm } from '../../../app/theme/tokens.stylex.ts';
+import { focusRing, media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, Folder, View } from '../../mail/core/index.ts';
 import { lift, troubleOf } from './TreeLine.tsx';
 import { UNIFIED_VIEWS, type ViewCounts } from './views.ts';
@@ -212,10 +207,9 @@ const styles = stylex.create({
     cursor: 'pointer',
     outline: {
       default: null,
-      // The focus ring every Astryx control draws.
-      ':focus-visible': `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`,
+      ':focus-visible': focusRing.line,
     },
-    outlineOffset: '-2px',
+    outlineOffset: focusRing.inside,
   },
   // Unread mail waits behind it: a dot of the accent at the icon's corner.
   dot: {
