@@ -99,6 +99,8 @@ export function ListPane({
       </section>
     );
   }
+  // The Outbox lists its own sends, and says when there are none.
+  const empty = EMPTY[isUnreadOnly ? 'unread' : viewIn === 'outbox' ? 'inbox' : viewIn];
   return (
     <section id={id} aria-labelledby={titleId} {...stylex.props(styles.pane)}>
       <header {...stylex.props(styles.header)}>
@@ -109,20 +111,19 @@ export function ListPane({
         {offline && (
           // Each part wraps whole to a second line its box hides, the last first, where they can't
           // all fit beside the title.
-          <span role="status" {...stylex.props(styles.offline)}>
+          <span role="status" {...stylex.props(styles.aside)}>
             <span {...stylex.props(styles.offlineDot)} />
-            <span {...stylex.props(styles.offlinePart)}>{offline.said}</span>
-            {offline.more && (
-              <span {...stylex.props(styles.offlinePart)}>{`: ${offline.more}`}</span>
-            )}
+            <span {...stylex.props(styles.whole)}>{offline.said}</span>
+            {offline.more && <span {...stylex.props(styles.whole)}>{`: ${offline.more}`}</span>}
           </span>
         )}
-        {unread ? (
+        {unread && !offline ? (
           // Where the count can't fit whole, it moves past a break to a second line its box hides,
-          // so it goes before the title gives up a letter.
-          <span {...stylex.props(styles.unread, offline !== undefined && styles.besideOffline)}>
+          // so it goes before the title gives up a letter. A list that says it's offline says
+          // nothing else beside its title.
+          <span {...stylex.props(styles.aside)}>
             {'\u200b'}
-            <span {...stylex.props(styles.unreadText)}>{unread} unread</span>
+            <span {...stylex.props(styles.whole)}>{unread} unread</span>
           </span>
         ) : null}
         <span {...stylex.props(styles.scope)}>
@@ -146,7 +147,11 @@ export function ListPane({
         {list ? (
           list
         ) : conversations?.length === 0 ? (
-          <Empty viewIn={isUnreadOnly ? 'unread' : viewIn} icon={icon} title={title} />
+          <EmptyState
+            icon={<Icon icon={icon} size="lg" color="secondary" />}
+            title={empty.title(title)}
+            description={empty.description}
+          />
         ) : conversations ? (
           <ConversationList {...rows} label={title} conversations={conversations} />
         ) : (
@@ -199,26 +204,6 @@ const EMPTY = {
     description: 'Mail you haven’t read gathers here, and stays while you read it.',
   },
 } satisfies Record<Exclude<View['in'], 'outbox'> | 'unread', unknown>;
-
-function Empty({
-  viewIn,
-  icon,
-  title,
-}: {
-  viewIn: View['in'] | 'unread';
-  icon: LucideIcon;
-  title: string;
-}) {
-  // The Outbox lists its own sends, and says when there are none.
-  const empty = EMPTY[viewIn === 'outbox' ? 'inbox' : viewIn];
-  return (
-    <EmptyState
-      icon={<Icon icon={icon} size="lg" color="secondary" />}
-      title={empty.title(title)}
-      description={empty.description}
-    />
-  );
-}
 
 const styles = stylex.create({
   pane: {
@@ -324,8 +309,9 @@ const styles = stylex.create({
     fontWeight: fontWeightVars['--font-weight-semibold'],
     whiteSpace: 'nowrap',
   },
-  // It shrinks far ahead of the title, and one line tall, it shows its count whole or not at all.
-  unread: {
+  // The unread count, or what the list says offline, beside the title. It shrinks far ahead of the
+  // title, and one line tall, it shows each part whole or not at all.
+  aside: {
     flexShrink: 1_000_000,
     minWidth: 0,
     height: `calc(${typeScaleVars['--text-supporting-size']} * ${typeScaleVars['--text-supporting-leading']})`,
@@ -334,23 +320,9 @@ const styles = stylex.create({
     fontSize: typeScaleVars['--text-supporting-size'],
     lineHeight: typeScaleVars['--text-supporting-leading'],
   },
-  unreadText: {
+  whole: {
     display: 'inline-block',
     whiteSpace: 'nowrap',
-  },
-  // A list that says it's offline says nothing else beside its title.
-  besideOffline: {
-    display: 'none',
-  },
-  // As the unread count, it gives way before the title gives up a letter, one line tall.
-  offline: {
-    flexShrink: 1_000_000,
-    minWidth: 0,
-    height: `calc(${typeScaleVars['--text-supporting-size']} * ${typeScaleVars['--text-supporting-leading']})`,
-    overflow: 'hidden',
-    color: tm.textQuiet,
-    fontSize: typeScaleVars['--text-supporting-size'],
-    lineHeight: typeScaleVars['--text-supporting-leading'],
   },
   offlineDot: {
     display: 'inline-block',
@@ -361,10 +333,6 @@ const styles = stylex.create({
     borderRadius: '50%',
     backgroundColor: tm.textQuiet,
     forcedColorAdjust: 'none',
-  },
-  offlinePart: {
-    display: 'inline-block',
-    whiteSpace: 'nowrap',
   },
   sheet: {
     flexGrow: 1,
