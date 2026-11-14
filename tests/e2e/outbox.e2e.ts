@@ -151,6 +151,21 @@ test('the countdown matches the time the Mailroom stored, and Undo leaves the dr
   await page.getByRole('option', { name: /Lunch Thursday/ }).waitFor();
 }, 60_000);
 
+test('a send undone on another device says so in its toast here', async () => {
+  const page = await open({ ...SIZES.desktop, colorScheme: 'light' });
+  const other = await open({ ...SIZES.desktop, colorScheme: 'dark' });
+  await goTo(other, 'Outbox');
+  await openDraft(page, /Lunch Thursday/);
+  await send(page).click();
+  await toast(page, /^Sending to Jonas in \d+s$/).waitFor();
+  await other
+    .getByRole('listitem')
+    .filter({ hasText: /To Jonas Weber/ })
+    .getByRole('button', { name: 'Undo', exact: true })
+    .click();
+  await toast(page, /^Undone\. Nothing was sent to Jonas\.$/).waitFor();
+}, 60_000);
+
 test('a send pressed while a save is on its way waits for it, and leaves when the window from the press closes', async () => {
   const page = await open({ ...SIZES.desktop, colorScheme: 'dark' });
   await openDraft(page, /Lunch Thursday/);

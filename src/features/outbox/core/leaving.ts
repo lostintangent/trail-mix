@@ -116,10 +116,11 @@ export const draftOf = (leaving: Leaving): MessageRef | undefined => leaving.dra
 
 /**
  * What a snapshot of the Outbox, taken by `at`, shows. Each send it holds is followed, and each
- * followed one it lacks is seen gone. `closesFor` says when a send's window closes on this device.
- * A press stays as it was until the Outbox holds its send, since a snapshot can be older than it. A
- * send is known by the press that names it, which can show it before the press hears what draft its
- * last save made, or else by the draft it sends, so one of a draft its message replaced is another's.
+ * followed one it lacks is seen gone, which may end it, for `expire` to let go. `closesFor` says
+ * when a send's window closes on this device. A press stays as it was until the Outbox holds its
+ * send, since a snapshot can be older than it. A send is known by the press that names it, which
+ * can show it before the press hears what draft its last save made, or else by the draft it sends,
+ * so one of a draft its message replaced is another's.
  */
 export function observe(
   all: readonly Leaving[],
@@ -149,7 +150,7 @@ export function observe(
       closes: closesFor(held),
       seen: followed(held),
     }));
-  return expire([...seen, ...added], at);
+  return [...seen, ...added];
 }
 
 /** The sends still followed at `now`: none undone or given up, nor gone without a copy too long. */

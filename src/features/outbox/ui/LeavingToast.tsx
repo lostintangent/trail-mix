@@ -14,20 +14,17 @@ import { Check, CircleAlert, Clock, CloudOff, Send, Undo2, X, type LucideIcon } 
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react';
 import { tooltipOf, UNDO_COMMAND, useCommands } from '../../commands/index.ts';
 import type { Address } from '../../mail/core/index.ts';
-import { conversationQuery, outboxQuery } from '../../mailroom/client/index.ts';
+import { conversationQuery } from '../../mailroom/client/index.ts';
 import { formatAhead } from '../core/later.ts';
 import { GONE_MS, holdsCopy } from '../core/leaving.ts';
 import {
   briefly,
-  follow,
-  followed,
   isLeaving,
   isOnItsWay,
   isUndoable,
   standingOfFollowed,
   standingOfPress,
   standingOfWait,
-  type Followed,
   type Standing,
 } from '../core/standing.ts';
 import { media } from '../../../app/theme/tokens.stylex.ts';
@@ -53,13 +50,12 @@ const TICK_MS = 250;
  * its conversation. From the press, through the undo window, it counts down with Undo, and for a
  * send later it says when. Then it says what the Mailroom has shown: that it's sending, that it
  * went, or why it didn't, with the way to the Outbox. Airmail lies along its top while the message
- * is leaving, and runs while it's on its way. It starts from what the device has seen of the send
- * so far, and goes if the hand-off fails, whose own toast says why.
+ * is leaving, and runs while it's on its way. It follows the send as far as the workbench has seen
+ * it, through the press, and goes if the hand-off fails, whose own toast says why.
  */
 export default function LeavingToast({
   id,
   to,
-  seen: seenFirst,
   closes,
   dismiss,
 }: {
@@ -67,46 +63,25 @@ export default function LeavingToast({
   id: string;
   /** Whom the press sent it to. */
   to: readonly Address[];
-  seen: Followed | undefined;
   /** When the undo window closes on this device's clock. */
   closes: number;
   dismiss: () => void;
 }) {
   const queryClient = useQueryClient();
-  const [seen, setSeen] = useState(seenFirst);
   const [undo, setUndo] = useState<'idle' | 'asking' | 'done' | { refused: string }>('idle');
   const [now, setNow] = useState(Date.now);
-  const hand = useAsked(id)?.hand;
+  const { hand, seen } = useAsked(id) ?? {};
   const outgoing = seen?.last;
 
-  // The workbench asks after a send under way, in case a hint is lost, and the toast follows,
-  // from the first snapshot that holds the send its press asked for, which the press names unless
-  // the Mailroom held a send of the same draft already.
-  const { data: outbox, dataUpdatedAt } = useQuery(outboxQuery);
-  const asked = hand?.is === 'asked' ? hand.send.id : id;
-  useEffect(() => {
-    if (!outbox) return;
-    setSeen((was) => {
-      if (was)
-        return follow(
-          was,
-          outbox.find((held) => held.id === was.last.id),
-          dataUpdatedAt,
-        );
-      const held = outbox.find((each) => each.id === asked);
-      return held && followed(held);
-    });
-  }, [outbox, dataUpdatedAt, asked]);
-
   // Gone without a sign that it went, the send went if its conversation holds its copy.
-  const isAwaitingCopy = seen?.goneAt !== undefined && !seen.hasBegun;
+  const isUnsureItWent = seen?.goneAt !== undefined && !seen.hasBegun;
   const conversation = seen?.last.conversation;
   const { data: messages } = useQuery({
     ...conversationQuery(conversation ?? ''),
-    enabled: isAwaitingCopy && conversation !== undefined,
+    enabled: isUnsureItWent && conversation !== undefined,
     refetchInterval: CHECK_MS,
   });
-  const isInSent = isAwaitingCopy && holdsCopy(messages ?? [], outgoing?.messageId);
+  const isInSent = isUnsureItWent && holdsCopy(messages ?? [], outgoing?.messageId);
 
   // Until the Outbox shows the send, this device may still be asking the Mailroom for it.
   const standing: Standing =
@@ -126,7 +101,7 @@ export default function LeavingToast({
     const timer = setInterval(() => setNow(Date.now()), TICK_MS);
     return () => clearInterval(timer);
   }, [isTicking]);
-  const linger = isAwaitingCopy && standing.is === 'sending' ? GONE_MS : LINGER_MS[standing.is];
+  const linger = isUnsureItWent && standing.is === 'sending' ? GONE_MS : LINGER_MS[standing.is];
   const leave = useEffectEvent(dismiss);
   useEffect(() => {
     if (linger === undefined) return;

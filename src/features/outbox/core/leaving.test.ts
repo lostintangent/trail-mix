@@ -105,9 +105,10 @@ test('a draft without a Message-ID takes no other message without one for its co
   expect(leavingIn(pressed, thread, [parent, unnamed, bare])).toHaveLength(1);
 });
 
-test('a reply undone is forgotten with the snapshot that shows it gone, and its draft is back', () => {
-  let all = observe(pressed, [outgoing()], at(1), closesFor);
-  all = observe(all, [], at(4), closesFor);
+test('a reply undone is seen undone and let go with the snapshot that shows it gone, and its draft is back', () => {
+  const seen = observe(observe(pressed, [outgoing()], at(1), closesFor), [], at(4), closesFor);
+  expect(standingOfLeaving(seen[0]!, at(4))).toEqual({ is: 'undone' });
+  const all = expire(seen, at(4));
   expect(all).toEqual([]);
   expect(draftsLeaving(all)).toEqual([]);
 });
@@ -115,15 +116,16 @@ test('a reply undone is forgotten with the snapshot that shows it gone, and its 
 test('a failed send stays at the end of its conversation saying why, back in Drafts, until given up', () => {
   const refused = { error: '554 refused', passing: false };
   const failed = submitted(begin(outgoing()), refused, iso(11));
-  let all = observe(pressed, [failed], at(11), closesFor);
+  const all = observe(pressed, [failed], at(11), closesFor);
   expect(leavingIn(all, thread, [parent, indexed])).toEqual([
     { ...all[0]!, preview: 'Thursday works. See you there.' },
   ]);
   expect(standingOfLeaving(all[0]!, at(11))).toEqual({ is: 'failed', error: '554 refused' });
   expect(draftsLeaving(all)).toEqual([draft]);
   expect(isAway(all[0]!)).toBe(false);
-  all = observe(all, [], at(20), closesFor);
-  expect(all).toEqual([]);
+  const givenUp = observe(all, [], at(20), closesFor);
+  expect(standingOfLeaving(givenUp[0]!, at(20))).toEqual({ is: 'undone' });
+  expect(expire(givenUp, at(20))).toEqual([]);
 });
 
 test('a draft sent again after its send failed lies at the end of its conversation once', () => {

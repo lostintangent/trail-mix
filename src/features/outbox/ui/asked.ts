@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react';
 import type { Address, MessageRef, Outgoing } from '../../mail/core/index.ts';
 import type { LastSave } from '../../mailroom/client/index.ts';
-import { closesAfterPress, closesAt } from '../core/standing.ts';
+import { closesAfterPress, closesAt, type Followed } from '../core/standing.ts';
 
 /**
  * A press of Send. The composer has closed, and the message goes to the Mailroom in one request,
@@ -37,10 +37,10 @@ export type Press = {
 };
 
 /**
- * A press this device made, as its hand-off to the Mailroom goes on, and how to stop that, which then
- * asks the Mailroom nothing more.
+ * A press this device made, as its hand-off to the Mailroom goes on, how to stop that, which then
+ * asks the Mailroom nothing more, and what this device has seen of its send in the Outbox.
  */
-type HandOff = { press: Press; hand: Hand; stop: () => void };
+type HandOff = { press: Press; hand: Hand; stop: () => void; seen?: Followed };
 
 /**
  * How a press reaches the Mailroom: any save of its message already on its way, then the asking,
@@ -83,6 +83,15 @@ export function handed(id: string, hand: Hand) {
   if (!was) return;
   change(id, { ...was, hand });
   if (hand.is === 'stopped') was.stop();
+}
+
+/**
+ * What this device has seen of a press's send in the Outbox, up to how it ended, as the workbench
+ * follows it, which the press's toast reads wherever the member is.
+ */
+export function saw(id: string, seen: Followed) {
+  const was = asked.get(id);
+  if (was && was.seen !== seen) change(id, { ...was, seen });
 }
 
 /**

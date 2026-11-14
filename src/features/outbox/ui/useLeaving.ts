@@ -13,7 +13,7 @@ import {
   standingOfLeaving,
   type Leaving,
 } from '../core/leaving.ts';
-import { closesFor } from './asked.ts';
+import { closesFor, saw } from './asked.ts';
 
 /** How often the Outbox is asked again while a send is under way, in case a hint is lost. */
 const CHECK_MS = 2_000;
@@ -24,19 +24,29 @@ const CHECK_MS = 2_000;
  * composer, and each snapshot of the Outbox moves every send on.
  */
 export function useLeaving() {
-  const [held, setHeld] = useState<{ outbox?: readonly Outgoing[]; all: readonly Leaving[] }>({
-    all: [],
-  });
+  const [held, setHeld] = useState<{
+    outbox?: readonly Outgoing[];
+    /** Every send the last snapshot showed, those it ended included. */
+    observed: readonly Leaving[];
+    all: readonly Leaving[];
+  }>({ observed: [], all: [] });
   const isUnderWay = useIsUnderWay(held.all);
   const { data: outbox, dataUpdatedAt } = useQuery({
     ...outboxQuery,
     refetchInterval: isUnderWay ? CHECK_MS : false,
   });
-  // Each snapshot is folded in the render that brings it, so nothing shows it half taken in.
+  // Each snapshot is folded in the render that brings it, so nothing shows it half taken in, and
+  // one that ends a send lets it go at once.
   if (outbox && outbox !== held.outbox) {
-    setHeld({ outbox, all: observe(held.all, outbox, dataUpdatedAt, closesFor) });
+    const observed = observe(held.all, outbox, dataUpdatedAt, closesFor);
+    setHeld({ outbox, observed, all: expire(observed, dataUpdatedAt) });
   }
-  const { all } = held;
+  const { observed, all } = held;
+  // Each press this device made sees its send as the workbench does, up to how it ended, for its
+  // toast.
+  useEffect(() => {
+    for (const { id, seen } of observed) if (seen) saw(id, seen);
+  }, [observed]);
 
   // A send gone from the Outbox waits only so long for its copy.
   useEffect(() => {

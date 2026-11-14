@@ -129,7 +129,7 @@ export function showLeavingToast(leaving: Leaving, standing: Standing) {
         : said(standing, who).text,
     render: (dismiss) => (
       <Suspense>
-        <LeavingToast id={id} to={to} seen={seen} closes={closes} dismiss={dismiss} />
+        <LeavingToast id={id} to={to} closes={closes} dismiss={dismiss} />
       </Suspense>
     ),
     // However it goes but put away, it has ended.
