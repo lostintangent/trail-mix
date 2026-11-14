@@ -114,6 +114,17 @@ export function useOpenThread(
     setThreadIn(named);
     setSeekingThread(named);
   }, []);
+  /**
+   * A thread that leaves its bundle gives way to the thread below it, or above it at the end, and on
+   * a phone to the bundle. What it returns opens the thread again, as a refusal puts it back.
+   */
+  const giveThreadWay = (leaving: OpenThread, isPhone: boolean) => {
+    const threads = inBundle.threads ?? [];
+    const at = inBundle.places.get(leaving.open) ?? -1;
+    const next = threads[at + 1] ?? threads[at - 1];
+    setThreadIn(next && !isPhone ? { bundle: leaving.bundle, open: next.id } : undefined);
+    return () => setThreadIn(leaving);
+  };
   return {
     inBundle,
     /** The thread open, if one is. */
@@ -130,6 +141,7 @@ export function useOpenThread(
     awaitsThread: around.awaits,
     setThreadIn,
     arriveAt,
+    giveThreadWay,
   };
 }
 

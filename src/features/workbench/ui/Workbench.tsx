@@ -256,8 +256,17 @@ export function Workbench({
   // A bundle selected lies open in the reader, and one of its threads may lie open in its place,
   // until the selection moves on from the bundle.
   const bundleOpen = selected !== undefined && bundlePartsOf(selected) ? selected : undefined;
-  const { inBundle, thread, threadAt, threadRow, cameFromAt, awaitsThread, setThreadIn, arriveAt } =
-    useOpenThread(bundleOpen, place);
+  const {
+    inBundle,
+    thread,
+    threadAt,
+    threadRow,
+    cameFromAt,
+    awaitsThread,
+    setThreadIn,
+    arriveAt,
+    giveThreadWay,
+  } = useOpenThread(bundleOpen, place);
   // The conversation the reader shows: the one selected, or the thread open in the bundle selected.
   const opened = bundleOpen === undefined ? selected : thread;
   const stamps = useMemo(() => new Map(accounts.map(({ id, stamp }) => [id, stamp])), [accounts]);
@@ -434,18 +443,14 @@ export function Workbench({
     triage(action, [id], { onRefused });
   };
   /**
-   * A thread of the bundle open, triaged in the bundle's list. One that leaves it gives way to the
-   * thread below it, or above it at the end, and on a phone to the bundle. The bundle's last thread
-   * takes the bundle with it, as triaging its row does.
+   * A thread of the bundle open, triaged in the bundle's list. The bundle's last thread takes the
+   * bundle with it, as triaging its row does.
    */
   const triageThread = (action: Action, id: ConversationId, bundle: BundleId) => {
     if (rowChange(action, view) !== 'gone') return triage(action, [id], { in: bundle });
-    const threads = inBundle.threads ?? [];
-    if (threads.length <= 1) return triageShown(action, bundle);
-    const at = inBundle.places.get(id) ?? -1;
-    const next = threads[at + 1] ?? threads[at - 1];
-    setThreadIn(next && !isPhone ? { bundle, open: next.id } : undefined);
-    triage(action, [id], { in: bundle, onRefused: () => setThreadIn({ bundle, open: id }) });
+    if ((inBundle.threads?.length ?? 0) <= 1) return triageShown(action, bundle);
+    const onRefused = giveThreadWay({ bundle, open: id }, isPhone);
+    triage(action, [id], { in: bundle, onRefused });
   };
   /**
    * Where a conversation sits in the list, or, while it leaves, where it was: the row that took its
