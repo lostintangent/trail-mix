@@ -1550,12 +1550,15 @@ const styles = stylex.create({
     overflow: 'hidden',
     backgroundColor: colorVars['--color-background-body'],
   },
-  // The sidebar lies on the desk, a desk's edge from the list. The list and the reader are sheets,
-  // which the reader's margin sets a sheet's gap apart.
+  // The sidebar lies on the desk, its margin from the window's edge and from the list. The list and
+  // the reader are sheets, which the reader's margin sets a sheet's gap apart, and the desk's edge
+  // lies about them.
   track: {
     display: { default: 'grid', [media.phone]: 'flex' },
-    gap: { default: tm.deskEdge, [media.phone]: 0 },
-    padding: { default: tm.deskEdge, [media.phone]: 0 },
+    gap: { default: tm.sidebarMargin, [media.phone]: 0 },
+    paddingBlock: { default: tm.deskEdge, [media.phone]: 0 },
+    paddingInlineStart: { default: tm.sidebarMargin, [media.phone]: 0 },
+    paddingInlineEnd: { default: tm.deskEdge, [media.phone]: 0 },
     width: { default: '100%', [media.phone]: '300%' },
     height: '100%',
     // Panes and the phone track move on the layout easing, and nothing moves under reduced motion.
@@ -1580,7 +1583,7 @@ const styles = stylex.create({
     flexGrow: { default: null, [media.phone]: 1 },
   },
   reader: {
-    marginInlineStart: { default: `calc(${tm.deskGap} - ${tm.deskEdge})`, [media.phone]: 0 },
+    marginInlineStart: { default: `calc(${tm.deskGap} - ${tm.sidebarMargin})`, [media.phone]: 0 },
   },
 });
 

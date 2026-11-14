@@ -20,7 +20,9 @@ export const tm = stylex.defineVars({
   // The gutter between sheets: 9px of desk between their rings, which lie outside them, as Toy Box
   // shows between its cards' borders, a card's 4px inset either side of a 1px rule.
   deskGap: '11px',
-  deskEdge: '8px', // the desk's margin around them and the sidebar, as in Toy Box
+  deskEdge: '9px', // the desk about them: 8px outside their rings, as Toy Box shows about its cards
+  // The desk about the sidebar, which has no ring: from the window's edge and from the list.
+  sidebarMargin: '8px',
   // From the sidebar's edge to its lines, which puts its icons 20px in, as GistPad's are. A phone's
   // sidebar fills the screen, so it keeps a wider margin, and so does one built for a finger.
   sidebarInset: { default: '4px', [COARSE]: '9px', [PHONE]: '9px' },

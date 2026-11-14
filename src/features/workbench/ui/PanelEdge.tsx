@@ -5,8 +5,8 @@ import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { dragPanel, nudgePanel, panelSize, type PanelSpec, type PanelState } from './panels.ts';
 
 /**
- * The draggable edge on a side panel's inline end, in the gutter beside it: the desk's edge beside
- * the sidebar, or the gap between two sheets. It moves the panel's width by pointer and by key, and
+ * The draggable edge on a side panel's inline end, in the gutter beside it: the sidebar's margin
+ * from the list, or the gap between two sheets. It moves the panel's width by pointer and by key, and
  * past the midpoint toward the rail it collapses the panel.
  *
  * While a pointer drags, the edge writes the size straight to the panel's custom property, so
@@ -27,7 +27,7 @@ export const PanelEdge = memo(function PanelEdge({
   label: string;
   /** The id of the panel the edge resizes. */
   controls: string;
-  /** The gutter the edge fills: the desk's edge after the sidebar, or the gap between sheets. */
+  /** The gutter the edge fills: the sidebar's margin from the list, or the gap between sheets. */
   gutter: 'desk' | 'sheets';
   onChange: (state: PanelState) => void;
   onResizingChange: (isResizing: boolean) => void;
@@ -139,8 +139,8 @@ const styles = stylex.create({
 // rings: the list's alone after the sidebar, and one on each side between sheets.
 const gutters = stylex.create({
   desk: {
-    width: tm.deskEdge,
-    '::before': { insetInline: `calc((${tm.deskEdge} - ${tm.target}) / 2)` },
+    width: tm.sidebarMargin,
+    '::before': { insetInline: `calc((${tm.sidebarMargin} - ${tm.target}) / 2)` },
     '::after': { insetInlineStart: 0, insetInlineEnd: '1px' },
   },
   sheets: {

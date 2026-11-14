@@ -301,14 +301,15 @@ test('the foot holds the Settings gear, a rule and Trail Mix, and says nothing a
       if (size === 'desktop') {
         expect(await footFits(page)).toEqual(FITS);
         expect(await composeIsSmall(page)).toEqual(SMALL);
-        // The foot stands where it stood before New message joined it: its rule 57 pixels above the
-        // window's bottom edge, and the gear 9 below that.
+        // The foot stands where it stood before New message joined it, less the pixel of desk the
+        // sheets gained below them: its rule 58 pixels above the window's bottom edge, and the gear 9
+        // below that.
         expect(
           await name.evaluate((words) =>
             Math.round(words.parentElement!.getBoundingClientRect().top),
           ),
-        ).toBe(843);
-        expect([gearBox!.y, gearBox!.height]).toEqual([852, 32]);
+        ).toBe(842);
+        expect([gearBox!.y, gearBox!.height]).toEqual([851, 32]);
         expect(await searchSays(page)).toEqual({ words: 'Search', isWhole: true });
       }
       expect(sidebarBox!.y + sidebarBox!.height - (gearBox!.y + gearBox!.height)).toBeLessThan(40);
