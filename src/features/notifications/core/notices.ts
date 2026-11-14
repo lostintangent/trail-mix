@@ -58,17 +58,10 @@ function summaryOf(news: readonly Message[], accountName: (id: AccountId) => str
   );
   return {
     title: `${news.length} new messages`,
-    body: `In ${listed(accounts)}`,
+    body: `In ${new Intl.ListFormat('en-GB').format(accounts)}`,
     tag: 'news',
     navigate: addressOf({ view: { in: 'inbox' } }),
   };
-}
-
-/** Names in a sentence: "Personal", "Personal and Work", "Personal, Work and Home". */
-function listed(names: readonly string[]): string {
-  return names.length < 2
-    ? (names[0] ?? '')
-    : `${names.slice(0, -1).join(', ')} and ${names.at(-1)}`;
 }
 
 /** Text cut to `SAID_LENGTH` characters, whole ones, so no emoji is split in half. */

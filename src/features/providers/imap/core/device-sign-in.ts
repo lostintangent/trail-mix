@@ -172,8 +172,8 @@ export const isFresh = (tokens: Pick<Tokens, 'expiresAt'>, now: number) =>
  * loopback host name, and no user name to dress another host as one.
  */
 export function namesThisMachine(address: string): boolean {
-  const url = urlOf(address);
-  return url !== undefined && ['http:', 'https:'].includes(url.protocol) && isLoopback(url);
+  const url = URL.parse(address);
+  return url !== null && ['http:', 'https:'].includes(url.protocol) && isLoopback(url);
 }
 
 // Reading what vendors send
@@ -223,7 +223,7 @@ function request(
 
 /** A page a browser may open: https, or plain http on this machine, as a test's stand-in serves. */
 function isPage(link: string): boolean {
-  const url = urlOf(link);
+  const url = URL.parse(link);
   return url?.protocol === 'https:' || (url?.protocol === 'http:' && isLoopback(url));
 }
 
@@ -232,12 +232,4 @@ function isLoopback(url: URL): boolean {
   return (
     ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) && !url.username && !url.password
   );
-}
-
-function urlOf(text: string): URL | undefined {
-  try {
-    return new URL(text);
-  } catch {
-    return undefined;
-  }
 }

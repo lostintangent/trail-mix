@@ -45,8 +45,4 @@ function withoutSecrets(text: string, { user, secrets }: SentCredentials) {
   return forms.reduce((out, form) => out.split(form).join('…'), text);
 }
 
-function base64(text: string) {
-  return btoa(
-    Array.from(new TextEncoder().encode(text), (byte) => String.fromCharCode(byte)).join(''),
-  );
-}
+const base64 = (text: string) => btoa(String.fromCharCode(...new TextEncoder().encode(text)));

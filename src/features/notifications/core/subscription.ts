@@ -15,11 +15,8 @@ export function subscriptionOf(value: unknown): Subscription {
   if (new URL(endpoint).protocol !== 'https:') {
     throw new TypeError('A push service is reached over HTTPS.');
   }
-  if (
-    bytesOf(p256dh)?.length !== 65 ||
-    bytesOf(p256dh)?.[0] !== 4 ||
-    bytesOf(auth)?.length !== 16
-  ) {
+  const key = bytesOf(p256dh);
+  if (key?.length !== 65 || key[0] !== 4 || bytesOf(auth)?.length !== 16) {
     throw new TypeError('A device subscribes with the keys its browser made.');
   }
   return { endpoint, keys: { p256dh: p256dh as string, auth: auth as string } };

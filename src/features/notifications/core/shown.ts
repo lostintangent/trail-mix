@@ -70,12 +70,6 @@ function shownIn(data: unknown): Shown {
     notification: { title: '', navigate, data: { message } },
   });
   // Only Trail Mix's own addresses open, whatever a notification says.
-  const isOwn =
-    typeof read?.navigate === 'string' &&
-    read.navigate.startsWith('/') &&
-    !read.navigate.startsWith('//');
-  return {
-    navigate: isOwn ? read.navigate : '/',
-    ...(read?.message ? { message: read.message } : {}),
-  };
+  const own = read && /^\/(?!\/)/.test(read.navigate) ? read.navigate : '/';
+  return { navigate: own, ...(read?.message ? { message: read.message } : {}) };
 }
