@@ -9,6 +9,7 @@ import {
   type QueryObserverResult,
   type QueryPersister,
 } from '@tanstack/react-query';
+import { deviceStorage } from '../../../shared/deviceStorage.ts';
 import { thisDeviceQuery, type ThisDevice } from '../../mailroom/client/index.ts';
 import { evictions, isKept, KEEP_FOR_MS, keptOf, type Kept } from '../core/kept.ts';
 import { snapshots } from './store.ts';
@@ -99,20 +100,10 @@ function firstAnswer(queryClient: QueryClient): Promise<ThisDevice | undefined> 
 
 async function forget(owner: string) {
   await snapshots.clear();
-  try {
-    localStorage.setItem(OWNER_KEY, owner);
-  } catch {
-    // Without storage the device asks again on its next start, and keeps nothing until then.
-  }
+  deviceStorage().setItem(OWNER_KEY, owner);
 }
 
-function readOwner(): string | undefined {
-  try {
-    return localStorage.getItem(OWNER_KEY) ?? undefined;
-  } catch {
-    return undefined;
-  }
-}
+const readOwner = () => deviceStorage().getItem(OWNER_KEY) ?? undefined;
 
 /** Drops the bodies past what the app keeps, those fetched longest ago first. */
 async function evict() {

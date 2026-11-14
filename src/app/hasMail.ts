@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import type { Account } from '../features/mail/core/index.ts';
 import { thisDeviceQuery } from '../features/mailroom/client/index.ts';
+import { deviceStorage } from '../shared/deviceStorage.ts';
 
 /**
  * Whether this device last saw its Mailroom hold accounts, so it can draw the desk before the
@@ -16,8 +17,8 @@ export function useHasMail(accounts: readonly Account[] | undefined): boolean {
     const held = read();
     const now = remembered(held, cache, accounts);
     if (now === held) return;
-    if (now === undefined) forget();
-    else write(now);
+    if (now === undefined) deviceStorage().removeItem(KEY);
+    else deviceStorage().setItem(KEY, now);
   }, [accounts, cache]);
   return hadMail;
 }
@@ -38,27 +39,4 @@ export function remembered(
 
 const KEY = 'trail-mix.has-mail';
 
-// A browser without storage remembers nothing, and asks first every time.
-function read(): string | undefined {
-  try {
-    return localStorage.getItem(KEY) ?? undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-function write(cache: string) {
-  try {
-    localStorage.setItem(KEY, cache);
-  } catch {
-    // As above.
-  }
-}
-
-function forget() {
-  try {
-    localStorage.removeItem(KEY);
-  } catch {
-    // As above.
-  }
-}
+const read = () => deviceStorage().getItem(KEY) ?? undefined;
