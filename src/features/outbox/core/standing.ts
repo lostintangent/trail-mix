@@ -90,7 +90,7 @@ const isBegun = ({ state }: Outgoing) => state === 'sending' || state === 'accep
 
 /**
  * Where a followed send stands at `now`. It has gone once the host accepted it, once it left the
- * Outbox while it was begun, or once Sent holds its copy. It was undone if it was seen gone before
+ * Outbox while it was begun, or once its conversation holds its copy. It was undone if it was seen gone before
  * its window could close, since nothing sends before then, and given up if it left failed. Gone
  * otherwise, it is still sending as far as this device can say.
  */

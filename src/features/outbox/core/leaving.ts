@@ -200,13 +200,17 @@ export function leavingIn(
       );
       if (conversationOf(leaving) !== conversation) return [];
       const messageId = leaving.seen?.last.messageId ?? draft?.messageId;
-      const isCopied = messages.some(
-        (message) => !message.flags.draft && !!messageId && message.messageId === messageId,
-      );
-      return isCopied ? [] : [{ leaving, preview: leaving.preview ?? draft?.preview ?? '' }];
+      return holdsCopy(messages, messageId)
+        ? []
+        : [{ leaving, preview: leaving.preview ?? draft?.preview ?? '' }];
     })
     .toSorted((a, b) => a.leaving.closes - b.leaving.closes);
 }
+
+/** Whether a conversation's messages hold a send's copy: one by its Message-ID that isn't a draft. */
+export const holdsCopy = (messages: readonly Message[], messageId: string | undefined) =>
+  messageId !== undefined &&
+  messages.some((message) => !message.flags.draft && message.messageId === messageId);
 
 /** A reply on its way as its conversation shows it: what it says, the way its copy will. */
 export type Shown = { leaving: Leaving; preview: string };

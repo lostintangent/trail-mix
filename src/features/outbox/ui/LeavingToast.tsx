@@ -14,9 +14,9 @@ import { Check, CircleAlert, Clock, CloudOff, Send, Undo2, X, type LucideIcon } 
 import { useEffect, useEffectEvent, useLayoutEffect, useRef, useState } from 'react';
 import { tooltipOf, UNDO_COMMAND, useCommands } from '../../commands/index.ts';
 import type { Address } from '../../mail/core/index.ts';
-import { conversationQuery, foldersQuery, outboxQuery } from '../../mailroom/client/index.ts';
+import { conversationQuery, outboxQuery } from '../../mailroom/client/index.ts';
 import { formatAhead } from '../core/later.ts';
-import { GONE_MS } from '../core/leaving.ts';
+import { GONE_MS, holdsCopy } from '../core/leaving.ts';
 import {
   briefly,
   follow,
@@ -98,7 +98,7 @@ export default function LeavingToast({
     });
   }, [outbox, dataUpdatedAt, asked]);
 
-  // Gone without a sign that it went, the send went if Sent holds its copy.
+  // Gone without a sign that it went, the send went if its conversation holds its copy.
   const isAwaitingCopy = seen?.goneAt !== undefined && !seen.hasBegun;
   const conversation = seen?.last.conversation;
   const { data: messages } = useQuery({
@@ -106,17 +106,7 @@ export default function LeavingToast({
     enabled: isAwaitingCopy && conversation !== undefined,
     refetchInterval: CHECK_MS,
   });
-  const folders = useQuery(foldersQuery).data;
-  const isInSent =
-    isAwaitingCopy &&
-    (messages ?? []).some(
-      (message) =>
-        message.messageId === outgoing?.messageId &&
-        folders?.some(
-          ({ account, path, role }) =>
-            role === 'sent' && account === message.account && path === message.path,
-        ),
-    );
+  const isInSent = isAwaitingCopy && holdsCopy(messages ?? [], outgoing?.messageId);
 
   // Until the Outbox shows the send, this device may still be asking the Mailroom for it.
   const standing: Standing =
