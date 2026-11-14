@@ -5,7 +5,8 @@ import type { Locator, Page } from 'playwright';
  * reads or shoots is where it comes to rest. It looks again each frame rather than awaiting each
  * animation's `finished`, which rejects when the animation is cancelled, as one is when a pane is
  * swapped mid-slide, and a transition sent somewhere new is a new animation. An endless animation,
- * such as the airmail stripe or a skeleton's pulse, never rests, so it isn't waited for.
+ * such as the airmail stripe or a skeleton's pulse, never rests, so it isn't waited for, and neither
+ * is one that scrolling drives, such as the list's fades, which moves only as its scroller does.
  */
 export async function atRest(on: Page | Locator): Promise<void> {
   await ('goto' in on ? on.locator(':root') : on).evaluate(
@@ -15,8 +16,10 @@ export async function atRest(on: Page | Locator): Promise<void> {
           const isMoving = root
             .getAnimations({ subtree: true })
             .some(
-              ({ playState, effect }) =>
-                playState === 'running' && effect?.getTiming().iterations !== Infinity,
+              ({ playState, effect, timeline }) =>
+                playState === 'running' &&
+                effect?.getTiming().iterations !== Infinity &&
+                timeline === root.ownerDocument.timeline,
             );
           if (isMoving) requestAnimationFrame(look);
           else done();

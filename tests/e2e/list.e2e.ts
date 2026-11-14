@@ -399,6 +399,83 @@ test('on a phone, rows run under the floating controls, and the last row and a r
   }
 }, 60_000);
 
+test('the list fades at an end only while it can scroll that way, and keys keep the selection clear of a fade', async () => {
+  const { context, page, problems } = await open();
+  const list = page.locator('[role="listbox"][aria-multiselectable]');
+  await list.getByRole('option').first().waitFor();
+  const shot = (moment: string) =>
+    list.screenshot({ path: join(SHOTS, `list-fades-${moment}.png`) });
+
+  // At the top its first row lies clear, and its foot fades over the rows below.
+  expect(await fadesOf(list)).toEqual({ start: 0, end: 32 });
+  await shot('top');
+
+  // Keys move the selection down past the foot and back up past the top, scrolling the list both
+  // ways, and the selection never lies under a fade. Its ring lies a pixel outside it.
+  await list.focus();
+  let scrolled = 0;
+  for (const key of [
+    ...Array<string>(16).fill('ArrowDown'),
+    ...Array<string>(16).fill('ArrowUp'),
+  ]) {
+    await page.keyboard.press(key);
+    const { top, sheet, row } = await list.evaluate(async (list) => {
+      await new Promise((settled) => requestAnimationFrame(() => requestAnimationFrame(settled)));
+      return {
+        top: list.scrollTop,
+        sheet: list.getBoundingClientRect().toJSON() as DOMRect,
+        row: list
+          .querySelector('[aria-selected="true"]')!
+          .getBoundingClientRect()
+          .toJSON() as DOMRect,
+      };
+    });
+    const fades = await fadesOf(list);
+    expect({ key, top, clear: row.top - 1 >= sheet.top + fades.start - 0.5 }).toEqual({
+      key,
+      top,
+      clear: true,
+    });
+    expect({ key, top, clear: row.bottom + 1 <= sheet.bottom - fades.end + 0.5 }).toEqual({
+      key,
+      top,
+      clear: true,
+    });
+    scrolled = Math.max(scrolled, top);
+  }
+  expect(scrolled).toBeGreaterThan(0);
+
+  // Between its ends it fades at both, under reduced motion too, since nothing moves.
+  await list.evaluate((list) => (list.scrollTop = 2_000));
+  expect(await fadesOf(list)).toEqual({ start: 32, end: 32 });
+  await shot('middle');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  expect(await fadesOf(list)).toEqual({ start: 32, end: 32 });
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+
+  // At its end its last row lies clear.
+  const length = Number(await list.getByRole('option').first().getAttribute('aria-setsize'));
+  const last = `[role="option"][aria-posinset="${length}"]`;
+  await list.evaluate((list) => (list.scrollTop = list.scrollHeight));
+  await list.locator(last).waitFor();
+  await list.evaluate((list) => (list.scrollTop = list.scrollHeight));
+  expect(await fadesOf(list)).toEqual({ start: 32, end: 0 });
+  await shot('end');
+
+  // A list too short to scroll fades at neither end.
+  await page
+    .getByRole('navigation', { name: 'Mailboxes' })
+    .getByRole('button', { name: /^Drafts( \d+)?$/ })
+    .first()
+    .click();
+  await page.getByRole('heading', { name: 'Drafts', level: 2 }).waitFor();
+  await row(page, 'To Sofia, Priya, Kwame').waitFor();
+  expect(await list.evaluate((list) => list.scrollHeight <= list.clientHeight)).toBe(true);
+  expect(await fadesOf(list)).toEqual({ start: 0, end: 0 });
+  expect(problems).toEqual([]);
+  await context.close();
+}, 60_000);
+
 test('a conversation only the member wrote names whom it went to, and leads with the first of them', async () => {
   const { context, page, problems } = await open();
   const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
@@ -487,3 +564,19 @@ const row = (page: Page, senders: string) =>
 /** The avatar leading a row, where a finger taps it. */
 const avatarOf = (page: Page, senders: string) =>
   row(page, senders).locator(':scope > span').first();
+
+/**
+ * How far the list fades at its top and its foot, in pixels, once the frame after a scroll has drawn
+ * them: where its mask's clear middle begins and ends.
+ */
+const fadesOf = (list: Locator) =>
+  list.evaluate(async (list) => {
+    await new Promise((drawn) => requestAnimationFrame(() => requestAnimationFrame(drawn)));
+    const mask = getComputedStyle(list).maskImage;
+    const clear =
+      /rgba\(0, 0, 0, 0\) ([\d.]+)px, rgba\(0, 0, 0, 0\) (?:calc\(100% - ([\d.]+)px\)|100%)/.exec(
+        mask,
+      );
+    if (!clear) throw new Error(`The list's mask has no clear middle: ${mask}`);
+    return { start: Number(clear[1]), end: Number(clear[2] ?? 0) };
+  });

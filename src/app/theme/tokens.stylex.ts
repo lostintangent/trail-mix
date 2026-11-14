@@ -84,3 +84,19 @@ export const tm = stylex.defineVars({
   safeTop: 'max(env(safe-area-inset-top), 8px)',
   safeBottom: 'max(env(safe-area-inset-bottom), 8px)',
 });
+
+/**
+ * How far the conversation list fades into its sheet at an end it can still scroll toward, and over
+ * how much scrolling it grows to that, as Toy Box's lists do. Constants, so the first load carries
+ * no names for them.
+ */
+export const scrollFade = stylex.defineConsts({ depth: '32px', reveal: '32px' });
+
+/**
+ * How far the conversation list fades at its top and its foot right now, which its scrolling drives.
+ * They are typed, so the animation that scrolling drives moves them smoothly.
+ */
+export const scrollFades = stylex.defineVars({
+  start: stylex.types.length('0px'),
+  end: stylex.types.length('0px'),
+});

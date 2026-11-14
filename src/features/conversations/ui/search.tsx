@@ -213,7 +213,6 @@ const styles = stylex.create({
   },
   // As Astryx draws an input: an emphasized edge that turns accent with a muted ring on focus.
   field: {
-    boxSizing: 'border-box',
     display: 'flex',
     alignItems: 'center',
     gap: spacingVars['--spacing-2'],

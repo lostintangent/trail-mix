@@ -33,7 +33,7 @@ import {
 } from 'react';
 import { Pending, pendingStyles, TextSkeleton } from '../../../app/theme/Pending.tsx';
 import { SenderAvatar } from '../../../app/theme/SenderAvatar.tsx';
-import { media, tm } from '../../../app/theme/tokens.stylex.ts';
+import { media, scrollFade, scrollFades, tm } from '../../../app/theme/tokens.stylex.ts';
 import {
   isBundle,
   type BundleSummary,
@@ -757,26 +757,59 @@ function useScrollPadding(
   return padding;
 }
 
+/** Only a browser that can drive an animation by scrolling fades the list's ends. */
+const SCROLL_DRIVEN = '@supports (animation-timeline: scroll())';
+
+/**
+ * The list's top fades in over the first stretch of scrolling, and its foot out over the last. Each
+ * keeps its own linear pace, so the list needs no class for one.
+ */
+const fadeStart = stylex.keyframes({
+  from: { [scrollFades.start]: '0px', animationTimingFunction: 'linear' },
+  to: { [scrollFades.start]: scrollFade.depth },
+});
+const fadeEnd = stylex.keyframes({
+  from: { [scrollFades.end]: scrollFade.depth, animationTimingFunction: 'linear' },
+  to: { [scrollFades.end]: '0px' },
+});
+
 const styles = stylex.create({
   scroller: {
     position: 'relative',
-    boxSizing: 'border-box',
     height: '100%',
     overflowY: 'auto',
     scrollbarWidth: 'thin',
     overscrollBehavior: 'contain',
     paddingInline: spacingVars['--spacing-1-5'],
     paddingBlockEnd: tm.listFoot,
-    scrollPaddingBlockEnd: tm.listFoot,
+    // Keys keep the selection clear of a fade, and of a phone's island, under which the foot's fade
+    // lies.
+    scrollPaddingBlock: `${scrollFade.depth} max(${scrollFade.depth}, ${tm.listFoot})`,
     outline: 'none',
+    // The list fades into its sheet at an end it can still scroll toward. The mask is the fade's
+    // inverse over the padding box, cut from a solid one over the whole, so the scrollbar's gutter
+    // beside the padding box stays whole. A browser that can't drive the fade by scrolling shows none.
+    mask: {
+      default: null,
+      [SCROLL_DRIVEN]: `linear-gradient(#000, transparent ${scrollFades.start}, transparent calc(100% - ${scrollFades.end}), #000) padding-box exclude, linear-gradient(#000, #000)`,
+    },
+    animationName: { default: null, [SCROLL_DRIVEN]: `${fadeStart}, ${fadeEnd}` },
+    animationFillMode: 'both',
+    animationTimeline: 'scroll(self)',
+    animationRange: `0px ${scrollFade.reveal}, calc(100% - ${scrollFade.reveal}) 100%`,
   },
   canvas: (height: number) => ({ position: 'relative', height }),
-  // Skeleton rows stand where the scroller would place the first rows, and scroll nowhere.
+  // Skeleton rows stand where the scroller would place the first rows, and scroll nowhere. They stand
+  // for a list that runs on below, so their foot fades as its will.
   skeletons: {
     height: '100%',
     overflow: 'hidden',
     paddingBlockStart: RING,
     paddingInline: spacingVars['--spacing-1-5'],
+    maskImage: {
+      default: null,
+      [SCROLL_DRIVEN]: `linear-gradient(#000 calc(100% - ${scrollFade.depth}), transparent)`,
+    },
   },
   standing: {
     position: 'relative',
