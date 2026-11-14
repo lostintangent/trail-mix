@@ -13,7 +13,7 @@ import {
   stop,
   users,
 } from '../../../../tests/mail-server/server.ts';
-import type { Requested } from '../../../../tests/mail-server/sign-in.ts';
+import { atSignInPage, type Requested } from '../../../../tests/mail-server/sign-in.ts';
 import { mailrooms, member } from '../../../../tests/mailrooms.ts';
 import type { LocalWorker } from '../../../../tests/workerd.ts';
 
@@ -31,13 +31,8 @@ const OUTLOOK = {
 };
 
 /** The stand-in's sign-in page, where a test plays the member: approving, as someone, or declining. */
-async function atMicrosoft(code: string, as: Record<string, string>) {
-  const response = await fetch(`${identity.origin}/devicelogin`, {
-    method: 'POST',
-    body: new URLSearchParams({ user_code: code, ...as }),
-  });
-  expect(response.status).toBe(204);
-}
+const atMicrosoft = (code: string, as: Record<string, string>) =>
+  atSignInPage(identity.origin, code, as);
 
 /** Every request the stand-in had: no code or token in any of them. */
 const requests = async () => (await fetch(`${identity.origin}/requests`)).json<Requested[]>();

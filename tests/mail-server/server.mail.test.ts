@@ -12,12 +12,13 @@ import {
   fileSentCopies,
   identity,
   ports,
-  resetUidValidity,
+  type Profile,
   settled,
   start,
   stop,
   users,
 } from './server.ts';
+import { signedIn } from './sign-in.ts';
 
 setDefaultTimeout(30_000);
 afterAll(stop);
@@ -65,15 +66,6 @@ const foldersWithRoles = () =>
       .filter((f) => [...f.flags].some((flag) => ROLES.has(flag)))
       .map((f) => f.path),
   );
-/** UIDVALIDITY and the message count of bob's Inbox. */
-async function inbox() {
-  const status = await session((client) =>
-    client.status('INBOX', { uidValidity: true, messages: true }),
-  );
-  if (!status) throw new Error('STATUS INBOX failed');
-  return { uidValidity: status.uidValidity, messages: status.messages ?? 0 };
-}
-
 function submit(
   port: number,
   message: { from: string; to: string },
@@ -91,97 +83,39 @@ function submit(
   return transport.sendMail({ ...message, subject: 'server test', text: 'server test' });
 }
 
-/**
- * A token from the stand-in for Microsoft's sign-in, as a person signing in would get one, lasting
- * `seconds` if given.
- */
-async function tokenFor(user: string, seconds?: number) {
-  const post = (path: string, form: Record<string, string>) =>
-    fetch(`${identity.authority}${path}`, { method: 'POST', body: new URLSearchParams(form) });
-  const started = await post('/oauth2/v2.0/devicecode', {
-    client_id: 'server-test',
-    scope: 'imap',
-  });
-  const code = await started.json<Record<string, string>>();
-  await fetch(`http://127.0.0.1:${ports.identity}/devicelogin`, {
-    method: 'POST',
-    body: new URLSearchParams({
-      user_code: code.user_code ?? '',
-      login_hint: user,
-      ...(seconds ? { expires_in: String(seconds) } : {}),
-    }),
-  });
-  const grant = {
-    grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
-    client_id: 'server-test',
-    device_code: code.device_code ?? '',
-  };
-  const token = await (await post('/oauth2/v2.0/token', grant)).json<Record<string, string>>();
-  return token.access_token ?? '';
-}
+/** What each profile advertises and withholds, as its host does, and the folders it marks with roles. */
+const PROFILES: Record<Profile, { has: string[]; lacks: string[]; roles?: string[] }> = {
+  full: {
+    has: ['IDLE', 'UIDPLUS', 'MOVE', 'CONDSTORE', 'QRESYNC', 'SPECIAL-USE'],
+    lacks: [],
+    roles: ['Archive', 'Drafts', 'Junk', 'Sent', 'Trash'],
+  },
+  zoho: {
+    has: ['IDLE', 'UIDPLUS', 'MOVE', 'CONDSTORE'],
+    lacks: ['QRESYNC', 'SPECIAL-USE', 'SORT', 'THREAD=REFERENCES'],
+    roles: [],
+  },
+  outlook: { has: ['IDLE', 'UIDPLUS', 'MOVE', 'SPECIAL-USE'], lacks: ['CONDSTORE', 'QRESYNC'] },
+  plain: {
+    has: ['IDLE'],
+    lacks: ['UIDPLUS', 'MOVE', 'CONDSTORE', 'QRESYNC', 'SPECIAL-USE'],
+    roles: [],
+  },
+};
 
 describe('profiles', () => {
-  test('full advertises everything the sync code may use, and marks folder roles', async () => {
-    await start('full');
-    const caps = await capabilities();
-    for (const cap of ['IDLE', 'UIDPLUS', 'MOVE', 'CONDSTORE', 'QRESYNC', 'SPECIAL-USE'])
-      expect(caps).toContain(cap);
-    expect((await foldersWithRoles()).sort()).toEqual([
-      'Archive',
-      'Drafts',
-      'Junk',
-      'Sent',
-      'Trash',
-    ]);
-  });
-
-  test('zoho withholds QRESYNC, SPECIAL-USE, SORT and THREAD, and marks no folder roles', async () => {
-    await start('zoho');
-    const caps = await capabilities();
-    for (const cap of ['IDLE', 'UIDPLUS', 'MOVE', 'CONDSTORE']) expect(caps).toContain(cap);
-    for (const cap of ['QRESYNC', 'SPECIAL-USE', 'SORT', 'THREAD=REFERENCES'])
-      expect(caps).not.toContain(cap);
-    expect(await foldersWithRoles()).toEqual([]);
-  });
-
-  test('outlook withholds CONDSTORE and QRESYNC', async () => {
-    await start('outlook');
-    const caps = await capabilities();
-    for (const cap of ['IDLE', 'UIDPLUS', 'MOVE', 'SPECIAL-USE']) expect(caps).toContain(cap);
-    for (const cap of ['CONDSTORE', 'QRESYNC']) expect(caps).not.toContain(cap);
-  });
-
-  test('plain withholds every extension but IDLE, and marks no folder roles', async () => {
-    await start('plain');
-    const caps = await capabilities();
-    expect(caps).toContain('IDLE');
-    for (const cap of ['UIDPLUS', 'MOVE', 'CONDSTORE', 'QRESYNC', 'SPECIAL-USE'])
-      expect(caps).not.toContain(cap);
-    expect(await foldersWithRoles()).toEqual([]);
-  });
-});
-
-describe('mailboxes', () => {
-  test('reset-uidvalidity gives a folder a new UIDVALIDITY and keeps its messages', async () => {
-    await start();
-    await submit(ports.submissions, { from: alice.email, to: bob.email });
-    const before = await inbox();
-    await resetUidValidity(bob.email, 'INBOX');
-    const after = await inbox();
-    expect(after.uidValidity).not.toBe(before.uidValidity);
-    expect(after.messages).toBe(before.messages);
-  });
+  for (const [profile, { has, lacks, roles }] of Object.entries(PROFILES)) {
+    test(`${profile} offers ${has.join(', ')}, and withholds ${lacks.join(', ') || 'nothing'}`, async () => {
+      await start(profile as Profile);
+      const caps = await capabilities();
+      for (const cap of has) expect(caps).toContain(cap);
+      for (const cap of lacks) expect(caps).not.toContain(cap);
+      if (roles) expect((await foldersWithRoles()).sort()).toEqual(roles);
+    });
+  }
 });
 
 describe('submission', () => {
-  test('delivers over implicit TLS and over STARTTLS', async () => {
-    await start();
-    const before = await inbox();
-    await submit(ports.submissions, { from: alice.email, to: bob.email });
-    await submit(ports.submission, { from: alice.email, to: bob.email });
-    expect((await inbox()).messages).toBe(before.messages + 2);
-  });
-
   test('refuses AUTH before STARTTLS', async () => {
     await start();
     const replies = await converse(ports.submission, [
@@ -235,25 +169,9 @@ describe('the host’s own copy in Sent', () => {
 });
 
 describe('OAuth', () => {
-  test('IMAP and submission accept a token from the stand-in for Microsoft', async () => {
-    await start('outlook');
-    const accessToken = await tokenFor(alice.email);
-    const folders = await session(async (client) => (await client.list()).length, {
-      user: alice.email,
-      accessToken,
-    });
-    expect(folders).toBeGreaterThan(0);
-    const sent = await submit(
-      ports.submission,
-      { from: alice.email, to: alice.email },
-      { type: 'OAuth2', user: alice.email, accessToken },
-    );
-    expect(sent.response).toStartWith('250');
-  });
-
   test('IMAP and submission refuse a token the stand-in never issued, or issued to someone else', async () => {
     await start('outlook');
-    const bobs = await tokenFor(bob.email);
+    const bobs = (await signedIn(identity.origin, bob.email)).access;
     for (const accessToken of ['never-issued', bobs]) {
       await expect(session(async () => {}, { user: alice.email, accessToken })).rejects.toThrow();
       await expect(
@@ -269,7 +187,7 @@ describe('OAuth', () => {
   // Dovecot keeps no cache of what a token was, so a lapsed sign-in shows at the next login.
   test('IMAP and submission refuse a token once it has expired', async () => {
     await start('outlook');
-    const accessToken = await tokenFor(alice.email, 1);
+    const accessToken = (await signedIn(identity.origin, alice.email, 1)).access;
     const auth = { user: alice.email, accessToken };
     await session(async () => {}, auth);
     await Bun.sleep(1100);

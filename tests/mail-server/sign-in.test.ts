@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, test } from 'bun:test';
-import { signInStandIn, type Requested } from './sign-in.ts';
+import { atSignInPage, signInStandIn, type Requested } from './sign-in.ts';
 
 // The stand-in answers as Microsoft's sign-in does, so code built against it meets the same
 // answers as it will in production.
@@ -23,13 +23,6 @@ async function post(path: string, form: Record<string, string>) {
   return { status: response.status, body: await response.json<Body>() };
 }
 
-/** Plays the person at the sign-in page, with the stand-in's controls. */
-const person = (userCode: unknown, form: Record<string, string>) =>
-  fetch(`${origin}/devicelogin`, {
-    method: 'POST',
-    body: new URLSearchParams({ user_code: String(userCode), ...form }),
-  });
-
 const requests = async () => (await fetch(`${origin}/requests`)).json<Requested[]>();
 
 describe('the stand-in for Microsoft’s sign-in', () => {
@@ -38,7 +31,10 @@ describe('the stand-in for Microsoft’s sign-in', () => {
 
   async function signIn(scope: string, controls: Record<string, string> = {}) {
     const started = await post(`${MICROSOFT}/devicecode`, { client_id: 'entra', scope });
-    await person(started.body.user_code, { login_hint: 'me@outlook.test', ...controls });
+    await atSignInPage(origin, String(started.body.user_code), {
+      login_hint: 'me@outlook.test',
+      ...controls,
+    });
     const poll = () =>
       post(`${MICROSOFT}/token`, {
         grant_type: device,

@@ -181,3 +181,46 @@ export function signInStandIn(origin: string) {
 
   return { fetch, userOf };
 }
+
+/** Plays the person at the sign-in page of the stand-in at `origin`, entering `userCode`. */
+export async function atSignInPage(
+  origin: string,
+  userCode: string,
+  controls: Record<string, string>,
+) {
+  const response = await fetch(`${origin}/devicelogin`, {
+    method: 'POST',
+    body: new URLSearchParams({ user_code: userCode, ...controls }),
+  });
+  if (response.status !== 204) throw new Error(`The stand-in has no sign-in for ${userCode}.`);
+}
+
+/**
+ * Signs `user` in at the stand-in at `origin`, as the Mailroom and a person do together, with each
+ * access token lasting `seconds` if given. `fresh` refreshes, rotating the refresh token.
+ */
+export async function signedIn(origin: string, user: string, seconds?: number) {
+  const post = async (path: string, form: Record<string, string>) => {
+    const response = await fetch(`${origin}/consumers/oauth2/v2.0/${path}`, {
+      method: 'POST',
+      body: new URLSearchParams({ client_id: 'test', ...form }),
+    });
+    const answer: unknown = await response.json();
+    return answer as Record<string, string>;
+  };
+  const code = await post('devicecode', { scope: 'imap smtp offline_access' });
+  const lasting: Record<string, string> = seconds ? { expires_in: String(seconds) } : {};
+  await atSignInPage(origin, code.user_code ?? '', { login_hint: user, ...lasting });
+  let tokens = await post('token', {
+    grant_type: DEVICE_GRANT,
+    device_code: code.device_code ?? '',
+  });
+  return {
+    access: tokens.access_token ?? '',
+    fresh: async () => {
+      const refresh_token = tokens.refresh_token ?? '';
+      tokens = await post('token', { grant_type: 'refresh_token', refresh_token });
+      return tokens.access_token ?? '';
+    },
+  };
+}

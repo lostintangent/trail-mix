@@ -19,6 +19,7 @@ import {
   start,
   users,
 } from '../mail-server/server.ts';
+import { atSignInPage } from '../mail-server/sign-in.ts';
 
 const { alice, bob } = users;
 const SIZES = {
@@ -68,14 +69,8 @@ afterEach(() => {
 });
 
 /** The stand-in's sign-in page, where a test plays the member. */
-async function atMicrosoft(page: Page, as: Record<string, string>) {
-  const code = (await codeOf(page).textContent()) ?? '';
-  const response = await fetch(`${identity.origin}/devicelogin`, {
-    method: 'POST',
-    body: new URLSearchParams({ user_code: code.trim(), ...as }),
-  });
-  expect(response.status).toBe(204);
-}
+const atMicrosoft = async (page: Page, as: Record<string, string>) =>
+  atSignInPage(identity.origin, ((await codeOf(page).textContent()) ?? '').trim(), as);
 
 const codeOf = (page: Page) => page.locator('output[aria-label="Code"]');
 
