@@ -5,7 +5,6 @@ import {
   inviteProblem,
   listOf,
   memberPolicy,
-  removeProblem,
   stillAdmittedBy,
   withMember,
   withoutMember,
@@ -117,9 +116,4 @@ test('an invitation for someone already in, by address or by another rule, says 
   expect(inviteProblem(held, 'kid@family.example')).toBe(
     'kid@family.example can already sign in, since the policy admits everyone at family.example.',
   );
-});
-
-test('the operator can’t remove themselves, however they write their address', () => {
-  expect(removeProblem('ADA@example.com', OPERATOR)).toBe('You can’t remove yourself.');
-  expect(removeProblem('bo@x.org', OPERATOR)).toBeUndefined();
 });

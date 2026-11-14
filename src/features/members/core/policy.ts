@@ -152,9 +152,4 @@ export function inviteProblem(policy: AccessPolicy, email: string): string | und
   return undefined;
 }
 
-/** Why an address can't be removed, or nothing when it can. */
-export function removeProblem(email: string, operator: string): string | undefined {
-  return folded(email) === folded(operator) ? 'You can’t remove yourself.' : undefined;
-}
-
 const ADDRESS = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;

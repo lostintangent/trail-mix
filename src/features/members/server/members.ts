@@ -4,7 +4,6 @@ import {
   inviteProblem,
   listOf,
   memberPolicy,
-  removeProblem,
   stillAdmittedBy,
   withMember,
   withoutMember,
@@ -111,8 +110,7 @@ export function membersFor({
     async remove(email, erase) {
       const { api, operator, policy } = await current();
       const address = folded(email);
-      const problem = removeProblem(address, operator);
-      if (problem) throw new Error(problem);
+      if (address === folded(operator)) throw new Error('You can’t remove yourself.');
       // Off the list first, so nothing that follows can let them back in.
       if (addressesOf(policy).includes(address)) {
         await change(

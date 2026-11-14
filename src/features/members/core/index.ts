@@ -5,7 +5,6 @@ export {
   inviteProblem,
   listOf,
   memberPolicy,
-  removeProblem,
   stillAdmittedBy,
   withMember,
   withoutMember,
