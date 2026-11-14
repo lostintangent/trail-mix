@@ -1,15 +1,8 @@
 import type { Address } from './model.ts';
 
 /** The domain of an address, after its last `@`, in lowercase, or empty when it has none. */
-export function domainOf(address: string): string {
-  const at = address.lastIndexOf('@');
-  return at < 0
-    ? ''
-    : address
-        .slice(at + 1)
-        .trim()
-        .toLowerCase();
-}
+export const domainOf = (address: string): string =>
+  (/@([^@]*)$/.exec(address)?.[1] ?? '').trim().toLowerCase();
 
 /**
  * The addresses in an address-list header, such as From, To or Reply-To, as a message carries it:
@@ -21,22 +14,14 @@ export function domainOf(address: string): string {
  * address that is never closed.
  */
 export function addressesIn(header: string): Address[] {
-  const found: Address[] = [];
-  let mailbox: Token[] = [];
+  const mailboxes: Token[][] = [[]];
   for (const token of tokensOf(header)) {
     // A comma or semicolon ends a mailbox. A colon ends a group's name, which has no address, and
     // the group's members are mailboxes like any other.
-    if (token.kind === 'special') {
-      const address = addressOf(mailbox);
-      if (address) found.push(address);
-      mailbox = [];
-    } else {
-      mailbox.push(token);
-    }
+    if (token.kind === 'special') mailboxes.push([]);
+    else mailboxes.at(-1)!.push(token);
   }
-  const last = addressOf(mailbox);
-  if (last) found.push(last);
-  return found;
+  return mailboxes.flatMap((mailbox) => addressOf(mailbox) ?? []);
 }
 
 type Token = { kind: 'atom' | 'quoted' | 'comment' | 'angle' | 'special'; text: string };
@@ -68,10 +53,8 @@ function tokensOf(header: string): Token[] {
     else if (char === '"') tokens.push({ kind: 'quoted', text: until('"') });
     else if (char === '(') tokens.push({ kind: 'comment', text: until(')', '(') });
     else if (char === '<') tokens.push({ kind: 'angle', text: until('>') });
-    else if (char === ',' || char === ';' || char === ':') {
-      tokens.push({ kind: 'special', text: char });
-      i++;
-    } else {
+    else if (',;:'.includes(char)) tokens.push({ kind: 'special', text: header[i++]! });
+    else {
       const start = i++;
       while (i < header.length && !/[\s"(<,;:]/.test(header[i]!)) i++;
       tokens.push({ kind: 'atom', text: header.slice(start, i) });
@@ -122,10 +105,8 @@ function decodeWords(text: string): string {
     /=\?([^?\s*]+)(?:\*[^?\s]*)?\?([bq])\?([^?\s]*)\?=/gi,
     (word, charset: string, encoding: string, data: string) => {
       try {
-        const bytes =
-          encoding.toLowerCase() === 'b'
-            ? Uint8Array.from(atob(data), (char) => char.charCodeAt(0))
-            : qBytes(data);
+        const binary = encoding.toLowerCase() === 'b' ? atob(data) : fromQ(data);
+        const bytes = Uint8Array.from(binary, (char) => char.charCodeAt(0));
         return new TextDecoder(charset, { fatal: true, ignoreBOM: false }).decode(bytes);
       } catch {
         return word;
@@ -134,17 +115,8 @@ function decodeWords(text: string): string {
   );
 }
 
-function qBytes(data: string): Uint8Array {
-  const bytes: number[] = [];
-  for (let i = 0; i < data.length; i++) {
-    const char = data[i]!;
-    const hex = data.slice(i + 1, i + 3);
-    if (char === '=' && /^[0-9a-f]{2}$/i.test(hex)) {
-      bytes.push(parseInt(hex, 16));
-      i += 2;
-    } else {
-      bytes.push(char === '_' ? 0x20 : char.charCodeAt(0));
-    }
-  }
-  return new Uint8Array(bytes);
-}
+/** Q-encoded text as a binary string, one character to a byte. */
+const fromQ = (data: string) =>
+  data.replace(/_|=([\da-f]{2})/gi, (match, hex: string) =>
+    match === '_' ? ' ' : String.fromCharCode(parseInt(hex, 16)),
+  );

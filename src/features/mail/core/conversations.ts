@@ -96,10 +96,19 @@ export function conversationIdOf(
 export function partsOf(
   id: ConversationId,
 ): { account: AccountId; gathering: string; root: string } | undefined {
+  const parts = decodedParts(id, 3);
+  return parts && { account: parts[0]!, gathering: parts[1]!, root: parts[2]! };
+}
+
+/** The `count` URI-encoded parts an id joins with `:`, or nothing when it doesn't hold them. */
+export function decodedParts(id: string, count: number): string[] | undefined {
   const parts = id.split(':');
-  if (parts.length !== 3) return undefined;
-  const [account, gathering, root] = parts.map(decodeURIComponent) as [string, string, string];
-  return { account, gathering, root };
+  try {
+    return parts.length === count ? parts.map(decodeURIComponent) : undefined;
+  } catch {
+    // A stray `%` decodes to nothing.
+    return undefined;
+  }
 }
 
 /** The Message-ID a message names itself by, in `<id@host>` form, or `''` when it has none. */
@@ -124,9 +133,7 @@ export function referencesOf(
   const ids = [...new Set(idsIn(references ?? ''))];
   const [parent] = idsIn(inReplyTo ?? '');
   if (parent && !ids.includes(parent)) ids.push(parent);
-  return ids.length > MAX_REFERENCES
-    ? [ids[0]!, ...ids.slice(ids.length - MAX_REFERENCES + 1)]
-    : ids;
+  return ids.length > MAX_REFERENCES ? [ids[0]!, ...ids.slice(1 - MAX_REFERENCES)] : ids;
 }
 
 /**

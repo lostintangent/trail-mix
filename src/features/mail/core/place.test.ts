@@ -78,6 +78,9 @@ test('an address that names nothing it can open reads as the unified Inbox with 
     '/?nonsense=1',
     '/?open=not-a-conversation',
     `/?open=${encodeURIComponent(conversation(PERSONAL))}&in=archive`,
+    // A stray `%` decodes to nothing.
+    '/?open=a:%25zz:b',
+    '/?bundle=a:%25zz',
   ]) {
     expect({ address, place: placeAt(address) }).toEqual({ address, place: inbox });
   }

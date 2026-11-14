@@ -1,7 +1,7 @@
 import start from '@tanstack/react-start/server-entry';
 import type { Mailroom, Timed } from '../features/mailroom/client/contract.ts';
 import { readAvatarPath, readMessagePath } from '../features/mailroom/client/urls.ts';
-import { signInFor } from './access.ts';
+import { setupPage, signInFor } from './access.ts';
 import { demoImages, proxyImage } from './routes/images.ts';
 import { serveAvatar } from './routes/avatars.ts';
 import { serveMessageBytes } from './routes/messages.ts';
@@ -36,11 +36,8 @@ export default {
     const avatar = readAvatarPath(url.pathname);
     // Everything but the page and remote images reaches the member's Mailroom, which may make one.
     const reachesMailroom =
-      url.pathname.startsWith('/_serverFn/') ||
-      url.pathname === '/updates' ||
-      url.pathname === '/notifications/act' ||
-      message !== null ||
-      avatar !== null;
+      (message ?? avatar) !== null ||
+      /^\/(?:_serverFn\/|updates$|notifications\/act$)/.test(url.pathname);
     const signed = await signIn(request, { reachesMailroom });
     if (signed instanceof Response) return signed;
     const { member, setCookie, isLetIn = true } = signed;
@@ -139,38 +136,4 @@ function isFromTrailMix(request: Request): boolean {
   const site = request.headers.get('Sec-Fetch-Site');
   if (site !== null) return site === 'same-origin';
   return request.headers.get('Origin') === new URL(request.url).origin;
-}
-
-/** Until the operator configures sign-in, the deployment serves this page and nothing else. */
-function setupPage(url: URL): Response {
-  const isLocal = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
-  const next = isLocal
-    ? '<p>To sign in while developing, copy <code>dev.vars.example</code> to <code>.dev.vars</code> and restart.</p>'
-    : `<ol>
-<li>In Cloudflare Zero Trust, add a self-hosted Access application for <code>${escapeHtml(url.hostname)}</code> that lets your email address in with a one-time PIN.</li>
-<li>In this Worker's settings, under Variables and Secrets, add <code>ACCESS_TEAM_DOMAIN</code>, your team domain, and <code>ACCESS_AUD</code>, the application's Audience (AUD) tag. Then reload this page.</li>
-</ol>
-<p><a href="${SETUP_STEPS}">Trail Mix's README</a> walks through both, step by step.</p>`;
-  const page = `<!doctype html>
-<html lang="en">
-<meta charset="utf-8">
-<meta name="color-scheme" content="light dark">
-<title>Trail Mix isn’t set up yet</title>
-<body style="font-family: system-ui; max-width: 36rem; margin: 4rem auto; padding: 0 1rem">
-<h1>Trail Mix isn’t set up yet</h1>
-<p>It stays closed until it can check who is signing in.</p>
-${next}
-</body>
-</html>`;
-  return new Response(page, {
-    status: 503,
-    headers: { 'Content-Type': 'text/html; charset=utf-8' },
-  });
-}
-
-/** Where the setup page sends an operator: the README's steps for signing in with Access. */
-const SETUP_STEPS = 'https://github.com/lostintangent/trail-mix#2-sign-in-with-cloudflare-access';
-
-function escapeHtml(text: string): string {
-  return text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
 }

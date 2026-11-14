@@ -1,6 +1,6 @@
 import { demoImage } from '../../features/providers/index.ts';
 import { isPublicHost } from '../../shared/public-host.ts';
-import { byteHeaders, rasterImage } from './messages.ts';
+import { byteHeaders, rasterImage, refuse } from './messages.ts';
 
 /**
  * `/images?url=<url>` loads a remote image that a message shows once the member allows its sender.
@@ -47,13 +47,10 @@ export async function proxyImage(
 
   if (!response?.ok || !response.body) return refuse(502, 'The image could not be loaded.');
   const type = rasterImage(response.headers.get('content-type') ?? '');
-  if (!type) {
+  const isTooLarge = Number(response.headers.get('content-length') ?? 0) > MAX_IMAGE_BYTES;
+  if (!type || isTooLarge) {
     await response.body.cancel();
-    return refuse(415, 'That is not an image.');
-  }
-  if (Number(response.headers.get('content-length') ?? 0) > MAX_IMAGE_BYTES) {
-    await response.body.cancel();
-    return refuse(413, 'The image is too large.');
+    return type ? refuse(413, 'The image is too large.') : refuse(415, 'That is not an image.');
   }
   return new Response(response.body.pipeThrough(limit(MAX_IMAGE_BYTES)), {
     headers: byteHeaders({ type, name: 'image', cache: 'private, max-age=86400' }),
@@ -94,16 +91,5 @@ function limit(max: number): TransformStream<Uint8Array, Uint8Array> {
       if (seen > max) controller.error(new Error('The image is too large.'));
       else controller.enqueue(chunk);
     },
-  });
-}
-
-function refuse(status: number, message: string): Response {
-  return new Response(message, {
-    status,
-    headers: byteHeaders({
-      type: 'text/plain; charset=utf-8',
-      name: 'error.txt',
-      cache: 'no-store',
-    }),
   });
 }

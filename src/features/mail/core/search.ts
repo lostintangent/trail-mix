@@ -66,11 +66,7 @@ function markedLength(word: string, marks: Marks): number {
  * is spelled out, so a Cyrillic й stays itself. A character NFKC spells as several words, such as
  * ½, folds to them run together, so only its first word marks it.
  */
-export function foldForSearch(text: string): string {
-  let folded = '';
-  for (const char of text) folded += foldChar(char);
-  return folded;
-}
+export const foldForSearch = (text: string): string => [...text].map(foldChar).join('');
 
 function foldChar(char: string): string {
   let folded = '';

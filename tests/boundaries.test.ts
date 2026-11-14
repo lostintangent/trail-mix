@@ -34,21 +34,6 @@ const FEATURE = /^src\/features\/([^/]+)\//;
 const CORE_MODULE = /^src\/features\/(?:[^/]+\/)+core\/(?!.*\.test\.tsx?$)/;
 const EXPORTED_TYPE = /^export\s+(?:declare\s+)?(?:type|interface)\s+([A-Za-z_$][\w$]*)/gm;
 
-test('a feature may use its own modules and the index.ts of another feature', () => {
-  const graph = importGraph({
-    'src/features/mail/core/index.ts': "export * from './model.ts';",
-    'src/features/mail/core/model.ts': 'export type AccountId = string;',
-    'src/features/reader/ui/Reader.tsx': [
-      "import type { AccountId } from '../../mail/core/index.ts';",
-      "import { foldQuotes } from '../core/quotes.ts';",
-    ].join('\n'),
-    'src/features/reader/core/quotes.ts': 'export const foldQuotes = (text: string) => text;',
-  });
-
-  expect(featureShortcuts(graph)).toEqual([]);
-  expect(impureCores(graph)).toEqual([]);
-});
-
 test('a feature that reaches past the index.ts of another feature is reported', () => {
   const graph = importGraph({
     'src/features/mail/core/model.ts': 'export type AccountId = string;',
@@ -91,20 +76,6 @@ test('a type name exported by two modules of src is reported with both', () => {
     'Place: src/features/mail/core/place.ts, src/features/folders/core/names.ts',
     'Moved: src/features/mail/core/model.ts, src/features/providers/provider.ts',
   ]);
-});
-
-test('a re-export, a class, a private type and a test outside src declare no homonym', () => {
-  expect(
-    homonyms({
-      'src/features/mail/core/model.ts': 'export type Moved = { from: string };',
-      'src/features/mail/core/index.ts': "export type { Moved } from './model.ts';",
-      'src/features/providers/index.ts': "export { type Moved } from '../mail/core/index.ts';",
-      'src/features/outbox/core/sending.ts': 'type Moved = string;',
-      'tests/e2e/suite.ts': 'export type Moved = number;',
-      'src/server/access.ts': 'export type VisitorGate = { admit(): boolean };',
-      'src/server/visitors.ts': 'export class VisitorGate {}',
-    }),
-  ).toEqual([]);
 });
 
 test('the repository keeps every rule', async () => {

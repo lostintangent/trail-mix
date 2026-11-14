@@ -6,7 +6,7 @@ import {
   partsOf,
   rootOf,
 } from './conversations.ts';
-import { refKey, refOf } from './refs.ts';
+import { refKey, refOf, sameFolder } from './refs.ts';
 import type {
   AccountId,
   ConversationId,
@@ -82,10 +82,7 @@ function receive(index: Index, envelope: Envelope): IndexChange {
     const parts = partsOf(id);
     if (parts?.gathering === gathering) roots.set(id, parts.root);
   }
-  const root = [...roots.values()].reduce(
-    (least, root) => (root < least ? root : least),
-    rootOf(envelope),
-  );
+  const root = [rootOf(envelope), ...roots.values()].sort()[0]!;
   const conversation = conversationIdOf(envelope.account, gathering, root);
   const renamed = [...roots.keys()]
     .filter((id) => id !== conversation)
@@ -154,8 +151,6 @@ export function memoryIndex(
   messages: readonly Message[] = [],
 ): MemoryIndex {
   const byKey = new Map(messages.map((message) => [refKey(message), message]));
-  const inFolder = (folder: FolderRef) => (candidate: FolderRef) =>
-    candidate.account === folder.account && candidate.path === folder.path;
   return {
     messages,
     message: (ref) => byKey.get(refKey(ref)),
@@ -168,8 +163,8 @@ export function memoryIndex(
       return [...new Set(linked.map((message) => message.conversation))];
     },
     conversation: (id) => messages.filter((message) => message.conversation === id),
-    folder: (folder) => messages.filter(inFolder(folder)),
-    role: (folder) => folders.find(inFolder(folder))?.role,
+    folder: (folder) => messages.filter((message) => sameFolder(message, folder)),
+    role: (folder) => folders.find((candidate) => sameFolder(candidate, folder))?.role,
     apply: (change) => {
       const replaced = new Set([...change.remove, ...change.put].map(refKey));
       return memoryIndex(folders, [
@@ -181,8 +176,5 @@ export function memoryIndex(
 }
 
 /** Whether two messages' flags are the same. */
-export function sameFlags(a: Flags, b: Flags): boolean {
-  return (
-    a.seen === b.seen && a.flagged === b.flagged && a.answered === b.answered && a.draft === b.draft
-  );
-}
+export const sameFlags = (a: Flags, b: Flags): boolean =>
+  a.seen === b.seen && a.flagged === b.flagged && a.answered === b.answered && a.draft === b.draft;

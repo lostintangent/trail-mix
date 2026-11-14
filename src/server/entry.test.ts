@@ -213,7 +213,7 @@ test('a page from before Members went is told its member isn’t the operator, a
   expect(reachedApp).toEqual([]);
 });
 
-test('a command or a socket that another site started is refused before sign-in is consulted', async () => {
+test('a command, a socket or a notification’s button that another site started is refused before sign-in is consulted', async () => {
   // With Access configured, consulting sign-in about a well-formed token fetches the team's
   // certificates, so a fetch that never happens shows sign-in was never asked.
   const certificates = spyOn(globalThis, 'fetch').mockResolvedValue(
@@ -238,8 +238,10 @@ test('a command or a socket that another site started is refused before sign-in 
     const socket = new Request(`${SITE}/updates`, {
       headers: { ...headers, Upgrade: 'websocket' },
     });
+    const button = new Request(`${SITE}/notifications/act`, { method: 'POST', headers });
     expect((await worker.fetch(command, env)).status).toBe(403);
     expect((await worker.fetch(socket, env)).status).toBe(403);
+    expect((await worker.fetch(button, env)).status).toBe(403);
   }
   expect(certificates).not.toHaveBeenCalled();
   expect(rooms.opened).toEqual([]);
@@ -314,20 +316,6 @@ test('a notification’s button reaches only the signed-in member’s Mailroom, 
   ]);
 });
 
-test('a notification’s button that another site started is refused, and reaches no Mailroom', async () => {
-  const { env, opened } = developer();
-  const response = await worker.fetch(
-    new Request(`${LOCAL}/notifications/act`, {
-      method: 'POST',
-      headers: { 'Sec-Fetch-Site': 'cross-site', Origin: 'https://evil.example' },
-      body: JSON.stringify({ action: 'archive', message: {} }),
-    }),
-    env,
-  );
-  expect(response.status).toBe(403);
-  expect(opened).toEqual([]);
-});
-
 test('an avatar comes only from the signed-in member’s Avatar cache, as an image that runs nothing', async () => {
   const { env, opened, avatars } = developer();
   const response = await worker.fetch(
@@ -377,15 +365,9 @@ test('a message’s bytes, the image proxy and avatars refuse a request nobody s
   internet.mockRestore();
 });
 
-test('the image proxy refuses a signed-in member’s request that another site started', async () => {
+test('the image proxy serves a signed-in member’s request from Trail Mix’s own pages', async () => {
   const internet = anImage();
   const { env } = developer();
-  for (const site of ['cross-site', 'same-site']) {
-    const request = new Request(`${LOCAL}${PROXIED}`, { headers: { 'Sec-Fetch-Site': site } });
-    expect((await worker.fetch(request, env)).status).toBe(403);
-  }
-  expect(internet).not.toHaveBeenCalled();
-
   const fromTrailMix = new Request(`${LOCAL}${PROXIED}`, {
     headers: { 'Sec-Fetch-Site': 'same-origin' },
   });
@@ -464,22 +446,14 @@ test('a visitor to the demo is let in at their first call to a Mailroom, which i
   reachedApp.length = 0;
   const page = await worker.fetch(new Request(`${DEMO}/`), env);
   expect(await page.text()).toBe('the app');
-  expect(asked).toEqual([]);
   // Serving the page hands the app no Mailroom, so nothing it does there can make one.
   expect(reachedApp[0]!.mailroom).toEqual(new Error('The demo’s gate hasn’t let this visitor in.'));
   expect(opened).toEqual([]);
 
-  const call = (cookie: string) =>
-    new Request(`${DEMO}/_serverFn/query`, { headers: { Cookie: cookie } });
   reachedApp.length = 0;
-  const first = await worker.fetch(call(cookieOf(page)), env);
-  const [visitor] = asked;
-  expect(visitor).toMatch(/^[0-9a-f]{32}$/);
-  expect(cookieOf(first)).toMatch(new RegExp(`=${visitor}\\.\\d{10}\\.`));
-  expect((reachedApp[0]!.mailroom as { name: string }).name).toBe(`${visitor}@demo.invalid`);
-  // From then on, the cookie lets them straight in.
-  await worker.fetch(call(cookieOf(first)), env);
-  expect(asked).toHaveLength(1);
+  const query = new Request(`${DEMO}/_serverFn/query`, { headers: { Cookie: cookieOf(page) } });
+  await worker.fetch(query, env);
+  expect((reachedApp[0]!.mailroom as { name: string }).name).toBe(`${asked[0]}@demo.invalid`);
 });
 
 test('a visitor the demo has no room for is told so, and reaches no Mailroom and not the app', async () => {

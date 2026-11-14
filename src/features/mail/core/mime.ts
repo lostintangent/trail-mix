@@ -62,15 +62,15 @@ export function writeMime(message: MimeMessage): string {
 
   const html = message.html === undefined ? undefined : textPart('html', message.html);
   const shown = inline.length
-    ? multipart('related', [html!, ...inline.map((file) => filePart(file, true))])
+    ? { subtype: 'related', parts: [html!, ...inline.map((file) => filePart(file, true))] }
     : html;
   const text = message.text === undefined ? undefined : textPart('plain', message.text);
   const body =
     text && shown
-      ? multipart('alternative', [text, shown])
+      ? { subtype: 'alternative', parts: [text, shown] }
       : (text ?? shown ?? textPart('plain', ''));
   const root = attached.length
-    ? multipart('mixed', [body, ...attached.map((file) => filePart(file, false))])
+    ? { subtype: 'mixed', parts: [body, ...attached.map((file) => filePart(file, false))] }
     : body;
 
   const references = message.references ?? [];
@@ -123,10 +123,6 @@ function filePart(file: MimeAttachment, inline: boolean): Part {
     ],
     body: base64(file.content),
   };
-}
-
-function multipart(subtype: string, parts: Part[]): Part {
-  return { subtype, parts };
 }
 
 function render(part: Part, headers: Header[], boundary: () => string): string {
@@ -290,13 +286,9 @@ function headerName(name: string): string {
   return name;
 }
 
-const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-
 /** An ISO 8601 date as RFC 5322 writes it, in UTC. */
 function rfc5322Date(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) throw new Error(`"${iso}" is not a date.`);
-  const two = (n: number) => String(n).padStart(2, '0');
-  return `${DAYS[date.getUTCDay()]}, ${two(date.getUTCDate())} ${MONTHS[date.getUTCMonth()]} ${date.getUTCFullYear()} ${two(date.getUTCHours())}:${two(date.getUTCMinutes())}:${two(date.getUTCSeconds())} +0000`;
+  return date.toUTCString().replace(/GMT$/, '+0000');
 }

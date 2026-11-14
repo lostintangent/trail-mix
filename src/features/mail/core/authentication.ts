@@ -67,18 +67,20 @@ function trustedResults(lines: HeaderLine[], servers: readonly string[]): Result
   if (!servers.some((server) => server.toLowerCase() === serverName)) return undefined;
   return results.map((result) => {
     const [method = '', ...properties] = result.trim().split(/\s+/);
-    return {
-      method: method.toLowerCase(),
-      properties: new Map(
-        properties.flatMap((property) => {
-          const equals = property.indexOf('=');
-          return equals > 0
-            ? [[property.slice(0, equals).toLowerCase(), property.slice(equals + 1)] as const]
-            : [];
-        }),
-      ),
-    };
+    return { method: method.toLowerCase(), properties: tagsOf(properties) };
   });
+}
+
+/** Each `name=value` piece by its name, in lowercase. A piece with no name gives nothing. */
+function tagsOf(pieces: string[]): Map<string, string> {
+  return new Map(
+    pieces.flatMap((piece) => {
+      const equals = piece.indexOf('=');
+      return equals > 0
+        ? [[piece.slice(0, equals).trim().toLowerCase(), piece.slice(equals + 1)] as const]
+        : [];
+    }),
+  );
 }
 
 /**
@@ -122,14 +124,7 @@ function oneHttpsAddress(header: string): string | undefined {
 type Signature = { domain: string; b: string; signs: Set<string> };
 
 function signatureOf({ value }: HeaderLine): Signature {
-  const tags = new Map(
-    value.split(';').flatMap((tag) => {
-      const equals = tag.indexOf('=');
-      return equals > 0
-        ? [[tag.slice(0, equals).trim().toLowerCase(), tag.slice(equals + 1)] as const]
-        : [];
-    }),
-  );
+  const tags = tagsOf(value.split(';'));
   const tag = (name: string) => (tags.get(name) ?? '').replace(/\s+/g, '');
   return {
     domain: tag('d').toLowerCase(),

@@ -135,20 +135,22 @@ export type BundleId = string;
 export type GitHubKind = 'pull' | 'issue' | 'discussion' | 'run';
 
 /** Why GitHub notified the member, as the Cc it adds says. */
-export type GitHubReason =
-  | 'assign'
-  | 'author'
-  | 'ci_activity'
-  | 'comment'
-  | 'manual'
-  | 'mention'
-  | 'push'
-  | 'review_requested'
-  | 'security_alert'
-  | 'state_change'
-  | 'subscribed'
-  | 'team_mention'
-  | 'your_activity';
+export const GITHUB_REASONS = [
+  'assign',
+  'author',
+  'ci_activity',
+  'comment',
+  'manual',
+  'mention',
+  'push',
+  'review_requested',
+  'security_alert',
+  'state_change',
+  'subscribed',
+  'team_mention',
+  'your_activity',
+] as const;
+export type GitHubReason = (typeof GITHUB_REASONS)[number];
 
 /**
  * The pull request, issue, discussion or workflow run a conversation of verified GitHub

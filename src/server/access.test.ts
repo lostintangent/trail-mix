@@ -1,20 +1,14 @@
-import { afterEach, beforeAll, describe, expect, setSystemTime, test } from 'bun:test';
+import { afterEach, beforeAll, describe, expect, setSystemTime, spyOn, test } from 'bun:test';
 import {
   createLocalJWKSet,
   exportJWK,
   generateKeyPair,
   SignJWT,
   type CryptoKey,
+  type JSONWebKeySet,
   type JWTVerifyGetKey,
 } from 'jose';
-import {
-  networkOf,
-  signInFor,
-  signsInDevelopers,
-  VISITOR_SECONDS,
-  type Signed,
-  type SignInConfig,
-} from './access.ts';
+import { networkOf, signInFor, VISITOR_SECONDS, type Signed, type SignInConfig } from './access.ts';
 
 const TEAM = 'trailmix.cloudflareaccess.com';
 const AUD = 'trail-mix-application';
@@ -23,15 +17,15 @@ const ACCESS: SignInConfig = { ACCESS_TEAM_DOMAIN: TEAM, ACCESS_AUD: AUD };
 /** The keys Access signs with, as its certificates publish them, and a key it never published. */
 let accessKey: CryptoKey;
 let strangerKey: CryptoKey;
+let published: JSONWebKeySet;
 let certificates: JWTVerifyGetKey;
 
 beforeAll(async () => {
   const access = await generateKeyPair('RS256');
   accessKey = access.privateKey;
   strangerKey = (await generateKeyPair('RS256')).privateKey;
-  certificates = createLocalJWKSet({
-    keys: [{ ...(await exportJWK(access.publicKey)), kid: 'access', alg: 'RS256' }],
-  });
+  published = { keys: [{ ...(await exportJWK(access.publicKey)), kid: 'access', alg: 'RS256' }] };
+  certificates = createLocalJWKSet(published);
 });
 
 /** A token as Access would sign it, with any claim or key changed. */
@@ -84,6 +78,19 @@ test('the team domain may be pasted as Cloudflare shows it, as an address', asyn
       'ada@example.com',
     );
   }
+});
+
+test('Access’s certificates are fetched once while the isolate lives, not for every request', async () => {
+  const team = 'once.cloudflareaccess.com';
+  const fetched = spyOn(globalThis, 'fetch').mockResolvedValue(Response.json(published));
+  const config = { ACCESS_TEAM_DOMAIN: team, ACCESS_AUD: AUD };
+  const asked = request({ 'Cf-Access-Jwt-Assertion': await token({ issuer: `https://${team}` }) });
+  // The Worker makes its sign-in afresh for every request.
+  for (const signIn of [signInFor(config)!, signInFor(config)!]) {
+    expect(await signIn(asked, { reachesMailroom: true })).toEqual({ member: 'ada@example.com' });
+  }
+  expect(fetched).toHaveBeenCalledTimes(1);
+  fetched.mockRestore();
 });
 
 test('only A to Z fold, so an address in another script keeps its own Mailroom', async () => {
@@ -306,7 +313,6 @@ describe('a visitor to the public demo', () => {
     expect(signInFor({ ...demo(), VISITOR_GATE: undefined, DEV_MEMBER: '' })).toBeUndefined();
     expect(await member({ ...demo(), ...ACCESS }, request({}, DEMO))).toBeUndefined();
     // The development member gives way to visitors.
-    expect(signsInDevelopers(demo())).toBe(false);
     expect(await member(demo(), request({}, 'http://localhost:5173/'))).toMatch(/@demo\.invalid$/);
     expect(() => signInFor({ ...demo(), VISITOR_KEY: 'short' })).toThrow('at least 32 characters');
   });

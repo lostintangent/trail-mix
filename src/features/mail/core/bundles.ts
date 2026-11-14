@@ -1,3 +1,4 @@
+import { decodedParts } from './conversations.ts';
 import type {
   AccountId,
   BundleChip,
@@ -30,7 +31,10 @@ export const BUNDLE_CHIPS = 12;
 /** A thread's number, within a safe integer, as run ids, at eleven digits, already reach past ten. */
 export const NUMBER = /^[1-9]\d{0,14}$/;
 /** A commit's hash, as GitHub abbreviates it or in full. */
-export const COMMIT = /^[\da-f]{7,40}$/;
+const COMMIT = /^[\da-f]{7,40}$/;
+
+/** Where each kind of thread is on github.com, after its repository's address. */
+const PATHS = { pull: 'pull', issue: 'issues', discussion: 'discussions', run: 'actions/runs' };
 
 /** The bundle an account's threads in one repository gather into. */
 export function bundleIdOf(account: AccountId, repository: string): BundleId {
@@ -41,15 +45,8 @@ export function bundleIdOf(account: AccountId, repository: string): BundleId {
 export function bundlePartsOf(
   id: BundleId,
 ): { account: AccountId; repository: string } | undefined {
-  const parts = id.split(':');
-  if (parts.length !== 2) return undefined;
-  try {
-    const [account, repository] = parts.map(decodeURIComponent) as [string, string];
-    return account !== '' && isRepository(repository) ? { account, repository } : undefined;
-  } catch {
-    // A stray `%` decodes to nothing.
-    return undefined;
-  }
+  const [account = '', repository = ''] = decodedParts(id, 2) ?? [];
+  return account !== '' && isRepository(repository) ? { account, repository } : undefined;
 }
 
 export const isBundle = (item: ListItem): item is BundleSummary => 'kind' in item;
@@ -86,7 +83,6 @@ export function bundleSummaryOf(
     ...(github.reasons[0] ? { reason: github.reasons[0] } : {}),
     unread: unread > 0,
   }));
-  const asking = chips.filter(asks);
   return {
     kind: 'bundle',
     id,
@@ -98,7 +94,7 @@ export function bundleSummaryOf(
     count: conversations.reduce((sum, { count }) => sum + count, 0),
     unread: conversations.reduce((sum, { unread }) => sum + unread, 0),
     flagged: conversations.some(({ flagged }) => flagged),
-    chips: [...asking, ...chips.filter((chip) => !asks(chip))].slice(0, BUNDLE_CHIPS),
+    chips: chips.toSorted((a, b) => Number(asks(b)) - Number(asks(a))).slice(0, BUNDLE_CHIPS),
     ...(newest.avatar ? { avatar: newest.avatar } : {}),
   };
 }
@@ -135,20 +131,10 @@ export function threadAddressOf(
 ): string | undefined {
   const repository = repositoryAddressOf(thread.repository);
   if (!repository) return undefined;
-  const number =
-    thread.number !== undefined && NUMBER.test(String(thread.number)) ? thread.number : undefined;
-  switch (thread.kind) {
-    case 'pull':
-      return number === undefined ? undefined : `${repository}/pull/${number}`;
-    case 'issue':
-      return number === undefined ? undefined : `${repository}/issues/${number}`;
-    case 'discussion':
-      return number === undefined ? undefined : `${repository}/discussions/${number}`;
-    case 'run':
-      if (number !== undefined) return `${repository}/actions/runs/${number}`;
-      if (thread.commit !== undefined && COMMIT.test(thread.commit)) {
-        return `${repository}/commit/${thread.commit}`;
-      }
-      return `${repository}/actions`;
+  if (thread.number !== undefined && NUMBER.test(String(thread.number))) {
+    return `${repository}/${PATHS[thread.kind]}/${thread.number}`;
   }
+  if (thread.kind !== 'run') return undefined;
+  const commit = thread.commit ?? '';
+  return COMMIT.test(commit) ? `${repository}/commit/${commit}` : `${repository}/actions`;
 }

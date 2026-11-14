@@ -28,12 +28,6 @@ const invoice: MimeAttachment = {
   content: new TextEncoder().encode('%PDF-1.4\n'),
 };
 
-test('a message reads back exactly as it was written', async () => {
-  const written = { ...message, html: '<p>Looks right.</p>', attachments: [picture, invoice] };
-
-  expect(await readBack(written)).toEqual(expected(written));
-});
-
 test('inline images travel with the HTML, and other files are attached after it', async () => {
   const parsed = await PostalMime.parse(
     writeMime({

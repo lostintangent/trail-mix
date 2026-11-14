@@ -16,14 +16,6 @@ test('a reply joins the conversation of the message it answers', () => {
   expect(threads(index)).toEqual([['answer', 'question'], ['unrelated']]);
 });
 
-test('a reply that arrives before the message it answers still joins it', () => {
-  const index = fold(
-    arrive(envelope('answer', { references: ['<question@example.com>'] }), envelope('question')),
-  );
-
-  expect(threads(index)).toEqual([['answer', 'question']]);
-});
-
 test('replies to a message the index never held share a conversation through it', () => {
   const index = fold(
     arrive(
@@ -139,7 +131,7 @@ test('a Message-ID is read with or without brackets, and a missing one stays emp
   }
 });
 
-test('a conversation opens on its newest message that is not a draft, or its newest draft', () => {
+test('a conversation opens on its newest message that is not a draft, or its newest draft, in any order', () => {
   const message = (subject: string, date: string, draft = false) => ({
     ...envelope(subject, {
       date,
@@ -154,5 +146,7 @@ test('a conversation opens on its newest message that is not a draft, or its new
 
   expect(newestShown([reply, answer, question])?.subject).toBe('answer');
   expect(newestShown([later, reply])?.subject).toBe('later');
+  expect(newestShown([question, reply, answer])?.subject).toBe('answer');
+  expect(newestShown([reply, later])?.subject).toBe('later');
   expect(newestShown([])).toBeUndefined();
 });

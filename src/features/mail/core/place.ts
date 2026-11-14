@@ -68,11 +68,8 @@ export function placeOf(params: Readonly<Record<string, unknown>>): Place {
 
 function viewOf(text: (key: (typeof KEYS)[number]) => string | undefined): View | undefined {
   const [unified, account, folder, q] = [text('in'), text('account'), text('folder'), text('q')];
-  if (q !== undefined) {
-    return text('bodies') === '1'
-      ? { in: 'search', text: q, fullText: true }
-      : { in: 'search', text: q };
-  }
+  const fullText = text('bodies') === '1' ? ({ fullText: true } as const) : {};
+  if (q !== undefined) return { in: 'search', text: q, ...fullText };
   const unread = text('unread') === '1' ? ({ unread: true } as const) : {};
   if (account !== undefined && folder !== undefined) {
     return { in: 'folder', folder: { account, path: folder }, ...unread };

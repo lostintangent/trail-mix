@@ -86,16 +86,13 @@ export function byteHeaders({
   });
 }
 
-export function notFound(): Response {
-  return new Response('Not found', {
-    status: 404,
-    headers: byteHeaders({
-      type: 'text/plain; charset=utf-8',
-      name: 'not-found.txt',
-      cache: 'no-store',
-    }),
-  });
+/** A refusal in plain text, under the same headers as the bytes it stands in for. */
+export function refuse(status: number, message: string, name = 'error.txt'): Response {
+  const headers = byteHeaders({ type: 'text/plain; charset=utf-8', name, cache: 'no-store' });
+  return new Response(message, { status, headers });
 }
+
+export const notFound = () => refuse(404, 'Not found', 'not-found.txt');
 
 /** `type/subtype`, lowercased and without parameters, or undefined when it is not one. */
 function mediaType(declared: string): string | undefined {

@@ -1,5 +1,12 @@
-import { COMMIT, isAsking, isRepository, NUMBER } from './bundles.ts';
-import type { Address, Envelope, GitHubKind, GitHubReason, GitHubThread } from './model.ts';
+import { isAsking, isRepository, NUMBER } from './bundles.ts';
+import {
+  GITHUB_REASONS,
+  type Address,
+  type Envelope,
+  type GitHubKind,
+  type GitHubReason,
+  type GitHubThread,
+} from './model.ts';
 
 /**
  * GitHub's notifications, read from the headers GitHub sends. A notification is verified mail from
@@ -14,21 +21,7 @@ import type { Address, Envelope, GitHubKind, GitHubReason, GitHubThread } from '
 
 const SENDER = 'notifications@github.com';
 
-const REASONS: ReadonlySet<string> = new Set<GitHubReason>([
-  'assign',
-  'author',
-  'ci_activity',
-  'comment',
-  'manual',
-  'mention',
-  'push',
-  'review_requested',
-  'security_alert',
-  'state_change',
-  'subscribed',
-  'team_mention',
-  'your_activity',
-]);
+const REASONS: ReadonlySet<string> = new Set(GITHUB_REASONS);
 
 /** What one notification says. Notifications of one thread share their `thread`. */
 type Notice = Omit<GitHubThread, 'reasons' | 'state'> & {
@@ -160,26 +153,16 @@ const NUMBERED_SUFFIX = /\s*\((?:PR |Issue |Discussion )?#\d+\)$/i;
 /** A run's subject, such as `Run failed: CI - main (4f2a9c1)`, as its title, outcome and commit. */
 function runOf(subject: string): Pick<Notice, 'title' | 'outcome' | 'commit'> {
   const said =
-    /^(?:Run|Workflow run|All jobs (?:have|were)) (failed|cancell?ed|succeeded|passed|completed successfully)\s*:\s*/i.exec(
+    /^(?:Run|Workflow run|All jobs (?:have|were)) (?:(failed)|(cancell?ed)|succeeded|passed|completed successfully)\s*:\s*/i.exec(
       subject,
     );
-  const word = said?.[1]?.toLowerCase();
-  const outcome =
-    word === undefined
-      ? undefined
-      : word === 'failed'
-        ? 'failed'
-        : word.startsWith('cancel')
-          ? 'cancelled'
-          : 'passed';
+  const outcome = !said ? undefined : said[1] ? 'failed' : said[2] ? 'cancelled' : 'passed';
   const rest = said ? subject.slice(said[0].length) : subject;
   const commit = /\s*\(([\da-f]{7,40})\)$/i.exec(rest);
   return {
     title: commit ? rest.slice(0, commit.index) : rest,
     ...(outcome ? { outcome } : {}),
-    ...(commit && COMMIT.test(commit[1]!.toLowerCase())
-      ? { commit: commit[1]!.toLowerCase() }
-      : {}),
+    ...(commit ? { commit: commit[1]!.toLowerCase() } : {}),
   };
 }
 

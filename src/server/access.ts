@@ -40,25 +40,17 @@ type SignIn = (
 /**
  * How this deployment signs a request in: through Cloudflare Access once it is configured, as a
  * visitor on the public demo, as the development member on localhost, or not at all, which keeps
- * the deployment closed. Tests hand in the keys Access signs with, which production fetches from
- * the team domain.
+ * the deployment closed. The public demo is a deployment whose key and gate are set, Access isn't,
+ * and that serves only the demo mailbox, which can't connect a real account. Tests hand in the
+ * keys Access signs with, which production fetches from the team domain.
  */
 export function signInFor(config: SignInConfig, keys?: JWTVerifyGetKey): SignIn | undefined {
   const access = accessOf(config);
   if (access)
     return accessSignIn(access.team, access.audience, keys ?? certificatesOf(access.team));
-  if (signsInVisitors(config)) return visitorSignIn(config.VISITOR_KEY!, config.VISITOR_GATE!);
-  if (signsInDevelopers(config)) return developmentSignIn(config.DEV_MEMBER!);
-  return undefined;
-}
-
-/**
- * Whether this deployment signs in its development member, which only a developer's machine
- * does: no Access, no visitors, and `DEV_MEMBER` set. Anything meant for a developer alone hangs
- * on this.
- */
-export function signsInDevelopers(config: SignInConfig): boolean {
-  return !accessOf(config) && !signsInVisitors(config) && Boolean(config.DEV_MEMBER);
+  const { VISITOR_KEY, VISITOR_GATE, DEMO_MAILBOX, DEV_MEMBER } = config;
+  if (VISITOR_KEY && DEMO_MAILBOX && VISITOR_GATE) return visitorSignIn(VISITOR_KEY, VISITOR_GATE);
+  return DEV_MEMBER ? developmentSignIn(DEV_MEMBER) : undefined;
 }
 
 /**
@@ -73,20 +65,6 @@ function accessOf(config: SignInConfig): { team: string; audience: string } | un
     .toLowerCase();
   const audience = config.ACCESS_AUD?.trim();
   return team && audience ? { team, audience } : undefined;
-}
-
-/**
- * Whether this deployment is the public demo, which signs in anyone as a visitor: its key and its
- * gate are set, Access isn't, and it serves only the demo mailbox, which can't connect a real
- * account.
- */
-function signsInVisitors(config: SignInConfig): boolean {
-  return (
-    !accessOf(config) &&
-    Boolean(config.VISITOR_KEY) &&
-    Boolean(config.DEMO_MAILBOX) &&
-    config.VISITOR_GATE !== undefined
-  );
 }
 
 /** Why Access named nobody: a request it didn't sign, or one for another application. */
@@ -220,39 +198,24 @@ export function networkOf(address: string): string {
 }
 
 /** The demo's answer once it has let in all it takes for now, in the setup page's voice. */
-function fullForNow(): Response {
-  const page = `<!doctype html>
-<html lang="en">
-<meta charset="utf-8">
-<meta name="color-scheme" content="light dark">
-<title>Trail Mix’s demo is full for now</title>
-<body style="font-family: system-ui; max-width: 36rem; margin: 4rem auto; padding: 0 1rem">
-<h1>Trail Mix’s demo is full for now</h1>
-<p>It lets in only so many new visitors at a time. Try again in a while, or deploy a Trail Mix of your own.</p>
-</body>
-</html>`;
-  return new Response(page, {
-    status: 429,
-    headers: { 'Content-Type': 'text/html; charset=utf-8', 'Retry-After': '60' },
-  });
-}
+const fullForNow = () =>
+  workerPage(
+    'Trail Mix’s demo is full for now',
+    '<p>It lets in only so many new visitors at a time. Try again in a while, or deploy a Trail Mix of your own.</p>',
+    429,
+    { 'Retry-After': '60' },
+  );
 
 /** The demo's signing key, made once per key while the isolate lives. */
-const visitorKeys = new Map<string, Promise<CryptoKey>>();
-function visitorKey(secret: string): Promise<CryptoKey> {
-  let key = visitorKeys.get(secret);
-  if (!key) {
-    key = crypto.subtle.importKey(
-      'raw',
-      new TextEncoder().encode(secret),
-      { name: 'HMAC', hash: 'SHA-256' },
-      false,
-      ['sign', 'verify'],
-    );
-    visitorKeys.set(secret, key);
-  }
-  return key;
-}
+const visitorKey = memoized((secret) =>
+  crypto.subtle.importKey(
+    'raw',
+    new TextEncoder().encode(secret),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign', 'verify'],
+  ),
+);
 
 const base64Url = (bytes: Uint8Array) =>
   btoa(String.fromCharCode(...bytes))
@@ -285,12 +248,61 @@ const memberOf = (email: string) =>
   email.trim().replace(/[A-Z]/g, (letter) => letter.toLowerCase());
 
 /** Access's signing keys, fetched from the team domain and kept while the isolate lives. */
-const certificates = new Map<string, JWTVerifyGetKey>();
-function certificatesOf(team: string): JWTVerifyGetKey {
-  let keys = certificates.get(team);
-  if (!keys) {
-    keys = createRemoteJWKSet(new URL(`https://${team}/cdn-cgi/access/certs`));
-    certificates.set(team, keys);
-  }
-  return keys;
+const certificatesOf = memoized((team) =>
+  createRemoteJWKSet(new URL(`https://${team}/cdn-cgi/access/certs`)),
+);
+
+/** What `make` makes of each key, made once per key while the isolate lives. */
+function memoized<T>(make: (key: string) => T): (key: string) => T {
+  const made = new Map<string, T>();
+  return (key) => {
+    if (!made.has(key)) made.set(key, make(key));
+    return made.get(key)!;
+  };
+}
+
+/** Until the operator configures sign-in, the deployment serves this page and nothing else. */
+export function setupPage(url: URL): Response {
+  const next = LOCALHOST.has(url.hostname)
+    ? '<p>To sign in while developing, copy <code>dev.vars.example</code> to <code>.dev.vars</code> and restart.</p>'
+    : `<ol>
+<li>In Cloudflare Zero Trust, add a self-hosted Access application for <code>${escapeHtml(url.hostname)}</code> that lets your email address in with a one-time PIN.</li>
+<li>In this Worker's settings, under Variables and Secrets, add <code>ACCESS_TEAM_DOMAIN</code>, your team domain, and <code>ACCESS_AUD</code>, the application's Audience (AUD) tag. Then reload this page.</li>
+</ol>
+<p><a href="${SETUP_STEPS}">Trail Mix's README</a> walks through both, step by step.</p>`;
+  return workerPage(
+    'Trail Mix isn’t set up yet',
+    `<p>It stays closed until it can check who is signing in.</p>\n${next}`,
+    503,
+  );
+}
+
+/** Where the setup page sends an operator: the README's steps for signing in with Access. */
+const SETUP_STEPS = 'https://github.com/lostintangent/trail-mix#2-sign-in-with-cloudflare-access';
+
+function escapeHtml(text: string): string {
+  return text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
+}
+
+/** A page the Worker answers with itself, rather than the app: its title, then its body. */
+function workerPage(
+  title: string,
+  body: string,
+  status: number,
+  headers: Record<string, string> = {},
+): Response {
+  const page = `<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="color-scheme" content="light dark">
+<title>${title}</title>
+<body style="font-family: system-ui; max-width: 36rem; margin: 4rem auto; padding: 0 1rem">
+<h1>${title}</h1>
+${body}
+</body>
+</html>`;
+  return new Response(page, {
+    status,
+    headers: { 'Content-Type': 'text/html; charset=utf-8', ...headers },
+  });
 }

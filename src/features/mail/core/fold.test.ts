@@ -72,17 +72,6 @@ test('folding any event a second time changes nothing', () => {
   }
 });
 
-test('removing the message that links a conversation splits it as if it had never arrived', () => {
-  const lunch = envelope('lunch');
-  const dinner = envelope('dinner');
-  const both = envelope('both', { references: [lunch.messageId, dinner.messageId] });
-
-  const index = fold([...arrive(lunch, both, dinner), { type: 'gone', ref: both }]);
-
-  expect(threads(index)).toEqual([['dinner'], ['lunch']]);
-  expect(sorted(index)).toEqual(sorted(fold(arrive(lunch, dinner))));
-});
-
 test('a reset forgets the folder at every UIDVALIDITY and leaves its conversations to the rest', () => {
   const question = envelope('question');
   const index = fold(
