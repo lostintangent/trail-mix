@@ -6,9 +6,8 @@
  *
  * Tests steer it through three endpoints of its own:
  * - `POST /devicelogin` plays the person at the sign-in page. With `user_code` and any of:
- *   `login_hint` signs in as that address, `decline` refuses, `slow_down=1` has the next poll told
- *   to slow down, and `expires_in=N` makes the sign-in's access tokens, refreshed ones too, last N
- *   seconds.
+ *   `login_hint` signs in as that address, `decline` refuses, and `expires_in=N` makes the
+ *   sign-in's access tokens, refreshed ones too, last N seconds.
  * - `POST /revoke` with `login_hint` revokes every refresh token of that address.
  * - `GET /requests` lists every request to the device-code and token endpoints: the grant type,
  *   the scope as sent, the client, whose sign-in it was, and the answer. It holds no code or token.
@@ -25,7 +24,6 @@ type Grant = {
   expiresAt: number;
   user?: string;
   declined?: boolean;
-  slowDown?: boolean;
   /** Seconds each access token lasts. */
   lifetime: number;
 };
@@ -86,7 +84,6 @@ export function signInStandIn(origin: string) {
       if (!grant) return Response.json({ error: 'invalid_user_code' }, { status: 404 });
       if (form.get('decline')) grant.declined = true;
       if (form.get('login_hint')) grant.user = form.get('login_hint') ?? '';
-      if (form.get('slow_down')) grant.slowDown = true;
       if (form.get('expires_in')) grant.lifetime = Number(form.get('expires_in'));
       return new Response(null, { status: 204 });
     }
@@ -149,10 +146,6 @@ export function signInStandIn(origin: string) {
     const grant = grants.get(code);
     if (!grant || grant.clientId !== clientId) return refused('bad_verification_code');
     if (Date.now() > grant.expiresAt) return refused('expired_token');
-    if (grant.slowDown) {
-      grant.slowDown = false;
-      return refused('slow_down');
-    }
     if (grant.declined) return refused('authorization_declined');
     if (!grant.user) return refused('authorization_pending');
     grants.delete(code);

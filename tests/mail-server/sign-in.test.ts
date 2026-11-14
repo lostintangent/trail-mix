@@ -94,19 +94,6 @@ describe('the stand-in for Microsoft’s sign-in', () => {
     expect((await refresh(tokens.body.refresh_token)).body.error).toBe('invalid_grant');
   });
 
-  test('tells the next poll to slow down once, then waits for the person', async () => {
-    const started = await post(`${MICROSOFT}/devicecode`, { client_id: 'entra', scope: 'imap' });
-    await person(started.body.user_code, { slow_down: '1' });
-    const poll = () =>
-      post(`${MICROSOFT}/token`, {
-        grant_type: device,
-        client_id: 'entra',
-        device_code: String(started.body.device_code),
-      });
-    expect((await poll()).body.error).toBe('slow_down');
-    expect((await poll()).body.error).toBe('authorization_pending');
-  });
-
   test('records what each token request asked for, and what it got', async () => {
     const before = (await requests()).length;
     const tokens = await (await signIn('imap offline_access')).poll();

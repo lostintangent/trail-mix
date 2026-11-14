@@ -3,10 +3,8 @@
 // for Microsoft's sign-in so the OAuth path can be exercised. Everything binds to loopback, nothing
 // runs as root, and nothing can reach another mail host.
 //
-//   bun tests/mail-server/server.ts start [--profile full|zoho|outlook]
+//   bun tests/mail-server/server.ts start [--profile full|zoho|outlook|plain]
 //   bun tests/mail-server/server.ts stop | status | clean
-//   bun tests/mail-server/server.ts kick <user>
-//   bun tests/mail-server/server.ts reset-uidvalidity <user> <folder>
 
 import { $ } from 'bun';
 import { spawn } from 'node:child_process';
@@ -16,8 +14,6 @@ import { tmpdir, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { SMTPServerAuthentication } from 'smtp-server';
 import { signInStandIn as standIn } from './sign-in.ts';
-
-export type { Requested } from './sign-in.ts';
 
 export const domain = 'trailmix.test';
 
@@ -788,12 +784,6 @@ if (import.meta.main) {
       // Keeps the macOS Dovecot build, which takes minutes to make again.
       await stop();
       rmSync(state, { recursive: true, force: true });
-      break;
-    case 'kick':
-      await kick(args[0] ?? '');
-      break;
-    case 'reset-uidvalidity':
-      await resetUidValidity(args[0] ?? '', args[1] ?? '');
       break;
     default:
       throw new Error(`Unknown command ${command}.`);
