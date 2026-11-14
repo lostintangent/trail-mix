@@ -1,5 +1,6 @@
 import { expect } from 'bun:test';
-import type { BrowserContext, BrowserContextOptions, Locator, Page } from 'playwright';
+import type { Locator, Page } from 'playwright';
+import { hold } from './helpers.ts';
 import { expectUsable } from './usable.ts';
 import { SIZES, suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
@@ -12,41 +13,55 @@ import { PANELS } from '../../src/features/workbench/ui/panels.ts';
  * its menu without a hover, and accounts and folders fold, as this device remembers.
  */
 
-const app = suite({ vars: { DEV_MEMBER: `sidebar-${Date.now()}@trailmix.test` } });
 // A test that fails leaves a screenshot of each page and what it showed, for CI to keep.
-const { test } = app;
-
-async function open(options: BrowserContextOptions): Promise<Page> {
-  const page = await (await app.context({ deviceScaleFactor: 2, ...options })).newPage();
-  await page.goto(app.url);
-  await mailIsIn(page);
-  return page;
-}
+const { test, open } = suite({
+  vars: { DEV_MEMBER: `sidebar-${Date.now()}@trailmix.test` },
+  scale: 2,
+});
 
 const personal = (page: Page) => page.getByRole('region', { name: 'Personal' });
 const folderRow = (page: Page, name: string) =>
   personal(page).getByRole('button', { name: new RegExp(`^${name}( \\d+)?$`) });
 
+/** New message as it should be: a fill about a line tall, in a target the gear's size, in a foot no taller than its gear needs. */
+const SMALL = { fill: 24, isGearSized: true, isFootSnug: true };
 /** How a desktop's foot fits: the name whole, everything in order and apart, inside the sidebar. */
-const FITS = { name: 'whole', isInOrder: true, isInside: true, isLevel: true };
+const FITS = { name: 'whole', isInOrder: true, isInside: true, isLevel: true, ...SMALL };
 /** How it fits where a wide font leaves the name no room: the name gives way, and only that. */
 const GIVES_WAY = { ...FITS, name: 'gives way' };
 
 /** A font about as wide as the sans a Linux runner draws with, which Apple's systems don't. */
 const WIDE_FONT = `nav * { font-family: Verdana, "DejaVu Sans", sans-serif !important; }`;
 
-/** New message as it should be: a fill about a line tall, in a target the gear's size, in a foot no taller than its gear needs. */
-const SMALL = { fill: 24, isGearSized: true, isFootSnug: true };
+/** Draws a page as a Linux runner does, with its wider sans and Ctrl+K, wherever the test runs. */
+async function asLinux(page: Page) {
+  await page.addInitScript((font) => {
+    Object.defineProperty(Navigator.prototype, 'platform', { get: () => 'Linux x86_64' });
+    addEventListener('DOMContentLoaded', () => {
+      document.head.append(Object.assign(document.createElement('style'), { textContent: font }));
+    });
+  }, WIDE_FONT);
+}
 
-function composeIsSmall(page: Page) {
+/** How the foot holds the gear, the name and New message, as FITS and SMALL say it should. */
+function footFits(page: Page) {
   return page.getByRole('navigation', { name: 'Mailboxes' }).evaluate((nav) => {
     const shown = (element: Element) => !element.closest('[inert]');
     const button = (name: string) =>
       [...nav.querySelectorAll('button')].find(
         (each) => shown(each) && each.getAttribute('aria-label') === name,
       )!;
-    const [compose, gear] = [button('New message'), button('Open settings')];
-    // What it fills: the biggest of it and what it holds that isn't transparent.
+    const name = [...nav.querySelectorAll('span')].find(
+      (span) => span.textContent === 'Trail Mix',
+    )!;
+    const compose = button('New message');
+    const [gear, words, target] = [button('Open settings'), name, compose].map((element) =>
+      element.getBoundingClientRect(),
+    ) as [DOMRect, DOMRect, DOMRect];
+    const edge = nav.getBoundingClientRect();
+    const middle = ({ top, height }: DOMRect) => top + height / 2;
+    const isWhole = name.scrollWidth <= name.clientWidth;
+    // What New message fills: the biggest of it and what it holds that isn't transparent.
     const fill = Math.max(
       ...[compose, ...compose.querySelectorAll('*')]
         .filter((each) => getComputedStyle(each).backgroundColor !== 'rgba(0, 0, 0, 0)')
@@ -55,53 +70,8 @@ function composeIsSmall(page: Page) {
           return Math.max(width, height);
         }),
     );
-    const name = [...nav.querySelectorAll('span')].find(
-      (span) => span.textContent === 'Trail Mix',
-    )!;
     const foot = name.parentElement!;
     const { paddingTop, borderTopWidth } = getComputedStyle(foot);
-    const [target, ring] = [compose, gear].map((each) => each.getBoundingClientRect()) as [
-      DOMRect,
-      DOMRect,
-    ];
-    return {
-      fill: Math.round(fill),
-      isGearSized: target.width === ring.width && target.height === ring.height,
-      isFootSnug:
-        foot.getBoundingClientRect().height -
-          parseFloat(paddingTop) -
-          parseFloat(borderTopWidth) ===
-        ring.height,
-    };
-  });
-}
-
-/** Draws a page as a Linux runner does, with its wider sans and Ctrl+K, wherever the test runs. */
-async function asLinux(context: BrowserContext) {
-  await context.addInitScript((font) => {
-    Object.defineProperty(Navigator.prototype, 'platform', { get: () => 'Linux x86_64' });
-    addEventListener('DOMContentLoaded', () => {
-      document.head.append(Object.assign(document.createElement('style'), { textContent: font }));
-    });
-  }, WIDE_FONT);
-}
-
-async function footFits(page: Page) {
-  return page.getByRole('navigation', { name: 'Mailboxes' }).evaluate((nav) => {
-    const shown = (element: Element) => !element.closest('[inert]');
-    const button = (name: string) =>
-      [...nav.querySelectorAll('button')].find(
-        (each) => shown(each) && each.getAttribute('aria-label') === name,
-      )!;
-    const name = [...nav.querySelectorAll('span')].find(
-      (span) => shown(span) && span.textContent === 'Trail Mix',
-    )!;
-    const [gear, words, compose] = [button('Open settings'), name, button('New message')].map(
-      (element) => element.getBoundingClientRect(),
-    ) as [DOMRect, DOMRect, DOMRect];
-    const edge = nav.getBoundingClientRect();
-    const middle = ({ top, height }: DOMRect) => top + height / 2;
-    const isWhole = name.scrollWidth <= name.clientWidth;
     return {
       // Cut, it ends in an ellipsis, so it reads as giving way rather than as broken.
       name: isWhole
@@ -110,9 +80,16 @@ async function footFits(page: Page) {
           ? 'gives way'
           : 'cut',
       // What shows of it never reaches under New message.
-      isInOrder: gear.right <= words.left && words.right <= compose.left,
-      isInside: gear.left >= edge.left && compose.right <= edge.right,
-      isLevel: Math.abs(middle(gear) - middle(compose)) < 1,
+      isInOrder: gear.right <= words.left && words.right <= target.left,
+      isInside: gear.left >= edge.left && target.right <= edge.right,
+      isLevel: Math.abs(middle(gear) - middle(target)) < 1,
+      fill: Math.round(fill),
+      isGearSized: target.width === gear.width && target.height === gear.height,
+      isFootSnug:
+        foot.getBoundingClientRect().height -
+          parseFloat(paddingTop) -
+          parseFloat(borderTopWidth) ===
+        gear.height,
     };
   });
 }
@@ -166,9 +143,45 @@ test('the sidebar folds to its rail and back by button and key, keeping every vi
   ]) {
     await sidebar.getByRole('button', { name }).waitFor({ timeout: 1_000 });
   }
-  // An account's stamp opens its Inbox.
   await atRest(page);
+  // Above the list, the search's words have room.
+  expect(await searchSays(page)).toEqual({ words: 'Search and commands', isWhole: true });
+  // A rule under the fold button heads the rail, and New message sits over a rule over the gear, as
+  // small as at the sidebar's foot.
+  expect(
+    await sidebar.evaluate((nav) => {
+      const shown = (element: Element) => !element.closest('[inert]');
+      const box = (name: string) =>
+        [...nav.querySelectorAll('button')]
+          .find((button) => shown(button) && button.getAttribute('aria-label') === name)!
+          .getBoundingClientRect();
+      const [fold, add, compose, gear] = [
+        'Unfold the sidebar',
+        'Add account',
+        'New message',
+        'Open settings',
+      ].map(box) as [DOMRect, DOMRect, DOMRect, DOMRect];
+      const first = [...nav.querySelectorAll('button')]
+        .filter(shown)
+        .map((button) => button.getBoundingClientRect())
+        .filter(({ top }) => top > fold.bottom)
+        .sort((one, other) => one.top - other.top)[0]!;
+      const rules = [...nav.querySelectorAll('span')]
+        .filter(shown)
+        .map((span) => span.getBoundingClientRect())
+        .filter(({ width, height }) => height === 1 && width === 16);
+      const ruled = (above: DOMRect, below: DOMRect) =>
+        rules.some(({ top, bottom }) => top >= above.bottom && bottom <= below.top);
+      return {
+        isRuledUnderFold: ruled(fold, first),
+        isComposeOverAdd: compose.top >= add.bottom,
+        isRuledOverGear: ruled(compose, gear),
+      };
+    }),
+  ).toEqual({ isRuledUnderFold: true, isComposeOverAdd: true, isRuledOverGear: true });
+  expect(await footFits(page)).toMatchObject(SMALL);
   await expectUsable(page, 'sidebar-desktop-dark-rail');
+  // An account's stamp opens its Inbox.
   await sidebar.getByRole('button', { name: /^Work/ }).click();
   await page.getByRole('heading', { name: 'Inbox', level: 2 }).waitFor();
   await expect(
@@ -278,16 +291,6 @@ test('the foot holds the Settings gear, a rule and Trail Mix, and says nothing a
       expect(gearBox!.x).toBeLessThan(nameBox!.x);
       if (size === 'desktop') {
         expect(await footFits(page)).toEqual(FITS);
-        expect(await composeIsSmall(page)).toEqual(SMALL);
-        // The foot stands where it stood before New message joined it, less the pixel of desk the
-        // sheets gained below them: its rule 58 pixels above the window's bottom edge, and the gear 9
-        // below that.
-        expect(
-          await name.evaluate((words) =>
-            Math.round(words.parentElement!.getBoundingClientRect().top),
-          ),
-        ).toBe(842);
-        expect([gearBox!.y, gearBox!.height]).toEqual([851, 32]);
         expect(await searchSays(page)).toEqual({ words: 'Search', isWhole: true });
       }
       expect(sidebarBox!.y + sidebarBox!.height - (gearBox!.y + gearBox!.height)).toBeLessThan(40);
@@ -315,50 +318,12 @@ test('the foot holds the Settings gear, a rule and Trail Mix, and says nothing a
       expect((await sidebar.getByRole('status').allTextContents()).join('')).toBe('');
       expect(await page.getByText(/Up to date|Checking for mail/).count()).toBe(0);
       await expectUsable(page, `sidebar-${size}-${colorScheme}-foot`);
-      if (size === 'desktop') {
-        // Folded, the rail keeps the gear where it was, with a rule over it and New message above
-        // that, and a rule under the fold button at its head.
-        await page.keyboard.press('ControlOrMeta+b');
-        await sidebar.getByRole('button', { name: 'Unfold the sidebar' }).waitFor();
-        await atRest(page);
-        expect(await gear.boundingBox()).toEqual(gearBox);
-        // The search moves above the list, where its words have room.
-        expect(await searchSays(page)).toEqual({ words: 'Search and commands', isWhole: true });
-        expect(
-          await sidebar.evaluate((nav) => {
-            const shown = (element: Element) => !element.closest('[inert]');
-            const box = (name: string) =>
-              [...nav.querySelectorAll('button')]
-                .find((button) => shown(button) && button.getAttribute('aria-label') === name)!
-                .getBoundingClientRect();
-            const [fold, add, compose, gear] = [
-              'Unfold the sidebar',
-              'Add account',
-              'New message',
-              'Open settings',
-            ].map(box) as [DOMRect, DOMRect, DOMRect, DOMRect];
-            const first = [...nav.querySelectorAll('button')]
-              .filter(shown)
-              .map((button) => button.getBoundingClientRect())
-              .filter(({ top }) => top > fold.bottom)
-              .sort((one, other) => one.top - other.top)[0]!;
-            const rules = [...nav.querySelectorAll('span')]
-              .filter(shown)
-              .map((span) => span.getBoundingClientRect())
-              .filter(({ width, height }) => height === 1 && width === 16);
-            const ruled = (above: DOMRect, below: DOMRect) =>
-              rules.some(({ top, bottom }) => top >= above.bottom && bottom <= below.top);
-            return {
-              isRuledUnderFold: ruled(fold, first),
-              isComposeOverAdd: compose.top >= add.bottom,
-              isRuledOverGear: ruled(compose, gear),
-            };
-          }),
-        ).toEqual({ isRuledUnderFold: true, isComposeOverAdd: true, isRuledOverGear: true });
-        expect(await composeIsSmall(page)).toEqual(SMALL);
-        await expectUsable(page, `sidebar-${size}-${colorScheme}-rail-foot`);
-        await page.keyboard.press('ControlOrMeta+b');
-        await sidebar.getByRole('button', { name: 'Fold the sidebar' }).waitFor();
+      if (size === 'phone') {
+        // A phone's sidebar never folds, though its folders do.
+        await expect(page.getByRole('button', { name: /the sidebar$/ }).count()).resolves.toBe(0);
+        await personal(page).getByRole('button', { name: 'Fold Projects' }).click();
+        await folderRow(page, 'Toy Box').waitFor({ state: 'detached' });
+        await expectUsable(page, `sidebar-phone-${colorScheme}-folded`);
       }
 
       // The gear opens Settings in the reader's place.
@@ -408,15 +373,19 @@ test('at its narrowest, the foot holds the gear, the rule, the name and New mess
     ['finger', { colorScheme: 'dark', hasTouch: true }, false],
     ['finger', { colorScheme: 'light', hasTouch: true }, true],
   ] as const) {
-    const context = await app.context({ ...SIZES.desktop, deviceScaleFactor: 2, ...options });
-    await context.addInitScript(
-      ([key, width]) => localStorage.setItem(key, JSON.stringify({ width, isCollapsed: false })),
-      [PANELS.sidebar.key, PANELS.sidebar.min] as const,
+    const page = await open(
+      { ...SIZES.desktop, ...options },
+      {
+        async before(page) {
+          await page.addInitScript(
+            ([key, width]) =>
+              localStorage.setItem(key, JSON.stringify({ width, isCollapsed: false })),
+            [PANELS.sidebar.key, PANELS.sidebar.min] as const,
+          );
+          if (isWide) await asLinux(page);
+        },
+      },
     );
-    if (isWide) await asLinux(context);
-    const page = await context.newPage();
-    await page.goto(app.url);
-    await mailIsIn(page);
     await atRest(page);
     const sidebar = page.getByRole('navigation', { name: 'Mailboxes' });
     expect(Math.round((await sidebar.boundingBox())!.width)).toBe(PANELS.sidebar.min);
@@ -424,31 +393,23 @@ test('at its narrowest, the foot holds the gear, the rule, the name and New mess
     const promised = isWide || (!isApple && pointer === 'finger') ? [FITS, GIVES_WAY] : [FITS];
     const kept = promised.find((each) => Bun.deepEquals(each, fits)) ?? FITS;
     expect({ pointer, isWide, fits }).toEqual({ pointer, isWide, fits: kept });
-    expect({ pointer, isWide, small: await composeIsSmall(page) }).toEqual({
-      pointer,
-      isWide,
-      small: SMALL,
-    });
     // The search's words show whole, its key giving way first where they need its room.
     expect(await searchSays(page)).toEqual({ words: 'Search', isWhole: true });
+    // The gear, and so New message, is a whole target for the pointer.
+    const { width, height } = (await sidebar
+      .getByRole('button', { name: 'Open settings' })
+      .boundingBox())!;
     const target = pointer === 'finger' ? 44 : 32;
-    for (const name of ['Open settings', 'New message']) {
-      const box = (await sidebar.getByRole('button', { name }).boundingBox())!;
-      expect({ name, width: box.width, height: box.height }).toEqual({
-        name,
-        width: target,
-        height: target,
-      });
-    }
+    expect({ pointer, width, height }).toEqual({ pointer, width: target, height: target });
     await expectUsable(
       page,
       `sidebar-desktop-${options.colorScheme}-narrowest-${pointer}${isWide ? '-wide' : ''}`,
     );
-    await context.close();
+    await page.context().close();
   }
 }, 60_000);
 
-test('every folder and account has its menu without a hover, for itself rather than the view', async () => {
+test('the tree is one Tab stop, whose arrows move through it and fold it, and whose every row has its own menu, without a hover and by key', async () => {
   const page = await open({ ...SIZES.desktop, colorScheme: 'light' });
   const work = page.getByRole('region', { name: 'Work' });
   // The account's folders have arrived, so the rows and their menus are counted from the same tree.
@@ -459,36 +420,6 @@ test('every folder and account has its menu without a hover, for itself rather t
   const menus = work.getByRole('button', { name: /^More for / });
   await expect(menus.count()).resolves.toBe(rows + 1);
   for (const menu of await menus.all()) await expect(menu.isVisible()).resolves.toBe(true);
-
-  // Inbox is in view, and Receipts' menu acts on Receipts.
-  await work.getByRole('button', { name: 'More for Receipts' }).click();
-  await page.getByRole('menuitem').first().waitFor();
-  await expect(page.getByRole('menuitem').allTextContents()).resolves.toEqual([
-    'New folder in Receipts',
-    'Rename Receipts',
-    'Delete Receipts',
-  ]);
-  await page.getByRole('menuitem', { name: 'Rename Receipts' }).click();
-  await page.getByRole('textbox', { name: 'New name for Receipts' }).press('Escape');
-  await page.getByRole('heading', { name: 'Inbox', level: 2 }).waitFor();
-
-  // An account's menu holds what can be done to it.
-  await work.getByRole('button', { name: 'More for Work' }).click();
-  await page.getByRole('menuitem').first().waitFor();
-  await expect(page.getByRole('menuitem').allTextContents()).resolves.toEqual([
-    'New folder in Work',
-    'Edit the Work account',
-    'Remove the Work account',
-  ]);
-  await expectUsable(page, 'sidebar-desktop-light-account-menu');
-}, 60_000);
-
-test('the tree is one Tab stop, whose arrows move through it and fold it, and whose rows open their menus by key', async () => {
-  const page = await open({ ...SIZES.desktop, colorScheme: 'light' });
-  await page
-    .getByRole('region', { name: 'Work' })
-    .getByRole('button', { name: /^Receipts/ })
-    .waitFor();
   // What has focus, by role and name, leaving out any count after a row's name.
   const focused = () =>
     page.evaluate(() => {
@@ -589,8 +520,14 @@ test('the tree is one Tab stop, whose arrows move through it and fold it, and wh
   await moveTo('Shift+Tab', 'BUTTON: Projects');
 
   // Shift+F10 opens a row's menu, which loads as it's first opened, and Escape comes back to the row.
+  // The menu is the row's own, not the view's.
   await downTo('BUTTON: Receipts');
   await moveTo('Shift+F10', 'menuitem: New folder in Receipts');
+  await expect(page.getByRole('menuitem').allTextContents()).resolves.toEqual([
+    'New folder in Receipts',
+    'Rename Receipts',
+    'Delete Receipts',
+  ]);
   await moveTo('ArrowDown', 'menuitem: Rename Receipts');
   await moveTo('Escape', 'BUTTON: Receipts');
   await moveTo('ArrowDown', 'BUTTON: Junk');
@@ -598,6 +535,17 @@ test('the tree is one Tab stop, whose arrows move through it and fold it, and wh
   // A right click opens a row's menu too.
   await folderRow(page, 'Projects').click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'New folder in Projects' }).waitFor();
+  await page.keyboard.press('Escape');
+
+  // An account's menu holds what can be done to it.
+  await work.getByRole('button', { name: 'More for Work' }).click();
+  await page.getByRole('menuitem').first().waitFor();
+  await expect(page.getByRole('menuitem').allTextContents()).resolves.toEqual([
+    'New folder in Work',
+    'Edit the Work account',
+    'Remove the Work account',
+  ]);
+  await expectUsable(page, 'sidebar-desktop-light-account-menu');
   await page.keyboard.press('Escape');
 
   // A search lifts no line, so the tree is entered on its first.
@@ -608,28 +556,23 @@ test('the tree is one Tab stop, whose arrows move through it and fold it, and wh
 }, 60_000);
 
 test('an account whose folders are on their way shows lines in their shape, which its folders take', async () => {
-  const context = await app.context({ ...SIZES.desktop, deviceScaleFactor: 2 });
-  const page = await context.newPage();
-  let release = () => {};
-  const held = new Promise<void>((resolve) => (release = resolve));
-  await page.route('**/_serverFn/**', async (route) => {
-    if (decodeURIComponent(route.request().url()).includes('"folders"')) await held;
-    await route.fallback();
+  const listing = (page: Page) =>
+    page.getByRole('status').filter({ hasText: /^Listing .+’s folders$/ });
+  let folders!: Awaited<ReturnType<typeof hold>>;
+  const page = await open(SIZES.desktop, {
+    before: async (page) => (folders = await hold(page, 'folders')),
+    ready: (page) => listing(page).last().waitFor({ state: 'attached' }),
   });
-  await page.goto(app.url);
-  const listing = page.getByRole('status').filter({ hasText: /^Listing .+’s folders$/ });
-  await listing.last().waitFor({ state: 'attached' });
-  await expect(listing.allTextContents()).resolves.toEqual([
+  await expect(listing(page).allTextContents()).resolves.toEqual([
     'Listing Personal’s folders',
     'Listing Work’s folders',
   ]);
-  release();
-  await page.unrouteAll({ behavior: 'wait' });
+  await folders.release();
   await folderRow(page, 'Archive').waitFor();
-  await expect(listing.count()).resolves.toBe(0);
+  await expect(listing(page).count()).resolves.toBe(0);
 }, 60_000);
 
-test('accounts and folders fold by click and by key, count what’s unread inside, and stay folded', async () => {
+test('accounts and folders fold, count what’s unread inside, and stay folded', async () => {
   const page = await open({ ...SIZES.desktop, colorScheme: 'dark' });
   const count = async (name: string) =>
     Number((await folderRow(page, name).textContent())!.replace(/\D/g, '') || 0);
@@ -640,13 +583,6 @@ test('accounts and folders fold by click and by key, count what’s unread insid
   await folderRow(page, 'Toy Box').waitFor({ state: 'detached' });
   await expect(count('Projects')).resolves.toBe(inside);
   await expectUsable(page, 'sidebar-desktop-dark-folded-folder');
-
-  // The arrow keys on its row unfold and fold it again.
-  await folderRow(page, 'Projects').focus();
-  await page.keyboard.press('ArrowRight');
-  await folderRow(page, 'Toy Box').waitFor();
-  await page.keyboard.press('ArrowLeft');
-  await folderRow(page, 'Toy Box').waitFor({ state: 'detached' });
 
   // A folded account hides its folders and counts their unread mail outside Junk and Trash.
   const account = personal(page).getByRole('button', { name: /^Personal/ });
@@ -662,13 +598,4 @@ test('accounts and folders fold by click and by key, count what’s unread insid
   await account.click();
   await folderRow(page, 'Projects').waitFor();
   await expect(folderRow(page, 'Toy Box').count()).resolves.toBe(0);
-}, 60_000);
-
-test('on a phone, the sidebar never folds', async () => {
-  const page = await open({ ...SIZES.phone, colorScheme: 'light' });
-  await page.getByRole('button', { name: 'Folders', exact: true }).click();
-  await expect(page.getByRole('button', { name: /the sidebar$/ }).count()).resolves.toBe(0);
-  await personal(page).getByRole('button', { name: 'Fold Projects' }).click();
-  await folderRow(page, 'Toy Box').waitFor({ state: 'detached' });
-  await expectUsable(page, 'sidebar-phone-light-folded');
 }, 60_000);

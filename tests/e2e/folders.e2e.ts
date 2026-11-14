@@ -1,5 +1,6 @@
 import { expect } from 'bun:test';
-import type { BrowserContextOptions, Page, Route } from 'playwright';
+import type { Page, Request } from 'playwright';
+import { hold } from './helpers.ts';
 import { expectUsable } from './usable.ts';
 import { SIZES, suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
@@ -10,38 +11,24 @@ import { mailIsIn } from '../mailIsIn.ts';
  * server refuses comes back with its reason. A fresh member each run starts from the seeded folders.
  */
 
-const app = suite({ vars: { DEV_MEMBER: `folders-${Date.now()}@trailmix.test` } });
 // A test that fails leaves a screenshot of each page and what it showed, for CI to keep.
-const { test } = app;
-
-async function open(options: BrowserContextOptions): Promise<Page> {
-  const page = await (await app.context({ deviceScaleFactor: 2, ...options })).newPage();
-  await page.goto(app.url);
-  await mailIsIn(page);
-  return page;
-}
+const { test, open } = suite({
+  vars: { DEV_MEMBER: `folders-${Date.now()}@trailmix.test` },
+  scale: 2,
+});
 
 const personal = (page: Page) => page.getByRole('region', { name: 'Personal' });
 const folderRow = (page: Page, name: string) =>
   personal(page).getByRole('button', { name: new RegExp(`^${name}( \\d+)?$`) });
+/** A command, held so that what shows before it’s answered is the page’s own doing. */
+const commands = (request: Request) => request.method() === 'POST';
 
-/** Holds every command this page sends until released, so what shows before is its own doing. */
-async function holdCommands(page: Page): Promise<() => Promise<void>> {
-  let release!: () => void;
-  const released = new Promise<void>((resolve) => (release = resolve));
-  const hold = async (route: Route) => {
-    if (route.request().method() === 'POST') await released;
-    await route.continue().catch(() => {});
-  };
-  await page.route('**/_serverFn/**', hold);
-  return async () => {
-    release();
-    await page.unroute('**/_serverFn/**', hold);
-  };
-}
-
-test('folders are made, nested and renamed in place, and show before the server answers', async () => {
+test('folders are made, nested and renamed in place, in their own account, and show before the server answers', async () => {
   const page = await open({ ...SIZES.desktop, colorScheme: 'light' });
+  // Work has a Receipts of its own, at the path Personal's will take.
+  const work = page.getByRole('region', { name: 'Work' });
+  const worksReceipts = work.getByRole('button', { name: /^Receipts( \d+)?$/ });
+  await worksReceipts.waitFor();
 
   // A name the folder can't take says why, and nothing is sent.
   await page.getByRole('button', { name: 'More for Personal' }).click();
@@ -61,35 +48,40 @@ test('folders are made, nested and renamed in place, and show before the server 
   expect(sent.filter((body) => body.includes('createFolder'))).toEqual([]);
 
   // A new folder shows at once, while its command is still on its way.
-  let release = await holdCommands(page);
-  await field.fill('Trips');
+  let held = await hold(page, commands);
+  await field.fill('Receipts');
   await field.press('Enter');
-  await folderRow(page, 'Trips').waitFor({ timeout: 1_000 });
-  await release();
+  await folderRow(page, 'Receipts').waitFor({ timeout: 1_000 });
+  await held.release();
 
   // Inside the folder in view, from the menu at the end of its row. An empty folder says so.
-  await folderRow(page, 'Trips').click();
-  await page.getByText('Trips is empty', { exact: true }).waitFor();
-  await page.getByRole('button', { name: 'More for Trips' }).click();
-  await page.getByRole('menuitem', { name: 'New folder in Trips' }).click();
-  await page.getByRole('textbox', { name: 'Name of the new folder in Trips' }).fill('Japan');
+  await folderRow(page, 'Receipts').click();
+  await page.getByText('Receipts is empty', { exact: true }).waitFor();
+  const menu = personal(page).getByRole('button', { name: 'More for Receipts' });
+  await menu.click();
+  await page.getByRole('menuitem', { name: 'New folder in Receipts' }).click();
+  await page.getByRole('textbox', { name: 'Name of the new folder in Receipts' }).fill('Japan');
   await page.keyboard.press('Enter');
   await folderRow(page, 'Japan').waitFor();
 
-  // Renamed in place, from the list's folder menu. The view follows it, and Japan goes along.
-  release = await holdCommands(page);
-  await page.getByRole('button', { name: 'Folder', exact: true }).click();
-  await page.getByRole('menuitem', { name: 'Rename Trips' }).click();
-  const renaming = page.getByRole('textbox', { name: 'New name for Trips' });
-  await expect(renaming.inputValue()).resolves.toBe('Trips');
+  // Renamed in place, from the same menu. Only Personal's Receipts takes the field, which keeps the
+  // keys until the name is given. The view follows it, Japan goes along, and Work's stays.
+  held = await hold(page, commands);
+  await menu.click();
+  await page.getByRole('menuitem', { name: 'Rename Receipts' }).click();
+  const renaming = personal(page).getByRole('textbox', { name: 'New name for Receipts' });
+  await expect(renaming.inputValue()).resolves.toBe('Receipts');
+  await expect(renaming.evaluate((input) => input === document.activeElement)).resolves.toBe(true);
+  await expect(work.getByRole('textbox').count()).resolves.toBe(0);
   await expectUsable(page, 'folders-desktop-light-renaming');
   await renaming.fill('Travel');
   await renaming.press('Enter');
   await folderRow(page, 'Travel').waitFor({ timeout: 1_000 });
   await page.getByRole('heading', { name: 'Travel', level: 2 }).waitFor({ timeout: 1_000 });
-  await expect(folderRow(page, 'Trips').count()).resolves.toBe(0);
-  await release();
+  await expect(folderRow(page, 'Receipts').count()).resolves.toBe(0);
+  await held.release();
   await folderRow(page, 'Japan').waitFor();
+  await worksReceipts.waitFor();
   // Once the server has it, a reload shows the same.
   await page.reload();
   await folderRow(page, 'Travel').waitFor({ timeout: 10_000 });
@@ -118,11 +110,11 @@ test('a delete asks first with what goes, comes back with the server’s reason,
   await expectUsable(page, 'folders-desktop-dark-delete-question');
 
   // The demo's server turns the first delete away. The folder goes at once, and comes back.
-  const release = await holdCommands(page);
+  const held = await hold(page, commands);
   await question.getByRole('button', { name: 'Delete' }).click();
   await folderRow(page, 'Projects').waitFor({ state: 'detached', timeout: 1_000 });
   await expect(folderRow(page, 'Toy Box').count()).resolves.toBe(0);
-  await release();
+  await held.release();
   await page
     .getByRole('region', { name: 'Notifications' })
     .getByText('Couldn’t delete Projects. NO [INUSE] Projects is open in another session.')
@@ -164,28 +156,4 @@ test('on a phone, a folder is named in the sidebar', async () => {
   await field.fill('2026');
   await field.press('Enter');
   await folderRow(page, '2026').waitFor();
-}, 60_000);
-
-test('a folder is renamed in its own account, though another account has one at the same path', async () => {
-  const page = await open({ ...SIZES.desktop, colorScheme: 'light' });
-  const work = page.getByRole('region', { name: 'Work' });
-  await work.getByRole('button', { name: /^Receipts( \d+)?$/ }).waitFor();
-  await page.getByRole('button', { name: 'More for Personal' }).click();
-  await page.getByRole('menuitem', { name: 'New folder in Personal' }).click();
-  await page.getByRole('textbox', { name: 'Name of the new folder in Personal' }).fill('Receipts');
-  await page.keyboard.press('Enter');
-  await folderRow(page, 'Receipts').waitFor();
-
-  // Only Personal's Receipts takes the field, which keeps the keys until the name is given.
-  await personal(page).getByRole('button', { name: 'More for Receipts' }).click();
-  await page.getByRole('menuitem', { name: 'Rename Receipts' }).click();
-  const renaming = personal(page).getByRole('textbox', { name: 'New name for Receipts' });
-  await renaming.waitFor({ timeout: 1_000 });
-  await expect(renaming.evaluate((input) => input === document.activeElement)).resolves.toBe(true);
-  await expect(work.getByRole('textbox').count()).resolves.toBe(0);
-  await renaming.fill('Bills');
-  await renaming.press('Enter');
-  await folderRow(page, 'Bills').waitFor();
-  await expect(folderRow(page, 'Receipts').count()).resolves.toBe(0);
-  await work.getByRole('button', { name: /^Receipts( \d+)?$/ }).waitFor();
 }, 60_000);
