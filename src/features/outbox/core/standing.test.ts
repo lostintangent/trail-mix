@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { Outgoing } from '../../mail/core/index.ts';
+import { at, draft, iso } from '../../../../tests/outbox.ts';
 import { begin, schedule, submitted } from './outbox.ts';
 import {
   briefly,
@@ -17,15 +18,10 @@ import {
   standingOfWait,
 } from './standing.ts';
 
-const T0 = Date.parse('2026-11-10T09:00:00.000Z');
-/** The time `seconds` after nine. */
-const at = (seconds: number) => T0 + seconds * 1000;
-const iso = (seconds: number) => new Date(at(seconds)).toISOString();
-
 const mina = { name: 'Mina Okafor', email: 'mina@example.com' };
 const entry = {
   id: 'one',
-  draft: { account: 'personal', path: 'Drafts', uidValidity: 7, uid: 42 },
+  draft,
   messageId: '<one@trailmix.invalid>',
   to: [mina],
   subject: 'Lunch',

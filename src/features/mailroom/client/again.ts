@@ -30,19 +30,18 @@ const LONGEST_WAIT_MS = 30_000;
 /** Waits `ms`, or until the network comes back, the page is seen again or `signal` aborts. */
 function chance(ms: number, signal: AbortSignal | undefined): Promise<void> {
   return new Promise((resolve) => {
+    const waiting = new AbortController();
     const seen = () => {
       if (document.visibilityState === 'visible') done();
     };
     const done = () => {
       clearTimeout(timer);
-      removeEventListener('online', done);
-      document.removeEventListener('visibilitychange', seen);
-      signal?.removeEventListener('abort', done);
+      waiting.abort();
       resolve();
     };
     const timer = setTimeout(done, ms);
-    addEventListener('online', done);
-    document.addEventListener('visibilitychange', seen);
-    signal?.addEventListener('abort', done);
+    addEventListener('online', done, { signal: waiting.signal });
+    document.addEventListener('visibilitychange', seen, { signal: waiting.signal });
+    signal?.addEventListener('abort', done, { signal: waiting.signal });
   });
 }

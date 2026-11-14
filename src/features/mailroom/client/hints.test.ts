@@ -35,7 +35,6 @@ beforeAll(() => {
   browser.document = {
     visibilityState: 'visible',
     addEventListener() {},
-    removeEventListener() {},
   };
 });
 afterAll(() => Object.assign(browser, held));

@@ -19,8 +19,6 @@ export const keys = {
   signIns: ['accounts', 'sign-ins'],
   // How the deployment is set up, which no hint changes.
   signInPresets: ['sign-in-presets'],
-  // As `notified` is without an endpoint, since the Mailroom answers both alike, so it's asked once.
-  thisDevice: ['this-device', null],
   folders: ['folders'],
   outbox: ['outbox'],
   /** Under this device, so an erase, which makes the Mailroom anew, asks again. */
@@ -96,12 +94,6 @@ export const signInPresetsQuery = queryOptions({
   queryFn: () => mailroom.signInPresets(),
 });
 
-/** What this device keeps of the Mailroom, which changes only when the Mailroom is made anew. */
-export const thisDeviceQuery = queryOptions({
-  queryKey: keys.thisDevice,
-  queryFn: () => mailroom.thisDevice(),
-});
-
 /**
  * Whether the device at `endpoint` is notified, and the key a device subscribes with, which is
  * absent where notifications are off. Without an endpoint, a device isn't subscribed.
@@ -111,6 +103,12 @@ export const notifiedQuery = (endpoint: string | undefined) =>
     queryKey: keys.notified(endpoint),
     queryFn: () => mailroom.thisDevice(endpoint),
   });
+
+/**
+ * What this device keeps of the Mailroom, which changes only when the Mailroom is made anew. It's
+ * `notified` without an endpoint, since the Mailroom answers both alike, so it's asked once.
+ */
+export const thisDeviceQuery = notifiedQuery(undefined);
 
 export const foldersQuery = queryOptions({
   queryKey: keys.folders,

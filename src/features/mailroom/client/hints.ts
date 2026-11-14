@@ -61,7 +61,7 @@ export function listen(queryClient: QueryClient): () => void {
   let socket: WebSocket | undefined;
   let retry: ReturnType<typeof setTimeout> | undefined;
   let failures = 0;
-  let isDone = false;
+  const listening = new AbortController();
   /** Hints heard since the last refetch, waiting for theirs, and when that refetch started. */
   let waiting: Hint[] = [];
   let refetching: ReturnType<typeof setTimeout> | undefined;
@@ -84,7 +84,7 @@ export function listen(queryClient: QueryClient): () => void {
 
   const connect = () => {
     clearTimeout(retry);
-    if (isDone || (socket && socket.readyState <= WebSocket.OPEN)) return;
+    if (listening.signal.aborted || (socket && socket.readyState <= WebSocket.OPEN)) return;
     socket = new WebSocket(new URL('/updates', location.href.replace(/^http/, 'ws')));
     socket.onopen = () => {
       failures = 0;
@@ -97,7 +97,7 @@ export function listen(queryClient: QueryClient): () => void {
     socket.onclose = () => {
       // Closed before it ever opened, it may never open, and the page has nothing more to wait for.
       caught.now();
-      if (!isDone) retry = setTimeout(connect, retryDelay(failures++));
+      if (!listening.signal.aborted) retry = setTimeout(connect, retryDelay(failures++));
     };
   };
 
@@ -105,17 +105,15 @@ export function listen(queryClient: QueryClient): () => void {
   const reconnect = () => {
     if (document.visibilityState === 'visible') connect();
   };
-  addEventListener('online', reconnect);
-  document.addEventListener('visibilitychange', reconnect);
+  addEventListener('online', reconnect, { signal: listening.signal });
+  document.addEventListener('visibilitychange', reconnect, { signal: listening.signal });
   connect();
 
   return () => {
-    isDone = true;
+    listening.abort();
     clearTimeout(retry);
     clearTimeout(refetching);
     socket?.close();
-    removeEventListener('online', reconnect);
-    document.removeEventListener('visibilitychange', reconnect);
   };
 }
 
