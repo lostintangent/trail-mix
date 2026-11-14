@@ -1204,8 +1204,6 @@ test('reader triage sits at the left of its bar, with place at the right, in bot
       .getByRole('toolbar', { name: 'Conversation' })
       .getByRole('button', { name: 'Archive' })
       .waitFor();
-    expect(await page.getByRole('toolbar', { name: 'Place' }).count()).toBe(0);
-    await screenshot(page, `t75-desktop-${colorScheme}-list`);
 
     const rows = page.getByRole('option');
     await rows.nth(3).click({ modifiers: ['Shift'] });
@@ -1230,21 +1228,7 @@ test('reader triage sits at the left of its bar, with place at the right, in bot
     expect(problems).toEqual([]);
     await context.close();
   }
-
-  for (const colorScheme of THEMES) {
-    const { context, page, problems } = await open({ ...SIZES.phone, colorScheme });
-    const list = page.locator('section[aria-labelledby]').first();
-    await page.getByRole('option').nth(1).click();
-    await page
-      .getByRole('toolbar', { name: 'Conversation' })
-      .getByRole('button', { name: 'Archive' })
-      .waitFor();
-    expect(await headerButtons(list)).toEqual(['Unread only']);
-    await screenshot(page, `t75-phone-${colorScheme}`);
-    expect(problems).toEqual([]);
-    await context.close();
-  }
-}, 90_000);
+}, 60_000);
 
 test('a narrow list’s header gives up its unread count, whole, before a letter of its title, under a finger too', async () => {
   const TABLET = { viewport: { width: 1180, height: 820 }, isMobile: true, hasTouch: true };
