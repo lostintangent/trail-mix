@@ -140,7 +140,7 @@ function visitorSignIn(secret: string, gate: VisitorGate): SignIn {
     return {
       member: `${id}@${VISITOR_DOMAIN}`,
       isLetIn: isLetIn(letIn, Date.now()),
-      setCookie: `${VISITOR_COOKIE}=${value}.${base64Url(signature)}; Max-Age=${VISITOR_SECONDS}; Path=/; Secure; HttpOnly; SameSite=Lax`,
+      setCookie: `${VISITOR_COOKIE}=${value}.${signature.toBase64({ alphabet: 'base64url', omitPadding: true })}; Max-Age=${VISITOR_SECONDS}; Path=/; Secure; HttpOnly; SameSite=Lax`,
     };
   };
 }
@@ -152,10 +152,7 @@ const NEW = 'new';
 const isLetIn = (letIn: number | undefined, now: number) =>
   letIn !== undefined && now / 1000 - letIn < VISITOR_SECONDS;
 
-const newVisitorId = () =>
-  [...crypto.getRandomValues(new Uint8Array(16))]
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('');
+const newVisitorId = () => crypto.getRandomValues(new Uint8Array(16)).toHex();
 
 /**
  * The visitor a request's cookie names, and when the gate last let them in, in seconds since the
@@ -173,9 +170,7 @@ async function heldVisitor(
   const [, id, state, signature] =
     /^([0-9a-f]{32})\.(new|\d{1,12})\.([\w-]{43})$/.exec(value ?? '') ?? [];
   if (!id || !state || !signature) return undefined;
-  const bytes = Uint8Array.from(atob(signature.replace(/-/g, '+').replace(/_/g, '/')), (c) =>
-    c.charCodeAt(0),
-  );
+  const bytes = Uint8Array.fromBase64(signature, { alphabet: 'base64url' });
   const isSigned = await crypto.subtle.verify('HMAC', key, bytes, signed(`${id}.${state}`));
   if (!isSigned) return undefined;
   return state === NEW ? { id } : { id, letIn: Number(state) };
@@ -217,12 +212,6 @@ const visitorKey = memoized((secret) =>
     ['sign', 'verify'],
   ),
 );
-
-const base64Url = (bytes: Uint8Array) =>
-  btoa(String.fromCharCode(...bytes))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
 
 /**
  * On a developer's machine there is one member, and only for requests addressed to localhost. The
