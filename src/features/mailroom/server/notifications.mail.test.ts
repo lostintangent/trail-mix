@@ -52,7 +52,7 @@ describe('The Mailroom, notifying devices', () => {
     opened += pushes.length;
     const from = service.received.length;
     for (const { url, headers, body } of pushes) {
-      const bytes = Uint8Array.from(atob(body), (c) => c.charCodeAt(0));
+      const bytes = Uint8Array.fromBase64(body);
       await service.post(new Request(url, { method: 'POST', headers, body: bytes }));
     }
     return service.received.slice(from);
@@ -129,7 +129,8 @@ describe('The Mailroom, notifying devices', () => {
   test('a device its push can’t be sealed for costs the other devices nothing', async () => {
     const broken = 'https://push.example/devices/broken';
     // A point that isn't on the curve, which no browser makes, so sealing a push for it throws.
-    const p256dh = btoa(String.fromCharCode(4, ...Array<number>(64).fill(0))).replace(/=+$/, '');
+    const point = Uint8Array.of(4, ...new Uint8Array(64));
+    const p256dh = point.toBase64({ alphabet: 'base64url', omitPadding: true });
     await nia.call('notifyUnchecked', {
       endpoint: broken,
       keys: { p256dh, auth: 'AAAAAAAAAAAAAAAAAAAAAA' },

@@ -300,11 +300,10 @@ export class TestMailroom extends Mailroom {
 
   /** Keeps each push as it would have gone, for a test's stand-in push service to open. */
   protected override async postPush(request: Request): Promise<Response> {
-    const body = new Uint8Array(await request.arrayBuffer());
     this.pushed.push({
       url: request.url,
       headers: [...request.headers],
-      body: btoa(String.fromCharCode(...body)),
+      body: new Uint8Array(await request.arrayBuffer()).toBase64(),
     });
     return new Response(null, { status: this.pushAnswer });
   }
