@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { Plugin } from 'vite';
+import { loadedAlongside } from './chunks.ts';
 
 const DIST = '/@astryxdesign/core/dist/';
 const USE_THEME = `${DIST}theme/useTheme.js`;
@@ -57,30 +58,10 @@ export function astryxUseTheme(): Plugin {
       return next === null ? null : { code: next, map: null };
     },
     generateBundle(_, bundle) {
-      const chunks = Object.values(bundle).flatMap((output) =>
-        output.type === 'chunk' ? [output] : [],
-      );
-      const holding = (end: string) =>
-        chunks.filter((chunk) =>
-          Object.entries(chunk.modules).some(
-            ([id, rendered]) => id.endsWith(end) && rendered.renderedLength > 0,
-          ),
-        );
-      const [first] = holding(USE_THEME);
-      if (!first) return;
-      const loaded = new Set<string>();
-      const next = [first.fileName];
-      for (let name = next.pop(); name !== undefined; name = next.pop()) {
-        if (loaded.has(name)) continue;
-        loaded.add(name);
-        const output = bundle[name];
-        if (output?.type === 'chunk') next.push(...output.imports);
-      }
-      const generator = holding(GENERATOR).find((chunk) => loaded.has(chunk.fileName));
-      if (generator) {
+      for (const { fileName } of loadedAlongside(bundle, USE_THEME, [GENERATOR])) {
         this.error(
-          `Astryx's theme generator is in ${generator.fileName}, which loads with useTheme.js, ` +
-            'so it is back on the first load.',
+          `Astryx's theme generator is in ${fileName}, which loads with useTheme.js, so it is ` +
+            'back on the first load.',
         );
       }
     },

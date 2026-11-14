@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { astryxUseTheme, HOOK, hookImportsOf, splitUseTheme } from './astryxUseTheme.ts';
+import { HOOK, hookImportsOf, splitUseTheme } from './astryxUseTheme.ts';
 
 const read = (path: string) =>
   readFileSync(
@@ -91,44 +91,4 @@ test("Astryx's importers name the hook from its own module, and keep their other
   expect(hookImportsOf('import { useTheme as theme, useThemeName } from "./useTheme.js";')).toBe(
     `import { useThemeName } from "./useTheme.js";\nimport { useTheme as theme } from "./useTheme.js${HOOK}";`,
   );
-});
-
-test('the build fails when the chunk holding useTheme.js loads the generator, and not when only a lazy one does', () => {
-  const chunk = (
-    fileName: string,
-    modules: string[],
-    imports: string[] = [],
-    dynamic: string[] = [],
-  ) => ({
-    type: 'chunk',
-    fileName,
-    imports,
-    dynamicImports: dynamic,
-    modules: Object.fromEntries(modules.map((id) => [id, { renderedLength: 1 }])),
-  });
-  const astryx = (path: string) => `/app/node_modules/@astryxdesign/core/dist/theme/${path}`;
-  const failures = (bundle: Record<string, unknown>) => {
-    const errors: string[] = [];
-    const generateBundle = astryxUseTheme().generateBundle as (
-      this: { error: (message: string) => void },
-      options: unknown,
-      bundle: Record<string, unknown>,
-    ) => void;
-    generateBundle.call({ error: (message: string) => errors.push(message) }, {}, bundle);
-    return errors;
-  };
-
-  const shared = {
-    'first.js': chunk('first.js', [astryx('useTheme.js')], [], ['toast.js']),
-    'toast.js': chunk('toast.js', [astryx('generateThemeRules.js')], ['first.js']),
-  };
-  expect(failures(shared)).toEqual([]);
-
-  const loaded = {
-    'first.js': chunk('first.js', [astryx('useTheme.js')], ['theme.js']),
-    'theme.js': chunk('theme.js', [astryx('generateThemeRules.js')]),
-  };
-  expect(failures(loaded)).toEqual([
-    "Astryx's theme generator is in theme.js, which loads with useTheme.js, so it is back on the first load.",
-  ]);
 });

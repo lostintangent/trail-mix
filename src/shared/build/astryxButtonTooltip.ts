@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { parseAst, type Plugin } from 'vite';
+import { loadedAlongside } from './chunks.ts';
 
 const DIST = '/@astryxdesign/core/dist/';
 const BUTTON = `${DIST}Button/Button.js`;
@@ -38,33 +39,11 @@ export function astryxButtonTooltip(): Plugin {
       }
     },
     generateBundle(_, bundle) {
-      const chunks = Object.values(bundle).flatMap((output) =>
-        output.type === 'chunk' ? [output] : [],
-      );
-      const holding = (end: string) =>
-        chunks.filter((chunk) =>
-          Object.entries(chunk.modules).some(
-            ([id, rendered]) => id.endsWith(end) && rendered.renderedLength > 0,
-          ),
+      for (const { end, fileName } of loadedAlongside(bundle, BUTTON, LATER)) {
+        this.error(
+          `Astryx's ${end.slice(DIST.length)} is in ${fileName}, which loads with Button.js, so ` +
+            'the tooltip is back on the first load.',
         );
-      const [first] = holding(BUTTON);
-      if (!first) return;
-      const loaded = new Set<string>();
-      const next = [first.fileName];
-      for (let name = next.pop(); name !== undefined; name = next.pop()) {
-        if (loaded.has(name)) continue;
-        loaded.add(name);
-        const output = bundle[name];
-        if (output?.type === 'chunk') next.push(...output.imports);
-      }
-      for (const end of LATER) {
-        const tooltip = holding(end).find((chunk) => loaded.has(chunk.fileName));
-        if (tooltip) {
-          this.error(
-            `Astryx's ${end.slice(DIST.length)} is in ${tooltip.fileName}, which loads with ` +
-              'Button.js, so the tooltip is back on the first load.',
-          );
-        }
       }
     },
   };

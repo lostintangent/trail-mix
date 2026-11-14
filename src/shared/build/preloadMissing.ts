@@ -1,4 +1,5 @@
 import type { Plugin } from 'vite';
+import { loadedWith, type Output } from './chunks.ts';
 
 /**
  * Keeps each dynamic import's preload list to the chunks its importer can lack. Vite lists every
@@ -19,23 +20,14 @@ export function preloadMissing(): Plugin {
         const { build } = this.environment.config;
         if (build.modulePreload === false) return;
         const lacks = lacking(bundle);
-        const given = build.modulePreload.resolveDependencies;
         build.modulePreload = {
           ...build.modulePreload,
-          resolveDependencies: (file, deps, context) => {
-            const lacked = lacks(deps, context.hostId);
-            return given ? given(file, lacked, context) : lacked;
-          },
+          resolveDependencies: (_, deps, { hostId }) => lacks(deps, hostId),
         };
       },
     },
   };
 }
-
-/** What `lacking` reads of each file Rolldown writes. */
-type Output =
-  | { type: 'chunk'; fileName: string; imports: readonly string[] }
-  | { type: 'asset'; fileName: string };
 
 /**
  * Which of a dynamic import's deps its importer, `host`, can lack: all but itself and the chunks it
@@ -46,22 +38,9 @@ export function lacking(
   bundle: Readonly<Record<string, Output>>,
 ): (deps: readonly string[], host: string) => string[] {
   const loaded = new Map<string, ReadonlySet<string>>();
-  const loadedBy = (host: string) => {
-    const known = loaded.get(host);
-    if (known) return known;
-    const reached = new Set<string>();
-    const next = [host];
-    for (let file = next.pop(); file !== undefined; file = next.pop()) {
-      const chunk = bundle[file];
-      if (reached.has(file) || chunk?.type !== 'chunk') continue;
-      reached.add(file);
-      next.push(...chunk.imports);
-    }
-    loaded.set(host, reached);
-    return reached;
-  };
   return (deps, host) => {
-    const have = loadedBy(host);
+    let have = loaded.get(host);
+    if (!have) loaded.set(host, (have = loadedWith(bundle, host)));
     return deps.filter((dep) => !have.has(dep));
   };
 }
