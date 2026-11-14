@@ -714,15 +714,15 @@ export function Workbench({
 
   // The registry: every command the workbench can run now, gathered from each feature, which binds
   // their keys and feeds the palette and the shortcut sheet.
-  const active = placeOf(selection.active);
-  const stepTo = (at: number) => {
-    const row = conversations?.[at];
+  // A move steps to the row either side, or to the thread either side while a thread is open.
+  const stepBy = (by: 1 | -1) => {
+    if (thread !== undefined) {
+      const row = inBundle.threads?.[threadAt + by];
+      return row && (() => openThread(row.id));
+    }
+    const { at, after } = placeOf(selection.active);
+    const row = conversations?.[by > 0 ? after : at - 1];
     return row && (() => pick(row.id, 'only'));
-  };
-  // While a thread is open, the moves step through its bundle's threads instead.
-  const stepToThread = (at: number) => {
-    const row = inBundle.threads?.[at];
-    return row && (() => openThread(row.id));
   };
   // In the dark theme, light paper for the conversation open, which a search may have left the list.
   // It reads the conversation as the reader fetched it, and never asks itself, so a held key that
@@ -784,20 +784,8 @@ export function Workbench({
   const commands = useSteadyCommands([
     ...(isBehindComposer ? [] : selectedCommands),
     ...workbenchCommands({
-      next: isOverReader
-        ? undefined
-        : thread !== undefined
-          ? stepToThread(threadAt + 1)
-          : stepTo(active.after),
-      previous: isOverReader
-        ? undefined
-        : thread !== undefined
-          ? threadAt > 0
-            ? stepToThread(threadAt - 1)
-            : undefined
-          : active.at > 0
-            ? stepTo(active.at - 1)
-            : undefined,
+      next: isOverReader ? undefined : stepBy(1),
+      previous: isOverReader ? undefined : stepBy(-1),
       back:
         backTo &&
         {
