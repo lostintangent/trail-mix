@@ -40,7 +40,7 @@ export function LaterTooltip({
 }
 
 /** What Astryx's `Button` reads of its tooltip hook. */
-export type ButtonTooltip = Pick<TooltipReturn, 'ref' | 'renderTooltip'> & {
+type ButtonTooltip = Pick<TooltipReturn, 'ref' | 'renderTooltip'> & {
   describedBy: string | undefined;
 };
 

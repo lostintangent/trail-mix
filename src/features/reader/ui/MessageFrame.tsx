@@ -35,7 +35,7 @@ import { hearsListeners, returnFocusFrom } from './focus.ts';
  * A document keeps every content security policy it was ever given, so a document after the first,
  * as when the sender's images are allowed or the theme changes, is written into a new frame.
  */
-export const FRAME_SANDBOX = 'allow-same-origin allow-popups allow-popups-to-escape-sandbox';
+const FRAME_SANDBOX = 'allow-same-origin allow-popups allow-popups-to-escape-sandbox';
 
 /**
  * Where keys pressed inside a message go. Once the member clicks into a message, its frame has the
@@ -44,7 +44,7 @@ export const FRAME_SANDBOX = 'allow-same-origin allow-popups allow-popups-to-esc
  */
 export const MessageKeys = createContext<(event: KeyboardEvent) => void>(() => {});
 
-export type MessageFrameProps = {
+type MessageFrameProps = {
   mail: SafeMail;
   quotes: FrameLook['quotes'];
   /** Names the frame for assistive technology, as "Message from Ada Park". */

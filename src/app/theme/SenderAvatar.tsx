@@ -75,7 +75,7 @@ export function SenderAvatar({
  * Up to two letters for a name: the first of its first word and of its last, as Astryx's Avatar
  * takes them. Words are runs that start with a letter or a digit, so an address gives its first.
  */
-export function initialsOf(name: string): string {
+function initialsOf(name: string): string {
   const words = name.split(/\s+/).filter((word) => /^[\p{L}\p{N}]/u.test(word));
   const [first, last] = [words[0], words.length > 1 ? words.at(-1) : undefined];
   return [first, last]

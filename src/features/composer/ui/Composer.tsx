@@ -70,7 +70,7 @@ export type Compose =
 /** How the workbench's Send reaches the open composer: a time to send at, or now. */
 export type Sender = { current: ((at?: string) => void) | undefined };
 
-export type ComposerProps = {
+type ComposerProps = {
   compose: Compose;
   accounts: readonly Account[];
   /**

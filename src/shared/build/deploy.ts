@@ -24,7 +24,7 @@ import { join } from 'node:path';
  */
 
 /** The secrets a deployment makes for itself. */
-export type MadeSecret = 'CREDENTIALS_KEY' | 'PUSH_KEY' | 'VISITOR_KEY';
+type MadeSecret = 'CREDENTIALS_KEY' | 'PUSH_KEY' | 'VISITOR_KEY';
 
 /** A built Worker's configuration, as much of it as a deploy reads. */
 export type Built = {
@@ -150,7 +150,7 @@ export function commitOf(env: NodeJS.ProcessEnv, git = gitCommit): string {
   return env.WORKERS_CI_COMMIT_SHA || env.GITHUB_SHA || git() || 'development';
 }
 
-export type Deploy = {
+type Deploy = {
   /** The built Worker's configuration. */
   config: string;
   /** More arguments for `wrangler deploy`, such as `--var NAME:value` or `--dry-run`. */

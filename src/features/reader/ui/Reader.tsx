@@ -42,7 +42,7 @@ import { displayName, MessageSheet, when } from './MessageSheet.tsx';
 import { refKey, refOf } from './refs.ts';
 import { imagesAllowed, safeMail } from './safeMail.ts';
 
-export type ReaderProps = {
+type ReaderProps = {
   /** One conversation's messages, in any order. */
   conversation: Message[];
   account: Account;

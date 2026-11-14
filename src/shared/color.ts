@@ -5,7 +5,7 @@
  */
 
 /** A color in OKLCH: lightness 0 to 1, chroma, and hue in degrees. */
-export type Oklch = { l: number; c: number; h: number };
+type Oklch = { l: number; c: number; h: number };
 
 /** A color in sRGB, each channel 0 to 1. */
 export type Rgb = { r: number; g: number; b: number };

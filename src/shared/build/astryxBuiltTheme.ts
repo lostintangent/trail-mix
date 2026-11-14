@@ -12,7 +12,7 @@ const LEFT_OUT =
  * build` has already written to the theme's stylesheet. `tokens` stays as an empty object, since
  * `useTheme` resolves them, and the toasts that call it read only its mode.
  */
-export const GENERATOR_FIELDS = [
+const GENERATOR_FIELDS = [
   'tokens',
   'components',
   '__onDark',
@@ -25,7 +25,7 @@ export const GENERATOR_FIELDS = [
  * The Astryx modules the build ships that read the theme object, and what each reads. All of it
  * stays in a built theme, apart from the tokens `useTheme` resolves, which none of them use.
  */
-export const THEME_READERS: Record<string, string> = {
+const THEME_READERS: Record<string, string> = {
   'Icon/globalIconRegistry.js': 'icons',
   'Indicator/indicatorRegistry.js': 'indicators',
   'Toast/Toast.js': "useTheme's mode",

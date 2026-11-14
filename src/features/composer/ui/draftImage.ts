@@ -11,7 +11,7 @@ import { NodeSelection, TextSelection } from '@tiptap/pm/state';
  * left out. Markdown's `![…](…)` by any other address stays the words it is, since dropping them
  * would lose what the member wrote.
  */
-export const isDraftImage = (src: string | null | undefined) => /^cid:/i.test(src?.trim() ?? '');
+const isDraftImage = (src: string | null | undefined) => /^cid:/i.test(src?.trim() ?? '');
 
 /**
  * An image node that shows only what the draft holds, as `imageUrl` resolves it. Its `src` stays

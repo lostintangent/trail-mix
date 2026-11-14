@@ -14,7 +14,7 @@ export const ACCENT_STORAGE_KEY = 'trail-mix.accent';
 export const ACCENT_STYLE_ID = 'trail-mix-accent';
 
 /** What a device keeps for a picked accent. */
-export type SavedAccent = { color: string; css: string };
+type SavedAccent = { color: string; css: string };
 
 /** The picked accent as `#rrggbb`, or undefined for the default. */
 export function readAccent(): string | undefined {

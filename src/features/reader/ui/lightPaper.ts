@@ -14,7 +14,7 @@ import { isLightPaper } from '../core/lightPaper.ts';
  */
 
 /** One choice of paper: a sender's mail on an account, on light paper or darkened. */
-export type LightPaper = { account: Account['id']; sender: string; on: boolean };
+type LightPaper = { account: Account['id']; sender: string; on: boolean };
 
 /**
  * Chooses light paper for a sender on an account, or darkens their mail again. The account shows

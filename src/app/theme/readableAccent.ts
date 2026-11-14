@@ -23,7 +23,7 @@ import { DESK, MUTED_ALPHA, PANE, PAPER, type Halves } from './palette.ts';
 export type Theme = keyof Halves;
 
 /** The tokens an accent sets in one theme, as CSS colors. */
-export type AccentTokens = { accent: string; onAccent: string; muted: string };
+type AccentTokens = { accent: string; onAccent: string; muted: string };
 
 /** 4.5:1, with room for a browser that blends the muted tint a shade differently. */
 const READABLE = 4.55;

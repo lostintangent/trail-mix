@@ -8,7 +8,7 @@
  */
 
 /** Plain text split at its trailing quote. `quote` is empty when nothing folds. */
-export type FoldedText = { text: string; quote: string };
+type FoldedText = { text: string; quote: string };
 
 export function foldQuote(text: string): FoldedText {
   const lines = text.split(/\r\n|\r|\n/);
@@ -26,7 +26,7 @@ export function foldQuote(text: string): FoldedText {
  */
 export type QuoteMarker = 'quote' | 'rest';
 
-export type ElementTraits = { tag: string; id: string; className: string; type: string };
+type ElementTraits = { tag: string; id: string; className: string; type: string };
 
 export function quoteMarker({ tag, id, className, type }: ElementTraits): QuoteMarker | null {
   if (REST_IDS.has(id.replace(/^x_/, ''))) return 'rest';

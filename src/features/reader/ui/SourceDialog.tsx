@@ -17,7 +17,7 @@ import { refOf } from './refs.ts';
 /** The most of a message's source shown here. The whole of it stays a download away. */
 const SHOWN = 512 * 1024;
 
-export type SourceDialogProps = { message: Message; onClose: () => void };
+type SourceDialogProps = { message: Message; onClose: () => void };
 
 /**
  * A message's headers and raw source, as text. Both come from the message as received, and React

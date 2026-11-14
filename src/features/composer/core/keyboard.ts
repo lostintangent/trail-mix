@@ -6,7 +6,7 @@
  * bottom rises above the keyboard. A pinch zoom shrinks the visual viewport too, but then the
  * member is looking closer, not typing, so the sheet stays where it is.
  */
-export type VisualViewport = { offsetTop: number; height: number; scale: number };
+type VisualViewport = { offsetTop: number; height: number; scale: number };
 
 export type Band = { top: number; bottom: number };
 

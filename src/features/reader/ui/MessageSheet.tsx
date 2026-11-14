@@ -37,7 +37,7 @@ import { refOf } from './refs.ts';
 import { imagesAllowed, safeMail } from './safeMail.ts';
 import { Unsubscribe } from './Unsubscribe.tsx';
 
-export type MessageSheetProps = {
+type MessageSheetProps = {
   message: Message;
   account: Account;
   /** What can be done with this message: a reply, beside its sender, and the rest in a menu. */

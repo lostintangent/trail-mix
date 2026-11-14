@@ -14,5 +14,3 @@ export {
 export { askAhead } from './ui/ahead.ts';
 export { BundleSkeleton, ReaderSkeleton } from './ui/skeletons.tsx';
 export { ConversationUnopened } from './ui/Unopened.tsx';
-export type { BundleReaderProps } from './ui/BundleReader.tsx';
-export type { ReaderProps } from './ui/Reader.tsx';

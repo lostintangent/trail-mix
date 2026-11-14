@@ -66,7 +66,7 @@ export function isPaperWhite(color: Rgb): boolean {
 export const SHADED = 1.4;
 
 /** How a background mail paints shows in the dark theme. */
-export type Shading =
+type Shading =
   /** White paper, which becomes the theme's. */
   | { as: 'paper' }
   /** A light background, darkened in its own hue. */
@@ -139,7 +139,7 @@ const COLORED = new Set(['background-color', 'background-image', ...LINES]);
 export type Adapted = { changed: boolean; needsInk: boolean };
 
 /** Declarations a legacy color attribute adds to its element's style, as `adapt` would write them. */
-export type FromAttribute = { declarations: [name: string, value: string][]; needsInk: boolean };
+type FromAttribute = { declarations: [name: string, value: string][]; needsInk: boolean };
 
 /**
  * What a walk through a message learns about its colors, and the rewrites that let them read on
@@ -348,7 +348,7 @@ function legacyColor(value: string, read: ColorReader): string | undefined {
   return /^[0-9a-f]{6}$/i.test(trimmed) ? `#${trimmed}` : undefined;
 }
 
-export type ColorReader = (css: string) => Seen | undefined;
+type ColorReader = (css: string) => Seen | undefined;
 
 /**
  * Reads any CSS color as the browser does, by drawing it: whatever its space, it comes back as the

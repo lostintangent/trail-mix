@@ -284,7 +284,7 @@ export type FrameLook = {
  * written in. Long mail comes in two: its start, with the head, which is laid out and shown at once,
  * and the rest, written once the member stays on it. Short mail is all `start`.
  */
-export type FrameDocument = { start: string; rest: string };
+type FrameDocument = { start: string; rest: string };
 
 /** How much of long mail is written first: several screens of most mail, a few kilobytes of it. */
 export const FIRST_PART = 32_000;

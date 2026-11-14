@@ -1,5 +1,5 @@
 /** How long after the first screen mounts code it can do without starts loading. */
-export const AFTER_FIRST_SCREEN_MS = 1_000;
+const AFTER_FIRST_SCREEN_MS = 1_000;
 
 /**
  * Runs `load` once the first screen has had its moment and then the browser is idle. Idle alone

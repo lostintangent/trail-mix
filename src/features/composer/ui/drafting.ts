@@ -22,7 +22,7 @@ const RETRIES_ONCE_CLOSED = 2;
 export type SaveState = 'unsaved' | 'saving' | 'saved' | 'failed';
 
 /** What the composer showing a message hears of its saves. */
-export type Showing = {
+type Showing = {
   onState: (state: SaveState) => void;
   /** Each draft a save makes, and the one it replaced, as soon as the Mailroom answers. */
   onDraft: (saved: MessageRef, replaced: MessageRef | undefined) => void;

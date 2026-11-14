@@ -35,7 +35,7 @@ import { issueStyles, threadStyles } from './layout.ts';
 import { metaStyles } from './meta.ts';
 import { ThreadSkeleton } from './skeletons.tsx';
 
-export type BundleReaderProps = {
+type BundleReaderProps = {
   bundle: BundleSummary;
   /** Its threads, newest first, at their true count, with the places of those on their way empty. */
   threads: Listed<ConversationSummary>;
