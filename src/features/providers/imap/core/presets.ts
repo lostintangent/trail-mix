@@ -1,3 +1,4 @@
+import { isLoopback } from '../../../../shared/public-host.ts';
 import { namesThisMachine, type DeviceSignIn } from './device-sign-in.ts';
 
 /** Where a host listens. Implicit TLS when `secure`, STARTTLS otherwise. */
@@ -81,7 +82,7 @@ export type PresetName = keyof typeof PRESETS;
  */
 export function authServersFor(host: string, standIn?: string): readonly string[] {
   const name = host.toLowerCase().replace(/\.$/, '');
-  if (LOOPBACK.includes(name)) {
+  if (isLoopback(name)) {
     const names = standInOf(standIn)[name];
     return Array.isArray(names)
       ? names.filter((each): each is string => typeof each === 'string')
@@ -94,8 +95,6 @@ export function authServersFor(host: string, standIn?: string): readonly string[
   }
   return [];
 }
-
-const LOOPBACK = ['localhost', '127.0.0.1', '::1'];
 
 /**
  * A preset with a test's stand-ins for its vendor, given as JSON: where it signs in, and its hosts,
@@ -121,7 +120,7 @@ function isLocal(value: unknown): value is Endpoint {
   const { host, port, secure } = (value ?? {}) as Record<string, unknown>;
   return (
     typeof host === 'string' &&
-    LOOPBACK.includes(host) &&
+    isLoopback(host) &&
     Number.isInteger(port) &&
     typeof secure === 'boolean'
   );

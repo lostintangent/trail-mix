@@ -45,10 +45,8 @@ export const ports = {
  * The stand-in for login.microsoftonline.com, for the device-code flow and XOAUTH2. `sign-in.ts`
  * says what it answers, and how a test plays the person and steers the sign-in.
  */
-export const identity = {
-  origin: `http://127.0.0.1:${ports.identity}`,
-  authority: `http://127.0.0.1:${ports.identity}/consumers`,
-} as const;
+const origin = `http://127.0.0.1:${ports.identity}`;
+export const identity = { origin, authority: `${origin}/consumers` } as const;
 
 /**
  * Capabilities each profile withholds, so code cannot lean on what Zoho and Outlook lack. Zoho also
@@ -126,9 +124,7 @@ async function launch(binaries: Dovecot, profile: Profile) {
   writeFileSync(join(state, 'profile'), profile);
 
   rmSync(join(state, 'serve.ready'), { force: true });
-  rmSync(join(state, 'paused'), { recursive: true, force: true });
-  rmSync(join(state, 'no-submission'), { recursive: true, force: true });
-  rmSync(join(state, 'filing'), { recursive: true, force: true });
+  rmSync(marks, { recursive: true, force: true });
   // Started by a shell that exits at once, so that, as Dovecot does, the server runs on its own and
   // records its own pid. When a test times out, Bun ends the processes its tests and hooks
   // started, and a server started from a harness's hook would go with them.
@@ -335,7 +331,7 @@ userdb passwd-file {
 # XOAUTH2 and OAUTHBEARER tokens are checked with the stand-in for Microsoft's sign-in.
 auth_mechanisms = plain login xoauth2 oauthbearer
 oauth2_introspection_mode = get
-oauth2_introspection_url = http://127.0.0.1:${ports.identity}/introspect?access_token=
+oauth2_introspection_url = ${origin}/introspect?access_token=
 oauth2_force_introspection = yes
 oauth2_active_attribute = active
 oauth2_active_value = true
@@ -577,25 +573,15 @@ async function buildPatched() {
  * Pauses a user's sending, or resumes it, as a host does when an account is over its sending limit.
  * While paused, submission refuses the user's mail with a 554.
  */
-export function pauseSending(user: string, paused: boolean) {
-  mkdirSync(join(state, 'paused'), { recursive: true });
-  if (paused) writeFileSync(pausedFile(user), '');
-  else rmSync(pausedFile(user), { force: true });
-}
-
-const pausedFile = (user: string) => join(state, 'paused', user.toLowerCase());
+export const pauseSending = (user: string, paused: boolean) =>
+  mark('paused', user, paused ? '' : undefined);
 
 /**
  * Turns a user's SMTP sign-in off, or on again, as Outlook does for an account whose SMTP AUTH is
  * off: IMAP still takes the password, and submission refuses it with a 535.
  */
-export function refuseSubmissionSignIn(user: string, refused: boolean) {
-  mkdirSync(join(state, 'no-submission'), { recursive: true });
-  if (refused) writeFileSync(noSubmissionFile(user), '');
-  else rmSync(noSubmissionFile(user), { force: true });
-}
-
-const noSubmissionFile = (user: string) => join(state, 'no-submission', user.toLowerCase());
+export const refuseSubmissionSignIn = (user: string, refused: boolean) =>
+  mark('no-submission', user, refused ? '' : undefined);
 
 /**
  * When submission files its own copy in Sent of what a user sends: `later`, a moment after it
@@ -608,13 +594,23 @@ export type Filing = 'later' | 'at-once' | 'held' | 'never';
  * Chooses when submission files a user's copies in Sent, from the next message on. Without a
  * choice, the profile decides: `later` where the host files its own, and `never` elsewhere.
  */
-export function fileSentCopies(user: string, filing: Filing | undefined) {
-  mkdirSync(join(state, 'filing'), { recursive: true });
-  if (filing) writeFileSync(filingFile(user), filing);
-  else rmSync(filingFile(user), { force: true });
-}
+export const fileSentCopies = (user: string, filing: Filing | undefined) =>
+  mark('filing', user, filing);
 
-const filingFile = (user: string) => join(state, 'filing', user.toLowerCase());
+/**
+ * What a test has said about a user, which submission reads as each message comes. They are files,
+ * since submission runs in a process of its own, and `start` forgets them.
+ */
+const marks = join(state, 'marks');
+type Mark = 'paused' | 'no-submission' | 'filing';
+const markFile = (kind: Mark, user: string) => join(marks, `${kind}-${user.toLowerCase()}`);
+function mark(kind: Mark, user: string, value: string | undefined) {
+  mkdirSync(marks, { recursive: true });
+  if (value === undefined) rmSync(markFile(kind, user), { force: true });
+  else writeFileSync(markFile(kind, user), value);
+}
+const markOf = (kind: Mark, user: string) =>
+  existsSync(markFile(kind, user)) ? readFileSync(markFile(kind, user), 'utf8') : undefined;
 
 /** How long a host that files its own copy in Sent `later` takes to file it. */
 const FILING_DELAY_MS = 250;
@@ -623,10 +619,10 @@ const FILING_DELAY_MS = 250;
  * Waits until the host has filed every copy in Sent it owes, letting it file those it was holding.
  */
 export async function settled() {
-  await fetch(`http://127.0.0.1:${ports.identity}/filing`, { method: 'POST' });
+  await fetch(`${origin}/filing`, { method: 'POST' });
   await until(
     async () => {
-      const response = await fetch(`http://127.0.0.1:${ports.identity}/filing`);
+      const response = await fetch(`${origin}/filing`);
       // Read as unknown, since the browser's Response, which a browser test reaching this sees, takes
       // no type for its body.
       const body: unknown = await response.json();
@@ -646,12 +642,8 @@ async function serve() {
   writeFileSync(join(state, 'serve.pid'), String(process.pid));
   const { filesSent } = profiles[readFileSync(join(state, 'profile'), 'utf8').trim() as Profile];
   const { doveadm } = await dovecot();
-  const filingOf = (user: string): Filing =>
-    existsSync(filingFile(user))
-      ? (readFileSync(filingFile(user), 'utf8') as Filing)
-      : filesSent
-        ? 'later'
-        : 'never';
+  const filingOf = (user: string) =>
+    (markOf('filing', user) as Filing | undefined) ?? (filesSent ? 'later' : 'never');
   /** Files a copy in a user's Sent, read, as a host files what its member sent. */
   const save = async (user: string, raw: Buffer) => {
     await Bun.spawn([doveadm, '-c', conf, 'save', '-u', user, '-m', 'Sent'], { stdin: raw }).exited;
@@ -701,7 +693,7 @@ async function serve() {
       authMethods: ['PLAIN', 'LOGIN', 'XOAUTH2'],
       onAuth(auth, _session, callback) {
         if (!authenticate(auth)) return callback(reject(535, 'Invalid credentials'));
-        if (existsSync(noSubmissionFile(auth.username ?? ''))) {
+        if (markOf('no-submission', auth.username ?? '') !== undefined) {
           return callback(
             reject(535, '5.7.139 Authentication unsuccessful, SMTP AUTH is disabled'),
           );
@@ -712,7 +704,7 @@ async function serve() {
         if (address.address.toLowerCase() !== String(session.user).toLowerCase()) {
           return callback(reject(553, 'Sender must be the signed-in user'));
         }
-        if (existsSync(pausedFile(address.address))) {
+        if (markOf('paused', address.address) !== undefined) {
           return callback(reject(554, '5.7.1 Sending is paused for this account'));
         }
         callback();
@@ -780,9 +772,7 @@ async function serve() {
 }
 
 /** The stand-in for Microsoft's sign-in, at the address the test mail server serves it on. */
-export function signInStandIn() {
-  return standIn(`http://127.0.0.1:${ports.identity}`);
-}
+export const signInStandIn = () => standIn(origin);
 
 // The command line
 

@@ -6,7 +6,6 @@ import { readMessagePath } from '../../src/features/mailroom/client/urls.ts';
 import { pushOf, type Notice } from '../../src/features/notifications/core/index.ts';
 import { expectUsable } from './usable.ts';
 import { SIZES, suite } from './suite.ts';
-import { mailIsIn } from '../mailIsIn.ts';
 import { atRest } from '../atRest.ts';
 import { until } from '../until.ts';
 
@@ -68,21 +67,12 @@ async function openSettings(page: Page) {
 /** Waits until the switch shows notifications on, or off. */
 const isOn = (page: Page, on: boolean) => notifying(page, on).waitFor({ timeout: 10_000 });
 
-async function open(
-  options: BrowserContextOptions,
-  prepare?: (context: BrowserContext) => Promise<void>,
-) {
-  const context = await app.context({ deviceScaleFactor: 2, ...options });
-  await prepare?.(context);
-  const page = await context.newPage();
-  await page.goto(app.url);
-  await mailIsIn(page);
-  return { context, page };
-}
+const open = (options: BrowserContextOptions, before?: (context: BrowserContext) => unknown) =>
+  app.open({ deviceScaleFactor: 2, ...options }, { before: (page) => before?.(page.context()) });
 
 /** Trail Mix as an installed app, allowed to notify, with the stand-in PushManager. */
 async function installed(options: BrowserContextOptions = SIZES.desktop) {
-  const opened = await open({ ...options, colorScheme: 'light' }, async (context) => {
+  const page = await open({ ...options, colorScheme: 'light' }, async (context) => {
     await context.grantPermissions(['notifications'], { origin: app.url });
     await context.addInitScript(() => {
       const real = window.matchMedia.bind(window);
@@ -106,10 +96,10 @@ async function installed(options: BrowserContextOptions = SIZES.desktop) {
       };
     });
   });
-  await opened.page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {
+  await page.waitForFunction(() => navigator.serviceWorker.controller !== null, undefined, {
     timeout: 15_000,
   });
-  return opened;
+  return { page, context: page.context() };
 }
 
 test('in a browser tab, Settings says notifications come to the installed app, and on an iPhone to its Home Screen', async () => {
@@ -123,7 +113,7 @@ test('in a browser tab, Settings says notifications come to the installed app, a
       'On iPhone, notifications come to Trail Mix on the Home Screen.',
     ],
   ] as const) {
-    const { page, context } = await open(options);
+    const page = await open(options);
     await openSettings(page);
     await page.getByRole('region', { name: 'Settings' }).getByText(says).waitFor();
     expect(await notifying(page).isDisabled()).toBe(true);
@@ -138,7 +128,7 @@ test('in a browser tab, Settings says notifications come to the installed app, a
         .click();
       await page.getByText(says).nth(1).waitFor();
     }
-    await context.close();
+    await page.context().close();
   }
 }, 60_000);
 

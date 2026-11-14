@@ -1,3 +1,5 @@
+import { isLoopback } from '../../../../shared/public-host.ts';
+
 /**
  * Signing in at a vendor instead of with a password: OAuth's device authorization grant (RFC 8628),
  * then refresh tokens, as Microsoft speaks them. The member reads a short code in Trail Mix and
@@ -173,7 +175,7 @@ export const isFresh = (tokens: Pick<Tokens, 'expiresAt'>, now: number) =>
  */
 export function namesThisMachine(address: string): boolean {
   const url = URL.parse(address);
-  return url !== null && ['http:', 'https:'].includes(url.protocol) && isLoopback(url);
+  return url !== null && ['http:', 'https:'].includes(url.protocol) && isThisMachine(url);
 }
 
 // Reading what vendors send
@@ -224,12 +226,8 @@ function request(
 /** A page a browser may open: https, or plain http on this machine, as a test's stand-in serves. */
 function isPage(link: string): boolean {
   const url = URL.parse(link);
-  return url?.protocol === 'https:' || (url?.protocol === 'http:' && isLoopback(url));
+  return url?.protocol === 'https:' || (url?.protocol === 'http:' && isThisMachine(url));
 }
 
 /** Whether a URL names this machine: its exact host name, and no user name to dress another as it. */
-function isLoopback(url: URL): boolean {
-  return (
-    ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) && !url.username && !url.password
-  );
-}
+const isThisMachine = (url: URL) => isLoopback(url.hostname) && !url.username && !url.password;

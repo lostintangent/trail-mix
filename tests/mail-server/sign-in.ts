@@ -15,6 +15,18 @@
  * Dovecot asks `/introspect` about each XOAUTH2 login, and submission asks `userOf`. Both answer
  * only for an access token that hasn't expired. Everything lives in this process's memory.
  */
+import {
+  PRESETS,
+  codeFrom,
+  codeRequest,
+  pollRequest,
+  polled,
+  refreshRequest,
+  refreshed,
+  type Polled,
+  type VendorAnswer,
+  type VendorRequest,
+} from '../../src/features/providers/imap/core/index.ts';
 
 /** A sign-in under way, from its device code until it is used. */
 type Grant = {
@@ -200,27 +212,27 @@ export async function atSignInPage(
  * access token lasting `seconds` if given. `fresh` refreshes, rotating the refresh token.
  */
 export async function signedIn(origin: string, user: string, seconds?: number) {
-  const post = async (path: string, form: Record<string, string>) => {
-    const response = await fetch(`${origin}/consumers/oauth2/v2.0/${path}`, {
-      method: 'POST',
-      body: new URLSearchParams({ client_id: 'test', ...form }),
-    });
-    const answer: unknown = await response.json();
-    return answer as Record<string, string>;
+  const signIn = { ...PRESETS.outlook.device, authority: `${origin}/consumers` };
+  const client = { id: 'test' };
+  const send = async ({ url, form }: VendorRequest): Promise<VendorAnswer> => {
+    const response = await fetch(url, { method: 'POST', body: form });
+    return { status: response.status, body: await response.json() };
   };
-  const code = await post('devicecode', { scope: 'imap smtp offline_access' });
+  const granted = (answer: Polled | ReturnType<typeof refreshed>) => {
+    if ('granted' in answer) return answer.granted;
+    throw new Error(`The stand-in didn't sign ${user} in: ${JSON.stringify(answer)}`);
+  };
+  const code = codeFrom(signIn, await send(codeRequest(signIn, client)), Date.now());
   const lasting: Record<string, string> = seconds ? { expires_in: String(seconds) } : {};
-  await atSignInPage(origin, code.user_code ?? '', { login_hint: user, ...lasting });
-  let tokens = await post('token', {
-    grant_type: DEVICE_GRANT,
-    device_code: code.device_code ?? '',
-  });
+  await atSignInPage(origin, code.code, { login_hint: user, ...lasting });
+  const poll = await send(pollRequest(signIn, client, code.deviceCode));
+  let tokens = granted(polled(signIn, poll, 0, Date.now()));
   return {
-    access: tokens.access_token ?? '',
+    access: tokens.access,
     fresh: async () => {
-      const refresh_token = tokens.refresh_token ?? '';
-      tokens = await post('token', { grant_type: 'refresh_token', refresh_token });
-      return tokens.access_token ?? '';
+      const refresh = await send(refreshRequest(signIn, client, tokens.refresh));
+      tokens = granted(refreshed(signIn, refresh, tokens.refresh, Date.now()));
+      return tokens.access;
     },
   };
 }

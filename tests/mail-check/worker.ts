@@ -28,16 +28,11 @@ export type CheckResult = {
   error?: string;
 };
 
-type Namespace = {
-  newUniqueId(): unknown;
-  get(id: unknown): { fetch(request: Request): Promise<Response> };
-};
-
 /** How long a send waits for a host that files its own copy in Sent, as the Outbox does. */
 const HOST_FILING_MS = 120_000;
 
 export default {
-  async fetch(request: Request, env: { CHECK: Namespace }): Promise<Response> {
+  async fetch(request: Request, env: { CHECK: DurableObjectNamespace }): Promise<Response> {
     if (request.method !== 'POST' || new URL(request.url).pathname !== '/run') {
       return new Response(null, { status: 404 });
     }
@@ -149,7 +144,7 @@ async function sendToSelf({ user, filesSent }: CheckRequest, provider: MailProvi
     left = 'its draft in Drafts, sent and not yet filed in Sent';
     const until = Date.now() + (filesSent ? HOST_FILING_MS : 0);
     while ((await provider.file(draft, messageId, Date.now() < until)) === 'unfiled') {
-      await sleep(5000);
+      await scheduler.wait(5000);
     }
     return { messageId };
   } catch (error) {
@@ -167,7 +162,7 @@ async function watch(check: CheckRequest, provider: MailProvider) {
     heard();
   });
   try {
-    await sleep(check.watchSeconds * 1000);
+    await scheduler.wait(check.watchSeconds * 1000);
     // News while nothing was sent, as a dropped connection gives when it reconnects.
     const toldWhileHeld = told;
     const announced = new Promise<number>((resolve) => (heard = () => resolve(Date.now())));
@@ -175,7 +170,9 @@ async function watch(check: CheckRequest, provider: MailProvider) {
     await sendToSelf(check, provider);
     const at = await Promise.race([
       announced,
-      sleep(60_000).then(() => Promise.reject(new Error('No news of the new mail within 60s.'))),
+      scheduler
+        .wait(60_000)
+        .then(() => Promise.reject(new Error('No news of the new mail within 60s.'))),
     ]);
     return { toldWhileHeld, toldAfterMs: at - sentAt };
   } finally {
@@ -195,5 +192,3 @@ async function timed(check: string, run: () => Promise<unknown>): Promise<CheckR
     return { check, ok: false, ms: Date.now() - start, error: message };
   }
 }
-
-const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));

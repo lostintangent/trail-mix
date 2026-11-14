@@ -13,6 +13,7 @@ import {
   identity,
   ports,
   type Profile,
+  profiles,
   settled,
   start,
   stop,
@@ -83,34 +84,20 @@ function submit(
   return transport.sendMail({ ...message, subject: 'server test', text: 'server test' });
 }
 
-/** What each profile advertises and withholds, as its host does, and the folders it marks with roles. */
-const PROFILES: Record<Profile, { has: string[]; lacks: string[]; roles?: string[] }> = {
-  full: {
-    has: ['IDLE', 'UIDPLUS', 'MOVE', 'CONDSTORE', 'QRESYNC', 'SPECIAL-USE'],
-    lacks: [],
-    roles: ['Archive', 'Drafts', 'Junk', 'Sent', 'Trash'],
-  },
-  zoho: {
-    has: ['IDLE', 'UIDPLUS', 'MOVE', 'CONDSTORE'],
-    lacks: ['QRESYNC', 'SPECIAL-USE', 'SORT', 'THREAD=REFERENCES'],
-    roles: [],
-  },
-  outlook: { has: ['IDLE', 'UIDPLUS', 'MOVE', 'SPECIAL-USE'], lacks: ['CONDSTORE', 'QRESYNC'] },
-  plain: {
-    has: ['IDLE'],
-    lacks: ['UIDPLUS', 'MOVE', 'CONDSTORE', 'QRESYNC', 'SPECIAL-USE'],
-    roles: [],
-  },
-};
+/** The extensions Trail Mix can use, which each profile offers unless its host lacks them. */
+const EXTENSIONS = ['IDLE', 'UIDPLUS', 'MOVE', 'CONDSTORE', 'QRESYNC', 'SPECIAL-USE'];
 
 describe('profiles', () => {
-  for (const [profile, { has, lacks, roles }] of Object.entries(PROFILES)) {
+  for (const [profile, { withhold, roleFlags }] of Object.entries(profiles)) {
+    const lacks: readonly string[] = withhold;
+    const has = EXTENSIONS.filter((cap) => !lacks.includes(cap));
     test(`${profile} offers ${has.join(', ')}, and withholds ${lacks.join(', ') || 'nothing'}`, async () => {
       await start(profile as Profile);
       const caps = await capabilities();
       for (const cap of has) expect(caps).toContain(cap);
       for (const cap of lacks) expect(caps).not.toContain(cap);
-      if (roles) expect((await foldersWithRoles()).sort()).toEqual(roles);
+      const roles = roleFlags ? ['Archive', 'Drafts', 'Junk', 'Sent', 'Trash'] : [];
+      expect((await foldersWithRoles()).sort()).toEqual(roles);
     });
   }
 });
