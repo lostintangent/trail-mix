@@ -93,10 +93,16 @@ test('the installed app reads offline at both sizes in both themes: the Inbox an
   ] as const) {
     const { context, page } = await installed({ ...SIZES[size], colorScheme });
     const subjects: string[] = [];
+    let address = '';
     for (const row of size === 'desktop' ? [0, 1, 2] : [0]) {
       subjects.push(await openConversation(page, row));
+      // The address names it once the selection has rested, which a reload sooner would miss.
+      const named = await page.waitForFunction(
+        (was) => (location.search === was ? '' : location.search),
+        address,
+      );
+      address = await named.jsonValue();
     }
-    const subject = subjects.at(-1);
     // Each conversation and its open body is kept as it arrives.
     await page.waitForFunction(async (least) => (await keptCount()) >= least, subjects.length * 3, {
       polling: 200,
@@ -112,7 +118,7 @@ test('the installed app reads offline at both sizes in both themes: the Inbox an
       (subject) =>
         document.querySelector('section[aria-label="Reader"] h1')?.textContent === subject &&
         document.querySelector('section[aria-label="Reader"] article') !== null,
-      subject,
+      subjects.at(-1),
     );
     const shown = await page.evaluate(() => ({ rows: rowsShownAt, reader: readerShownAt }));
     const late = Object.entries(shown).flatMap(([what, at]) =>
