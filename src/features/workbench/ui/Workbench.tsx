@@ -914,7 +914,7 @@ export function Workbench({
             accounts={accounts}
             onDraft={(saved, older) => composing.noteDraft(compose, saved, older)}
             onSend={sending.onSend}
-            sender={sending.sender}
+            composerSend={sending.composerSend}
             onSendable={sending.onSendable}
             // Send has no boundary of its own, so the composer shows only once Send can.
             sendActions={<SendActions commands={sending.commands} onPick={sending.sendAt} />}

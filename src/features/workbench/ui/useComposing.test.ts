@@ -7,17 +7,17 @@ const thread = 'thread-lunch';
 test('a draft its composer saved is out of the first snapshot that holds it, before its save answers', () => {
   // The first save answered with uid 8. The second has made uid 9 and dropped 8, and a hint has
   // brought the conversation that holds it before the save itself answers.
-  const writing = { in: thread, before: [], editing: draft(8) };
+  const composer = { in: thread, before: [], editing: draft(8) };
   const conversation = [message(1), message(9, true)];
 
-  expect(uids(hiddenIn({ writing: [writing], gone: [] }, thread, conversation))).toContain(9);
+  expect(uids(hiddenIn({ composers: [composer], gone: [] }, thread, conversation))).toContain(9);
 });
 
 test('the drafts its conversation held as the composer started stay in sight', () => {
-  const writing = { in: thread, before: [draft(5)], editing: undefined };
+  const composer = { in: thread, before: [draft(5)], editing: undefined };
   const conversation = [message(1), message(5, true), message(9, true)];
 
-  expect(uids(hiddenIn({ writing: [writing], gone: [] }, thread, conversation))).toEqual([9]);
+  expect(uids(hiddenIn({ composers: [composer], gone: [] }, thread, conversation))).toEqual([9]);
 });
 
 test('a draft sent from among the messages it answers leaves its conversation open', () => {

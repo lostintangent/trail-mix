@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import type { Address, ConversationId, MessageRef, Outgoing } from '../../mail/core/index.ts';
+import type { MessageRef, Outgoing } from '../../mail/core/index.ts';
 import { outboxQuery } from '../../mailroom/client/index.ts';
 import {
   draftsLeaving,
@@ -54,30 +54,8 @@ export function useLeaving() {
 
   /** A press of Send, with the draft its message was last saved as, if it has been. */
   const pressed = useCallback(
-    (
-      id: string,
-      sent: {
-        draft: MessageRef | undefined;
-        in: ConversationId | undefined;
-        written: string;
-        to: readonly Address[];
-        at: string | undefined;
-        pressedAt: number;
-      },
-    ) => {
-      setHeld((was) => ({
-        ...was,
-        all: press(was.all, {
-          id,
-          draft: sent.draft,
-          pressedIn: sent.in,
-          written: sent.written,
-          to: sent.to,
-          pressedAt: sent.pressedAt,
-          at: sent.at,
-        }),
-      }));
-    },
+    (sent: Parameters<typeof press>[1]) =>
+      setHeld((was) => ({ ...was, all: press(was.all, sent) })),
     [],
   );
   /** A press's message, saved again on its way to the Mailroom. */

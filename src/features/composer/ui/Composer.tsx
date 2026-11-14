@@ -48,7 +48,7 @@ export type Compose =
   | { as: 'resumed'; drafting: Drafting; isDocked: boolean };
 
 /** How the workbench's Send reaches the open composer: a time to send at, or now. */
-export type Sender = { current: ((at?: string) => void) | undefined };
+export type ComposerSend = { current: ((at?: string) => void) | undefined };
 
 type ComposerProps = {
   compose: Compose;
@@ -64,7 +64,7 @@ type ComposerProps = {
    */
   onSend: (drafting: Drafting, at: string | undefined) => void;
   /** Filled with the composer's Send while it is open, for the registry's Send and its keys. */
-  sender: Sender;
+  composerSend: ComposerSend;
   /** Whether what's written can be sent now, which it can once it is to someone. */
   onSendable: (isSendable: boolean) => void;
   /** Send, split with Send later, drawn from the registry's commands. */
@@ -175,7 +175,7 @@ function Writer({
   accounts,
   onDraft,
   onSend,
-  sender,
+  composerSend,
   onSendable,
   sendActions,
   isSheet,
@@ -219,9 +219,9 @@ function Writer({
     onClose();
   };
   useLayoutEffect(() => {
-    sender.current = send;
+    composerSend.current = send;
   });
-  useEffect(() => () => void (sender.current = undefined), [sender]);
+  useEffect(() => () => void (composerSend.current = undefined), [composerSend]);
   useEffect(() => onSendable(canSend), [canSend, onSendable]);
   const discard = () => {
     void drafting.discard();

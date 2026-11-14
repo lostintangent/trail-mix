@@ -159,7 +159,7 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
   // Drafts on their way stay out too, since they can't be written on until their send is undone.
   const hiding = useMemo<Hiding>(
     () => ({
-      writing: [
+      composers: [
         ...(compose && started ? [{ in: started.in, before: started.before, editing }] : []),
         ...sending.values(),
       ],
@@ -190,7 +190,7 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
  * closed whose last save is on its way, and the drafts gone from every conversation.
  */
 export type Hiding = {
-  writing: readonly Written[];
+  composers: readonly Written[];
   gone: readonly MessageRef[];
 };
 
@@ -206,11 +206,11 @@ type Written = {
  * so a draft the composer saved is out of the first snapshot that holds it.
  */
 export function hiddenIn(
-  { writing, gone }: Hiding,
+  { composers, gone }: Hiding,
   id: ConversationId,
   conversation: readonly Message[],
 ): MessageRef[] {
-  const written = writing.flatMap(({ in: started, before, editing }) => [
+  const written = composers.flatMap(({ in: started, before, editing }) => [
     ...(started === id
       ? conversation.filter(
           (message) => message.flags.draft && !before.some((draft) => sameRef(draft, message)),

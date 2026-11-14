@@ -1,7 +1,7 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { toast } from '../../../shared/toasts.tsx';
 import type { ConversationId, MessageRef } from '../../mail/core/index.ts';
-import { isDocked, type Drafting, type Sender } from '../../composer/ui/index.ts';
+import { isDocked, type ComposerSend, type Drafting } from '../../composer/ui/index.ts';
 import { useSend, useSendCommands, type useLeaving } from '../../outbox/index.ts';
 import { leftBySend, type useComposing } from './useComposing.ts';
 
@@ -32,7 +32,7 @@ export function useSendWritten({
 }) {
   const { compose } = composing;
   const send = useSend();
-  const sender = useRef<Sender['current']>(undefined);
+  const composerSend = useRef<ComposerSend['current']>(undefined);
   const [isSendable, setSendable] = useState(false);
   const shownNow = useRef(opened);
   const composeNow = useRef(compose);
@@ -54,9 +54,10 @@ export function useSendWritten({
     const pressedAt = Date.now();
     // Whom it goes to, as the Outbox will say: everyone it names but Bcc.
     const to = [...writing.to, ...writing.cc];
-    leaving.pressed(id, {
+    leaving.pressed({
+      id,
       draft: drafting.draft,
-      in: from.isDocked
+      pressedIn: from.isDocked
         ? from.conversation
         : compose?.as === 'draft'
           ? compose.draft.conversation
@@ -105,11 +106,11 @@ export function useSendWritten({
     });
   };
   /** Sends what the open composer holds, at a time or now, as its own Send would. */
-  const sendAt = useCallback((at?: string) => sender.current?.(at), []);
+  const sendAt = useCallback((at?: string) => composerSend.current?.(at), []);
   const commands = useSendCommands(compose !== undefined, {
     onSend: sendAt,
     isEnabled: isSendable && isOnline,
     shortcut: 'Mod+Enter',
   });
-  return { onSend, sender, onSendable: setSendable, sendAt, commands };
+  return { onSend, composerSend, onSendable: setSendable, sendAt, commands };
 }
