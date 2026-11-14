@@ -22,7 +22,8 @@ import { UNIFIED_VIEWS, type ViewCounts } from './views.ts';
  * The sidebar's tree: the unified views, then each account under its stamp, with its folders.
  * Accounts and folders with folders inside fold away under a chevron, and a folder being named
  * shows its name in a field in its line's place. `tree.ts` works out what each line shows, and
- * `TreeLine.tsx` draws it.
+ * `TreeLine.tsx` draws it. Astryx's TreeList can't report a fold, so a device couldn't remember its
+ * folds, and it has no key for a line's menu.
  */
 
 /** The views that gather mail across every account, at the top of the tree. */

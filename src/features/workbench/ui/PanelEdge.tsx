@@ -12,6 +12,8 @@ import { dragPanel, nudgePanel, panelSize, type PanelSpec, type PanelState } fro
  * While a pointer drags, the edge writes the size straight to the panel's custom property, so
  * following the pointer re-renders only the edge. The panel's owner hears about a width when the
  * drag ends, and about collapsing the moment it happens, since the panel then changes form.
+ * Astryx's useResizable collapses a panel to nothing rather than to its rail, and keeps its sizes in
+ * a form of its own that the prepaint script would have to read.
  */
 export const PanelEdge = memo(function PanelEdge({
   spec,
