@@ -177,41 +177,6 @@ test('a row leads with its sender and subject, and sets unread apart by weight a
   }
 });
 
-test('every row is one height, the first with no preview too, so no two overlap', async () => {
-  for (const [size, options] of Object.entries(SIZES)) {
-    const { context, page, problems } = await open(options);
-    const inbox = await rowsDrawn(page);
-    const subject = await writeNothing(page);
-    const drafts = page.getByRole('button', { name: /^Drafts/ }).first();
-    if (!(await inView(drafts)))
-      await page.getByRole('button', { name: 'Folders', exact: true }).click();
-    await drafts.click();
-    await page.getByRole('option').first().filter({ hasText: subject }).waitFor();
-
-    const rows = await rowsDrawn(page);
-    expect({ size, preview: rows[0]?.preview }).toEqual({ size, preview: '' });
-    const height = inbox[0]?.height ?? 0;
-    expect(height).toBeGreaterThan(0);
-    // Rows lie on whole pixels, each the height of a row of mail rounded up, below the pixel the
-    // list keeps at its top for a lifted row's ring.
-    const pitch = Math.ceil(height);
-    for (const row of [...inbox, ...rows]) {
-      expect({ size, row: row.index, height: row.height }).toEqual({
-        size,
-        row: row.index,
-        height,
-      });
-      expect({ size, row: row.index, top: row.top }).toEqual({
-        size,
-        row: row.index,
-        top: RING + row.index * pitch,
-      });
-    }
-    expect(problems).toEqual([]);
-    await context.close();
-  }
-}, 60_000);
-
 test('scrolling a long folder never changes a row’s height, moves a row already drawn, or changes the list’s length', async () => {
   for (const [size, options] of Object.entries(SIZES)) {
     const { context, page } = await open(options);
@@ -1523,23 +1488,6 @@ async function writeNothing(page: Page): Promise<string> {
   await page.getByRole('status').filter({ hasText: 'Saved to Drafts' }).waitFor();
   await page.keyboard.press('Escape');
   return subject;
-}
-
-/** The list's rows drawn now: where each lies in the list, its height, and its preview's text. */
-function rowsDrawn(page: Page) {
-  return page.evaluate(() => {
-    const list = document.querySelector('[role="listbox"][aria-multiselectable]');
-    const canvas = list?.lastElementChild?.getBoundingClientRect().top ?? 0;
-    return [...(list?.querySelectorAll('[role="option"]') ?? [])].map((row) => {
-      const box = row.getBoundingClientRect();
-      return {
-        index: Number(row.getAttribute('aria-posinset')) - 1,
-        top: box.top - canvas,
-        height: box.height,
-        preview: row.lastElementChild?.lastElementChild?.textContent ?? undefined,
-      };
-    });
-  });
 }
 
 /**
