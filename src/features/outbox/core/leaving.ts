@@ -209,7 +209,7 @@ export function leavingIn(
 
 /** Whether a conversation's messages hold a send's copy: one by its Message-ID that isn't a draft. */
 export const holdsCopy = (messages: readonly Message[], messageId: string | undefined) =>
-  messageId !== undefined &&
+  !!messageId &&
   messages.some((message) => !message.flags.draft && message.messageId === messageId);
 
 /** A reply on its way as its conversation shows it: what it says, the way its copy will. */

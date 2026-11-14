@@ -99,6 +99,12 @@ test('a draft with its Message-ID is no copy, and a copy can be known by its dra
   expect(leavingIn(pressed, thread, [parent, indexed, copy])).toEqual([]);
 });
 
+test('a draft without a Message-ID takes no other message without one for its copy', () => {
+  const bare = message({ ...draft, messageId: '' }, true);
+  const unnamed = message({ uid: 4, path: 'INBOX', messageId: '' });
+  expect(leavingIn(pressed, thread, [parent, unnamed, bare])).toHaveLength(1);
+});
+
 test('a reply undone is forgotten with the snapshot that shows it gone, and its draft is back', () => {
   let all = observe(pressed, [outgoing()], at(1), closesFor);
   all = observe(all, [], at(4), closesFor);
