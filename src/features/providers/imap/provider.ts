@@ -527,7 +527,7 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
       return moved;
     },
 
-    async saveDraft(message: Uint8Array, replaces?: MessageRef) {
+    async saveDraft(message: Uint8Array) {
       const drafts = await folderFor('drafts');
       const { appended, uidplus } = await connected(async (connection) => ({
         appended: await connection.append(drafts, Buffer.from(message), ['\\Draft', '\\Seen']),
@@ -543,9 +543,11 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
               return uid === undefined ? undefined : refIn(drafts, mailbox.uidValidity, uid);
             });
       if (!filed) throw new Error('The server did not say where it filed the draft');
-      // Only a draft is ever replaced, so a wrong ref can never cost a message.
-      if (replaces && replaces.path === drafts) await remove(replaces);
       return filed;
+    },
+
+    async discardDraft(draft: MessageRef) {
+      if (draft.path === (await folderFor('drafts'))) await remove(draft);
     },
 
     async submit(draft: MessageRef, messageId: string) {

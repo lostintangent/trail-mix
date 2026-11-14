@@ -36,11 +36,14 @@ export interface MailProvider {
    */
   move(refs: MessageRef[], to: string): Promise<Moved[]>;
 
+  /** Files a draft in the account's Drafts and returns its ref. */
+  saveDraft(message: Uint8Array): Promise<MessageRef>;
+
   /**
-   * Files a draft in the account's Drafts and returns its ref. With `replaces`, the older draft is
-   * removed once the new one is saved, so a crash in between leaves two drafts, never none.
+   * Removes a draft for good, as one a newer version has replaced. A message outside the account's
+   * Drafts is skipped, so a wrong ref costs no message, and so is a draft already gone.
    */
-  saveDraft(message: Uint8Array, replaces?: MessageRef): Promise<MessageRef>;
+  discardDraft(draft: MessageRef): Promise<void>;
 
   /**
    * Sending is two steps, each safe to repeat, and the Outbox records the host's acceptance between

@@ -408,6 +408,17 @@ export const versions: readonly (readonly string[])[] = [
     // the last rowid noted, or none once all are. Without its row, every message is owed a note.
     `CREATE TABLE people_fill (one INTEGER PRIMARY KEY CHECK (one = 1), mine TEXT NOT NULL, after INTEGER)`,
   ],
+  [
+    // The drafts newer versions replaced, which their servers owe a discard. A save notes the old
+    // version as it answers, and the next wake discards it before its sync.
+    `CREATE TABLE replaced_drafts (
+      account TEXT NOT NULL,
+      path TEXT NOT NULL,
+      uid_validity INTEGER NOT NULL,
+      uid INTEGER NOT NULL,
+      PRIMARY KEY (account, path, uid_validity, uid)
+    )`,
+  ],
 ];
 
 /**

@@ -198,27 +198,26 @@ export function demoServer(
       return moved;
     },
 
-    async saveDraft(message, replaces) {
+    async saveDraft(message) {
       const draft = await written(message);
       const drafts = roleFolder('drafts');
       // Saving the same draft again finds the copy the first save filed.
-      let uid = server.uidsIn(mailbox, drafts).find((candidate) => {
+      const uid = server.uidsIn(mailbox, drafts).find((candidate) => {
         const saved = server.messageAt(mailbox, drafts, candidate)!;
         return saved.content().messageId === draft.content.messageId && saved.raw() === draft.raw;
       });
-      let next = mailbox;
-      if (uid === undefined) {
-        [next, uid] = server.append(next, drafts, draft, DRAFT);
-      }
-      // Only a draft is ever replaced, so a ref to anything else cannot cost a message.
-      const older = live(replaces ? [replaces] : []).get(drafts) ?? [];
-      next = server.expunge(
-        next,
-        drafts,
-        older.filter((old) => old !== uid),
-      );
+      if (uid !== undefined) return refOf(drafts, uid);
+      const [next, filed] = server.append(mailbox, drafts, draft, DRAFT);
       await commit(next, [drafts]);
-      return refOf(drafts, uid);
+      return refOf(drafts, filed);
+    },
+
+    async discardDraft(draft) {
+      const drafts = roleFolder('drafts');
+      // Only a draft is ever discarded, so a ref to anything else cannot cost a message.
+      const gone = live([draft]).get(drafts);
+      if (!gone) return;
+      await commit(server.expunge(mailbox, drafts, gone), [drafts]);
     },
 
     submit: (draft, messageId) =>

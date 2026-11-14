@@ -125,6 +125,7 @@ import {
 } from './avatars.ts';
 import { upgrade, type Sql, type SqlValue } from './schema.ts';
 import { outboxQueue, type OutboxQueue } from './outbox.ts';
+import { replacedDrafts, type ReplacedDrafts } from './replaced.ts';
 import { foundOf, opened, type Found } from './search.ts';
 import { signInBook, type SignInBook } from './sign-ins.ts';
 import { syncQueue, WAKE, type SyncQueue } from './sync.ts';
@@ -255,6 +256,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   private readonly watchers = new Map<AccountId, () => void>();
   protected readonly queue: SyncQueue;
   protected readonly sending: OutboxQueue;
+  private readonly replaced: ReplacedDrafts;
   /** When every account was last owed a check. A cold start checks at its first wake. */
   private checkedAt = 0;
   /** When a signed-in device last asked for something, as storage holds it. */
@@ -325,6 +327,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       },
       accepted: () => this.accepted(),
     });
+    this.replaced = replacedDrafts(this.sql);
     // Every wake is a cold start, and this is where one begins: a send found mid-submit was cut
     // short by whatever ended the last instance.
     this.sending.recover();
@@ -572,6 +575,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       // A picture stays only for a sender of the mail that's left.
       this.avatars.keep(this.store.verifiedSenders());
       this.sending.forget(account);
+      this.replaced.forget(account);
       this.underWay.forget(account);
       this.notifying.forgetAccount(account);
     });
@@ -763,19 +767,28 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       },
     );
     const raw = new TextEncoder().encode(writeMime(message));
-    const saved = await (await this.provider(account.id)).saveDraft(raw, older);
+    const saved = await (await this.provider(account.id)).saveDraft(raw);
     this.drafts.add(refKeyOf(saved));
+    const replacing = older && !sameRef(older, saved) ? older : undefined;
+    if (replacing) {
+      // The member waits only for the new version. The old one is owed a discard before anything
+      // else is awaited, and the next wake makes it before its sync, and lets its bytes go, so the
+      // cache keeps only the newest draft's.
+      this.replaced.owe(replacing);
+      this.drafts.delete(refKeyOf(replacing));
+      this.store.oweBody(replacing);
+      this.sending.release(replacing);
+    }
     // The composer reads the draft back at once, and the server's copy would wait behind the sync
     // this save owes. Once the draft is filed, a failure here costs only that wait, so it never
     // fails the save, which a retry would file again.
     await this.env.BODIES.put(this.bodyKey(saved), raw).catch(report);
-    if (older) {
-      // Each save replaces the last, so the cache keeps only the newest draft's bytes.
-      this.drafts.delete(refKeyOf(older));
-      this.store.oweBody(older);
-      this.sending.release(older);
-    }
-    await this.owe(() => this.queue.folder({ account: account.id, path: saved.path }));
+    // A discard owes its folder's sync, so no sync this save asks for finds both versions.
+    await this.owe(() => {
+      if (replacing?.path !== saved.path) {
+        this.queue.folder({ account: account.id, path: saved.path });
+      }
+    });
     return saved;
   }
 
@@ -1016,6 +1029,8 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     );
     // A send that is due goes before sync, which can wait.
     await this.sending.run(() => new Date().toISOString());
+    // And so do the drafts newer versions replaced, so sync finds only the newest.
+    const failing = await this.discardReplaced();
     // Timed from the wake's start, as the next alarm is, so the wake it sets always checks.
     if (isChecking && now - this.checkedAt >= checking - ALARM_SLACK_MS) this.checkAll(now);
     await this.watchAll(open);
@@ -1036,9 +1051,12 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     const isOwingAvatars = await this.lookUpAvatars();
     const isResummarizing = this.resummarize();
     const isFillingPeople = this.sql.transaction(() => this.store.fillPeople(PEOPLE_FILLED));
+    // A save meanwhile owes a discard, and one whose server failed waits for the next check.
+    const isOwingDiscards = this.replaced.owed().some(({ account }) => !failing.has(account));
     const sendAt = this.sending.nextWake() ?? poll;
     if (
       this.queue.owing() ||
+      isOwingDiscards ||
       isOwingBodies ||
       isSweeping ||
       isOwingAvatars ||
@@ -1049,6 +1067,28 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       await this.ctx.storage.setAlarm(Date.now());
     } else await this.ctx.storage.setAlarm(Math.min(poll, sendAt, this.signInWake() ?? poll));
     return landed;
+  }
+
+  /**
+   * Discards the drafts newer versions replaced, longest owed first, and owes each one's folder the
+   * sync its save left to this. An account whose server fails keeps its others owed for the next
+   * check, rather than each waiting out the same server. Returns the accounts whose servers failed.
+   */
+  private async discardReplaced(): Promise<Set<AccountId>> {
+    const failing = new Set<AccountId>();
+    for (const draft of this.replaced.owed()) {
+      if (!failing.has(draft.account)) {
+        try {
+          await (await this.provider(draft.account)).discardDraft(draft);
+          this.replaced.discarded(draft);
+        } catch (error) {
+          report(error);
+          failing.add(draft.account);
+        }
+      }
+      this.queue.folder({ account: draft.account, path: draft.path });
+    }
+    return failing;
   }
 
   /**

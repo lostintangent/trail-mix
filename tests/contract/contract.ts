@@ -284,26 +284,29 @@ export function describeContract(
       expect(await listed()).toEqual(before);
     });
 
-    it('saves a draft, and a new version replaces the old one', async () => {
+    it('saves a draft, and discards the one a newer version replaced', async () => {
       const drafts = await role('drafts');
       const draft = (subject: string) =>
         bytes(message({ id: 'draft', subject, to: world().address }));
       const first = await provider.saveDraft(draft('Draft one'));
       expect(first.path).toBe(drafts);
       expect((await only(drafts, 'Draft one')).flags.draft).toBe(true);
-      const second = await provider.saveDraft(draft('Draft two'), first);
+      const second = await provider.saveDraft(draft('Draft two'));
+      // Until the discard, the server holds both versions, never neither.
+      expect(arrived((await syncAll(drafts)).events)).toHaveLength(2);
+      await provider.discardDraft(first);
       const listed = arrived((await syncAll(drafts)).events);
       expect(listed.map((e) => e.subject)).toEqual(['Draft two']);
       expect(refOf(listed[0]!)).toEqual(second);
-      // Replacing a draft that is already gone only saves the new one.
-      await provider.saveDraft(draft('Draft three'), first);
-      expect(arrived((await syncAll(drafts)).events)).toHaveLength(2);
+      // Discarding a draft that is already gone, as a retry does, changes nothing.
+      await provider.discardDraft(first);
+      expect(arrived((await syncAll(drafts)).events).map(refOf)).toEqual([second]);
     });
 
-    it('replaces only a draft, so a wrong ref costs no message', async () => {
+    it('discards only a draft, so a wrong ref costs no message', async () => {
       await world().deliver(message({ id: 'kept', subject: 'Kept' }));
       const kept = refOf(await only('INBOX', 'Kept'));
-      await provider.saveDraft(bytes(message({ id: 'draft', subject: 'Draft' })), kept);
+      await provider.discardDraft(kept);
       expect((await only('INBOX', 'Kept')).messageId).toBe('<kept@example.com>');
     });
 

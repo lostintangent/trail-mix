@@ -551,6 +551,17 @@ describe('The Mailroom', () => {
       device.close();
       return held(subject);
     };
+    /** Once the wakes after a save have discarded every draft it replaced. */
+    const discarded = () =>
+      ada.until(async () => {
+        const { tables } = await ada.call<{ tables: Record<string, unknown[]> }>('stored');
+        return tables.replaced_drafts!.length === 0;
+      });
+    const isOnServer = (ref: MessageRef) =>
+      draftOnServer(ref).then(
+        () => true,
+        () => false,
+      );
 
     test('writes the Markdown, a pasted image and a file as one message in Drafts, joined to its reply', async () => {
       const lunch = await held('Re: Lunch');
@@ -644,6 +655,8 @@ describe('The Mailroom', () => {
         }),
         first,
       );
+      // The save answers once the new version is filed, and the wake it owes discards the old one.
+      await discarded();
       await expect(draftOnServer(first)).rejects.toThrow(/isn’t in Drafts/);
       const written = await PostalMime.parse((await draftOnServer(second)).source);
       expect(written.text).toContain('see the notes.');
@@ -667,6 +680,36 @@ describe('The Mailroom', () => {
       const [row] = await ada.page({ in: 'drafts' });
       const [message] = await ada.call<Message[]>('conversation', row!.id);
       expect(refOf(message!)).toEqual(second);
+      await ada.call('move', [second], 'trash');
+    }, 30_000);
+
+    test('a restart before the wake leaves a replaced draft owed, and the next wake discards it before its sync', async () => {
+      const first = await ada.call<MessageRef>('saveDraft', draft({ subject: 'Owed' }));
+      await ada.until(async () => (await ada.page({ in: 'drafts' })).length === 1);
+
+      // The save answers with both versions on the server, and storage owes the old one a discard.
+      await ada.call('holdWakes');
+      const second = await ada.call<MessageRef>(
+        'saveDraft',
+        draft({ subject: 'Owed', markdown: 'Thursday works, still.\n' }),
+        first,
+      );
+      expect(await isOnServer(first)).toBe(true);
+      expect(await isOnServer(second)).toBe(true);
+      await ada.call('restart').catch(() => {});
+
+      // A device opening wakes the new instance, which remembers nothing the last one owed in memory.
+      const device = ada.device();
+      await device.opened;
+      await discarded();
+      device.close();
+      expect(await isOnServer(first)).toBe(false);
+      await ada.until(async () => {
+        const rows = await ada.page({ in: 'drafts' });
+        if (rows.length !== 1) return false;
+        const messages = await ada.call<Message[]>('conversation', rows[0]!.id);
+        return messages.length === 1 && Bun.deepEquals(refOf(messages[0]!), second);
+      });
       await ada.call('move', [second], 'trash');
     }, 30_000);
 
@@ -766,6 +809,7 @@ describe('The Mailroom', () => {
         ada.call('saveDraft', draft({}), { ...lunch, account: 'elsewhere' }),
       ).rejects.toThrow(/only a draft of the account/);
       const saved = await ada.call<MessageRef>('saveDraft', draft({}), lunch);
+      await discarded();
       expect(await onServer('INBOX')).toContainKey('<lunch-reply@trailmix.test>');
       // Nor does it take what a message it doesn't replace answers.
       expect(await answered(saved)).toEqual({ inReplyTo: undefined, references: undefined });

@@ -126,7 +126,7 @@ test('saving the same draft again, as a retry does, files it once', async () => 
   );
 
   const saved = await provider.saveDraft(draft);
-  const again = await provider.saveDraft(draft, saved);
+  const again = await provider.saveDraft(draft);
 
   expect(again).toEqual(saved);
   const { messages } = await everything({ provider });
@@ -276,7 +276,9 @@ test('whatever happens to the mailbox, syncing keeps up, and reopening what was 
         await server.deliver(message(`delivered ${step}`, pick(held)), pick(paths));
       else if (roll < 0.5) {
         const subject = `draft ${step}`;
-        const draft = await provider.saveDraft(message(subject, pick(held)), pick(drafts));
+        const draft = await provider.saveDraft(message(subject, pick(held)));
+        const replaced = pick(drafts);
+        if (replaced) await provider.discardDraft(replaced);
         if (random() < 0.5) {
           await provider.submit(draft, messageIdOf(subject));
           await provider.file(draft, messageIdOf(subject), true);
