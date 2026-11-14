@@ -1,5 +1,4 @@
-import type { Flags, FolderRole } from '../../mail/core/index.ts';
-import { sameFlags } from '../imap/core/sync.ts';
+import { sameFlags, type Flags, type FolderRole } from '../../mail/core/index.ts';
 import {
   SEEDED_FOLDERS,
   seededFolders,

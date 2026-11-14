@@ -26,6 +26,7 @@ export {
 export {
   applySyncEvent,
   memoryIndex,
+  sameFlags,
   type Index,
   type MemoryIndex,
   type SyncEvent,

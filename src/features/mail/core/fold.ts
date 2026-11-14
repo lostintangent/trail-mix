@@ -187,7 +187,8 @@ function keyOf(ref: MessageRef): string {
   return JSON.stringify([ref.account, ref.path, ref.uidValidity, ref.uid]);
 }
 
-function sameFlags(a: Flags, b: Flags): boolean {
+/** Whether two messages' flags are the same. */
+export function sameFlags(a: Flags, b: Flags): boolean {
   return (
     a.seen === b.seen && a.flagged === b.flagged && a.answered === b.answered && a.draft === b.draft
   );

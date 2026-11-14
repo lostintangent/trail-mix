@@ -1,4 +1,10 @@
-import type { Envelope, Flags, FolderRef, SyncEvent } from '../../../mail/core/index.ts';
+import {
+  sameFlags,
+  type Envelope,
+  type Flags,
+  type FolderRef,
+  type SyncEvent,
+} from '../../../mail/core/index.ts';
 import { FIRST_SYNC_BATCH } from '../../provider.ts';
 
 /**
@@ -158,12 +164,6 @@ function flagsToFetch(known: Remembered, state: FolderState): SyncPlan['flags'] 
     return 'all';
   }
   return since === state.highestModSeq ? 'none' : { changedSince: since };
-}
-
-export function sameFlags(a: Flags, b: Flags): boolean {
-  return (
-    a.seen === b.seen && a.flagged === b.flagged && a.answered === b.answered && a.draft === b.draft
-  );
 }
 
 // The cursor. UIDs are stored as runs, and flags as runs over those UIDs, each run a variable-length
