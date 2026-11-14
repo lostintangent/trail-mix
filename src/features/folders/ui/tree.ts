@@ -90,25 +90,16 @@ export function folderLine(node: FolderNode, { view, folds, editing }: TreeState
   const { folder, children } = node;
   const isRenaming = editing?.do === 'rename' && isAt(editing.folder, folder);
   const namedAt = editing?.do === 'create' ? editing.parent : editing?.folder;
-  const isNamingInside =
-    namedAt !== undefined &&
-    namedAt.account === folder.account &&
-    holds(node, namedAt.path) &&
-    !isRenaming;
+  const isNamingInside = !isRenaming && namedAt !== undefined && holds(node, namedAt);
   const isOpen = !folds.has(foldKey(folder)) || isNamingInside;
   return {
     isRenaming,
     isSelected: view.in === 'folder' && isAt(view.folder, folder),
     isOpen,
-    isHolding:
-      !isOpen &&
-      view.in === 'folder' &&
-      view.folder.account === folder.account &&
-      holds(node, view.folder.path),
+    isHolding: !isOpen && view.in === 'folder' && holds(node, view.folder),
     count: isOpen ? folder.unread : unreadWithin(node),
     canFold: children.length > 0,
-    holdsNewFolder:
-      editing?.do === 'create' && editing.parent !== undefined && isAt(editing.parent, folder),
+    isNamingInside,
   };
 }
 
@@ -143,9 +134,9 @@ const unreadInAccount = (nodes: readonly FolderNode[]): number =>
     .filter(({ folder }) => folder.role !== 'junk' && folder.role !== 'trash')
     .reduce((sum, node) => sum + unreadWithin(node), 0);
 
-/** Whether a folder in an account's tree is this node or sits inside it. */
-const holds = ({ folder, children }: FolderNode, path: string): boolean =>
-  folder.path === path || children.some((child) => holds(child, path));
+/** Whether a folder is this node's or sits inside it. */
+const holds = ({ folder, children }: FolderNode, ref: FolderRef): boolean =>
+  isAt(ref, folder) || children.some((child) => holds(child, ref));
 
 const isAt = (ref: FolderRef, folder: Folder) =>
   ref.account === folder.account && ref.path === folder.path;

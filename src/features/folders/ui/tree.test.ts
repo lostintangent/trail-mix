@@ -197,7 +197,7 @@ test('a folder a new one is named in opens to hold its field, though nothing is 
   };
   expect(line('Projects/Toy Box', state([], { editing }))).toMatchObject({
     canFold: false,
-    holdsNewFolder: true,
+    isNamingInside: true,
     isOpen: true,
   });
 });
@@ -219,7 +219,7 @@ test('another account’s folder at the same path is not named, unfolded or lift
     expect(line('Projects/Trail Mix', at)).toMatchObject({
       isRenaming: false,
       isOpen: false,
-      holdsNewFolder: false,
+      isNamingInside: false,
     });
   }
 });

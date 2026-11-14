@@ -139,7 +139,7 @@ function FolderRows({
 }) {
   const row = (node: FolderNode) => {
     const { folder, children } = node;
-    const { isRenaming, holdsNewFolder, ...line } = folderLine(node, state);
+    const { isRenaming, isNamingInside, ...line } = folderLine(node, state);
     return (
       <li key={folder.path}>
         {isRenaming ? (
@@ -167,7 +167,7 @@ function FolderRows({
             folderActions={folderActions}
           />
         )}
-        {(line.canFold || holdsNewFolder) && (
+        {(line.canFold || isNamingInside) && (
           <Folding isOpen={line.isOpen}>
             <FolderRows
               nodes={children}
