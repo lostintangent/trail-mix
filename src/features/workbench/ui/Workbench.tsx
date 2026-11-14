@@ -24,7 +24,6 @@ import { toast, Toasts } from '../../../shared/toasts.tsx';
 import {
   bundlePartsOf,
   isBundle,
-  marksOf,
   newestShown,
   repositoryAddressOf,
   sameRef,
@@ -94,6 +93,7 @@ import {
   TriageActions,
   triageCommands,
   useBundle,
+  useSearch,
   useTriage,
   type Action,
   placesOf,
@@ -1594,39 +1594,6 @@ function listing(view: View & { in: 'folder' | 'inbox' }, unreadOnly: boolean): 
 
 /** A step to a new view is pushed, so Back returns, except from a search, which it takes the place of. */
 const historyFrom = (view: View) => (view.in === 'search' ? 'replace' : 'push');
-
-/**
- * What the member searches for, as the view holds it, and how typing changes the view. Typing turns
- * the list into the search's results, clearing the field goes back to the view the search began
- * from, which it names, and asking for message bodies keeps the text and searches the servers too.
- */
-function useSearch(view: View, onViewChange: (view: View) => void) {
-  const queryClient = useQueryClient();
-  const text = view.in === 'search' ? view.text : '';
-  const latest = useRef(view);
-  useLayoutEffect(() => {
-    latest.current = view;
-  });
-  const [returnTo, setReturnTo] = useState<View>(view.in === 'search' ? { in: 'inbox' } : view);
-  const onSearch = useCallback(
-    (next: string) => {
-      const from = latest.current.in === 'search' ? returnTo : latest.current;
-      if (from !== returnTo) setReturnTo(from);
-      const searched: View = next === '' ? from : { in: 'search', text: next };
-      // The matches are asked for as the key goes down, not once the keystroke has been drawn.
-      void queryClient.prefetchQuery(conversationsQuery(searched));
-      onViewChange(searched);
-    },
-    [onViewChange, queryClient, returnTo],
-  );
-  const search = useMemo(() => ({ text, onSearch }), [text, onSearch]);
-  const marks = useMemo(() => marksOf(text), [text]);
-  const searchBodies = useCallback(
-    () => onViewChange({ in: 'search', text, fullText: true }),
-    [onViewChange, text],
-  );
-  return { search, marks, searchBodies, returnTo };
-}
 
 /**
  * The conversations the member may open next, which the reader prepares ahead: those just below and

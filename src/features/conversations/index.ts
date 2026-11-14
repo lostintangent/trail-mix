@@ -13,7 +13,7 @@ export { useTriage } from './ui/useTriage.tsx';
 export { useConversations } from './ui/useConversations.ts';
 export { placesOf, type Listed } from './core/pages.ts';
 export { faceOf } from './core/face.ts';
-export { SearchContext, SearchField, SearchScope } from './ui/search.tsx';
+export { SearchContext, SearchField, SearchScope, useSearch } from './ui/search.tsx';
 export { gitHubCommand, triageCommands } from './ui/commands.ts';
 export { useBundle } from './ui/useBundle.ts';
 export { Chip, kindIconOf } from './ui/github.tsx';

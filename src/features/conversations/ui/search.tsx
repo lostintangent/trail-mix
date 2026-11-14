@@ -12,7 +12,19 @@ import {
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { Search, X } from 'lucide-react';
-import { createContext, Suspense, use, useEffect, useId, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
+import {
+  createContext,
+  Suspense,
+  use,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import {
   bestCommandFor,
@@ -24,7 +36,8 @@ import {
   type PaletteKeys,
 } from '../../commands/index.ts';
 import { useMediaQuery } from '../../../shared/useMediaQuery.ts';
-import { highlight, type Marks } from '../../mail/core/index.ts';
+import { highlight, marksOf, type Marks, type View } from '../../mail/core/index.ts';
+import { conversationsQuery } from '../../mailroom/client/index.ts';
 import type { SearchScopeProps } from './SearchScope.tsx';
 
 /** What the search field shows, and where what the member types goes. */
@@ -36,6 +49,39 @@ type SearchState = { text: string; onSearch: (text: string) => void };
  * types.
  */
 export const SearchContext = createContext<SearchState>({ text: '', onSearch: () => {} });
+
+/**
+ * What the member searches for, as the view holds it, and how typing changes the view. Typing turns
+ * the list into the search's results, clearing the field goes back to the view the search began
+ * from, which it names, and asking for message bodies keeps the text and searches the servers too.
+ */
+export function useSearch(view: View, onViewChange: (view: View) => void) {
+  const queryClient = useQueryClient();
+  const text = view.in === 'search' ? view.text : '';
+  const latest = useRef(view);
+  useLayoutEffect(() => {
+    latest.current = view;
+  });
+  const [returnTo, setReturnTo] = useState<View>(view.in === 'search' ? { in: 'inbox' } : view);
+  const onSearch = useCallback(
+    (next: string) => {
+      const from = latest.current.in === 'search' ? returnTo : latest.current;
+      if (from !== returnTo) setReturnTo(from);
+      const searched: View = next === '' ? from : { in: 'search', text: next };
+      // The matches are asked for as the key goes down, not once the keystroke has been drawn.
+      void queryClient.prefetchQuery(conversationsQuery(searched));
+      onViewChange(searched);
+    },
+    [onViewChange, queryClient, returnTo],
+  );
+  const search = useMemo(() => ({ text, onSearch }), [text, onSearch]);
+  const marks = useMemo(() => marksOf(text), [text]);
+  const searchBodies = useCallback(
+    () => onViewChange({ in: 'search', text, fullText: true }),
+    [onViewChange, text],
+  );
+  return { search, marks, searchBodies, returnTo };
+}
 
 /**
  * The field that searches every account as the member types. It is on screen from the first paint,
