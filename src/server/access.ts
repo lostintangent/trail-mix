@@ -1,4 +1,5 @@
 import { createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from 'jose';
+import { isLoopback } from '../shared/public-host.ts';
 
 /**
  * The sign-in seam: how the Worker proves who sent a request. It is the only module that knows
@@ -232,13 +233,9 @@ const base64Url = (bytes: Uint8Array) =>
 function developmentSignIn(developer: string): SignIn {
   return (request) =>
     Promise.resolve(
-      LOCALHOST.has(new URL(request.url).hostname)
-        ? { member: memberOf(developer) }
-        : notSignedIn(),
+      isLoopback(new URL(request.url).hostname) ? { member: memberOf(developer) } : notSignedIn(),
     );
 }
-
-const LOCALHOST = new Set(['localhost', '127.0.0.1', '[::1]']);
 
 /**
  * One person, one Mailroom, however their address is capitalized. Only A to Z fold, since
@@ -263,7 +260,7 @@ function memoized<T>(make: (key: string) => T): (key: string) => T {
 
 /** Until the operator configures sign-in, the deployment serves this page and nothing else. */
 export function setupPage(url: URL): Response {
-  const next = LOCALHOST.has(url.hostname)
+  const next = isLoopback(url.hostname)
     ? '<p>To sign in while developing, copy <code>dev.vars.example</code> to <code>.dev.vars</code> and restart.</p>'
     : `<ol>
 <li>In Cloudflare Zero Trust, add a self-hosted Access application for <code>${escapeHtml(url.hostname)}</code> that lets your email address in with a one-time PIN.</li>

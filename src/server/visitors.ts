@@ -12,8 +12,7 @@ import { networkOf, VISITOR_SECONDS, type VisitorGate as Gate } from './access.t
 
 /**
  * Today's admissions: the UTC day, how many times the gate has let a visitor in during it, and when
- * it last let in each visitor, in milliseconds since the epoch. They are one stored value, which
- * holds about 2,000 visitors at most, so a larger `NEW_VISITORS_A_DAY` needs them kept as rows.
+ * it last let in each visitor, in milliseconds since the epoch.
  */
 type Today = { day: string; count: number; letIn: Record<string, number> };
 

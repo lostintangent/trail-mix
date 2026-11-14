@@ -20,3 +20,7 @@ export function isPublicHost(hostname: string): boolean {
     (a === 192 && b === 168)
   );
 }
+
+/** Whether a host names this machine, as a socket writes IPv6 or in a URL's brackets. */
+export const isLoopback = (hostname: string): boolean =>
+  ['localhost', '127.0.0.1', '::1'].includes(hostname.replace(/^\[(.*)\]$/, '$1'));
