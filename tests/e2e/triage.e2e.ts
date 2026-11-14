@@ -5,6 +5,7 @@ import type { Page, Request, Route } from 'playwright';
 import { unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
+import { atRest } from '../atRest.ts';
 
 /**
  * Triage, end to end: the built app on workerd, with two browsers open on one member's demo mail.
@@ -80,6 +81,7 @@ async function finger(page: Page) {
     /** Holds a finger on a point for a while, then lifts it. */
     press: async (x: number, y: number, ms: number) => {
       await touch('touchStart', x, y);
+      // Sets the pace: how long the finger stays down.
       await page.waitForTimeout(ms);
       await touch('touchEnd', x, y);
     },
@@ -269,12 +271,13 @@ test('arrowing the list rings its active row, never the sheet, and a pointer cle
 test('archiving shows at once, reaches another open browser, and Undo brings it back to both', async () => {
   const [here, there] = await Promise.all([inbox(), inbox()]);
   const subject = /Invoice for October/;
-  // The header's controls act on the one J opens, which the reader prepared beside the one above.
+  // The header's controls act on the one J opens from the row above, a repository's bundle, once
+  // its threads show.
   const place = Number(await row(here, subject).getAttribute('aria-posinset'));
   const above = await textAt(here, place - 1);
   await at(here, place - 1).click();
   await shownSubject(here);
-  await here.waitForTimeout(1_500);
+  await reader(here).locator('[data-index]').first().waitFor();
   await here.keyboard.press('j');
   await expect(shownSubject(here)).resolves.toBe('Invoice for October');
   await bar(here).getByRole('button', { name: 'Archive' }).waitFor();
@@ -480,7 +483,9 @@ test('on a phone, a row swiped far enough left is archived, and a short swipe sl
   const short = await options.nth(1).textContent();
   const one = await centerOf(here, 1);
   await hand.swipeLeft(one.x, one.y, one.width * 0.2);
-  await here.waitForTimeout(400);
+  // The row has slid back, or away, once its motion ends, and the frame after draws what it did.
+  await atRest(options.nth(1));
+  await here.evaluate(() => new Promise(requestAnimationFrame));
   await expect(options.nth(1).textContent()).resolves.toBe(short);
   // The short swipe neither archived nor opened the conversation.
   await expect(options.nth(1).getAttribute('aria-selected')).resolves.toBe('false');

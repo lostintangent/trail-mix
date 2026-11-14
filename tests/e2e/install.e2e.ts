@@ -173,7 +173,8 @@ test('the installed app reads offline at both sizes in both themes: the Inbox an
           .getByRole('status')
           .filter({ hasText: 'Offline: kept mail' })
           .waitFor();
-        await page.waitForTimeout(400);
+        // The list has slid back into view.
+        await atRest(page);
         expect({ colorScheme, ...(await listHeader(page)) }).toEqual({
           colorScheme,
           ...HEADER_OFFLINE,
@@ -246,8 +247,9 @@ test('offline, a conversation never opened says it opens once online, and Send k
     later: true,
   });
   await message.press('ControlOrMeta+Enter');
-  await page.waitForTimeout(1_000);
-  expect(await message.textContent()).toBe('Kept until the network is back.');
+  // Send closes the composer in the key's own handler, so by the frame after it would be gone.
+  await page.evaluate(() => new Promise(requestAnimationFrame));
+  expect(await message.textContent({ timeout: 1_000 })).toBe('Kept until the network is back.');
   await page.screenshot({ path: join(SHOTS, 'offline-desktop-light-send.png') });
 
   // The conversation the reload opened, from what was kept, asked for no read mark it couldn't make.
@@ -293,6 +295,7 @@ test('on a phone, an archive refused offline puts back the conversation it took 
     const box = (await options.nth(at).boundingBox())!;
     const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [point] });
+    // Sets the pace: how long the finger stays down.
     await page.waitForTimeout(ms);
     await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   };
@@ -405,19 +408,40 @@ test('what a device kept of another Mailroom never shows, and goes', async () =>
       await new Promise((resolve) => setTimeout(resolve, 1_500));
       await route.continue();
     });
+    // Whether a stranger's name ever shows, until the network's accounts do.
+    await page.addInitScript(() => {
+      const watching = new MutationObserver(() => {
+        if (!document.body?.textContent.includes('Mallory')) return;
+        Object.assign(window, { isStrangerShown: true });
+        watching.disconnect();
+      });
+      watching.observe(document, { subtree: true, childList: true, characterData: true });
+    });
     await page.reload();
-    await page.waitForTimeout(1_000);
-    const stranger = await page.getByText('Mallory').count();
-    expect({ owner, shown: stranger > 0 }).toEqual({ owner, shown: owner === 'ours' });
+    await page.getByRole('region', { name: 'Personal' }).waitFor();
+    const shown = await page.evaluate(() => 'isStrangerShown' in window);
+    expect({ owner, shown }).toEqual({ owner, shown: owner === 'ours' });
     await context.close();
   }
 }, 60_000);
 
 test('a browser tab keeps nothing, and its page loads as it always has', async () => {
   const context = await app.context();
+  await context.addInitScript(() => {
+    const { prototype } = ServiceWorkerContainer;
+    const register = Object.getOwnPropertyDescriptor(prototype, 'register')!
+      .value as typeof prototype.register;
+    prototype.register = function (this: ServiceWorkerContainer, ...args) {
+      Object.assign(window, { isWorkerAskedFor: true });
+      return register.apply(this, args);
+    };
+  });
   const page = await context.newPage();
   await page.goto(app.url, { waitUntil: 'networkidle' });
-  await page.waitForTimeout(500);
+  // An installed app's page asks for its worker in a timer it sets once loaded, which has run once
+  // one set now has.
+  await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 0)));
+  expect(await page.evaluate(() => 'isWorkerAskedFor' in window)).toBe(false);
   expect(await page.evaluate(() => navigator.serviceWorker.getRegistrations())).toHaveLength(0);
   await context.close();
 });

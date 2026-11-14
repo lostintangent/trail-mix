@@ -26,12 +26,22 @@ const app = suite({
 
 test('anyone but the operator has no Members in Settings, and its calls are refused before Cloudflare', async () => {
   const page = await (await app.context({ viewport: { width: 1440, height: 900 } })).newPage();
+  // Members is a command only once the Mailroom has said this member is the operator.
+  const isOperator = page.waitForResponse((response) =>
+    response.url().includes(encodeURIComponent('"isOperator"')),
+  );
   await page.goto(app.url);
   await mailIsIn(page);
+  await isOperator;
   await page.keyboard.press('ControlOrMeta+k');
+  // The palette lists what can run before anything is typed.
+  await page.getByRole('listbox', { name: 'Commands' }).waitFor();
   await page.keyboard.type('members');
-  // The palette has drawn what matches by then, and the operator's command isn't among it.
-  await page.waitForTimeout(1_000);
+  // It has drawn what matches once it lists Members or, since nothing else matches, empties.
+  await page.waitForFunction(() => {
+    const list = document.querySelector('[role="listbox"][aria-label="Commands"]');
+    return !list || list.textContent.includes('Members');
+  });
   expect(await page.getByRole('option', { name: 'Members' }).count()).toBe(0);
   await page.keyboard.press('Escape');
   // Settings has the member's own sections, and no Members.

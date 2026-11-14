@@ -5,6 +5,7 @@ import type { BrowserContextOptions, Page, Route } from 'playwright';
 import { unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
+import { atRest } from '../atRest.ts';
 
 /**
  * Mail on its way stays out of Drafts, end to end: the built app on workerd, sending the demo
@@ -99,6 +100,27 @@ async function listed(page: Page, subject: string) {
   return values.filter((value, at) => at === 0 || value !== values[at - 1]);
 }
 
+/** Waits until the last thing a page drew shows these counts, and a row for `subject` or none. */
+async function drawsLast(
+  page: Page,
+  shown: { drafts: number; outbox: string; subject: string; isListed: boolean },
+) {
+  await page.waitForFunction((shown) => {
+    const last = (window as unknown as { drawn: Drawn[] }).drawn.at(-1);
+    return (
+      Number(last?.drafts) === shown.drafts &&
+      last?.outbox === shown.outbox &&
+      last.rows.some((row) => row.includes(shown.subject)) === shown.isListed
+    );
+  }, shown);
+}
+
+/** Lets a page draw what it has been sent. */
+const drawnNext = (page: Page) =>
+  page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+
 const isPhone = (page: Page) => (page.viewportSize()?.width ?? 0) < 768;
 
 /** Goes to one of the sidebar's views, such as Drafts or Outbox. */
@@ -146,6 +168,20 @@ function outboxSnapshots(page: Page) {
   return snapshots;
 }
 
+/** How many drafts the server counts across every account, in each snapshot of the folders. */
+function draftsSnapshots(page: Page) {
+  const snapshots: number[] = [];
+  page.on('response', async (response) => {
+    const asked = decodeURIComponent(response.url());
+    if (!asked.includes('/_serverFn/') || !asked.includes('{"t":1,"s":"folders"}')) return;
+    const text = await response.text().catch(() => '');
+    // Each folder's role, then its total.
+    const totals = [...text.matchAll(/\{"t":1,"s":"drafts"\},\{"t":0,"s":(\d+)\}/g)];
+    snapshots.push(totals.reduce((sum, [, total]) => sum + Number(total), 0));
+  });
+  return snapshots;
+}
+
 /** Has the Mailroom answer each snapshot of `query` only after `ms`. */
 async function slow(page: Page, query: 'folders' | 'outbox', ms: number) {
   await page.route('**/_serverFn/**', async (route: Route) => {
@@ -167,6 +203,7 @@ async function readable(page: Page, screen: string) {
 test('a send undone leaves Drafts at the press, and comes back to it as it was', async () => {
   const page = await open({ ...DESKTOP, colorScheme: 'light' });
   const [drafts] = await counted(page, 'drafts');
+  const outbox = outboxSnapshots(page);
   await sendDraft(page, /Lunch Thursday/);
   const counting = toast(page, /^Sending to Jonas in \d+s$/);
   await counting.waitFor();
@@ -175,10 +212,20 @@ test('a send undone leaves Drafts at the press, and comes back to it as it was',
   await counting.click({ trial: true });
   await readable(page, 'desktop-light-counting');
 
+  const undoneAt = page
+    .waitForResponse((response) => !!response.request().postData()?.includes('"cancelSend"'))
+    .then(() => Date.now());
   await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
   await toast(page, /^Undone\. Nothing was sent to Jonas\.$/).waitFor();
   await row(page, /Lunch Thursday/).waitFor();
-  await page.waitForTimeout(1_000);
+  // The counts wait for the Outbox's snapshot after the Undo, the last thing that changes them.
+  const undone = await undoneAt;
+  await waitUntil(
+    () => outbox.some(({ at, states }) => at > undone && states.length === 0),
+    20_000,
+  );
+  await drawsLast(page, { drafts: drafts!, outbox: '', subject: 'Lunch Thursday', isListed: true });
+  await drawnNext(page);
   expect(await counted(page, 'drafts')).toEqual([drafts!, drafts! - 1, drafts!]);
   expect(await counted(page, 'outbox')).toEqual([0, 1, 0]);
   expect(await listed(page, 'Lunch Thursday')).toEqual([true, false, true]);
@@ -188,6 +235,7 @@ test('an accepted send waits for the server’s copy out of Drafts, its count an
   const page = await open({ ...DESKTOP, colorScheme: 'dark' });
   const [drafts] = await counted(page, 'drafts');
   const outbox = outboxSnapshots(page);
+  const server = draftsSnapshots(page);
   // The folders' counts lag the Outbox by a second, as when Drafts syncs after the send has gone.
   await slow(page, 'folders', 1_000);
   await sendDraft(page, /Lunch Thursday/);
@@ -203,7 +251,8 @@ test('an accepted send waits for the server’s copy out of Drafts, its count an
   await readable(page, 'desktop-dark-accepted');
   await waitUntil(() => outbox.at(-1)?.states.length === 0, 20_000);
   // Drafts has synced since, and its count follows.
-  await page.waitForTimeout(3_000);
+  await waitUntil(() => server.at(-1) === drafts! - 1, 20_000);
+  await drawnNext(page);
 
   expect(await counted(page, 'drafts')).toEqual([drafts!, drafts! - 1]);
   expect(await counted(page, 'outbox')).toEqual([0, 1, 0]);
@@ -226,6 +275,7 @@ test('a count the folders lower before the Outbox lets the send go never drops t
   const page = await open({ ...DESKTOP, colorScheme: 'light' });
   const [drafts] = await counted(page, 'drafts');
   const outbox = outboxSnapshots(page);
+  const server = draftsSnapshots(page);
   // The Outbox's snapshots lag the folders' by a second, so Drafts' count falls before it says why.
   await slow(page, 'outbox', 1_000);
   await sendDraft(page, /Offsite agenda/);
@@ -239,7 +289,8 @@ test('a count the folders lower before the Outbox lets the send go never drops t
   await waitUntil(() => outbox.some(({ states }) => states.includes('accepted')), 20_000);
   await readable(page, 'desktop-light-accepted');
   await waitUntil(() => outbox.at(-1)?.states.length === 0, 20_000);
-  await page.waitForTimeout(3_000);
+  await waitUntil(() => server.at(-1) === drafts! - 1, 20_000);
+  await drawnNext(page);
 
   expect(await counted(page, 'drafts')).toEqual([drafts!, drafts! - 1]);
   expect(await listed(page, 'Offsite agenda')).toEqual([true, false]);
@@ -262,7 +313,8 @@ test('a send the server refuses is back in Drafts, and counted there again', asy
     timeout: 30_000,
   });
   await row(page, /Cabin/).waitFor();
-  await page.waitForTimeout(1_000);
+  await drawsLast(page, { drafts: drafts!, outbox: '1', subject: 'Cabin', isListed: true });
+  await atRest(page);
   await readable(page, 'phone-light-refused');
 
   expect(await counted(page, 'drafts')).toEqual([drafts!, drafts! - 1, drafts!]);

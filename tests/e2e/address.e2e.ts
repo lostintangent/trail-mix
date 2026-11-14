@@ -1,5 +1,6 @@
 import { afterEach, expect } from 'bun:test';
 import type { BrowserContextOptions, Page } from 'playwright';
+import { DWELL_MS } from '../../src/features/workbench/ui/useReadMark.ts';
 import { suite } from './suite.ts';
 
 /**
@@ -159,7 +160,14 @@ test('a conversation deep in its list opens at its page, its row in sight, and J
   await early.getByRole('button', { name: 'Back', exact: true }).locator('visible=true').click();
   // Meanwhile the list stands as skeleton rows.
   const back = early.locator('[role="listbox"][aria-multiselectable]');
-  await early.waitForTimeout(500);
+  await early.waitForFunction(() =>
+    [...document.querySelectorAll('[role="status"][aria-busy="true"]')].some(
+      (pending) =>
+        pending.textContent === 'Loading Inbox' &&
+        pending.querySelector('[aria-hidden="true"]') &&
+        getComputedStyle(pending).opacity === '1',
+    ),
+  );
   await expect(back.count()).resolves.toBe(0);
   await expect(sawTop(early)).resolves.toBe(false);
   expect(asked).toBeGreaterThan(0);
@@ -345,12 +353,15 @@ test('choosing a view opens its newest, read only once it has stayed open two se
   // The Inbox's newest starts unread, whatever came before, and is left before it's read again.
   await choose(/^Inbox/);
   await newestOpen('Inbox');
+  const wasUnread = (await selectedRow(page).textContent())?.includes('Unread');
+  const counted = await unread();
   await page.keyboard.press('Shift+U');
   await selectedRow(page).filter({ hasText: 'Unread' }).waitFor();
   await choose(/^Flagged/);
   await newestOpen('Flagged');
-  await page.waitForTimeout(500);
-  const before = await unread();
+  // The Inbox counts it once the Mailroom has Shift+U's change.
+  const before = wasUnread ? counted : counted + 1;
+  await unreadIs(before, 5_000);
   const steps = await historyLength(page);
 
   // Passing through the Inbox on the way to Drafts, by the palette, reads nothing.
@@ -360,7 +371,9 @@ test('choosing a view opens its newest, read only once it has stayed open two se
   await page.keyboard.type('go to drafts');
   await page.keyboard.press('Enter');
   await newestOpen('Drafts');
-  await page.waitForTimeout(2_500);
+  // Proves no read comes in the time the Inbox's newest would have had to stay open to be read, and
+  // a little more for its count to show it.
+  await page.waitForTimeout(DWELL_MS + 500);
   expect(await unread()).toBe(before);
 
   // Staying reads it, only after two seconds, and not while the member scrolls the list.
@@ -490,7 +503,11 @@ test('the member’s own choice wins over the view’s newest, however late its 
   await composer.waitFor();
   await release();
   await page.getByRole('option').first().waitFor();
-  await page.waitForTimeout(300);
+  // Proves the newest doesn't take the new message's place: a view opens its newest before the frame
+  // that draws its rows, so two frames on it would have.
+  await page.evaluate(
+    () => new Promise((drawn) => requestAnimationFrame(() => requestAnimationFrame(drawn))),
+  );
   await expect(composer.count()).resolves.toBe(1);
   await expect(selectedRow(page).count()).resolves.toBe(0);
   await page.keyboard.press('Escape');
@@ -520,6 +537,10 @@ test('the member’s own choice wins over the view’s newest, however late its 
       Boolean(shown && row.textContent?.includes(shown))
     );
   });
-  await page.waitForTimeout(500);
+  // The pick stays once it has rested and the address names it.
+  await page.waitForFunction(() => {
+    const address = new URL(location.href).searchParams;
+    return address.get('folder') === 'Archive' && address.has('open');
+  });
   await expect(selectedRow(page).getAttribute('aria-posinset')).resolves.toBe('2');
 }, 60_000);

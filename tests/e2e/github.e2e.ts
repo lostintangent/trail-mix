@@ -1,5 +1,6 @@
 import { afterEach, expect } from 'bun:test';
 import type { BrowserContextOptions, Page } from 'playwright';
+import { DWELL_MS } from '../../src/features/workbench/ui/useReadMark.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 import { suite } from './suite.ts';
 
@@ -97,8 +98,9 @@ test('a bundle opens its threads unread, and a thread opens under it, steps by J
   const row = bundleRow(page, TOY_BOX);
   await row.click();
   await shows(page, TOY_BOX);
-  // Opening a bundle reads none of it, however long it stays open.
-  await page.waitForTimeout(2_500);
+  // Opening a bundle reads none of it, however long it stays open. This proves no read comes in the
+  // time the reader takes to read what it opens, and a little more for the row to show it.
+  await page.waitForTimeout(DWELL_MS + 500);
   await expect(row.getByText('Unread', { exact: true }).count()).resolves.toBe(1);
   await expect(
     threadTitles(page).first().getByRole('img', { name: 'Unread' }).count(),
@@ -185,7 +187,8 @@ test('a thread deep in its bundle opens at its place on a reload, and J moves on
   await early.goto(address);
   await shows(early, title);
   await reader(early).getByRole('button', { name: TOY_BOX, exact: true }).click();
-  await early.waitForTimeout(500);
+  await shows(early, TOY_BOX);
+  await reader(early).getByRole('status').filter({ hasText: 'Opening the repository' }).waitFor();
   await expect(reader(early).locator('[data-index]').count()).resolves.toBe(0);
   expect(asked).toBeGreaterThan(0);
   release();

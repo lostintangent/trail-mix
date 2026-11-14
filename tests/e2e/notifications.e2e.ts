@@ -64,11 +64,11 @@ afterEach(() => {
   expect(errors.splice(0)).toEqual([]);
 });
 
-/** Settings' switch for this device's notifications. */
-const notifying = (page: Page) =>
+/** Settings' switch for this device's notifications, or only while it shows them on or off. */
+const notifying = (page: Page, checked?: boolean) =>
   page
     .getByRole('region', { name: 'Settings' })
-    .getByRole('switch', { name: 'Notifications on this device' });
+    .getByRole('switch', { name: 'Notifications on this device', checked });
 
 /** Opens Settings from the gear at the foot of the sidebar, which a phone slides into view first. */
 async function openSettings(page: Page) {
@@ -80,12 +80,7 @@ async function openSettings(page: Page) {
 }
 
 /** Waits until the switch shows notifications on, or off. */
-async function isOn(page: Page, on: boolean) {
-  for (let wait = 0; wait < 200 && (await notifying(page).isChecked()) !== on; wait++) {
-    await page.waitForTimeout(50);
-  }
-  expect(await notifying(page).isChecked()).toBe(on);
-}
+const isOn = (page: Page, on: boolean) => notifying(page, on).waitFor({ timeout: 10_000 });
 
 async function open(
   options: BrowserContextOptions,

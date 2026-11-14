@@ -7,6 +7,7 @@ import { parseHex } from '../../src/shared/color.ts';
 import { DESK_HEX } from '../../src/app/theme/palette.ts';
 import { accentRule, accentTokens } from '../../src/app/theme/readableAccent.ts';
 import { PAGE_SIZE } from '../../src/features/mailroom/client/contract.ts';
+import { REST_MS } from '../../src/features/reader/core/rest.ts';
 import { textContrasts, unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
@@ -121,7 +122,7 @@ for (const accent of ACCENTS) {
         }
         for (const [screen, reach] of screens) {
           await reach(page);
-          await page.waitForTimeout(400);
+          await atRest(page);
           const shot = [size, colorScheme, screen, accent?.slice(1)].filter(Boolean).join('-');
           await page.screenshot({ path: join(SHOTS, `${shot}.png`) });
           expect({ screen: shot, unreadable: await unreadableText(page) }).toEqual({
@@ -432,10 +433,14 @@ test('the first screen draws every control it settles with, from the first load 
       .count();
     heldBack += held.length;
 
+    // The composer's code is the last to load, once the member has rested a moment on the first
+    // screen, after everything else that loads once it has settled.
+    const isComposerLoaded = page.waitForResponse((response) =>
+      /\/assets\/Composer-[^/]+\.js$/.test(response.url()),
+    );
     isHolding = false;
     await Promise.all([...held, ...asked].map((route) => route.continue()));
-    // Past what loads once the first screen has settled, and the browser is idle again.
-    await page.waitForTimeout(2_000);
+    await isComposerLoaded;
     await page.waitForLoadState('networkidle');
     const settled = await controls(page);
     expect(first.screen, `${size}: the controls at the first rows`).toEqual(settled.screen);
@@ -742,6 +747,7 @@ test('reaching for the accent in Settings the moment the list shows, on a slowed
   );
   // Choosing a color in the system's picker takes a person longer than this, so a pick comes later.
   expect(loadedIn).toBeLessThan(CHOOSING_MS);
+  // Sets the pace: the pick comes no sooner than a person could choose.
   await page.waitForTimeout(CHOOSING_MS - loadedIn);
   await picker.fill('#c2185b');
   expect(await accentShown(page)).toBe(shownAs(accentTokens(parseHex('#c2185b')!, 'light').accent));
@@ -768,8 +774,7 @@ test('a sheet that sets its own color scheme takes the theme’s colors for that
 test('the reader follows a move made after a rest at once, and waits while a key is held', async () => {
   const { context, page, problems } = await open(SIZES.desktop);
   await openConversation(page, 0);
-  // Long enough idle for the reader to prepare the conversations beside the open one.
-  await page.waitForTimeout(3_000);
+  await preparedBelow(page);
 
   const shown = await page.evaluate(async () => {
     const reader = document.querySelector('section[aria-label="Reader"]')!;
@@ -828,7 +833,8 @@ test('quick presses never rest, however long a slow phone takes to draw each mov
     }, row);
   }
   expect(await heading.count()).toBe(1);
-  await page.waitForTimeout(1_000);
+  // Sets the pace: the member rests on the conversation before pressing, so the first press opens.
+  await page.waitForTimeout(REST_MS);
 
   const shown = await page.evaluate(async () => {
     const reader = document.querySelector('section[aria-label="Reader"]')!;
@@ -1141,7 +1147,19 @@ test('the list shows only unread mail while its filter is on, and keeps the one 
   await page.screenshot({ path: join(SHOTS, 't90-desktop-light-unread.png') });
 
   // A conversation read under the filter stays listed, and the reader stays on it.
-  await rows.filter({ hasText: 'Unread' }).filter({ hasNotText: 'trailmix-demo/' }).first().click();
+  const isRead = page.waitForResponse(
+    (response) => response.request().postData()?.includes('"setFlags"') ?? false,
+  );
+  const refetched = isRead.then(() =>
+    page.waitForRequest((request) => request.url().includes(encodeURIComponent('"conversations"'))),
+  );
+  const unread = rows
+    .filter({ hasText: 'Unread' })
+    .filter({ hasNotText: 'trailmix-demo/' })
+    .first();
+  const wasOpen = (await unread.getAttribute('aria-selected')) === 'true';
+  const named = new URL(page.url()).searchParams.get('open');
+  await unread.click();
   await subject.waitFor();
   const opened = await subject.textContent();
   await page.waitForFunction(
@@ -1150,13 +1168,22 @@ test('the list shows only unread mail while its filter is on, and keeps the one 
         .querySelector('[role="option"][aria-selected="true"]')
         ?.textContent.includes('Unread'),
   );
-  // Long enough for the read to reach the Mailroom and the list to be fetched again.
-  await page.waitForTimeout(1_500);
+  // The read reaches the Mailroom, whose hint has the list fetched again and drawn.
+  await (await refetched).response();
+  await page.evaluate(() => new Promise(requestAnimationFrame));
   await expect(selected.count()).resolves.toBe(1);
   await expect(subject.textContent()).resolves.toBe(opened);
   const read = await selected.textContent();
 
-  // A reload keeps the filter, and the conversation open stays listed, though it has been read.
+  // A reload keeps the filter, and the conversation open stays listed, though it has been read. The
+  // address names the conversation once its selection has rested, and a reload opens what it names.
+  await page.waitForFunction(
+    ({ wasOpen, named }) => {
+      const open = new URL(location.href).searchParams.get('open');
+      return open !== null && (wasOpen || open !== named);
+    },
+    { wasOpen, named },
+  );
   await page.reload({ waitUntil: 'networkidle' });
   await selected.waitFor();
   expect(isFiltered(new URL(page.url()))).toBe(true);
@@ -1452,6 +1479,27 @@ async function openConversation(page: Page, which: number | RegExp) {
     ];
     return frames.length > 0 && frames.every((frame) => frame.style.visibility === 'visible');
   });
+}
+
+/**
+ * Waits until the reader has prepared the conversation below the open one, as it does while the
+ * browser is idle: its newest body fetched, the page's second after the open one's, and sanitized
+ * in an idle moment after it came.
+ */
+async function preparedBelow(page: Page) {
+  await page.waitForFunction(
+    (body) =>
+      new Set(
+        performance
+          .getEntriesByType('resource')
+          .map(({ name }) => name)
+          .filter((name) => name.includes(body)),
+      ).size >= 2,
+    encodeURIComponent('"body"'),
+  );
+  await page.evaluate(
+    () => new Promise((resolve) => requestIdleCallback(() => requestIdleCallback(resolve))),
+  );
 }
 
 /** Types a search into the field and waits for the rows it marks. On a phone, from the list. */

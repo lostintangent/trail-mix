@@ -310,7 +310,8 @@ test('an Undo that reaches the Mailroom before its Send stops the send there, an
   const refused = page.waitForResponse((response) => isSend(response.request().postData()));
   undone.resolve();
   expect(await (await refused).text()).toContain('The send was undone.');
-  // The refusal is the Undo's own, so the message stays as it was, and isn't asked for again.
+  // The refusal is the Undo's own, so the message stays as it was, and isn't asked for again. This
+  // proves no second ask and no failure come: one taken as unanswered is asked again after a second.
   await page.waitForTimeout(1_500);
   expect(asks).toBe(1);
   await expect(page.getByText(/Couldn’t send/).count()).resolves.toBe(0);
@@ -335,7 +336,8 @@ test('a send straight after a cold load counts down, though toasts and their the
   const stored = storedSendAt(page);
   await send(page).click();
   await stored;
-  await page.waitForTimeout(500);
+  // The page has taken the answer once the sidebar's Outbox counts the send.
+  await page.getByRole('button', { name: /^Outbox\s?1$/ }).waitFor();
   release();
 
   const counting = toast(page, /^Sending to Jonas in \d+s$/);

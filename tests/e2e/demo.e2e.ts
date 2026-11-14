@@ -227,10 +227,10 @@ test('holding E down archives the whole Inbox within the change limit, which sto
   });
   const rows = di.getByRole('option');
   await rows.first().click();
-  // A held key repeats about 30 times a second at its fastest.
   await di.keyboard.down('e');
   for (let held = 0; held < CHANGES_A_MINUTE && (await rows.count()) > 0; held++) {
     await di.keyboard.down('e');
+    // Sets the pace of a held key, which repeats about 30 times a second at its fastest.
     await di.waitForTimeout(33);
   }
   await di.keyboard.up('e');
