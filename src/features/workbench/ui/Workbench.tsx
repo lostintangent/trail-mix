@@ -91,7 +91,7 @@ import {
   triageCommands,
   unreadFilter,
   useAround,
-  useBundle,
+  useOpenThread,
   useSearch,
   useTriage,
   type Action,
@@ -127,12 +127,6 @@ import {
   type Writing,
 } from '../../composer/ui/index.ts';
 import { useComposing } from './useComposing.ts';
-
-/**
- * How many threads on each side of the one open are fetched, so a held J or K finds the next page
- * there before it reaches it.
- */
-const THREADS_AHEAD = 10;
 
 import { useReach, type Reach } from '../../offline/index.ts';
 import {
@@ -262,34 +256,10 @@ export function Workbench({
   // A bundle selected lies open in the reader, and one of its threads may lie open in its place,
   // until the selection moves on from the bundle.
   const bundleOpen = selected !== undefined && bundlePartsOf(selected) ? selected : undefined;
-  const [threadIn, setThreadIn] = useState(() =>
-    place.bundle !== undefined && place.open !== undefined
-      ? { bundle: place.bundle, open: place.open }
-      : undefined,
-  );
-  if (threadIn !== undefined && threadIn.bundle !== bundleOpen) setThreadIn(undefined);
-  const thread = threadIn?.bundle === bundleOpen ? threadIn?.open : undefined;
+  const { inBundle, thread, threadAt, threadRow, cameFromAt, awaitsThread, setThreadIn, arriveAt } =
+    useOpenThread(bundleOpen, place);
   // The conversation the reader shows: the one selected, or the thread open in the bundle selected.
   const opened = bundleOpen === undefined ? selected : thread;
-  const inBundle = useBundle(bundleOpen);
-  const threadAt = thread === undefined ? -1 : (inBundle.places.get(thread) ?? -1);
-  const threadRow = inBundle.threads?.[threadAt];
-  // While a thread is open, the threads beside it are fetched at once, so J and K step on past its
-  // page without waiting.
-  const showThreads = inBundle.show;
-  useEffect(() => {
-    if (threadAt >= 0) {
-      showThreads(threadAt - THREADS_AHEAD, threadAt + THREADS_AHEAD, threadAt, true);
-    }
-  }, [showThreads, threadAt]);
-  // The thread last open in the bundle, which the bundle shows in sight when the member returns.
-  const [cameFrom, setCameFrom] = useState(threadIn);
-  if (thread !== undefined && cameFrom?.open !== thread) setCameFrom(threadIn);
-  // The thread a place arrived naming, which its bundle looks for until it lists it.
-  const [seekingThread, setSeekingThread] = useState(threadIn);
-  if (seekingThread !== undefined && seekingThread.bundle !== bundleOpen) {
-    setSeekingThread(undefined);
-  }
   const stamps = useMemo(() => new Map(accounts.map(({ id, stamp }) => [id, stamp])), [accounts]);
   // A row's avatar is its newest sender other than the member, by any of their addresses.
   const selves = useMemo(
@@ -335,9 +305,7 @@ export function Workbench({
     arrive: ({ view, bundle, open }) => {
       setSelection(openOnly(bundle ?? open));
       setSeeking(bundle ?? open);
-      const named = bundle !== undefined && open !== undefined ? { bundle, open } : undefined;
-      setThreadIn(named);
-      setSeekingThread(named);
+      arriveAt({ view, bundle, open });
       setPhonePane(bundle !== undefined || open !== undefined ? 'reader' : 'list');
       setOpening(
         bundle === undefined && open === undefined && opensNewest(view, isPhone) ? view : undefined,
@@ -410,8 +378,7 @@ export function Workbench({
   // be listed, so it opens there with the row in sight rather than at its top, even after a phone's
   // Back closed the conversation before the page came. It doesn't wait when the page can't be asked
   // for, as offline, or once the list has caught up without the row, as a list of unread mail
-  // leaves out one read. A thread deep in its bundle is asked for alike, so J steps on from it, and
-  // the bundle waits for it too, so closing the thread before its page came shows it in sight.
+  // leaves out one read.
   const around = useAround(
     isArrived ? seeking : undefined,
     conversations && places,
@@ -419,13 +386,6 @@ export function Workbench({
     conversationsQuery(view, { around: seeking ?? '' }, isUnreadOnly ? seeking : undefined),
   );
   if (seeking !== undefined && around.isDone) setSeeking(undefined);
-  const threadAround = useAround(
-    seekingThread?.open,
-    inBundle.threads && inBundle.places,
-    inBundle.isFetching,
-    bundleQuery(bundleOpen ?? '', { around: seekingThread?.open ?? '' }),
-  );
-  if (seekingThread !== undefined && threadAround.isDone) setSeekingThread(undefined);
   // A conversation that leaves the list gives way to the one below it, or above it at the end. On a
   // phone, where the reader fills the screen, the list comes back instead. The list shows the
   // conversation gone at once, and the reader turns to the next one just after, so the frame that
@@ -692,7 +652,7 @@ export function Workbench({
       if (open === undefined || pushed.current === open) pushed.current = id;
       move({ view, bundle: bundleOpen, open: id }, open === undefined ? 'push' : 'replace');
     },
-    [bundleOpen, move, pushed, written],
+    [bundleOpen, move, pushed, written, setThreadIn],
   );
   const closeThread = useCallback(() => {
     const { bundle, open } = latestPlace.current;
@@ -703,7 +663,7 @@ export function Workbench({
       return;
     }
     setThreadIn(undefined);
-  }, [onBack, pushed]);
+  }, [onBack, pushed, setThreadIn]);
   // A demo visitor's Mailroom keeps its accounts, erases itself, and says so.
   const isVisitor = useQuery(thisDeviceQuery).data?.visitor === true;
   const accountsCommands = useMemo(
@@ -766,7 +726,7 @@ export function Workbench({
         move(bundlePartsOf(id) ? { view, bundle: id } : { view, open: id }, 'push');
       }
     },
-    [move, pushed, written, openedByMember],
+    [move, pushed, written, openedByMember, setThreadIn],
   );
   const startPicking = useCallback((id: ConversationId) => {
     setPicking(true);
@@ -1019,7 +979,7 @@ export function Workbench({
           id: bundleOpen,
           label: 'Repository',
           content: (scroller) =>
-            inBundle.bundle && inBundle.threads && !threadAround.awaits ? (
+            inBundle.bundle && inBundle.threads && !awaitsThread ? (
               <Suspense fallback={<BundleSkeleton repository={repository} />}>
                 <BundleReader
                   bundle={inBundle.bundle}
@@ -1029,9 +989,7 @@ export function Workbench({
                   scroller={scroller}
                   onOpen={openThread}
                   onShown={inBundle.show}
-                  from={
-                    cameFrom?.bundle === bundleOpen ? inBundle.places.get(cameFrom.open) : undefined
-                  }
+                  from={cameFromAt}
                 />
               </Suspense>
             ) : inBundle.isError ? (
