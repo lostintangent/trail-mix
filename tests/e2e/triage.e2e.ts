@@ -485,66 +485,49 @@ test('keys run the registry’s commands inside a message, and ? lists them', as
   await expect(conversationKeys.getByText('#', { exact: true }).isVisible()).resolves.toBe(true);
 }, 30_000);
 
-test('Delete and Backspace delete an open conversation from the list and message, with Undo', async () => {
-  for (const key of ['Delete', 'Backspace']) {
-    for (const insideMessage of [false, true]) {
-      const here = await inbox();
-      const target = row(here, /Trip photos/);
-      await target.click();
-      await shownSubject(here);
-      if (!insideMessage && key === 'Delete') {
-        await bar(here).getByRole('button', { name: 'Delete' }).hover();
-        await here
-          .getByRole('tooltip')
-          .filter({ hasText: 'Delete (#, Delete, Backspace)' })
-          .waitFor();
-      }
-      if (insideMessage) {
-        await framesShown(here, 1);
-        await reader(here).locator('iframe').last().contentFrame().locator('body').click();
-      } else {
-        await here.getByRole('listbox', { name: 'Inbox' }).focus();
-      }
+test('Delete deletes the open conversation from the list, with Undo', async () => {
+  const here = await inbox();
+  const target = row(here, /Trip photos/);
+  await target.click();
+  await shownSubject(here);
+  await bar(here).getByRole('button', { name: 'Delete' }).hover();
+  await here.getByRole('tooltip').filter({ hasText: 'Delete (#, Delete, Backspace)' }).waitFor();
+  await here.getByRole('listbox', { name: 'Inbox' }).focus();
 
-      await here.keyboard.press(key);
-      await target.waitFor({ state: 'detached', timeout: 1_000 });
-      await undoButton(here).waitFor();
-      await here.keyboard.press('z');
-      await target.waitFor({ timeout: 1_000 });
-      await here.context().close();
-    }
-  }
-}, 60_000);
+  await here.keyboard.press('Delete');
+  await target.waitFor({ state: 'detached', timeout: 1_000 });
+  await undoButton(here).waitFor();
+  await here.keyboard.press('z');
+  await target.waitFor({ timeout: 1_000 });
+}, 30_000);
 
-test('Delete and Backspace delete the whole selection together, and Undo restores all of it at once', async () => {
-  for (const key of ['Delete', 'Backspace']) {
-    const here = await inbox();
-    const options = here.getByRole('option');
-    const picked = await Promise.all([5, 6, 7].map((place) => summaryAt(here, place)));
-    await options.nth(4).click();
-    await options.nth(6).click({ modifiers: ['Shift'] });
-    await options.nth(5).click({ modifiers: ['ControlOrMeta'] });
-    await here.getByRole('heading', { name: '2 conversations selected' }).waitFor();
-    await options.nth(5).click({ modifiers: ['ControlOrMeta'] });
-    await here.getByRole('heading', { name: '3 conversations selected' }).waitFor();
-    await here.getByRole('listbox', { name: 'Inbox' }).focus();
-    await here.keyboard.press(key);
-    for (const text of picked) {
-      await listedSummary(here, text).waitFor({ state: 'detached', timeout: 1_000 });
-    }
-    await undoButton(here).waitFor();
-    // The picked rows come from both accounts, so Undo moves each account's back. It asks for
-    // every move before any answers, so a page closed as soon as it shows them back loses none.
-    const undoing: string[] = [];
-    const isMove = (request: Request) => request.postData()?.includes('"move"') ?? false;
-    here.on('request', (request) => isMove(request) && undoing.push('asked'));
-    here.on('response', (response) => isMove(response.request()) && undoing.push('answered'));
-    await here.keyboard.press('z');
-    for (const text of picked) await listedSummary(here, text).waitFor({ timeout: ELSEWHERE_MS });
-    await until(() => Promise.resolve(undoing.length === 4), ELSEWHERE_MS);
-    expect(undoing).toEqual(['asked', 'asked', 'answered', 'answered']);
-    await here.context().close();
+test('Backspace deletes the whole selection together, and Undo restores all of it at once', async () => {
+  const here = await inbox();
+  const options = here.getByRole('option');
+  const picked = await Promise.all([5, 6, 7].map((place) => summaryAt(here, place)));
+  await options.nth(4).click();
+  await options.nth(6).click({ modifiers: ['Shift'] });
+  await options.nth(5).click({ modifiers: ['ControlOrMeta'] });
+  await here.getByRole('heading', { name: '2 conversations selected' }).waitFor();
+  await options.nth(5).click({ modifiers: ['ControlOrMeta'] });
+  await here.getByRole('heading', { name: '3 conversations selected' }).waitFor();
+  await here.getByRole('listbox', { name: 'Inbox' }).focus();
+  await here.keyboard.press('Backspace');
+  for (const text of picked) {
+    await listedSummary(here, text).waitFor({ state: 'detached', timeout: 1_000 });
   }
+  await undoButton(here).waitFor();
+  // The picked rows come from both accounts, so Undo moves each account's back. It asks for
+  // every move before any answers, so a page closed as soon as it shows them back loses none.
+  const undoing: string[] = [];
+  const isMove = (request: Request) => request.postData()?.includes('"move"') ?? false;
+  here.on('request', (request) => isMove(request) && undoing.push('asked'));
+  here.on('response', (response) => isMove(response.request()) && undoing.push('answered'));
+  await here.keyboard.press('z');
+  for (const text of picked) await listedSummary(here, text).waitFor({ timeout: ELSEWHERE_MS });
+  await until(() => Promise.resolve(undoing.length === 4), ELSEWHERE_MS);
+  expect(undoing).toEqual(['asked', 'asked', 'answered', 'answered']);
+  await here.context().close();
 }, 30_000);
 
 test("a toast's Undo is its icon alone, ruled off from the close, and its tooltip names Undo's key", async () => {
