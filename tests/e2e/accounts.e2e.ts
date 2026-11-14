@@ -97,11 +97,19 @@ describe('The first-run screen', () => {
     await lost.unroute('**/_serverFn/**');
     await lost.getByRole('button', { name: 'Try again' }).click();
     await lost.getByRole('heading', { name: 'Welcome to Trail Mix' }).waitFor();
+    // Offline, an account added says so, where the browser would say only that a fetch failed.
+    await lost.context().setOffline(true);
+    await lost.getByRole('textbox', { name: 'Address' }).fill('sam@trl.example');
+    await lost.getByLabel('Password', { exact: true }).fill('an app password');
+    await lost.getByRole('button', { name: 'Add account' }).click();
+    await lost.getByRole('alert').filter({ hasText: 'This device is offline.' }).waitFor();
 
     await refused.getByText('Trail Mix answered 503: The Mailroom is restarting.').waitFor();
     await refused.unroute('**/_serverFn/**');
     // Coming back to the tab asks again, with no button pressed.
-    await refused.evaluate(() => document.dispatchEvent(new Event('visibilitychange')));
+    await refused.evaluate(() =>
+      document.dispatchEvent(new Event('visibilitychange', { bubbles: true })),
+    );
     await refused.getByRole('heading', { name: 'Welcome to Trail Mix' }).waitFor();
   }, 30_000);
 });

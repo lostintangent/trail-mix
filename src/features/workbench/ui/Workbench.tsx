@@ -23,7 +23,6 @@ import {
   conversationQuery,
   conversationsQuery,
   MATCHES_LISTED,
-  outboxQuery,
   thisDeviceQuery,
   useIsCaughtUp,
 } from '../../mailroom/client/index.ts';
@@ -326,9 +325,6 @@ export function Workbench({
   const isOffscreen = (pane: PhonePane) => isPhone && pane !== phonePane;
 
   const { triage, undoLast, canUndo } = useTriage(view, folders);
-  // Drafts on their way can't be written on until their send is undone. Each lies at the end of its
-  // conversation as a reply on its way instead, until the server's copy takes its place.
-  const { data: outgoing } = useQuery(outboxQuery);
   const composing = useComposing(opened, leaving.drafts);
   const { compose } = composing;
   // A new message is from the account the view holds, or else the first.
@@ -1086,7 +1082,6 @@ export function Workbench({
         <Suspense>
           <RemoveQuestion
             account={removing}
-            waiting={(outgoing ?? []).filter(({ draft }) => draft.account === removing.id).length}
             onRemoved={removed}
             onClose={() => setRemoving(undefined)}
           />
@@ -1094,11 +1089,7 @@ export function Workbench({
       )}
       {isErasing && (
         <Suspense>
-          <EraseQuestion
-            accounts={accounts}
-            waiting={(outgoing ?? []).filter(({ state }) => state === 'waiting').length}
-            onClose={() => setErasing(false)}
-          />
+          <EraseQuestion accounts={accounts} onClose={() => setErasing(false)} />
         </Suspense>
       )}
       {folderEditing.deleting && (

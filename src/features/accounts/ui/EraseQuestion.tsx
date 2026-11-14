@@ -1,8 +1,7 @@
 import { AlertDialog } from '@astryxdesign/core/AlertDialog';
-import { useQueryClient } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Account } from '../../mail/core/index.ts';
-import { accountsQuery, mailroom } from '../../mailroom/client/index.ts';
+import { accountsQuery, mailroom, outboxQuery } from '../../mailroom/client/index.ts';
 import { reasonOf } from '../../../shared/reasons.ts';
 import { toast } from '../../../shared/toasts.tsx';
 import { eraseSaid } from '../core/said.ts';
@@ -14,37 +13,34 @@ import { eraseSaid } from '../core/said.ts';
  */
 export function EraseQuestion({
   accounts,
-  waiting,
   onClose,
 }: {
   accounts: readonly Account[];
-  /** How many messages wait in the Outbox. */
-  waiting: number;
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
-  const [isErasing, setErasing] = useState(false);
-  const erase = async () => {
-    setErasing(true);
-    try {
-      await mailroom.eraseEverything();
+  const { data: outgoing = [] } = useQuery(outboxQuery);
+  const erase = useMutation({
+    mutationFn: () => mailroom.eraseEverything(),
+    // Offline it fails at once and says so, rather than waiting with its button spinning.
+    networkMode: 'always',
+    onSuccess: () => {
       queryClient.setQueryData(accountsQuery.queryKey, []);
       onClose();
-    } catch (error) {
-      setErasing(false);
-      void toast({ type: 'error', body: `Couldn’t erase everything. ${reasonOf(error)}` });
-    }
-  };
+    },
+    onError: (error) =>
+      void toast({ type: 'error', body: `Couldn’t erase everything. ${reasonOf(error)}` }),
+  });
   return (
     <AlertDialog
       isOpen
-      onOpenChange={(isOpen) => !isOpen && !isErasing && onClose()}
+      onOpenChange={(isOpen) => !isOpen && !erase.isPending && onClose()}
       title="Erase everything Trail Mix holds for you?"
-      description={eraseSaid(accounts, waiting)}
+      description={eraseSaid(accounts, outgoing.filter(({ state }) => state === 'waiting').length)}
       actionLabel="Erase everything"
       actionVariant="destructive"
-      isActionLoading={isErasing}
-      onAction={() => void erase()}
+      isActionLoading={erase.isPending}
+      onAction={() => erase.mutate()}
     />
   );
 }

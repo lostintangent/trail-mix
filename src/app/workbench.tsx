@@ -89,8 +89,6 @@ function App() {
   // shows here.
   useHints();
   const accounts = useQuery(accountsQuery);
-  const { refetch } = accounts;
-  const askAgain = useCallback(() => void refetch(), [refetch]);
   const isUnreached = accounts.data === undefined && accounts.isError;
   // Saying so may wait for its code, as when the network went before the page was idle, so the
   // screen before stays until it has come, rather than a bare desk.
@@ -116,7 +114,7 @@ function App() {
     [notifications, accent, setAccent],
   );
   const screen = saysUnreached ? (
-    <Unreachable failed={accounts.error} onTryAgain={askAgain} />
+    <Unreachable failed={accounts.error} />
   ) : accounts.data === undefined && !hasMail ? (
     <Opening />
   ) : !isFirstRun ? (

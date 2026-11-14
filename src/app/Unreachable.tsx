@@ -3,9 +3,9 @@ import { EmptyState } from '@astryxdesign/core/EmptyState';
 import { Icon } from '@astryxdesign/core/Icon';
 import { colorVars, spacingVars, typeScaleVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
+import { useQuery } from '@tanstack/react-query';
 import { CloudOff, Hourglass } from 'lucide-react';
-import { useEffect } from 'react';
-import { whatFailed, type Unanswered } from '../features/mailroom/client/index.ts';
+import { accountsQuery, whatFailed, type Unanswered } from '../features/mailroom/client/index.ts';
 import { tm } from './theme/tokens.stylex.ts';
 
 /**
@@ -14,17 +14,14 @@ import { tm } from './theme/tokens.stylex.ts';
  * a deploy that cut it off for a moment. Try again loads the page anew, which signs in again where
  * the sign-in has run out. The public demo, when it lets no more visitors in, says so instead.
  */
-export function Unreachable({ failed, onTryAgain }: { failed?: unknown; onTryAgain?: () => void }) {
-  useEffect(() => {
-    if (!onTryAgain) return;
-    const again = () => {
-      if (document.visibilityState === 'visible' && navigator.onLine) onTryAgain();
-    };
-    const listening = new AbortController();
-    document.addEventListener('visibilitychange', again, { signal: listening.signal });
-    window.addEventListener('online', again, { signal: listening.signal });
-    return () => listening.abort();
-  }, [onTryAgain]);
+export function Unreachable({ failed }: { failed?: unknown }) {
+  useQuery({
+    ...accountsQuery,
+    // Its tries were just spent, so it waits to be seen again with a network, or for the network.
+    retryOnMount: false,
+    refetchOnWindowFocus: () => navigator.onLine,
+    refetchOnReconnect: true,
+  });
   const isFull = (failed as Unanswered | undefined)?.status === 429;
   return (
     <main {...stylex.props(styles.desk)}>

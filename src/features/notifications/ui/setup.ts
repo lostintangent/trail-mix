@@ -1,4 +1,5 @@
 import { mailroom } from '../../mailroom/client/index.ts';
+import { reasonOf } from '../../../shared/reasons.ts';
 import { toast } from '../../../shared/toasts.tsx';
 import {
   fromBase64Url,
@@ -37,7 +38,7 @@ export async function turn(isOn: boolean, pushKey: string): Promise<'blocked' | 
   } catch (error) {
     void toast({
       type: 'error',
-      body: `Couldn’t turn notifications ${isOn ? 'off' : 'on'}. ${error instanceof Error ? error.message : String(error)}`,
+      body: `Couldn’t turn notifications ${isOn ? 'off' : 'on'}. ${reasonOf(error)}`,
     });
     return error instanceof NotAllowed && error.answer === 'denied' ? 'blocked' : undefined;
   }

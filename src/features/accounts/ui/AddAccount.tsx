@@ -16,6 +16,7 @@ import {
   type SignIn,
 } from '../../mailroom/client/index.ts';
 import { PRESETS } from '../../providers/imap/core/index.ts';
+import { reasonOf } from '../../../shared/reasons.ts';
 import {
   formFor,
   formProblems,
@@ -26,6 +27,7 @@ import {
   type PresetServers,
 } from '../core/form.ts';
 import { DEMO_SAID, isDemoOnly, signInNotSetUp } from '../core/said.ts';
+import { Refusal } from './Refusal.tsx';
 import { SignInStep } from './SignInStep.tsx';
 import { formStyles } from './formStyles.ts';
 
@@ -96,7 +98,7 @@ export function AddAccount({
         added(await mailroom.addAccount(setupFrom(form, ZOHO)));
       }
     } catch (error) {
-      setRefusal(error instanceof Error ? error.message : String(error));
+      setRefusal(reasonOf(error));
     } finally {
       setChecking(undefined);
     }
@@ -214,11 +216,7 @@ export function AddAccount({
         </fieldset>
       )}
 
-      {refusal && (
-        <div role="alert">
-          <Banner status="error" title="The account wasn’t added." description={refusal} />
-        </div>
-      )}
+      <Refusal title="The account wasn’t added." reason={refusal} />
       <div {...stylex.props(formStyles.actions)}>
         <Button
           type="submit"

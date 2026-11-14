@@ -1,4 +1,3 @@
-import { Banner } from '@astryxdesign/core/Banner';
 import { Button } from '@astryxdesign/core/Button';
 import { TextInput } from '@astryxdesign/core/TextInput';
 import {
@@ -19,6 +18,8 @@ import { focusRing, media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, StampColor } from '../../mail/core/index.ts';
 import { VISITOR_SAID } from '../core/said.ts';
 import { accountsQuery, mailroom } from '../../mailroom/client/index.ts';
+import { reasonOf } from '../../../shared/reasons.ts';
+import { Refusal } from './Refusal.tsx';
 import { formStyles } from './formStyles.ts';
 
 /** The stamps an account can wear, in the order they're given out, and what each is called. */
@@ -76,7 +77,7 @@ export function EditAccount({
       onDone();
     } catch (error) {
       void queryClient.invalidateQueries({ queryKey: accountsQuery.queryKey });
-      setRefusal(error instanceof Error ? error.message : String(error));
+      setRefusal(reasonOf(error));
     }
   };
 
@@ -139,11 +140,7 @@ export function EditAccount({
           {...stylex.props(styles.textarea)}
         />
       </div>
-      {refusal && (
-        <div role="alert">
-          <Banner status="error" title="The change wasn’t kept." description={refusal} />
-        </div>
-      )}
+      <Refusal title="The change wasn’t kept." reason={refusal} />
       <div {...stylex.props(formStyles.actions)}>
         <Button type="submit" variant="primary" label="Save" />
         <Button label="Cancel" variant="ghost" onClick={onDone} />

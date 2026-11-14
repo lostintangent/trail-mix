@@ -1,7 +1,8 @@
 import { AlertDialog } from '@astryxdesign/core/AlertDialog';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import type { Account } from '../../mail/core/index.ts';
-import { accountsQuery, mailroom } from '../../mailroom/client/index.ts';
+import { accountsQuery, mailroom, outboxQuery } from '../../mailroom/client/index.ts';
+import { reasonOf } from '../../../shared/reasons.ts';
 import { toast } from '../../../shared/toasts.tsx';
 import { removeSaid } from '../core/said.ts';
 
@@ -11,17 +12,16 @@ import { removeSaid } from '../core/said.ts';
  */
 export function RemoveQuestion({
   account,
-  waiting,
   onRemoved,
   onClose,
 }: {
   account: Account;
-  /** How many of its messages wait in the Outbox. */
-  waiting: number;
   onRemoved: (account: Account) => void;
   onClose: () => void;
 }) {
   const queryClient = useQueryClient();
+  const { data: outgoing = [] } = useQuery(outboxQuery);
+  const waiting = outgoing.filter(({ draft }) => draft.account === account.id).length;
   const remove = async () => {
     queryClient.setQueryData(accountsQuery.queryKey, (held) =>
       held?.filter(({ id }) => id !== account.id),
@@ -31,8 +31,7 @@ export function RemoveQuestion({
       await mailroom.removeAccount(account.id);
     } catch (error) {
       void queryClient.invalidateQueries({ queryKey: accountsQuery.queryKey });
-      const reason = error instanceof Error ? error.message : String(error);
-      void toast({ type: 'error', body: `Couldn’t remove ${account.name}. ${reason}` });
+      void toast({ type: 'error', body: `Couldn’t remove ${account.name}. ${reasonOf(error)}` });
     }
   };
   return (

@@ -1,4 +1,3 @@
-import { Banner } from '@astryxdesign/core/Banner';
 import { Button } from '@astryxdesign/core/Button';
 import {
   colorVars,
@@ -14,6 +13,7 @@ import { tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account } from '../../mail/core/index.ts';
 import { accountsQuery, signInsQuery, type SignIn } from '../../mailroom/client/index.ts';
 import { EXPIRED } from '../../providers/imap/core/index.ts';
+import { Refusal } from './Refusal.tsx';
 import { formStyles } from './formStyles.ts';
 
 /**
@@ -63,9 +63,7 @@ export function SignInStep({
   if (stopped) {
     return (
       <section aria-label={`Signing in at ${vendor}`} {...stylex.props(styles.step)}>
-        <div role="alert">
-          <Banner status="error" title="The sign-in didn’t finish." description={stopped} />
-        </div>
+        <Refusal title="The sign-in didn’t finish." reason={stopped} />
         <div {...stylex.props(formStyles.actions)}>
           <Button label="Get a new code" variant="primary" onClick={onAgain} />
           <Button label="Back" variant="ghost" onClick={onBack} />
