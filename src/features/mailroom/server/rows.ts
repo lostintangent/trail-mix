@@ -42,7 +42,7 @@ export const summaryIn = ({ summary }: { summary: string }) =>
 export const itemIn = ({ summary }: { summary: string }) => JSON.parse(summary) as ListItem;
 
 /** A folder as a map key. */
-export const placeOf = ({ account, path }: FolderRef) => JSON.stringify([account, path]);
+export const folderKey = ({ account, path }: FolderRef) => JSON.stringify([account, path]);
 
 /**
  * Search text as an FTS5 query: every word must match, each as a prefix, so results follow typing.

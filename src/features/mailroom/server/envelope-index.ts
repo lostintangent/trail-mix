@@ -22,7 +22,7 @@ import {
 import { senderOf } from '../core/avatars.ts';
 import { listsIn } from './lists.ts';
 import { isNotedAlike, peopleIn } from './people.ts';
-import { BY_REF, COLUMNS, keyOf, matchOf, messageIn, placeOf, type Row } from './rows.ts';
+import { BY_REF, COLUMNS, keyOf, matchOf, messageIn, folderKey, type Row } from './rows.ts';
 import type { Sql, SqlValue } from './schema.ts';
 
 /**
@@ -54,7 +54,7 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
         .all<{ account: string; path: string; role: string | null }>(
           `SELECT account, path, role FROM folders`,
         )
-        .map((row) => [placeOf(row), (row.role ?? undefined) as FolderRole | undefined]),
+        .map((row) => [folderKey(row), (row.role ?? undefined) as FolderRole | undefined]),
     );
 
   /**
@@ -88,7 +88,7 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
       sql
         .all<Row>(`SELECT ${COLUMNS} FROM messages WHERE account = ? AND path = ?`, account, path)
         .map(messageIn),
-    role: (folder) => (roles ?? rolesNow()).get(placeOf(folder)),
+    role: (folder) => (roles ?? rolesNow()).get(folderKey(folder)),
   };
 
   /** Notes that the Body cache owes a message's body a delete, should it hold one. */
@@ -203,14 +203,14 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
       sql.run(`DELETE FROM conversations WHERE id = ?`, id);
       return { placed: [], bundles };
     }
-    const roleOf = (message: Message) => roles.get(placeOf(message));
+    const roleOf = (message: Message) => roles.get(folderKey(message));
     const inbox = messages.filter((m) => roleOf(m) === 'inbox');
     const github = inbox.length > 0 ? threadOf(inbox) : undefined;
     const summary: ConversationSummary = github ? { ...row, github } : row;
     const bundle = github ? bundleIdOf(summary.account, github.repository) : null;
     if (bundle !== null) bundles.push(bundle);
     // Where its unread mail is, which is where it is listed as unread, as each folder counts it.
-    const unreadIn = new Set(messages.filter((m) => !m.flags.seen).map(placeOf));
+    const unreadIn = new Set(messages.filter((m) => !m.flags.seen).map(folderKey));
     sql.run(
       `INSERT OR REPLACE INTO conversations (id, date, summary, inbox, drafts, flagged, bundle, unread)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -221,11 +221,11 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
       Number(messages.some((m) => roleOf(m) === 'drafts')),
       Number(summary.flagged),
       bundle,
-      Number(inbox.some((m) => unreadIn.has(placeOf(m)))),
+      Number(inbox.some((m) => unreadIn.has(folderKey(m)))),
     );
     const latest = new Map<string, Message>();
     for (const message of messages) {
-      const key = placeOf(message);
+      const key = folderKey(message);
       const held = latest.get(key);
       if (!held || held.date < message.date) latest.set(key, message);
     }
@@ -238,7 +238,7 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
         id,
         message.date,
         roleOf(message) === 'inbox' ? bundle : null,
-        Number(unreadIn.has(placeOf(message))),
+        Number(unreadIn.has(folderKey(message))),
       );
     }
     return { placed: [...latest.values()], bundles };
@@ -309,7 +309,7 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
   ): FolderRef[] {
     const changed = new Map<string, FolderRef>();
     const note = ({ account, path }: FolderRef) =>
-      changed.set(placeOf({ account, path }), { account, path });
+      changed.set(folderKey({ account, path }), { account, path });
     const touched = new Set<BundleId>();
     const mine = ownNow();
     for (const id of ids) {
@@ -506,7 +506,7 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
         .all<{ id: string }>(`SELECT id FROM conversations WHERE bundle = ?`, id)
         .flatMap(({ id: conversation }) => {
           const held = reads.conversation(conversation).filter((m) => m.date <= through);
-          if (reach === 'inbox') return held.filter((m) => roles.get(placeOf(m)) === 'inbox');
+          if (reach === 'inbox') return held.filter((m) => roles.get(folderKey(m)) === 'inbox');
           if (reach === 'every') return held;
           const newest = held.reduce<Message | undefined>(
             (found, m) => (found && found.date >= m.date ? found : m),
@@ -565,7 +565,7 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
       const met = new Set<string>();
       for (const row of rows) {
         const message = messageIn(row);
-        people.note(message, roles.get(placeOf(message)), mine, met);
+        people.note(message, roles.get(folderKey(message)), mine, met);
       }
       people.recount(met);
       const isMore = rows.length === most;
