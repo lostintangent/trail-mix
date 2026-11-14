@@ -25,8 +25,8 @@ const BUDGET = {
 };
 
 /**
- * What a member types into search, a keystroke at a time, as the Mailroom's bench types it: a
- * sender's name, a newsletter's, and a word nearly every message holds.
+ * What a member types into search, a keystroke at a time: a sender's name, a newsletter's, and a
+ * word nearly every message holds, which makes the first keystrokes the broadest searches.
  */
 const TYPED = ['mina okafor', 'kernel weekly', 'are'];
 

@@ -22,7 +22,7 @@ import {
 /**
  * The Mailroom's budgets, as AGENTS.md sets them: the first sync of a 50,000-message folder from the
  * test mail server, with no batch over a second of CPU, and then a page of the unified Inbox, a
- * 50-message conversation, search as it is typed and an address completion, read from that index.
+ * 50-message conversation and an address completion, read from that index.
  *
  * The sync is the real one, on workerd, provider, fold and SQLite included. A device is open while
  * it runs, and the Mailroom hints that device once for each Inbox batch it folds. The CPU workerd
@@ -35,22 +35,8 @@ const BUDGET = {
   inboxPage: 10,
   pageAnywhere: 10,
   conversation: 10,
-  search: 100,
   people: 10,
 };
-
-/**
- * What a member types into search, a keystroke at a time: a sender's name, a newsletter's, and a
- * word nearly every message holds, which makes the first keystrokes the broadest searches.
- */
-const TYPED = ['mina okafor', 'kernel weekly', 'are'].flatMap((text) =>
-  Array.from({ length: text.length }, (_, i) => text.slice(0, i + 1)).filter(
-    (t) => !t.endsWith(' '),
-  ),
-);
-
-/** How many times each typed search is asked. */
-const SEARCHES = 10;
 
 /**
  * What a member types into an address field, a keystroke at a time: every first letter, which
@@ -67,6 +53,9 @@ const ADDRESSED = [
 
 /** How many times each read is asked, for its 95th percentile. */
 const READS = 200;
+
+/** How many times each typed address is asked. */
+const COMPLETIONS = 10;
 
 const INBOX = { in: 'inbox' } satisfies View;
 
@@ -126,7 +115,6 @@ export const mailroom: BenchArea = {
           BUDGET.pageAnywhere,
         ),
         measured('A 50-message conversation, p95', reads.conversation, BUDGET.conversation),
-        measured('Search as it is typed, p95', reads.search, BUDGET.search),
         measured('An address completion as it is typed, p95', reads.people, BUDGET.people),
       ];
     } finally {
@@ -244,15 +232,9 @@ async function readTimes(url: string) {
   // Nothing in the bench's Inbox is seen, so its unread list is all of it, with one kept open.
   const unreadLast = await lastPage({ in: 'inbox', unread: true }, thread.id);
   const conversation = await call<number[]>(url, 'timed', 'conversation', [thread.id], READS);
-  const search: number[] = [];
-  for (const text of TYPED) {
-    search.push(
-      ...(await call<number[]>(url, 'timed', 'conversations', [{ in: 'search', text }], SEARCHES)),
-    );
-  }
   const people: number[] = [];
   for (const typed of ADDRESSED) {
-    people.push(...(await call<number[]>(url, 'timed', 'people', [typed], SEARCHES)));
+    people.push(...(await call<number[]>(url, 'timed', 'people', [typed], COMPLETIONS)));
   }
   return {
     people: percentile(people, 0.95),
@@ -261,7 +243,6 @@ async function readTimes(url: string) {
     folderLast,
     unreadLast,
     conversation: percentile(conversation, 0.95),
-    search: percentile(search, 0.95),
   };
 }
 
