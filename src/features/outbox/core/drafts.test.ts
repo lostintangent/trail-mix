@@ -29,7 +29,7 @@ const pressing = (of: MessageRef | null = draft, all: readonly Leaving[] = []) =
     id: `press ${of?.uid ?? 'unsaved'}`,
     draft: of ?? undefined,
     pressedIn: thread,
-    written: 'Thursday works.',
+    preview: 'Thursday works.',
     to: [],
     pressedAt: at(0),
     at: undefined,

@@ -37,10 +37,7 @@ const outgoing = (sendAt = iso(10)): Outgoing => ({
   ...schedule({ id: 'one', draft, messageId, to: [], subject: 'Lunch' }, iso(0), sendAt),
   conversation: thread,
 });
-const pressed = press([], {
-  ...pressedWith(),
-  written: 'Thursday works.\n\n> On Monday, Mina wrote:\n> Lunch?\nSee you there.',
-});
+const pressed = press([], { ...pressedWith(), preview: 'Thursday works. See you there.' });
 
 test('a reply pressed is on its way at once, at the end of its conversation, as it was written', () => {
   expect(leavingIn(pressed, thread, [parent])).toEqual([
@@ -241,7 +238,7 @@ function pressedWith(): Parameters<typeof press>[1] {
     id: 'press',
     draft,
     pressedIn: thread,
-    written: 'Thursday works.',
+    preview: 'Thursday works.',
     to: [{ name: 'Mina Okafor', email: 'mina@example.com' }],
     pressedAt: at(0),
     at: undefined,

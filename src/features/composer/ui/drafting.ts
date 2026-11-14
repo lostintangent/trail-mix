@@ -2,7 +2,7 @@ import type { QueryClient } from '@tanstack/react-query';
 import { Undo2 } from 'lucide-react';
 import { listeners } from '../../../shared/listeners.ts';
 import { toast } from '../../../shared/toasts.tsx';
-import { sameRef, type MessageRef } from '../../mail/core/index.ts';
+import { previewOf, sameRef, type MessageRef } from '../../mail/core/index.ts';
 import { bodyQuery, mailroom, untilAnswered, type LastSave } from '../../mailroom/client/index.ts';
 import {
   afterSave,
@@ -48,6 +48,8 @@ export type Drafting = {
    * bytes cross once.
    */
   readonly writing: Writing;
+  /** What its copy will preview, as the index reads the Markdown it's sent as. */
+  readonly preview: string;
   readonly state: SaveState;
   /** Hears of each change to what is written, or to how its saves go, until it stops. */
   subscribe: (listener: () => void) => () => void;
@@ -224,6 +226,9 @@ export function startDrafting(
     },
     get writing() {
       return writing;
+    },
+    get preview() {
+      return previewOf(draftInputOf(writing).markdown, false);
     },
     get state() {
       return state;

@@ -26,4 +26,5 @@ export {
 } from './place.ts';
 export { applySyncEvent, sameFlags, type Index, type IndexChange, type SyncEvent } from './fold.ts';
 export { writeMime, type MimeAttachment, type MimeMessage } from './mime.ts';
+export { previewFrom, previewOf } from './preview.ts';
 export { foldForSearch, highlight, marksOf, searchWords, type Marks } from './search.ts';

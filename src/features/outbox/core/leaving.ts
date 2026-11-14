@@ -59,8 +59,8 @@ export type Pressed = {
   id: string;
   draft: MessageRef | undefined;
   pressedIn: ConversationId | undefined;
-  /** The Markdown the member wrote. */
-  written: string;
+  /** What its copy will preview, as the index reads what it's sent as. */
+  preview: string;
   to: readonly Address[];
   pressedAt: number;
   at: string | undefined;
@@ -72,7 +72,7 @@ export type Pressed = {
  */
 export function press(
   all: readonly Leaving[],
-  { id, draft, pressedIn, written, to, pressedAt, at }: Pressed,
+  { id, draft, pressedIn, preview, to, pressedAt, at }: Pressed,
 ): readonly Leaving[] {
   const others = all.filter(
     (leaving) => leaving.id !== id && !(draft && leaving.drafts.some((was) => sameRef(was, draft))),
@@ -84,7 +84,7 @@ export function press(
       drafts: draft ? [draft] : [],
       to,
       ...(pressedIn && { pressedIn }),
-      preview: previewOf(written),
+      preview,
       closes: closesAfterPress(pressedAt, at),
     },
   ];
@@ -235,19 +235,3 @@ export function standingOfLeaving({ seen, closes }: Leaving, now: number): Stand
   if (seen) return standingOfFollowed(seen, closes, now, false);
   return standingOfWait(new Date(closes).toISOString(), closes, now);
 }
-
-/**
- * What a conversation's line shows of the Markdown a member sent, as the index reads the message's
- * plain-text part, which is that Markdown: its lines but quoted ones, run together.
- */
-function previewOf(written: string): string {
-  return written
-    .split(/\r?\n/)
-    .filter((line) => !line.trimStart().startsWith('>'))
-    .join(' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, PREVIEW_LENGTH);
-}
-
-const PREVIEW_LENGTH = 200;

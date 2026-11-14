@@ -15,6 +15,7 @@ import type { SMTPTransportGetSocket } from 'nodemailer/lib/smtp-transport';
 import PostalMime from 'postal-mime';
 import {
   messageIdOf,
+  previewOf,
   type AccountId,
   type Flags,
   type Folder,
@@ -38,7 +39,6 @@ import {
   type PreviewPart,
   type Previews,
 } from './core/envelope.ts';
-import { previewOf } from './core/preview.ts';
 import { flagsOf, planSync, type SyncPlan } from './core/sync.ts';
 import { subtree } from './core/folders.ts';
 import type { Endpoint } from './core/presets.ts';

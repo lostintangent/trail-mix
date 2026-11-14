@@ -1,13 +1,13 @@
 import {
   isVerified,
   messageIdOf,
+  previewFrom,
   referencesOf,
   type Address,
   type Envelope,
   type Flags,
   type MessageRef,
 } from '../../../mail/core/index.ts';
-import { previewFrom } from './preview.ts';
 
 /**
  * Envelopes from what an IMAP server reports. Fetching is the provider's work, and this turns the

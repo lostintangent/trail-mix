@@ -1,6 +1,7 @@
 import PostalMime, { type Address as ParsedAddress } from 'postal-mime';
 import {
   messageIdOf,
+  previewFrom,
   referencesOf,
   type AccountId,
   type Address,
@@ -10,7 +11,6 @@ import {
   type MessageRef,
   type Moved,
 } from '../../mail/core/index.ts';
-import { previewFrom } from '../imap/core/preview.ts';
 import { recipientsIn, withoutBcc } from '../imap/core/send.ts';
 import { planSync } from '../imap/core/sync.ts';
 import { SEARCH_LIMIT, SendFailure, beforeSending, type MailProvider } from '../provider.ts';

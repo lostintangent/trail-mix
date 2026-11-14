@@ -59,7 +59,7 @@ export function useSendWritten({
         : compose?.as === 'draft'
           ? compose.draft.conversation
           : undefined,
-      written: writing.markdown,
+      preview: drafting.preview,
       to,
       at,
       pressedAt,

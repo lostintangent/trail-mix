@@ -161,7 +161,7 @@ src/
       built/           the theme compiled by `bun run theme`, which the app loads
       tokens.stylex.ts Trail Mix's own tokens
   features/
-    mail/core/         the shared vocabulary: model, conversation linking, the index fold, MIME, the address, Authentication-Results
+    mail/core/         the shared vocabulary: model, conversation linking, the index fold, MIME, the address, previews, Authentication-Results
     providers/         provider.ts is the MailProvider contract
       imap/            the IMAP and SMTP provider, with sync reconciliation and vendor presets in core/
       demo/            the demo provider and its seeded mailbox

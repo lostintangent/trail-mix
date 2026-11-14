@@ -398,9 +398,10 @@ for (const [size, options] of Object.entries(SIZES)) {
       // Each conversation comes late, as when a host files its copy in Sent late, so the Outbox
       // lets a send go before the index shows its copy.
       await slow(page, 'conversation', SLOW_MS);
+      // Written in Markdown, which its line reads by the words alone, as its copy will.
       const text = 'Thursday works for the cutover.';
       await watch(page, text);
-      await sendReply(page, text);
+      await sendReply(page, `**Thursday** works for the cutover.`);
       await sentShows(page, text, 'light-sent');
       // The copy in Sent takes its place.
       const copy = reader(page).locator('button', { hasText: text });
