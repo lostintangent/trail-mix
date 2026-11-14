@@ -17,6 +17,7 @@ import type {
   BundleScope,
   DraftUpload,
   FileBytes,
+  LastUpload,
   PageAt,
   SignInSetup,
 } from '../client/contract.ts';
@@ -280,7 +281,7 @@ export function draftOf(value: unknown): DraftUpload {
 }
 
 /** What Send names: a draft, or a message's last save with the draft that save replaces. */
-export function sentOf(value: unknown): MessageRef | { save: DraftUpload; replaces?: MessageRef } {
+export function sentOf(value: unknown): MessageRef | LastUpload {
   const sent = record(value, 'a draft');
   if (!('save' in sent)) return refOf(sent);
   const replaces = optional(sent.replaces, refOf);

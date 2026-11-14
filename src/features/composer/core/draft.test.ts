@@ -12,7 +12,7 @@ import {
   replyRecipients,
   replySubject,
   withSignature,
-  type Draft,
+  type Composed,
 } from './draft.ts';
 import { renderMarkdown } from './markdown.ts';
 
@@ -27,7 +27,7 @@ const copy = {
   boundary: 'composer-test',
 };
 
-const draft: Draft = {
+const composed: Composed = {
   from: me,
   to: [grace],
   cc: [alan],
@@ -50,15 +50,15 @@ const notes: MimeAttachment = {
   content: new TextEncoder().encode('%PDF-1.7'),
 };
 
-async function sent(written: Draft) {
+async function sent(written: Composed) {
   const raw = writeMime(messageOf(written, copy));
   return { raw, parsed: await PostalMime.parse(raw) };
 }
 
 test('a message is its Markdown twice: rendered as the HTML part, and as written as the plain text', async () => {
-  const { parsed } = await sent(draft);
-  expect(parsed.text).toBe(draft.markdown);
-  expect(parsed.html).toBe(renderMarkdown(draft.markdown));
+  const { parsed } = await sent(composed);
+  expect(parsed.text).toBe(composed.markdown);
+  expect(parsed.html).toBe(renderMarkdown(composed.markdown));
   expect(parsed.from).toEqual({ name: me.name!, address: me.email });
   expect(parsed.to).toEqual([{ name: grace.name!, address: grace.email }]);
   expect(parsed.cc).toEqual([{ name: alan.name!, address: alan.email }]);
@@ -75,7 +75,7 @@ test('the plain text keeps every character written, a signature delimiter includ
     '  Ça marche — à demain 🚀\n\nLine one\nline two  ',
     'Ada\n*Engines*',
   );
-  const { parsed } = await sent({ ...draft, subject: 'Résumé ✓', markdown });
+  const { parsed } = await sent({ ...composed, subject: 'Résumé ✓', markdown });
   expect(parsed.text).toBe(markdown);
   expect(parsed.text).toContain('\n\n-- \nAda\n*Engines*');
   expect(parsed.subject).toBe('Résumé ✓');
@@ -86,7 +86,7 @@ test("a reply names its parent and its parent's references, so other clients thr
     messageId: '<parent@example.com>',
     references: ['<root@example.com>', '<middle@example.com>'],
   };
-  const { parsed } = await sent({ ...draft, parent });
+  const { parsed } = await sent({ ...composed, parent });
   expect(parsed.inReplyTo).toBe('<parent@example.com>');
   expect(parsed.references).toBe('<root@example.com> <middle@example.com> <parent@example.com>');
 });
@@ -94,7 +94,7 @@ test("a reply names its parent and its parent's references, so other clients thr
 test('a reply deep in a long thread keeps its first message and its nearest ancestors', async () => {
   const ancestors = Array.from({ length: 30 }, (_, i) => `<${i}@example.com>`);
   const { parsed } = await sent({
-    ...draft,
+    ...composed,
     parent: { messageId: '<30@example.com>', references: ancestors },
   });
   const references = parsed.references!.split(' ');
@@ -108,7 +108,7 @@ test('a reply deep in a long thread keeps its first message and its nearest ance
 
 test("a reply to a parent without a Message-ID threads by the parent's own references", async () => {
   const { parsed } = await sent({
-    ...draft,
+    ...composed,
     parent: { messageId: '', references: ['<root@example.com>'] },
   });
   expect(parsed.references).toBe('<root@example.com>');
@@ -116,7 +116,7 @@ test("a reply to a parent without a Message-ID threads by the parent's own refer
 
 test('a pasted image travels inline with the HTML that shows it, and a file is attached', async () => {
   const markdown = `The ridge at dawn:\n\n![The ridge](cid:${ridge})\n\nNotes attached.`;
-  const { raw, parsed } = await sent({ ...draft, markdown, attachments: [photo, notes] });
+  const { raw, parsed } = await sent({ ...composed, markdown, attachments: [photo, notes] });
 
   expect(parsed.html).toContain(`<img src="cid:${ridge}" alt="The ridge"`);
   expect(parsed.text).toBe(markdown);
@@ -143,7 +143,7 @@ test('a pasted image travels inline with the HTML that shows it, and a file is a
 });
 
 test('an image the Markdown no longer shows goes out as an ordinary attachment', async () => {
-  const { raw, parsed } = await sent({ ...draft, attachments: [photo] });
+  const { raw, parsed } = await sent({ ...composed, attachments: [photo] });
   expect(parsed.attachments).toHaveLength(1);
   expect(parsed.attachments[0]).toMatchObject({ filename: 'ridge.png', disposition: 'attachment' });
   expect(parsed.attachments[0]!.contentId).toBeUndefined();
@@ -152,7 +152,7 @@ test('an image the Markdown no longer shows goes out as an ordinary attachment',
 
 test('an image the Markdown shows but the draft does not carry fails, naming it', () => {
   expect(() =>
-    messageOf({ ...draft, markdown: `![The ridge](cid:${ridge})`, attachments: [notes] }, copy),
+    messageOf({ ...composed, markdown: `![The ridge](cid:${ridge})`, attachments: [notes] }, copy),
   ).toThrow(`The image "The ridge" is the attachment ${ridge}, which the message doesn't carry.`);
 });
 
@@ -160,7 +160,7 @@ test('a file the Markdown shows as an image must be one', () => {
   expect(() =>
     messageOf(
       {
-        ...draft,
+        ...composed,
         markdown: `![Notes](cid:${ridge})`,
         attachments: [{ ...notes, contentId: ridge }],
       },
@@ -173,7 +173,7 @@ test('two files cannot share a Content-ID', () => {
   expect(() =>
     messageOf(
       {
-        ...draft,
+        ...composed,
         markdown: `![a](cid:${ridge})`,
         attachments: [photo, { ...photo, name: 'b.png' }],
       },
@@ -183,7 +183,7 @@ test('two files cannot share a Content-ID', () => {
 });
 
 test('a message of only attachments has no HTML part', async () => {
-  const { raw, parsed } = await sent({ ...draft, markdown: '', attachments: [notes] });
+  const { raw, parsed } = await sent({ ...composed, markdown: '', attachments: [notes] });
   expect(raw).not.toContain('text/html');
   expect(parsed.text ?? '').toBe('');
   expect(parsed.attachments.map(({ filename }) => filename)).toEqual(['notes.pdf']);

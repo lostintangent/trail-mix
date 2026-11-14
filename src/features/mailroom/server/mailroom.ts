@@ -37,6 +37,7 @@ import {
   type Call,
   type CommandName,
   type DraftUpload,
+  type LastUpload,
   type Mailroom as Contract,
   type Page,
   type PageAt,
@@ -76,13 +77,7 @@ import * as input from './input.ts';
 import { messageCommands, type MessageCommands } from './messages.ts';
 import { avatars, type Avatars } from './avatars.ts';
 import { upgrade, type Sql, type SqlValue } from './schema.ts';
-import {
-  outboxCommands,
-  outboxQueue,
-  type LastUpload,
-  type OutboxCommands,
-  type OutboxQueue,
-} from './outbox.ts';
+import { outboxCommands, outboxQueue, type OutboxCommands, type OutboxQueue } from './outbox.ts';
 import { fullTextSearch, type FullTextSearch } from './search.ts';
 import { signingIn, type SigningIn } from './sign-ins.ts';
 import { report } from './report.ts';

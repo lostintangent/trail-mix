@@ -290,6 +290,9 @@ export type DraftUpload = Omit<DraftInput, 'attachments'> & {
   attachments: ({ file: FileBytes; contentId?: string } | { in: MessageRef; id: string })[];
 };
 
+/** A `LastSave` as it reaches the Mailroom, with its new files read into bytes. */
+export type LastUpload = { save: DraftUpload; replaces?: MessageRef };
+
 /**
  * The Mailroom as the Worker reaches it: its queries and commands, the hint socket by `fetch`, and
  * closing its devices, which only the operator's removal of this member asks for.
@@ -303,7 +306,7 @@ export type Mailroom = Queries &
       isAgain: boolean,
     ): Promise<MessageRef>;
     send(
-      draft: MessageRef | { save: DraftUpload; replaces?: MessageRef },
+      draft: MessageRef | LastUpload,
       at: string | undefined,
       waited: number,
       id: string,

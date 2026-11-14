@@ -14,8 +14,12 @@ import { contentIdsIn, renderMarkdown } from './markdown.ts';
  * HTML that shows it, and every other file is attached.
  */
 
-/** A draft as the Mailroom writes it: what the composer saved, with its files' bytes. */
-export type Draft = {
+/**
+ * What a member composed, resolved for writing as mail: From, the recipients, the subject, the
+ * Markdown, the ids of the message it answers and every file's bytes. The Mailroom makes one from
+ * each save of a draft.
+ */
+export type Composed = {
   from: Address;
   to: Address[];
   cc: Address[];
@@ -29,45 +33,45 @@ export type Draft = {
 };
 
 /**
- * The draft as a message to write, given what makes this copy of it: its date, Message-ID and
- * boundary. It throws when the Markdown shows an image that does not travel with it, so no message
- * goes out with a broken image. A file whose Content-ID the Markdown never shows is attached like
- * any other, so nothing the member added is lost.
+ * What a member composed, as a message to write, given what makes this copy of it: its date,
+ * Message-ID and boundary. It throws when the Markdown shows an image that does not travel with
+ * it, so no message goes out with a broken image. A file whose Content-ID the Markdown never shows
+ * is attached like any other, so nothing the member added is lost.
  */
 export function messageOf(
-  draft: Draft,
+  composed: Composed,
   copy: Pick<MimeMessage, 'date' | 'messageId' | 'boundary'>,
 ): MimeMessage {
   const images = new Map<string, MimeAttachment>();
-  for (const file of draft.attachments) {
+  for (const file of composed.attachments) {
     if (file.contentId === undefined) continue;
     if (images.has(file.contentId)) {
       throw new Error(`Two attachments have the Content-ID ${file.contentId}.`);
     }
     images.set(file.contentId, file);
   }
-  const shown = new Set(contentIdsIn(draft.markdown));
+  const shown = new Set(contentIdsIn(composed.markdown));
   for (const id of shown) {
     const file = images.get(id);
     if (file && !file.type.startsWith('image/')) {
       throw new Error(`The Markdown shows ${file.name} as an image, but it is ${file.type}.`);
     }
   }
-  const written = draft.markdown.trim() !== '';
-  const references = draft.parent
-    ? referencesOf(draft.parent.references.join(' '), draft.parent.messageId)
+  const written = composed.markdown.trim() !== '';
+  const references = composed.parent
+    ? referencesOf(composed.parent.references.join(' '), composed.parent.messageId)
     : [];
   return {
     ...copy,
-    from: draft.from,
-    to: draft.to,
-    cc: draft.cc,
-    bcc: draft.bcc,
-    subject: draft.subject,
+    from: composed.from,
+    to: composed.to,
+    cc: composed.cc,
+    bcc: composed.bcc,
+    subject: composed.subject,
     ...(references.length ? { references } : {}),
-    text: draft.markdown,
-    ...(written ? { html: renderMarkdown(draft.markdown, new Set(images.keys())) } : {}),
-    attachments: draft.attachments.map(({ contentId, ...file }) =>
+    text: composed.markdown,
+    ...(written ? { html: renderMarkdown(composed.markdown, new Set(images.keys())) } : {}),
+    attachments: composed.attachments.map(({ contentId, ...file }) =>
       contentId !== undefined && shown.has(contentId) ? { ...file, contentId } : file,
     ),
   };

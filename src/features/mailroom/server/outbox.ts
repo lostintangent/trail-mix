@@ -7,9 +7,9 @@ import {
 } from '../../mail/core/index.ts';
 import * as outbox from '../../outbox/core/index.ts';
 import { SendFailure, type MailProvider } from '../../providers/index.ts';
-import type { DraftUpload } from '../client/contract.ts';
+import type { LastUpload } from '../client/contract.ts';
 import type { AccountBook } from './accounts.ts';
-import type { Asked, FiledDraft, SavingDrafts } from './drafts.ts';
+import type { FiledDraft, SaveRequest, SavingDrafts } from './drafts.ts';
 import type { EnvelopeIndex } from './envelope-index.ts';
 import type { Sql } from './schema.ts';
 import { WAKE } from './sync.ts';
@@ -293,9 +293,6 @@ export function outboxQueue(sending: Sending) {
   };
 }
 
-/** What Send may carry in place of a draft: the message's last save. */
-export type LastUpload = { save: DraftUpload; replaces?: MessageRef };
-
 /** A send whose last save is being filed. Undo before its window closes keeps it as a draft. */
 type Handing = {
   closes: number;
@@ -333,7 +330,7 @@ export function outboxCommands(ports: {
     { save, replaces }: LastUpload,
     when: string | undefined,
     opened: string,
-    press: Asked,
+    press: SaveRequest,
   ): Promise<Outgoing> => {
     const { id } = press;
     const filing = drafts.file(save, replaces, press);

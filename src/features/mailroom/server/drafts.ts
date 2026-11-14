@@ -44,11 +44,11 @@ export type FiledDraft = {
 export type Addressing = Pick<Outgoing, 'messageId' | 'to' | 'subject'>;
 
 /**
- * The id a save is asked under, its own or the press of Send that carries it, whether an ask before
- * may have filed it, as one whose answer was lost or a press a restart cut short may have, and
- * whether the id is a press, which the Outbox keeps.
+ * A request to save a draft: the id it is asked under, its own or the press of Send that carries
+ * it, whether an ask before may have filed it, as one whose answer was lost or a press a restart
+ * cut short may have, and whether the id is a press, which the Outbox keeps.
  */
-export type Asked = { id: string; mayBeFiled: boolean; isPress: boolean };
+export type SaveRequest = { id: string; mayBeFiled: boolean; isPress: boolean };
 
 export function savingDrafts(ports: {
   sql: Sql;
@@ -85,7 +85,7 @@ export function savingDrafts(ports: {
   const file = async (
     draft: DraftUpload,
     replaces: MessageRef | undefined,
-    asked: Asked,
+    request: SaveRequest,
   ): Promise<FiledDraft> => {
     const checked = input.draftOf(draft);
     const older = input.optional(replaces, input.refOf);
@@ -95,12 +95,12 @@ export function savingDrafts(ports: {
       throw new TypeError('A draft replaces only a draft of the account it is from.');
     }
     const domain = account.address.split('@')[1]!;
-    const messageId = await messageIdFor(asked.id, domain);
+    const messageId = await messageIdFor(request.id, domain);
     const addressing = { messageId, to: [...checked.to, ...checked.cc], subject: checked.subject };
     if (older && ports.outbox.holds(older)) {
       throw new Error('That draft is on its way. Undo the send to change it.');
     }
-    if (asked.mayBeFiled) {
+    if (request.mayBeFiled) {
       const held = await (await ports.provider(account.id)).findDraft(messageId);
       if (held) return { ...filed(held, older), addressing };
     }
@@ -137,7 +137,7 @@ export function savingDrafts(ports: {
     const raw = new TextEncoder().encode(writeMime(message));
     const provider = await ports.provider(account.id);
     // A restart before the press is on disk would leave its second ask not knowing to look.
-    if (asked.isPress) await ports.flush();
+    if (request.isPress) await ports.flush();
     const saved = await provider.saveDraft(raw).catch(async (error: unknown) => {
       const held = await provider.findDraft(messageId).catch(() => undefined);
       if (!held) throw error;
