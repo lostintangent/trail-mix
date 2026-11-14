@@ -268,20 +268,18 @@ export function outboxQueue(sending: Sending) {
      * Runs the steps due now, soonest first, up to a wake's budget, reading the Outbox again
      * before each, since a command may have undone or retried a send meanwhile. Once an account's
      * host fails for a passing reason, the account's other sends wait for the next wake, which
-     * comes after sync, rather than each waiting out the same host. Returns how many steps it ran.
-     * One run at a time.
+     * comes after sync, rather than each waiting out the same host. One run at a time.
      */
-    async run(now: () => string, budget = WAKE.steps): Promise<number> {
-      if (running) return 0;
+    async run(now: () => string): Promise<void> {
+      if (running) return;
       running = true;
       sql.run(
         `DELETE FROM presses WHERE at < ? AND (send IS NULL OR send NOT IN (SELECT id FROM outbox))`,
         Date.parse(now()) - PRESS_KEPT_MS,
       );
-      let steps = 0;
       const resting = new Set<AccountId>();
       try {
-        for (; steps < budget; steps++) {
+        for (let steps = 0; steps < WAKE.steps; steps++) {
           const [next] = outbox
             .due(all(), now())
             .filter(({ outgoing }) => !resting.has(outgoing.draft.account));
@@ -291,7 +289,6 @@ export function outboxQueue(sending: Sending) {
       } finally {
         running = false;
       }
-      return steps;
     },
   };
 }
