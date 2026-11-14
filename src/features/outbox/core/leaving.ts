@@ -94,13 +94,14 @@ export function press(
 }
 
 /** A press's message, saved again as `draft` on its way to the Mailroom, which replaced the last. */
-export function named(all: readonly Leaving[], id: string, draft: MessageRef): readonly Leaving[] {
-  return all.map((leaving) => {
-    const last = draftOf(leaving);
-    return leaving.id !== id || (last && sameRef(last, draft))
-      ? leaving
-      : { ...leaving, drafts: [...leaving.drafts, draft] };
-  });
+export const named = (all: readonly Leaving[], id: string, draft: MessageRef): readonly Leaving[] =>
+  all.map((leaving) => (leaving.id === id ? savedAs(leaving, draft) : leaving));
+
+function savedAs(leaving: Leaving, draft: MessageRef): Leaving {
+  const last = draftOf(leaving);
+  return last && sameRef(last, draft)
+    ? leaving
+    : { ...leaving, drafts: [...leaving.drafts, draft] };
 }
 
 /** A send this device no longer follows: the Mailroom refused it, or this device took it back. */
@@ -114,7 +115,8 @@ export const draftOf = (leaving: Leaving): MessageRef | undefined => leaving.dra
  * What a snapshot of the Outbox, taken by `at`, shows. Each send it holds is followed, and each
  * followed one it lacks is seen gone. `closesFor` says when a send's window closes on this device.
  * A press stays as it was until the Outbox holds its send, since a snapshot can be older than it. A
- * send is known by the draft it sends, so one of a draft its message replaced is another's.
+ * send is known by the press that names it, which can show it before the press hears what draft its
+ * last save made, or else by the draft it sends, so one of a draft its message replaced is another's.
  */
 export function observe(
   all: readonly Leaving[],
@@ -124,13 +126,17 @@ export function observe(
 ): readonly Leaving[] {
   const entryOf = (leaving: Leaving) => {
     const draft = draftOf(leaving);
-    return draft && outbox.find((held) => sameRef(held.draft, draft));
+    return (
+      outbox.find((held) => held.id === leaving.id) ??
+      (draft && outbox.find((held) => sameRef(held.draft, draft)))
+    );
   };
   const seen = all.map((leaving): Leaving => {
     const entry = entryOf(leaving);
     const closes = entry ? closesFor(entry) : leaving.closes;
-    if (leaving.seen) return { ...leaving, closes, seen: follow(leaving.seen, entry, at) };
-    return entry ? { ...leaving, closes, seen: followed(entry) } : leaving;
+    const known = entry ? savedAs(leaving, entry.draft) : leaving;
+    if (leaving.seen) return { ...known, closes, seen: follow(leaving.seen, entry, at) };
+    return entry ? { ...known, closes, seen: followed(entry) } : leaving;
   });
   const added = outbox
     .filter((held) => !all.some((leaving) => entryOf(leaving) === held))

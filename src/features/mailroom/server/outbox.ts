@@ -99,19 +99,22 @@ export function outboxQueue(sending: Sending) {
 
     /**
      * Schedules a draft, to go when the undo window that opened at the press, `opened`, closes, or
-     * at `at` if later. Sending a draft that is already on its way returns that send, as it was
-     * scheduled. A failed one starts over.
+     * at `at` if later, as the send `id` names, or a new one. Sending a draft that is already on its
+     * way returns that send, as it was scheduled. A failed one starts over.
      */
     send(
       draft: Pick<Outgoing, 'draft' | 'messageId' | 'to' | 'subject'>,
       now: string,
       at?: string,
       opened?: string,
+      id?: string,
     ): Outgoing {
       const held = all().find((entry) => sameRef(entry.draft, draft.draft));
       if (held && held.state !== 'failed') return held;
+      // An id another send already has never takes its place.
+      const named = id !== undefined && !get(id) ? id : undefined;
       const scheduled = outbox.schedule(
-        { id: held?.id ?? crypto.randomUUID(), ...draft },
+        { id: held?.id ?? named ?? crypto.randomUUID(), ...draft },
         now,
         at,
         opened,

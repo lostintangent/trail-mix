@@ -42,7 +42,12 @@ function tried(reach: () => unknown): unknown {
 // The Mailroom and the demo's visitor gate run only on workerd, and the Worker here only names them.
 await mock.module('../features/mailroom/server/index.ts', () => ({ Mailroom: class {} }));
 await mock.module('cloudflare:workers', () => ({ DurableObject: class {} }));
-const { default: worker } = await import('./entry.ts');
+const { default: entry } = await import('./entry.ts');
+/** The Worker as Cloudflare calls it. Nothing here keeps work running past its response. */
+const worker = {
+  fetch: (request: Request, env: Parameters<typeof entry.fetch>[1]) =>
+    entry.fetch(request, env, { waitUntil() {} } as unknown as ExecutionContext),
+};
 
 /** The key of a picture a Mailroom's Avatar cache holds. */
 const PICTURE = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';

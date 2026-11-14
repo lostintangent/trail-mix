@@ -112,10 +112,16 @@ export interface Commands {
   saveDraft(draft: DraftInput, replaces?: MessageRef): Promise<MessageRef>;
   /**
    * At the press of Send plus the undo window, unless given a later time. The press came `waited`
-   * milliseconds before the call, while the draft's last save finished, and is now if not given.
+   * milliseconds before the call, while any save already on its way finished, and is now if not
+   * given. A message with changes still unsaved carries its last save, which the Mailroom files
+   * before it schedules the send, so the press needs this one request. `id` names the press, and
+   * the send it schedules, so asking again returns that send.
    */
-  send(draft: MessageRef, at?: string, waited?: number): Promise<Outgoing>;
-  /** Returns the draft, untouched. Refused once the send is due, unless it failed. */
+  send(draft: MessageRef | LastSave, at?: string, waited?: number, id?: string): Promise<Outgoing>;
+  /**
+   * Returns the draft, untouched. Refused once the send is due, unless it failed. A send whose last
+   * save is still being filed is never scheduled, and returns the draft once that save is.
+   */
   cancelSend(id: string): Promise<MessageRef>;
   /** A failed send, tried again now. */
   retrySend(id: string): Promise<Outgoing>;
@@ -249,6 +255,9 @@ export type DraftInput = {
   attachments: ({ file: File; contentId?: string } | { in: MessageRef; id: string })[];
 };
 
+/** A message's last save, as Send carries it: what it holds, and the draft it replaces, if any. */
+export type LastSave = { save: DraftInput; replaces?: MessageRef };
+
 /**
  * A browser's file as it reaches the Mailroom. A Durable Object takes no `File`, so the Worker reads
  * each one into bytes on the way.
@@ -265,8 +274,14 @@ export type DraftUpload = Omit<DraftInput, 'attachments'> & {
  * closing its devices, which only the operator's removal of this member asks for.
  */
 export type Mailroom = Queries &
-  Omit<Commands, 'saveDraft'> & {
+  Omit<Commands, 'saveDraft' | 'send'> & {
     saveDraft(draft: DraftUpload, replaces?: MessageRef): Promise<MessageRef>;
+    send(
+      draft: MessageRef | { save: DraftUpload; replaces?: MessageRef },
+      at?: string,
+      waited?: number,
+      id?: string,
+    ): Promise<Outgoing>;
     /**
      * Runs a query or command a browser sent, which is how the Worker asks for every one, and says
      * how long it took. `sentAt` is when the Worker sent it, by the Worker's clock.
@@ -304,9 +319,15 @@ declare module '@tanstack/react-start' {
       /**
        * The Worker hands each request a way to reach its signed-in member's Mailroom, a new stub
        * each time, and nothing that names them, Members' side for them, which answers the operator alone, and the parts of the
-       * request's time, which a call adds to and the Worker sends as Server-Timing.
+       * request's time, which a call adds to and the Worker sends as Server-Timing. `waitUntil`
+       * keeps the request's work running after its browser has gone, as a closed page has.
        */
-      requestContext: { mailroom: () => Mailroom; members: Members; timing: Timed[] };
+      requestContext: {
+        mailroom: () => Mailroom;
+        members: Members;
+        timing: Timed[];
+        waitUntil: (work: Promise<unknown>) => void;
+      };
     };
   }
 }

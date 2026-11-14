@@ -80,9 +80,10 @@ export default function LeavingToast({
   const outgoing = seen?.last;
 
   // The workbench asks after a send under way, in case a hint is lost, and the toast follows,
-  // from the first snapshot that holds the send its press asked for.
+  // from the first snapshot that holds the send its press asked for, which the press names unless
+  // the Mailroom held a send of the same draft already.
   const { data: outbox, dataUpdatedAt } = useQuery(outboxQuery);
-  const asked = hand?.is === 'asked' ? hand.send.id : undefined;
+  const asked = hand?.is === 'asked' ? hand.send.id : id;
   useEffect(() => {
     if (!outbox) return;
     setSeen((was) => {

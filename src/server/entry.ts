@@ -49,7 +49,7 @@ let started = false;
  * named by the verified sign-in alone, and the app and the routes get the Mailroom, not the name.
  */
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const begun = performance.now();
     const isFirst = !started;
     started = true;
@@ -99,6 +99,7 @@ export default {
         mailroom,
         members: membersOf(env, member),
         timing,
+        waitUntil: (work) => ctx.waitUntil(work),
       },
     });
     return answer(

@@ -24,7 +24,13 @@ const query = createServerFn({ method: 'GET', strict: { output: false } })
 const command = createServerFn({ method: 'POST', strict: { output: false } })
   // Either a call as JSON or, carrying files, as form data. `receivedCall` reads both.
   .validator((input: unknown) => receivedCall(COMMANDS, input))
-  .handler(({ data, context }) => ask(context, data));
+  .handler(({ data, context }) => {
+    // A command that has left the browser runs to its end, though the page closes before it
+    // answers, as a phone put away straight after Send does.
+    const answer = ask(context, data);
+    context.waitUntil(answer.catch(() => {}));
+    return answer;
+  });
 
 /**
  * The browser's Mailroom: every query and command, typed as the contract has them. A call that

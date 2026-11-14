@@ -29,6 +29,7 @@ import {
   type Folder,
   type ListItem,
   type Message,
+  type MessageRef,
   type Place,
   type View,
 } from '../../mail/core/index.ts';
@@ -818,9 +819,10 @@ export function Workbench({
   );
   const outbox = useOutboxCommands();
 
-  // Send closes the composer at once and sends what it holds once its last save is done. Undo, or a
-  // send that fails, brings the same message back, under its conversation if that's still the one
-  // open, unless another composer has opened meanwhile, when a failure's toast offers to open it.
+  // Send closes the composer at once and hands what it holds to the Mailroom, carrying its last save.
+  // Undo, or a send that fails, brings the same message back, under its conversation if that's still
+  // the one open, unless another composer has opened meanwhile, when a failure's toast offers to
+  // open it.
   const send = useSend();
   const sender = useRef<Sender['current']>(undefined);
   const [isSendable, setSendable] = useState(false);
@@ -834,6 +836,8 @@ export function Workbench({
   // draft opened in its own, and leaves it again if the send fails or Undo takes it back. A new
   // message has no conversation until the Outbox names one.
   const sendWritten = (drafting: Drafting, at: string | undefined, writing: Writing) => {
+    // Before the composer closes, which would save what it owes.
+    drafting.hand();
     const from = { conversation: opened, isDocked: compose !== undefined && isDocked(compose) };
     // A draft opened from its conversation gives way to the next conversation, as one archived
     // does, when its send leaves nothing to show: a draft alone there, or a Drafts list the
@@ -866,8 +870,9 @@ export function Workbench({
     });
     composing.sent(id);
     const unwatch = drafting.watch((saved) => leaving.named(id, saved));
-    // Until its last save is done, the drafts it makes are the leaving’s, and stay out of sight.
-    const handed = () => {
+    // Until the Mailroom has the send, the drafts it makes are the leaving’s, and stay out of sight.
+    const handed = (draft: MessageRef | undefined) => {
+      if (draft) drafting.took(draft);
       unwatch();
       composing.saved(id);
     };
@@ -877,13 +882,18 @@ export function Workbench({
     };
     send({
       id,
-      saved: (signal) => drafting.settle(signal).finally(handed),
+      last: (signal) => drafting.last(signal),
       to,
       at,
       pressedAt,
-      onUndone: back,
+      onSent: handed,
+      onUndone: (draft) => {
+        handed(draft);
+        back();
+      },
       onFailed: (reason) => {
-        handed();
+        handed(undefined);
+        drafting.resume();
         const body = `Couldn’t send. ${reason}`;
         if (composeNow.current === undefined) {
           back();

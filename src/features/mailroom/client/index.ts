@@ -5,6 +5,7 @@ export type {
   Commands,
   DraftInput,
   Endpoint,
+  LastSave,
   Mailroom,
   Page,
   Queries,

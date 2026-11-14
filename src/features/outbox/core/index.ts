@@ -17,3 +17,4 @@ export {
   type Filed,
   type Submitted,
 } from './outbox.ts';
+export { closesAfterPress } from './standing.ts';

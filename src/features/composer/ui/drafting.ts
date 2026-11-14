@@ -1,8 +1,8 @@
 import type { QueryClient } from '@tanstack/react-query';
 import { Undo2 } from 'lucide-react';
 import { toast } from '../../../shared/toasts.tsx';
-import type { MessageRef } from '../../mail/core/index.ts';
-import { bodyQuery, mailroom } from '../../mailroom/client/index.ts';
+import { sameRef, type MessageRef } from '../../mail/core/index.ts';
+import { bodyQuery, mailroom, type LastSave } from '../../mailroom/client/index.ts';
 import {
   afterSave,
   draftInputOf,
@@ -33,8 +33,8 @@ export type Showing = {
  * A message being written, saved to the account's Drafts as it is: shortly after typing pauses, at
  * least every few seconds while it doesn't, whenever the page hides, and when its composer closes.
  * One save runs at a time, each replacing the draft the one before saved, and a change made during
- * a save is saved after it. It outlives its composer, so Send closes the composer at once while the
- * last save finishes behind it, and Undo brings the same message back to a composer.
+ * a save is saved after it. It outlives its composer, so Send closes the composer at once and
+ * carries its last save to the Mailroom, and Undo brings the same message back to a composer.
  */
 export type Drafting = {
   /** The draft it was last saved as, if it has been. */
@@ -55,10 +55,20 @@ export type Drafting = {
   /** Its composer closes, and won't save later, so what's owed is saved now. */
   close: () => void;
   /**
-   * The draft once everything written is saved, as Send needs it, saving one if there's none. It
-   * fails with the reason a save failed, and stops waiting once `signal` aborts.
+   * Send has it: no save starts until a composer shows it again or Send gives it back, since Send
+   * carries the last save itself.
    */
-  settle: (signal?: AbortSignal) => Promise<MessageRef>;
+  hand: () => void;
+  /**
+   * What Send sends, once any save on its way has answered: the draft, if it holds everything
+   * written, or else the last save, which the Mailroom files as it schedules the send. Stops
+   * waiting once `signal` aborts.
+   */
+  last: (signal: AbortSignal) => Promise<MessageRef | LastSave>;
+  /** The draft the Mailroom filed the last save Send carried as, or the one it sent. */
+  took: (saved: MessageRef) => void;
+  /** Send gave it back without a draft, so what's owed is saved as a closed composer saves it. */
+  resume: () => void;
   /**
    * Stops saving and moves the draft to the Trash, once any save under way has made it, with a way
    * to bring it back.
@@ -77,7 +87,7 @@ export function startDrafting(
   let isOwed = false;
   let owedSince = 0;
   let isDiscarded = false;
-  let failure: { reason: unknown } | undefined;
+  let isHanded = false;
   let isClosed = false;
   let retriesClosed = 0;
   let saving: Promise<void> | undefined;
@@ -91,7 +101,7 @@ export function startDrafting(
   const save = (): Promise<void> => {
     clearTimeout(timer);
     timer = undefined;
-    if (saving || isDiscarded) return saving ?? Promise.resolve();
+    if (saving || isDiscarded || isHanded) return saving ?? Promise.resolve();
     isOwed = false;
     become('saving');
     const saved = writing;
@@ -114,10 +124,8 @@ export function startDrafting(
           attachments: writing.attachments.map((attached) => names.get(attached) ?? attached),
         };
         showing?.onNamed(names);
-        failure = undefined;
         become(isOwed ? 'unsaved' : 'saved');
-      } catch (reason) {
-        failure = { reason };
+      } catch {
         isOwed = true;
         become('failed');
         // A closed composer's message tries its last save a few more times, then gives up.
@@ -147,6 +155,9 @@ export function startDrafting(
       showing = next;
       isClosed = false;
       retriesClosed = 0;
+      if (!isHanded) return;
+      isHanded = false;
+      if (isOwed && !saving) timer = setTimeout(() => void save(), owedWait(owedSince));
     },
     watch: (watcher) => {
       watchers.add(watcher);
@@ -160,7 +171,7 @@ export function startDrafting(
       isOwed = true;
       if (state !== 'saving') become('unsaved');
       // A change owes a save: shortly after typing pauses, and at least every few seconds meanwhile.
-      if (saving || isDiscarded) return;
+      if (saving || isDiscarded || isHanded) return;
       clearTimeout(timer);
       timer = setTimeout(() => void save(), owedWait(owedSince));
     },
@@ -171,16 +182,34 @@ export function startDrafting(
       isClosed = true;
       if (isOwed) void (saving ? saving.then(save) : save());
     },
-    settle: async (signal) => {
-      if (!draft) isOwed = true;
-      while (saving || isOwed) {
-        if (signal?.aborted) throw signal.reason;
-        await (saving ?? save());
-        if (failure) throw failure.reason;
+    hand: () => {
+      isHanded = true;
+      clearTimeout(timer);
+      timer = undefined;
+    },
+    last: async (signal) => {
+      while (saving) await saving;
+      signal.throwIfAborted();
+      if (draft && !isOwed) return draft;
+      // A draft replaces only one from its own account, as a save's does.
+      const replaces = draft?.account === writing.account ? draft : undefined;
+      return { save: draftInputOf(writing), ...(replaces ? { replaces } : {}) };
+    },
+    took: (saved) => {
+      const older = draft;
+      draft = saved;
+      isOwed = false;
+      become('saved');
+      if (older && sameRef(older, saved)) return;
+      showing?.onDraft(saved, older);
+      for (const watcher of watchers) watcher(saved);
+      if (older && older.account !== saved.account) {
+        void mailroom.move([older], 'trash').catch(() => {});
       }
-      if (signal?.aborted) throw signal.reason;
-      if (!draft) throw new Error('The draft couldn’t be saved.');
-      return draft;
+    },
+    resume: () => {
+      isHanded = false;
+      if (isOwed) void save();
     },
     discard: async () => {
       isDiscarded = true;

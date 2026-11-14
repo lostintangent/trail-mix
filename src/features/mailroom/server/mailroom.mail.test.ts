@@ -1554,6 +1554,74 @@ for (const profile of ['full', 'outlook'] as const satisfies Profile[]) {
       expect(await whereIs('Steady')).toMatchObject({ delivered: 0, drafts: 0 });
     }, 60_000);
 
+    test('a send that carries its last save files it in place of the draft before, and goes once', async () => {
+      const before = await drafted('Carried');
+      const press = crypto.randomUUID();
+      const last = { save: draftOf('Carried, as last written'), replaces: before };
+      const sending = await cal.call<Outgoing>('send', last, undefined, 0, press);
+      expect(sending).toMatchObject({ id: press, subject: 'Carried, as last written' });
+      expect(sending.draft).not.toEqual(before);
+      // Asking again, as a retry does, answers with the same send and files nothing more.
+      expect(await cal.call<Outgoing>('send', last, undefined, 0, press)).toMatchObject({
+        id: press,
+        draft: sending.draft,
+      });
+      await cal.until(async () => (await outbox()).length === 0, 60_000);
+      expect(await whereIs('Carried, as last written')).toEqual({
+        delivered: 1,
+        sent: 1,
+        drafts: 0,
+      });
+      expect(await whereIs('Carried')).toEqual({ delivered: 0, sent: 0, drafts: 0 });
+    }, 90_000);
+
+    test('an undo while a send’s last save is filed keeps it as a draft, and nothing goes', async () => {
+      const press = crypto.randomUUID();
+      await cal.call('holdDrafts');
+      const sending = cal.call<Outgoing>('send', { save: draftOf('Kept') }, undefined, 0, press);
+      sending.catch(() => {});
+      let undoing: Promise<MessageRef>;
+      try {
+        await cal.until(async () => (await cal.call<number>('draftsHeld')) === 1);
+        undoing = cal.call<MessageRef>('cancelSend', press);
+        await cal.until(() => cal.call<boolean>('isUndoing', press));
+      } finally {
+        await cal.call('letDraftsFile');
+      }
+      const kept = await undoing;
+      await expect(sending).rejects.toThrow('The send was undone.');
+      expect(await outbox()).toEqual([]);
+      expect(kept.path).toBe('Drafts');
+      expect(new TextDecoder().decode((await draftOnServer(kept)).source)).toContain('About Kept.');
+      expect(await whereIs('Kept')).toEqual({ delivered: 0, sent: 0, drafts: 1 });
+    }, 60_000);
+
+    test('an undo after the window closed while the last save was filed is refused, and it goes', async () => {
+      const press = crypto.randomUUID();
+      await cal.call('holdDrafts');
+      // The device waited out the whole window before it could ask.
+      const waited = UNDO_SECONDS * 1000;
+      const sending = cal.call<Outgoing>(
+        'send',
+        { save: draftOf('Late') },
+        undefined,
+        waited,
+        press,
+      );
+      sending.catch(() => {});
+      try {
+        await cal.until(async () => (await cal.call<number>('draftsHeld')) === 1);
+        await expect(cal.call('cancelSend', press)).rejects.toThrow(
+          'It is being sent, so it can’t be undone.',
+        );
+      } finally {
+        await cal.call('letDraftsFile');
+      }
+      expect(await sending).toMatchObject({ id: press });
+      await cal.until(async () => (await outbox()).length === 0, 60_000);
+      expect(await whereIs('Late')).toEqual({ delivered: 1, sent: 1, drafts: 0 });
+    }, 90_000);
+
     test('a send scheduled ahead goes at its time, with no device open', async () => {
       const saved = await drafted('Scheduled');
       const at = new Date(Date.now() + 20_000).toISOString();

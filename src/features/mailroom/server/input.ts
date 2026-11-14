@@ -266,6 +266,14 @@ export function draftOf(value: unknown): DraftUpload {
   };
 }
 
+/** What Send names: a draft, or a message's last save with the draft that save replaces. */
+export function sentOf(value: unknown): MessageRef | { save: DraftUpload; replaces?: MessageRef } {
+  const sent = record(value, 'a draft');
+  if (!('save' in sent)) return refOf(sent);
+  const replaces = optional(sent.replaces, refOf);
+  return { save: draftOf(sent.save), ...(replaces ? { replaces } : {}) };
+}
+
 /** A device's push endpoint, as a browser names the device it asks about or forgets. */
 export function pushEndpointOf(value: unknown): string {
   if (typeof value !== 'string' || value.length > 2_048) {

@@ -38,7 +38,7 @@ import {
   type Subscription,
 } from '../../notifications/core/index.ts';
 import { deliver, pushKeyOf, type PushKey } from '../../notifications/server/index.ts';
-import { UNDO_SECONDS } from '../../outbox/core/index.ts';
+import { closesAfterPress, UNDO_SECONDS } from '../../outbox/core/index.ts';
 import {
   DEMO_ACCOUNTS,
   DEMO_SIGNERS,
@@ -268,6 +268,8 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   private found: Found | undefined;
   /** Drafts this Mailroom filed, whose attachments the next version may carry before sync sees it. */
   private readonly drafts = new Set<string>();
+  /** Sends whose last save is being filed, by the press that named them. Memory alone holds them. */
+  protected readonly handing = new Map<string, Handing>();
   /** Whether this instance has had anything to do yet, so the first call can say it started it. */
   private isRunning = false;
   private readonly notifying: Notifying;
@@ -723,6 +725,107 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
    * the draft it replaces. Only a first save refuses a parent that has gone.
    */
   async saveDraft(draft: DraftUpload, replaces?: MessageRef): Promise<MessageRef> {
+    const filed = await this.fileDraft(draft, replaces);
+    await this.keepFiled(filed);
+    return filed.saved;
+  }
+
+  /**
+   * Schedules a draft to send when the undo window closes, or at a later time. The draft stays in
+   * Drafts, as it is, until the host accepts it. The window opened when the member pressed Send,
+   * `waited` milliseconds before the device asked, and never further back than its own length.
+   *
+   * Send may carry the message's last save in place of a draft, which is filed first, so a device
+   * that closes once it has asked still sends. Then the press names the send by `id`, so asking
+   * again answers with the same send, and an Undo while the save is filed keeps it as a draft.
+   */
+  async send(
+    draft: MessageRef | LastUpload,
+    at?: string,
+    waited?: number,
+    id?: string,
+  ): Promise<Outgoing> {
+    const arrived = Date.now();
+    const sent = input.sentOf(draft);
+    const when = input.optional(at, input.instantOf);
+    const since = Math.min(input.optional(waited, input.waitedOf) ?? 0, UNDO_SECONDS * 1000);
+    const press = input.optional(id, input.sendOf);
+    const opened = new Date(arrived - since).toISOString();
+    if (press !== undefined) {
+      const named = this.sending.list().find((held) => held.id === press);
+      if (named) return this.placed(named);
+      const handing = this.handing.get(press);
+      if (handing) return handing.sent;
+    }
+    if ('save' in sent) {
+      if (press === undefined) throw new TypeError('A send that carries its save needs an id.');
+      return this.sendLastSave(sent, when, opened, press);
+    }
+    if (!this.book.get(sent.account)) throw new Error('There is no such account.');
+    if (this.store.reads.role(sent) !== 'drafts') throw new Error('Only a draft can be sent.');
+    const addressing = await this.addressing(sent);
+    const outgoing = this.sending.send(
+      { draft: sent, ...addressing },
+      new Date().toISOString(),
+      when,
+      opened,
+      press,
+    );
+    await this.wakeBy(Date.parse(outgoing.sendAt));
+    return this.placed(outgoing);
+  }
+
+  /**
+   * Undo. A send whose last save is still being filed is never scheduled, and its draft is returned
+   * once it is saved, while its window is open.
+   */
+  async cancelSend(id: string): Promise<MessageRef> {
+    const press = input.sendOf(id);
+    const handing = this.handing.get(press);
+    if (!handing || this.sending.list().some((held) => held.id === press)) {
+      return this.sending.cancel(press, new Date().toISOString());
+    }
+    if (Date.now() >= handing.closes) throw new Error('It is being sent, so it can’t be undone.');
+    handing.isUndone = true;
+    return (await handing.filing).saved;
+  }
+
+  /** Files a send's last save, then schedules the draft it made, unless the send was undone. */
+  private sendLastSave(
+    { save, replaces }: LastUpload,
+    when: string | undefined,
+    opened: string,
+    id: string,
+  ): Promise<Outgoing> {
+    const filing = this.fileDraft(save, replaces);
+    const handing = { closes: closesAfterPress(Date.parse(opened), when), isUndone: false, filing };
+    const sent = (async () => {
+      const filed = await filing;
+      if (handing.isUndone) {
+        await this.keepFiled(filed);
+        throw new Error('The send was undone.');
+      }
+      // Scheduled before the save owes its sync, so the sync never finds the draft unsent.
+      const outgoing = this.sending.send(
+        { draft: filed.saved, ...filed.addressing },
+        new Date().toISOString(),
+        when,
+        opened,
+        id,
+      );
+      await this.keepFiled(filed);
+      await this.wakeBy(Date.parse(outgoing.sendAt));
+      return this.placed(outgoing);
+    })().finally(() => this.handing.delete(id));
+    this.handing.set(id, Object.assign(handing, { sent }));
+    return sent;
+  }
+
+  /**
+   * Writes a draft as mail and files it in Drafts, in place of the version before it, with what a
+   * send of it needs to know. Everything it refuses, it refuses before the server is asked.
+   */
+  private async fileDraft(draft: DraftUpload, replaces?: MessageRef): Promise<FiledDraft> {
     const checked = input.draftOf(draft);
     const older = replaces === undefined ? undefined : input.refOf(replaces);
     const account = this.book.get(checked.account)?.account;
@@ -751,6 +854,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       if (!held) throw new Error('An attachment this draft carried over is gone.');
       attachments.push(held);
     }
+    const messageId = `<${crypto.randomUUID()}@${account.address.split('@')[1]}>`;
     const message = messageOf(
       {
         from: { ...(account.fromName ? { name: account.fromName } : {}), email: account.address },
@@ -762,11 +866,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
         ...(parent ? { parent } : {}),
         attachments,
       },
-      {
-        date: new Date().toISOString(),
-        messageId: `<${crypto.randomUUID()}@${account.address.split('@')[1]}>`,
-        boundary: crypto.randomUUID(),
-      },
+      { date: new Date().toISOString(), messageId, boundary: crypto.randomUUID() },
     );
     const raw = new TextEncoder().encode(writeMime(message));
     const saved = await (await this.provider(account.id)).saveDraft(raw);
@@ -781,6 +881,12 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       this.store.oweBody(replacing);
       this.sending.release(replacing);
     }
+    const addressing = { messageId, to: [...checked.to, ...checked.cc], subject: checked.subject };
+    return { saved, raw, ...(replacing ? { replacing } : {}), addressing };
+  }
+
+  /** Keeps a filed draft's bytes for the composer, and owes the sync that folds it in. */
+  private async keepFiled({ saved, raw, replacing }: FiledDraft): Promise<void> {
     // The composer reads the draft back at once, and the server's copy would wait behind the sync
     // this save owes. Once the draft is filed, a failure here costs only that wait, so it never
     // fails the save, which a retry would file again.
@@ -788,37 +894,9 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     // A discard owes its folder's sync, so no sync this save asks for finds both versions.
     await this.owe(() => {
       if (replacing?.path !== saved.path) {
-        this.queue.folder({ account: account.id, path: saved.path });
+        this.queue.folder({ account: saved.account, path: saved.path });
       }
     });
-    return saved;
-  }
-
-  /**
-   * Schedules a draft to send when the undo window closes, or at a later time. The draft stays in
-   * Drafts, as it is, until the host accepts it. The window opened when the member pressed Send,
-   * `waited` milliseconds before the device asked, and never further back than its own length.
-   */
-  async send(draft: MessageRef, at?: string, waited?: number): Promise<Outgoing> {
-    const ref = input.refOf(draft);
-    const when = input.optional(at, input.instantOf);
-    const since = Math.min(input.optional(waited, input.waitedOf) ?? 0, UNDO_SECONDS * 1000);
-    if (!this.book.get(ref.account)) throw new Error('There is no such account.');
-    if (this.store.reads.role(ref) !== 'drafts') throw new Error('Only a draft can be sent.');
-    const addressing = await this.addressing(ref);
-    const now = Date.now();
-    const outgoing = this.sending.send(
-      { draft: ref, ...addressing },
-      new Date(now).toISOString(),
-      when,
-      new Date(now - since).toISOString(),
-    );
-    await this.wakeBy(Date.parse(outgoing.sendAt));
-    return this.placed(outgoing);
-  }
-
-  cancelSend(id: string): Promise<MessageRef> {
-    return Promise.resolve(this.sending.cancel(input.sendOf(id), new Date().toISOString()));
   }
 
   async retrySend(id: string): Promise<Outgoing> {
@@ -1877,6 +1955,25 @@ function imapOver(
 }
 
 /** A password, or what gives each connection an access token from the account's vendor. */
+/** What Send may carry in place of a draft: the message's last save. */
+type LastUpload = { save: DraftUpload; replaces?: MessageRef };
+
+/** A draft just filed, with what a send of it names. */
+type FiledDraft = {
+  saved: MessageRef;
+  raw: Uint8Array;
+  replacing?: MessageRef;
+  addressing: Pick<Outgoing, 'messageId' | 'to' | 'subject'>;
+};
+
+/** A send whose last save is being filed. Undo before its window closes keeps it as a draft. */
+type Handing = {
+  closes: number;
+  isUndone: boolean;
+  filing: Promise<FiledDraft>;
+  sent: Promise<Outgoing>;
+};
+
 type Secret = { pass: string } | { accessToken: () => Promise<string> };
 
 function imapAccount(

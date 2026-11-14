@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import type { Outgoing } from '../../mail/core/index.ts';
+import type { MessageRef, Outgoing } from '../../mail/core/index.ts';
 import { closesAt } from '../core/standing.ts';
 
 /**
@@ -11,19 +11,25 @@ import { closesAt } from '../core/standing.ts';
 export type Asked = {
   closes: number;
   hand: Hand;
-  /** Brings the message back to a composer, once Undo has stopped or taken back its send. */
-  onUndone: () => void;
+  /**
+   * Brings the message back to a composer, once Undo has stopped or taken back its send, as the
+   * draft the Mailroom kept, if it filed one.
+   */
+  onUndone: (draft?: MessageRef) => void;
   /** Stops the hand-off before it asks the Mailroom. */
   stop: () => void;
 };
 
 /**
- * How a press reaches the Mailroom: its message's last save, then the asking, then the send the
- * Mailroom scheduled. Undo stops it while it saves, or takes back the send once it is asked.
+ * How a press reaches the Mailroom: any save of its message already on its way, then the asking,
+ * which carries the last save, then the send the Mailroom scheduled. Undo stops it while it waits
+ * for the save, asks the Mailroom to stop it while it's asked, and takes back the send once it is.
  */
 export type Hand =
   | { is: 'saving' }
   | { is: 'asking'; answer: Promise<Outgoing | undefined> }
+  /** Undo asked the Mailroom to stop a send it was still being asked for. */
+  | { is: 'undoing'; answer: Promise<Outgoing | undefined> }
   | { is: 'asked'; send: Outgoing }
   | { is: 'stopped' }
   | { is: 'failed' };
@@ -67,14 +73,25 @@ export const useAskedVersion = () => useSyncExternalStore(subscribe, () => versi
 /** A press, as its hand-off goes on. */
 export const useAsked = (id: string) => useSyncExternalStore(subscribe, () => asked.get(id));
 
-/** The press that asked for a send, if this device asked for it. */
-export const pressOf = (outgoing: Outgoing) =>
-  [...asked.values()].find(({ hand }) => hand.is === 'asked' && hand.send.id === outgoing.id);
+/**
+ * The press that asked for a send, and its id, if this device asked for it. A press names its send,
+ * unless the Mailroom held one of the same draft already.
+ */
+export function pressOf(outgoing: Outgoing): (Asked & { id: string }) | undefined {
+  const named = asked.get(outgoing.id);
+  if (named) return { ...named, id: outgoing.id };
+  for (const [id, press] of asked) {
+    if (press.hand.is === 'asked' && press.hand.send.id === outgoing.id) return { ...press, id };
+  }
+  return undefined;
+}
 
 function change(id: string, press: Asked) {
   asked = new Map(asked).set(id, press);
   version++;
-  holdPage([...asked.values()].some(({ hand }) => hand.is === 'saving' || hand.is === 'asking'));
+  holdPage(
+    [...asked.values()].some(({ hand }) => ['saving', 'asking', 'undoing'].includes(hand.is)),
+  );
   for (const listener of listeners) listener();
 }
 

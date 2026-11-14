@@ -175,10 +175,10 @@ test('the countdown matches the time the Mailroom stored, and Undo leaves the dr
   await page.getByRole('option', { name: /Lunch Thursday/ }).waitFor();
 }, 60_000);
 
-test('a send pressed while its last save is on its way leaves when the window from the press closes', async () => {
+test('a send pressed while a save is on its way waits for it, and leaves when the window from the press closes', async () => {
   const page = await open({ ...DESKTOP, colorScheme: 'dark' });
   await openDraft(page, /Lunch Thursday/);
-  // Each save answers three seconds late, so the Mailroom hears of the send only after them.
+  // Each save answers three seconds late, so the Mailroom hears of the send only after one.
   await page.route('**/_serverFn/**', async (route) => {
     const request = route.request();
     if (request.method() !== 'POST' || !request.postData()?.includes('saveDraft')) {
@@ -188,22 +188,61 @@ test('a send pressed while its last save is on its way leaves when the window fr
     await new Promise((done) => setTimeout(done, 3_000));
     await route.fulfill({ response });
   });
+  const saving = page.waitForRequest((request) => !!request.postData()?.includes('saveDraft'));
   // Lunch Thursday is a reply, so its body is the reply's.
   await page.getByRole('textbox', { name: /^(Reply|Message)$/ }).click();
   await page.keyboard.press('ControlOrMeta+End');
   await page.keyboard.type(' See you there.');
+  await saving;
+  const saved = Date.now();
   const stored = storedSendAt(page);
   const pressed = Date.now();
   await send(page).click();
   // It counts down from the press, before the Mailroom has heard of it.
   await toast(page, /^Sending to Jonas in (10|9)s$/).waitFor({ timeout: 1_000 });
   const sendAt = await stored;
-  expect(Date.now() - pressed).toBeGreaterThan(3_000);
+  expect(Date.now() - saved).toBeGreaterThan(3_000);
   expect(sendAt - pressed).toBeGreaterThan(9_500);
   expect(sendAt - pressed).toBeLessThan(11_000);
 
   await page.getByRole('button', { name: 'Undo', exact: true }).first().click();
   await toast(page, /^Undone\. Nothing was sent to Jonas\.$/).waitFor();
+}, 60_000);
+
+test('Send carries what was written since the last save in one request, and goes though the page closes before the answer', async () => {
+  const page = await open({ ...PHONE, colorScheme: 'light' });
+  const subject = `Gone at once ${Date.now()}`;
+  const asked: string[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST') asked.push(request.postData() ?? '');
+  });
+  // The Mailroom has the whole request, and the page never hears its answer.
+  const answered = Promise.withResolvers<unknown>();
+  await page.route('**/_serverFn/**', (route) => {
+    if (!route.request().postData()?.includes('"send"')) return route.fallback();
+    answered.resolve(route.fetch());
+    return Promise.resolve();
+  });
+  await page.keyboard.press('c');
+  await page.getByRole('combobox', { name: 'To' }).fill('sam@trailmix.test');
+  await page.getByRole('textbox', { name: 'Subject' }).fill(subject);
+  await page.getByRole('textbox', { name: 'Message' }).click();
+  await page.keyboard.type('Bring the map.');
+  await send(page).click();
+  await answered.promise;
+  await page.close();
+  expect(asked.filter((body) => body.includes('saveDraft'))).toEqual([]);
+  expect(
+    asked.filter((body) => body.includes('"send"') && body.includes('Bring the map.')),
+  ).toHaveLength(1);
+
+  const again = await open({ ...DESKTOP, colorScheme: 'light' });
+  await again
+    .getByRole('navigation', { name: 'Mailboxes' })
+    .getByRole('region', { name: 'Personal' })
+    .getByRole('button', { name: /^Sent( \d+)?$/ })
+    .click();
+  await again.getByRole('option', { name: new RegExp(subject) }).waitFor({ timeout: 30_000 });
 }, 60_000);
 
 test('a send straight after a cold load counts down, though toasts and their theme load only then', async () => {

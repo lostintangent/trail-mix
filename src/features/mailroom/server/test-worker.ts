@@ -173,14 +173,46 @@ export class TestMailroom extends Mailroom {
 
   private readonly synced: Synced[] = [];
   private readonly fetched: MessageRef[] = [];
+  private filing: { saving: number; release: Promise<void>; let: () => void } | undefined;
+
+  /** Holds each draft the server is asked to file until `letDraftsFile`, counting them. */
+  holdDrafts(): Promise<void> {
+    const { promise, resolve } = Promise.withResolvers<void>();
+    this.filing = { saving: 0, release: promise, let: resolve };
+    return Promise.resolve();
+  }
+
+  /** How many drafts are held on their way to the server. */
+  draftsHeld(): Promise<number> {
+    return Promise.resolve(this.filing?.saving ?? 0);
+  }
+
+  letDraftsFile(): Promise<void> {
+    this.filing?.let();
+    this.filing = undefined;
+    return Promise.resolve();
+  }
+
+  /** Whether the member has undone a send whose last save is being filed. */
+  isUndoing(id: string): Promise<boolean> {
+    return Promise.resolve(this.handing.get(id)?.isUndone === true);
+  }
 
   /**
    * Records what each folder's sync downloads, the messages it reports by path, and each body
-   * fetched from the server.
+   * fetched from the server, and holds drafts while a test asks.
    */
   protected override reached(provider: MailProvider): MailProvider {
     return {
       ...provider,
+      saveDraft: async (raw) => {
+        const held = this.filing;
+        if (held) {
+          held.saving++;
+          await held.release;
+        }
+        return provider.saveDraft(raw);
+      },
       sync: async (path, cursor, window) => {
         const batch = await provider.sync(path, cursor, window);
         const messages = batch.events.filter(({ type }) => type === 'message').length;

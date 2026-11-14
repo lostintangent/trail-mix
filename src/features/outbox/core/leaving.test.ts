@@ -219,6 +219,20 @@ test('a message saved again on its way keeps both drafts out, and is the send of
   expect(observe(all, [sent], at(1), closesFor)).toEqual([{ ...all[0]!, seen: followed(sent) }]);
 });
 
+test('a send the Outbox shows before its press hears what the last save made is the press’s', () => {
+  // Send carried the last save, so the Outbox can name the draft before the Mailroom answers.
+  const unsaved = press([], { ...pressedWith(), draft: undefined });
+  const first = { ...outgoing(), id: 'press' };
+  expect(observe(unsaved, [first], at(0.5), closesFor)).toEqual([
+    { ...unsaved[0]!, drafts: [draft], seen: followed(first) },
+  ]);
+  const resaved = { ...draft, uid: 43 };
+  const again = { ...outgoing(), id: 'press', draft: resaved };
+  expect(observe(pressed, [again], at(0.5), closesFor)).toEqual([
+    { ...pressed[0]!, drafts: [draft, resaved], seen: followed(again) },
+  ]);
+});
+
 function pressedWith(): Parameters<typeof press>[1] {
   return {
     id: 'press',
