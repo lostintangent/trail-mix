@@ -65,6 +65,8 @@ Every layer uses the same nouns, with the same names in the index, the contracts
 | Hint         | A message on the WebSocket that names what changed, so the browser knows what to refetch.                                                                                          |
 | Stamp        | An account's color. In a list that mixes accounts it lies on the corner of each row's avatar, and it marks the composer's From chip.                                               |
 
+The browser's commands are the verbs, each named for what it does to one of these nouns. An account is added, signed in again, updated and removed. A sender's images are allowed, their mail set on light paper, and their list unsubscribed from. Messages have their flags set and are moved. A draft is saved and sent, and its send cancelled or retried. A folder is created, renamed and deleted. Notifications are turned on for a device, which can be forgotten. Everything is erased.
+
 ### Contracts
 
 Every feature is built against three contracts. Change one only together with this file.
@@ -202,6 +204,7 @@ public/                the manifest, favicon.svg and the icons made from it, ser
 - `mail/core` is the shared vocabulary that every other feature imports.
 - `src/app` and `src/server` compose features. `src/shared` holds only generic mechanics and knows no feature.
 - Imports are relative and carry their file extension. There is no path alias.
+- One name, one meaning. An exported type is declared in one module, under a name no other module in `src` declares, and an `index.ts` only re-exports it. A name that means two things is renamed where it has fewer readers.
 - `tests/boundaries.test.ts` walks the import graph and fails on a shortcut between features or on a `core` that reaches a framework.
 
 ## Writing Great Code
