@@ -30,33 +30,33 @@ export function useFolderEditing({
   const [editing, setEditing] = useState<FolderEdit>();
   const [deleting, setDeleting] = useState<Folder>();
   const change = useFolderChange();
-  const latestView = useRef(view);
+  // What the handlers read as they run, so the ones the sidebar holds stay the same as the folders'
+  // counts change, and a count redraws only the lines that show it.
+  const latest = useRef({ accounts, folders, view, editing, reveal });
   useLayoutEffect(() => {
-    latestView.current = view;
+    latest.current = { accounts, folders, view, editing, reveal };
   });
 
   const make = useCallback(
     async (made: FolderChange) => {
-      const before = latestView.current;
+      const before = latest.current.view;
       const after = followed(before, made);
       if (after !== before) open(after);
       const isAccepted = await change(made);
       // A refused change brings the view back to where it was, if the member hasn't moved on.
-      if (!isAccepted && after !== before && sameView(latestView.current, after)) open(before);
+      if (!isAccepted && after !== before && sameView(latest.current.view, after)) open(before);
     },
     [change, open],
   );
 
-  const edit = useCallback(
-    (next: FolderEdit) => {
-      setEditing(next);
-      reveal();
-    },
-    [reveal],
-  );
+  const edit = useCallback((next: FolderEdit) => {
+    setEditing(next);
+    latest.current.reveal();
+  }, []);
 
   const onEdited = useCallback(
     (name: string | undefined) => {
+      const { editing, folders } = latest.current;
       setEditing(undefined);
       if (!editing || name === undefined) return;
       if (editing.do === 'rename') {
@@ -80,17 +80,20 @@ export function useFolderEditing({
         },
       });
     },
-    [editing, folders, make],
+    [make],
   );
 
   const commands = useMemo(
     () => folderCommands({ accounts, folders, view, edit, remove: setDeleting }),
     [accounts, folders, view, edit],
   );
-  // Each folder's own, for the menu on its row.
+  // Each folder's own, for the menu on its row, asked as the menu opens.
   const actionsFor = useCallback(
-    (folder: Folder) => folderActions({ folder, accounts, folders, edit, remove: setDeleting }),
-    [accounts, folders, edit],
+    (folder: Folder) => {
+      const { accounts, folders } = latest.current;
+      return folderActions({ folder, accounts, folders, edit, remove: setDeleting });
+    },
+    [edit],
   );
 
   return {

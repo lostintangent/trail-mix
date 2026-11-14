@@ -7,7 +7,7 @@ import {
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { MailPlus } from 'lucide-react';
-import { useRef, type ReactNode } from 'react';
+import { memo, useRef, type ReactNode } from 'react';
 import { LaterTooltip } from '../../../shared/LaterTooltip.tsx';
 import { StampDot } from '../../../app/theme/StampDot.tsx';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
@@ -20,7 +20,8 @@ import { UNIFIED_VIEWS, type ViewCounts } from './views.ts';
  * account's stamp, then Add account and New message over a rule and the gear, so folding gives up
  * the tree without taking anything the member needs. Each shows its name as a tooltip, a stamp
  * opens its account's Inbox, and an account that needs the member marks its stamp. The fold button
- * and the gear are the sidebar's, pinned over both layouts.
+ * and the gear are the sidebar's, pinned over both layouts. Each button is drawn again only as what
+ * it shows changes, so a count changing redraws only the buttons it changes.
  */
 export function RailContent({
   compose,
@@ -45,48 +46,32 @@ export function RailContent({
       <span {...stylex.props(styles.foldRoom)} />
       <span {...stylex.props(styles.rule)} />
       <div {...stylex.props(styles.railScroll)}>
-        {UNIFIED_VIEWS.map(({ in: unified, label, icon }) => {
-          const unread = unified === 'inbox' ? counts.inbox : undefined;
-          return (
-            <RailButton
-              key={unified}
-              label={unread ? `${label}, ${unread} unread` : label}
-              isSelected={view.in === unified}
-              hasDot={Boolean(unread)}
-              onSelect={() => onSelect({ in: unified })}
-            >
-              <Icon icon={icon} size="sm" />
-            </RailButton>
-          );
-        })}
+        {UNIFIED_VIEWS.map((unified) => (
+          <RailView
+            key={unified.in}
+            unified={unified}
+            unread={unified.in === 'inbox' ? counts.inbox : undefined}
+            isSelected={view.in === unified.in}
+            onSelect={onSelect}
+          />
+        ))}
         {accounts.length > 0 && <span {...stylex.props(styles.rule)} />}
-        {accounts.map((account) => {
-          const inbox =
-            folders.find((folder) => folder.account === account.id && folder.role === 'inbox') ??
-            folders.find((folder) => folder.account === account.id);
-          const trouble = troubleOf(account);
-          return (
-            <RailButton
-              key={account.id}
-              label={[account.name, trouble, inbox?.unread && `${inbox.unread} unread`]
-                .filter(Boolean)
-                .join(', ')}
-              isSelected={view.in === 'folder' && view.folder.account === account.id}
-              hasDot={Boolean(inbox?.unread)}
-              isTroubled={trouble !== undefined}
-              onSelect={() =>
-                inbox &&
-                onSelect({ in: 'folder', folder: { account: inbox.account, path: inbox.path } })
-              }
-            >
-              <StampDot stamp={account.stamp} isLarge />
-            </RailButton>
-          );
-        })}
+        {accounts.map((account) => (
+          <RailAccount
+            key={account.id}
+            account={account}
+            inbox={
+              folders.find((folder) => folder.account === account.id && folder.role === 'inbox') ??
+              folders.find((folder) => folder.account === account.id)
+            }
+            isSelected={view.in === 'folder' && view.folder.account === account.id}
+            onSelect={onSelect}
+          />
+        ))}
       </div>
       {onAddAccount && (
         <RailButton label="Add account" onSelect={onAddAccount}>
-          <Icon icon={MailPlus} size="sm" />
+          {ADD_ACCOUNT_ICON}
         </RailButton>
       )}
       {compose}
@@ -97,7 +82,64 @@ export function RailContent({
   );
 }
 
-function RailButton({
+const ADD_ACCOUNT_ICON = <Icon icon={MailPlus} size="sm" />;
+
+const RailView = memo(function RailView({
+  unified: { in: unified, label, icon },
+  unread,
+  isSelected,
+  onSelect,
+}: {
+  unified: (typeof UNIFIED_VIEWS)[number];
+  /** The unread mail its button is marked for, which only Inbox's is. */
+  unread: number | undefined;
+  isSelected: boolean;
+  onSelect: (view: View) => void;
+}) {
+  return (
+    <RailButton
+      label={unread ? `${label}, ${unread} unread` : label}
+      isSelected={isSelected}
+      hasDot={Boolean(unread)}
+      onSelect={() => onSelect({ in: unified })}
+    >
+      <Icon icon={icon} size="sm" />
+    </RailButton>
+  );
+});
+
+/** An account's stamp, which opens its Inbox. */
+const RailAccount = memo(function RailAccount({
+  account,
+  inbox,
+  isSelected,
+  onSelect,
+}: {
+  account: Account;
+  /** Its Inbox, or its first folder where none has the role, or nothing before they're listed. */
+  inbox: Folder | undefined;
+  isSelected: boolean;
+  onSelect: (view: View) => void;
+}) {
+  const trouble = troubleOf(account);
+  return (
+    <RailButton
+      label={[account.name, trouble, inbox?.unread && `${inbox.unread} unread`]
+        .filter(Boolean)
+        .join(', ')}
+      isSelected={isSelected}
+      hasDot={Boolean(inbox?.unread)}
+      isTroubled={trouble !== undefined}
+      onSelect={() =>
+        inbox && onSelect({ in: 'folder', folder: { account: inbox.account, path: inbox.path } })
+      }
+    >
+      <StampDot stamp={account.stamp} isLarge />
+    </RailButton>
+  );
+});
+
+const RailButton = memo(function RailButton({
   label,
   isSelected = false,
   hasDot = false,
@@ -132,7 +174,7 @@ function RailButton({
       <LaterTooltip anchor={button} content={label} placement="end" />
     </>
   );
-}
+});
 
 const styles = stylex.create({
   foldRoom: {

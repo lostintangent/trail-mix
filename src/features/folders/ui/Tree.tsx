@@ -11,7 +11,7 @@ import {
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { ChevronRight, type LucideIcon } from 'lucide-react';
-import { Suspense, useReducer, useState, type ReactNode, type SyntheticEvent } from 'react';
+import { memo, Suspense, useReducer, useState, type ReactNode, type SyntheticEvent } from 'react';
 import { Pending, TextSkeleton } from '../../../app/theme/Pending.tsx';
 import { StampDot } from '../../../app/theme/StampDot.tsx';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
@@ -28,11 +28,12 @@ import { folderIcon, UNIFIED_VIEWS, type ViewCounts } from './views.ts';
 /**
  * The sidebar's tree: the unified views, then each account under its stamp, with its folders. Every
  * line keeps room at its end for its menu, so counts line up whether a line has one or not, and
- * accounts and folders with folders inside fold away under a chevron.
+ * accounts and folders with folders inside fold away under a chevron. Each line is drawn again only
+ * as what it shows changes, so a count changing redraws only the lines it changes.
  */
 
 /** The views that gather mail across every account, at the top of the tree. */
-export function ViewRows({
+export const ViewRows = memo(function ViewRows({
   view,
   isViewHere,
   counts,
@@ -46,28 +47,52 @@ export function ViewRows({
 }) {
   return (
     <ul {...stylex.props(styles.rows)}>
-      {UNIFIED_VIEWS.map(({ in: unified, label, icon }, at) => (
-        <li key={unified}>
-          <Row
-            label={label}
-            icon={icon}
-            count={counts[unified]}
-            isCountUnread={unified === 'inbox'}
-            isSelected={view.in === unified}
-            isStop={view.in === unified || (!isViewHere && at === 0)}
-            onSelect={() => onSelect({ in: unified })}
+      {UNIFIED_VIEWS.map((unified, at) => (
+        <li key={unified.in}>
+          <ViewLine
+            unified={unified}
+            count={counts[unified.in]}
+            isSelected={view.in === unified.in}
+            isStop={view.in === unified.in || (!isViewHere && at === 0)}
+            onSelect={onSelect}
           />
         </li>
       ))}
     </ul>
   );
-}
+});
+
+const ViewLine = memo(function ViewLine({
+  unified: { in: unified, label, icon },
+  count,
+  isSelected,
+  isStop,
+  onSelect,
+}: {
+  unified: (typeof UNIFIED_VIEWS)[number];
+  count: number | undefined;
+  isSelected: boolean;
+  isStop: boolean;
+  onSelect: (view: View) => void;
+}) {
+  return (
+    <Row
+      label={label}
+      icon={icon}
+      count={count}
+      isCountUnread={unified === 'inbox'}
+      isSelected={isSelected}
+      isStop={isStop}
+      onSelect={() => onSelect({ in: unified })}
+    />
+  );
+});
 
 /**
  * An account: its stamp and name, which fold its folders away and back, with its menu at the end.
  * Folded, it shows the unread mail in its folders.
  */
-export function AccountSection({
+export const AccountSection = memo(function AccountSection({
   account,
   folders,
   view,
@@ -99,38 +124,17 @@ export function AccountSection({
   // Naming a folder unfolds whatever it's in, for as long as it's named.
   const isOpen = !folds.has(foldKey({ account: account.id })) || editingHere;
   const holdsView = view.in === 'folder' && view.folder.account === account.id;
-  const unread = unreadInAccount(nodes);
-  const hasUnreadInbox = own.some(({ role, unread }) => role === 'inbox' && unread > 0);
-  const trouble = troubleOf(account);
   return (
     <section aria-label={account.name} {...stylex.props(styles.account)}>
-      <Line menu={{ label: `More for ${account.name}`, actions: () => accountActions(account) }}>
-        <h2 {...stylex.props(styles.accountHeading)}>
-          <button
-            type="button"
-            // The tree's one Tab stop, when it's folded around the view.
-            tabIndex={!isOpen && holdsView ? 0 : -1}
-            aria-expanded={isOpen}
-            onClick={() => onFold({ account: account.id })}
-            data-row={1}
-            data-fold
-            {...stylex.props(styles.row, styles.accountRow, !isOpen && holdsView && lift.holding)}
-          >
-            <Chevron isOpen={isOpen} />
-            <span {...stylex.props(styles.stampBox)}>
-              <StampDot stamp={account.stamp} />
-            </span>
-            <span {...stylex.props(styles.label, styles.accountName)}>{account.name}</span>
-            {trouble && (
-              <>
-                {' '}
-                <span {...stylex.props(styles.trouble)}>{trouble}</span>
-              </>
-            )}
-            {!isOpen && unread > 0 && <Count count={unread} isUnread={hasUnreadInbox} />}
-          </button>
-        </h2>
-      </Line>
+      <AccountLine
+        account={account}
+        isOpen={isOpen}
+        isHolding={!isOpen && holdsView}
+        unread={isOpen ? 0 : unreadInAccount(nodes)}
+        isUnreadInInbox={!isOpen && own.some(({ role, unread }) => role === 'inbox' && unread > 0)}
+        onFold={onFold}
+        accountActions={accountActions}
+      />
       <Folding isOpen={isOpen}>
         {own.length === 0 && isListing(account) && <FolderSkeletons account={account} />}
         <FolderRows
@@ -151,7 +155,59 @@ export function AccountSection({
       </Folding>
     </section>
   );
-}
+});
+
+/** An account's own line: its stamp and name, which fold its folders away and back, and its menu. */
+const AccountLine = memo(function AccountLine({
+  account,
+  isOpen,
+  isHolding,
+  unread,
+  isUnreadInInbox,
+  onFold,
+  accountActions,
+}: {
+  account: Account;
+  isOpen: boolean;
+  /** Whether it's folded around the view, which then lifts it and makes it the tree's Tab stop. */
+  isHolding: boolean;
+  /** The unread mail folded away under it, so none while it's open. */
+  unread: number;
+  /** Whether any of that is in its Inbox, which then counts in the accent. */
+  isUnreadInInbox: boolean;
+  onFold: (what: Foldable) => void;
+  accountActions: (account: Account) => readonly Command[];
+}) {
+  const trouble = troubleOf(account);
+  return (
+    <Line menu={{ label: `More for ${account.name}`, actions: () => accountActions(account) }}>
+      <h2 {...stylex.props(styles.accountHeading)}>
+        <button
+          type="button"
+          tabIndex={isHolding ? 0 : -1}
+          aria-expanded={isOpen}
+          onClick={() => onFold({ account: account.id })}
+          data-row={1}
+          data-fold
+          {...stylex.props(styles.row, styles.accountRow, isHolding && lift.holding)}
+        >
+          <Chevron isOpen={isOpen} />
+          <span {...stylex.props(styles.stampBox)}>
+            <StampDot stamp={account.stamp} />
+          </span>
+          <span {...stylex.props(styles.label, styles.accountName)}>{account.name}</span>
+          {trouble && (
+            <>
+              {' '}
+              <span {...stylex.props(styles.trouble)}>{trouble}</span>
+            </>
+          )}
+          {unread > 0 && <Count count={unread} isUnread={isUnreadInInbox} />}
+        </button>
+      </h2>
+    </Line>
+  );
+});
 
 /**
  * What an account that needs the member says on its line, and the rail's tooltip for its stamp:
@@ -259,13 +315,12 @@ function FolderRows({
       view.in === 'folder' &&
       view.folder.account === folder.account &&
       holds(node, view.folder.path);
-    const name = folderName(folder);
     return (
       <li key={folder.path}>
         {isRenaming ? (
           <Suspense>
             <NameField
-              label={`New name for ${name}`}
+              label={`New name for ${folderName(folder)}`}
               initial={folder.name}
               depth={depth}
               place={{
@@ -278,38 +333,18 @@ function FolderRows({
             />
           </Suspense>
         ) : (
-          <Line
-            menu={{ label: `More for ${name}`, actions: () => folderActions(folder) }}
-            fold={
-              canFold && (
-                <button
-                  type="button"
-                  tabIndex={-1}
-                  aria-label={`${isOpen ? 'Fold' : 'Unfold'} ${name}`}
-                  aria-expanded={isOpen}
-                  onClick={() => onFold(folder)}
-                  data-fold
-                  {...stylex.props(styles.fold, styles.foldAt(depth))}
-                >
-                  <Chevron isOpen={isOpen} />
-                </button>
-              )
-            }
-          >
-            <Row
-              label={name}
-              icon={folderIcon(folder)}
-              depth={depth}
-              count={isOpen ? folder.unread : unreadWithin(node)}
-              isCountUnread={folder.role === 'inbox'}
-              isSelected={isSelected}
-              isHolding={holdsView}
-              isStop={isSelected || holdsView}
-              onSelect={() =>
-                onSelect({ in: 'folder', folder: { account: folder.account, path: folder.path } })
-              }
-            />
-          </Line>
+          <FolderLine
+            folder={folder}
+            depth={depth}
+            count={isOpen ? folder.unread : unreadWithin(node)}
+            canFold={canFold}
+            isOpen={isOpen}
+            isSelected={isSelected}
+            isHolding={holdsView}
+            onSelect={onSelect}
+            onFold={onFold}
+            folderActions={folderActions}
+          />
         )}
         {(canFold || isParent) && (
           <Folding isOpen={isOpen || isParent}>
@@ -343,6 +378,70 @@ function FolderRows({
 
 const isFolder = (ref: FolderRef, folder: Folder) =>
   ref.account === folder.account && ref.path === folder.path;
+
+/** A folder's own line: what opens it, the chevron that folds what's inside it, and its menu. */
+const FolderLine = memo(function FolderLine({
+  folder,
+  depth,
+  count,
+  canFold,
+  isOpen,
+  isSelected,
+  isHolding,
+  onSelect,
+  onFold,
+  folderActions,
+}: {
+  folder: Folder;
+  depth: number;
+  /** Its unread mail, with that of the folders inside it while they're folded away. */
+  count: number;
+  /** Whether it has folders inside it to fold away. */
+  canFold: boolean;
+  isOpen: boolean;
+  isSelected: boolean;
+  /** Whether it's folded around the view, which then lifts it instead. */
+  isHolding: boolean;
+  onSelect: (view: View) => void;
+  onFold: (what: Foldable) => void;
+  folderActions: (folder: Folder) => readonly Command[];
+}) {
+  const name = folderName(folder);
+  return (
+    <Line
+      menu={{ label: `More for ${name}`, actions: () => folderActions(folder) }}
+      fold={
+        canFold && (
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-label={`${isOpen ? 'Fold' : 'Unfold'} ${name}`}
+            aria-expanded={isOpen}
+            onClick={() => onFold(folder)}
+            data-fold
+            {...stylex.props(styles.fold, styles.foldAt(depth))}
+          >
+            <Chevron isOpen={isOpen} />
+          </button>
+        )
+      }
+    >
+      <Row
+        label={name}
+        icon={folderIcon(folder)}
+        depth={depth}
+        count={count}
+        isCountUnread={folder.role === 'inbox'}
+        isSelected={isSelected}
+        isHolding={isHolding}
+        isStop={isSelected || isHolding}
+        onSelect={() =>
+          onSelect({ in: 'folder', folder: { account: folder.account, path: folder.path } })
+        }
+      />
+    </Line>
+  );
+});
 
 /**
  * One line of the tree: what it opens or folds, a chevron over its start when it folds, and its
