@@ -5,7 +5,6 @@ import * as stylex from '@stylexjs/stylex';
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { memo, useDeferredValue, useEffect, useEffectEvent, useRef, useState } from 'react';
 import { useMediaQuery } from '../../../shared/useMediaQuery.ts';
-import { whenIdle } from '../../../shared/whenIdle.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Command } from '../../commands/index.ts';
 import { numberOf } from '../../conversations/index.ts';
@@ -345,8 +344,13 @@ function useFetchAhead(account: Account) {
   };
 }
 
-/** Resolves when the browser has nothing more pressing to do. */
-const idle = () => new Promise<void>((resolve) => whenIdle(resolve, 0));
+/** Resolves when the browser has nothing more pressing to do. Safari has no idle callback. */
+function idle(): Promise<void> {
+  return new Promise((resolve) => {
+    if ('requestIdleCallback' in window) requestIdleCallback(() => resolve());
+    else setTimeout(resolve, 50);
+  });
+}
 
 const styles = stylex.create({
   // Nothing to open yet, so it neither lifts nor points.
