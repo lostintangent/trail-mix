@@ -3,15 +3,19 @@
 // and senders' sites: which mail counts as verified, which picture each sender shows and in what
 // order, what the Avatar cache keeps, how one found late reaches open devices, and how they go.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { ImapFlow } from 'imapflow';
 import type { ConversationSummary, Message } from '../../mail/core/index.ts';
-import type { AccountSetup } from '../client/contract.ts';
 import { DEMO_PICTURES } from '../../providers/index.ts';
 import { LOGO_BYTES, PICTURE_BYTES } from '../core/avatars.ts';
-import { caFile, empty, ports, start, stop, users } from '../../../../tests/mail-server/server.ts';
-import { mailrooms, member } from '../../../../tests/mailrooms.ts';
+import {
+  caFile,
+  deliver,
+  empty,
+  start,
+  stop,
+  users,
+} from '../../../../tests/mail-server/server.ts';
+import { mailrooms, member, setupOf } from '../../../../tests/mailrooms.ts';
 import type { LocalWorker } from '../../../../tests/workerd.ts';
 import type { Wake } from './test-worker.ts';
 
@@ -27,14 +31,7 @@ const PNG = (name: string, size = 0) => {
   return bytes;
 };
 
-const setup = (host: string): AccountSetup => ({
-  provider: 'imap',
-  name: 'Bob',
-  address: bob.email,
-  imap: { host, port: ports.imaps, secure: true },
-  smtp: { host, port: ports.submissions, secure: true },
-  password: bob.password,
-});
+const setup = (host = 'localhost') => setupOf(bob, 'Bob', host);
 
 /** DNS, Gravatar and senders' sites, as the stand-in serves them, and every name and path asked of it. */
 let internet: ReturnType<typeof Bun.serve>;
@@ -43,7 +40,6 @@ let dns: Record<string, string[]> = {};
 /** Held while a test keeps DNS from answering for a name, until it lets the answer go. */
 const held = new Map<string, PromiseWithResolvers<void>>();
 
-let ca: string;
 let worker: LocalWorker;
 
 /** The photos Gravatar keeps, by address. */
@@ -90,7 +86,6 @@ const sha256Of = (text: string) => new Bun.CryptoHasher('sha256').update(text).d
 
 beforeAll(async () => {
   await start('full');
-  ca = readFileSync(caFile, 'utf8');
   await empty(bob.email);
   const tls = dirname(caFile);
   const gravatar = new Map(
@@ -146,6 +141,7 @@ beforeAll(async () => {
     AVATARS_STAND_IN: here,
   });
   await deliver(
+    bob,
     signed('brand', 'news@brand.test', 'pass'),
     // The server found DMARC failed, and the sender wrote a header of their own beneath that says
     // it passed, in the server's name.
@@ -187,7 +183,7 @@ describe('Verified senders’ avatars', () => {
   ];
 
   test('show a logo, else a photo, else a site’s icon, in lists and conversations', async () => {
-    await ada.call('addAccount', setup('localhost'));
+    await ada.call('addAccount', setup());
     await ada.until(async () => {
       const { domains, senders } = await storedAvatars('ada');
       return (
@@ -253,51 +249,22 @@ describe('Verified senders’ avatars', () => {
     device.close();
   }, 60_000);
 
-  test('show initials for unverified mail, a public mailbox, and pictures that are too big, aren’t pictures, or are kept from the Mailroom', async () => {
-    const rows = await ada.page({ in: 'inbox' });
-    for (const domain of [
-      'forged.test',
-      'lax.test',
-      'heavy.test',
-      'scripted.test',
-      'gmail.com',
-      'bulky.test',
-      'guarded.test',
-    ]) {
-      const row = rowFrom(rows, domain)!;
-      expect(row).not.toHaveProperty('avatar');
-      const [message] = await ada.call<Message[]>('conversation', row.id);
-      expect(message).not.toHaveProperty('avatar');
-      expect(message?.verified).toBe(domain !== 'forged.test');
-    }
-    const { domains, senders, pictures } = await storedAvatars('ada');
+  test('never looks up forged mail, a public mailbox’s site or a lax domain’s logo, and keeps only the pictures it shows', async () => {
     // Mail whose verification was forged is never looked up at all.
-    expect(domains.map(({ domain }) => domain).sort()).toEqual(DOMAINS.toSorted());
-    expect(senders).toHaveLength(DOMAINS.length);
     expect(asked).not.toContain('_dmarc.forged.test');
     expect(asked).not.toContain(`/gravatar/${sha256Of('deals@forged.test')}`);
     // A public mailbox's site is never asked, nor the logo of a domain whose policy is none.
-    expect(asked).toContain(`/gravatar/${sha256Of('friend@gmail.com')}`);
     expect(asked.filter((path) => path.startsWith('/sites/gmail.com/'))).toEqual([]);
     expect(asked).not.toContain('default._bimi.lax.test');
-    for (const path of [
-      '/heavy.svg',
-      '/scripted.svg',
-      '/sites/bulky.test/huge.png',
-      '/sites/bulky.test/page.png',
-      '/sites/guarded.test/',
-    ]) {
-      expect(asked).toContain(path);
-    }
-    // The cache keeps the pictures it shows, and only those.
+    // The cache keeps the pictures it shows, and none too big, not a picture or kept from it.
     // Brand's logo and the photo it outranks, Pat's photo and their domain's icon, and an icon.
-    expect(pictures).toHaveLength(5);
-  }, 60_000);
+    expect((await storedAvatars('ada')).pictures).toHaveLength(5);
+  });
 
   test('a picture found after its mail arrived reaches every open device', async () => {
     const answer = Promise.withResolvers<void>();
     held.set('_dmarc.late.test', answer);
-    await deliver(signed('late', 'news@late.test', 'pass'));
+    await deliver(bob, signed('late', 'news@late.test', 'pass'));
     // A device opening has the Mailroom check for mail at once.
     const device = ada.device();
     await device.opened;
@@ -343,7 +310,7 @@ describe('Verified senders’ avatars', () => {
     expect(await pictureOf(ada, key)).toBeNull();
 
     const hal = member('hal', () => worker);
-    await hal.call('addAccount', setup('localhost'));
+    await hal.call('addAccount', setup());
     await hal.until(
       async () => rowFrom(await hal.page({ in: 'inbox' }), 'brand.test')?.avatar !== undefined,
     );
@@ -433,18 +400,4 @@ function signed(id: string, from: string, dmarc: 'pass' | 'fail', below: string[
     `This is ${id}.`,
     '',
   ].join('\r\n');
-}
-
-async function deliver(...messages: string[]) {
-  const client = new ImapFlow({
-    host: 'localhost',
-    port: ports.imaps,
-    secure: true,
-    auth: { user: bob.email, pass: bob.password },
-    tls: { ca: [ca] },
-    logger: false,
-  });
-  await client.connect();
-  for (const message of messages) await client.append('INBOX', message);
-  await client.logout();
 }

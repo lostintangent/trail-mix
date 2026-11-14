@@ -17,16 +17,14 @@ export class TestMailroom extends Mailroom {
   private held: { wakes: Promise<void>; release: () => void } | undefined;
 
   /** Holds every wake back until `releaseWakes`, so nothing a command owes lands meanwhile. */
-  holdWakes(): Promise<void> {
+  holdWakes(): void {
     const { promise, resolve } = Promise.withResolvers<void>();
     this.held = { wakes: promise, release: resolve };
-    return Promise.resolve();
   }
 
-  releaseWakes(): Promise<void> {
+  releaseWakes(): void {
     this.held?.release();
     this.held = undefined;
-    return Promise.resolve();
   }
 
   /** Records each wake that landed anything, with each account's status and indexed mail after it. */
@@ -49,19 +47,18 @@ export class TestMailroom extends Mailroom {
     return steps;
   }
 
-  wakeLog(): Promise<Wake[]> {
-    return Promise.resolve(this.wakes);
+  wakeLog(): Wake[] {
+    return this.wakes;
   }
 
   /** Has the member last opened this Mailroom `days` ago, as if no device had asked since. */
-  unopenedFor(days: number): Promise<void> {
+  unopenedFor(days: number): void {
     this.writeOpened(Date.now() - days * 24 * 60 * 60_000);
-    return Promise.resolve();
   }
 
   /** When storage says a signed-in device last asked this Mailroom for something. */
-  lastOpened(): Promise<number | undefined> {
-    return Promise.resolve(this.sql.all<{ at: number }>(`SELECT at FROM opened`)[0]?.at);
+  lastOpened(): number | undefined {
+    return this.sql.all<{ at: number }>(`SELECT at FROM opened`)[0]?.at;
   }
 
   /** When the alarm next comes, if it is set. */
@@ -76,28 +73,26 @@ export class TestMailroom extends Mailroom {
   }
 
   /** Ends this instance, as a deploy or an eviction would. The next request starts a new one. */
-  restart(): Promise<void> {
+  restart(): void {
     this.ctx.abort('A test restarted the Mailroom.');
-    return Promise.resolve();
   }
 
   /**
    * Has the index hold its mail as a release from before verified senders and readable previews
    * did: no sender verified, a preview that reads `as before`, and no row naming an avatar.
    */
-  indexAsBefore(): Promise<void> {
+  indexAsBefore(): void {
     this.sql.run(
       `UPDATE messages SET message = json_set(json_remove(message, '$.verified'), '$.preview', 'as before')`,
     );
     this.sql.run(`UPDATE conversations SET summary = json_remove(summary, '$.avatar')`);
-    return Promise.resolve();
   }
 
   /** Reads every folder again, as the version that asks for it does, from a cold start. */
   async rereadAsUpgraded(): Promise<void> {
     this.sql.run(REREAD);
     await this.ctx.storage.sync();
-    await this.restart();
+    this.restart();
   }
 
   /**
@@ -121,27 +116,12 @@ export class TestMailroom extends Mailroom {
    * Ends this instance the next time a host accepts a message, before the Outbox can record it:
    * the one instant a restart leaves a send's fate unknown.
    */
-  restartWhenAccepted(): Promise<void> {
+  restartWhenAccepted(): void {
     this.restartOnAcceptance = true;
-    return Promise.resolve();
   }
 
   protected override accepted(): void {
     if (this.restartOnAcceptance) this.ctx.abort('A test restarted the Mailroom mid-send.');
-  }
-
-  /**
-   * Has an account's provider leave Sent to the host, as Zoho's and Outlook's presets do, and
-   * restarts so the provider is made again. Setup can't say so for a host it names itself.
-   */
-  async hostFilesSent(account: string): Promise<void> {
-    this.sql.run(
-      `UPDATE accounts SET connection = json_set(connection, '$.filesSent', json('true')) WHERE id = ?`,
-      account,
-    );
-    // A restart drops writes not yet on disk.
-    await this.ctx.storage.sync();
-    await this.restart();
   }
 
   /**
@@ -167,8 +147,8 @@ export class TestMailroom extends Mailroom {
   }
 
   /** How many times this instance has asked for the IMAP provider's code. */
-  imapLoadCount(): Promise<number> {
-    return Promise.resolve(this.imapLoads);
+  imapLoadCount(): number {
+    return this.imapLoads;
   }
 
   private readonly synced: Synced[] = [];
@@ -176,21 +156,19 @@ export class TestMailroom extends Mailroom {
   private filing: { saving: number; release: Promise<void>; let: () => void } | undefined;
 
   /** Holds each draft the server is asked to file until `letDraftsFile`, counting them. */
-  holdDrafts(): Promise<void> {
+  holdDrafts(): void {
     const { promise, resolve } = Promise.withResolvers<void>();
     this.filing = { saving: 0, release: promise, let: resolve };
-    return Promise.resolve();
   }
 
   /** How many drafts are held on their way to the server. */
-  draftsHeld(): Promise<number> {
-    return Promise.resolve(this.filing?.saving ?? 0);
+  draftsHeld(): number {
+    return this.filing?.saving ?? 0;
   }
 
-  letDraftsFile(): Promise<void> {
+  letDraftsFile(): void {
     this.filing?.let();
     this.filing = undefined;
-    return Promise.resolve();
   }
 
   private filingCut: 'restart' | 'answer' | undefined;
@@ -199,14 +177,13 @@ export class TestMailroom extends Mailroom {
    * Has the next draft the server files go unheard: the instance ends once it is filed, as a
    * deploy would, or only the server's answer is lost, as with a connection that drops.
    */
-  cutNextFiling(how: 'restart' | 'answer'): Promise<void> {
+  cutNextFiling(how: 'restart' | 'answer'): void {
     this.filingCut = how;
-    return Promise.resolve();
   }
 
   /** Whether the member has undone a send whose last save is being filed. */
-  isUndoing(id: string): Promise<boolean> {
-    return Promise.resolve(this.outboxCommands.isUndoing(id));
+  isUndoing(id: string): boolean {
+    return this.outboxCommands.isUndoing(id);
   }
 
   private closes = 0;
@@ -217,15 +194,15 @@ export class TestMailroom extends Mailroom {
   }
 
   /** How many devices' hint sockets have closed since the Mailroom started. */
-  devicesClosed(): Promise<number> {
-    return Promise.resolve(this.closes);
+  devicesClosed(): number {
+    return this.closes;
   }
 
   private readonly watched: string[] = [];
 
   /** The folders being watched now, by path. */
-  watching(): Promise<string[]> {
-    return Promise.resolve([...this.watched]);
+  watching(): string[] {
+    return [...this.watched];
   }
 
   /**
@@ -273,21 +250,20 @@ export class TestMailroom extends Mailroom {
   }
 
   /** Each folder sync since the Mailroom started, with how many messages it downloaded. */
-  syncLog(): Promise<Synced[]> {
-    return Promise.resolve(this.synced);
+  syncLog(): Synced[] {
+    return this.synced;
   }
 
   /** Each message whose body the Mailroom asked its server for since it started. */
-  fetchLog(): Promise<MessageRef[]> {
-    return Promise.resolve(this.fetched);
+  fetchLog(): MessageRef[] {
+    return this.fetched;
   }
 
   private bucketDelay = 0;
 
   /** Has the bucket wait this long before deleting, so a test can look in while it does. */
-  slowBucket(ms: number): Promise<void> {
+  slowBucket(ms: number): void {
     this.bucketDelay = ms;
-    return Promise.resolve();
   }
 
   protected override async forgetBodies(prefix: string): Promise<void> {
@@ -301,9 +277,8 @@ export class TestMailroom extends Mailroom {
    * Has every wake keep the bodies it owes a delete, as if each ended before letting them go, until
    * a test lets them go again or the instance restarts.
    */
-  holdBodies(isHeld: boolean): Promise<void> {
+  holdBodies(isHeld: boolean): void {
     this.isHoldingBodies = isHeld;
-    return Promise.resolve();
   }
 
   protected override letBodiesGo(): Promise<boolean> {
@@ -311,14 +286,13 @@ export class TestMailroom extends Mailroom {
   }
 
   /** Where a folder's sync stands, as its provider left the cursor. */
-  cursorOf(account: string, path: string): Promise<string | null> {
-    return Promise.resolve(this.store.cursor(account, path));
+  cursorOf(account: string, path: string): string | null {
+    return this.store.cursor(account, path);
   }
 
   /** Sets a folder's sync back to a cursor it left, so its next sync reports again what followed. */
-  rewind(account: string, path: string, cursor: string): Promise<void> {
+  rewind(account: string, path: string, cursor: string): void {
     this.store.saveCursor(account, path, cursor);
-    return Promise.resolve();
   }
 
   private readonly pushed: SentPush[] = [];
@@ -336,24 +310,22 @@ export class TestMailroom extends Mailroom {
   }
 
   /** Every push since the Mailroom started, its body base64. */
-  pushes(): Promise<SentPush[]> {
-    return Promise.resolve(this.pushed);
+  pushes(): SentPush[] {
+    return this.pushed;
   }
 
   /** Notifies a device unchecked, as no browser could have it, such as one whose keys can't seal. */
-  notifyUnchecked(subscription: unknown): Promise<void> {
+  notifyUnchecked(subscription: unknown): void {
     this.sql.run(
       `INSERT INTO devices (endpoint, subscription, added) VALUES (?, ?, 0)`,
       (subscription as { endpoint: string }).endpoint,
       JSON.stringify(subscription),
     );
-    return Promise.resolve();
   }
 
   /** Has every push service answer each push from now on with this status. */
-  answerPushesWith(status: number): Promise<void> {
+  answerPushesWith(status: number): void {
     this.pushAnswer = status;
-    return Promise.resolve();
   }
 
   /** Erases the envelope index and the body cache, which sync rebuilds from the servers. */
@@ -363,8 +335,8 @@ export class TestMailroom extends Mailroom {
   }
 
   /** A preset as this Mailroom reaches it, from its settings, with any stand-ins it honors. */
-  presetFrom(name: PresetName): Promise<Preset> {
-    return Promise.resolve(this.preset(name));
+  presetFrom(name: PresetName): Preset {
+    return this.preset(name);
   }
 
   /** Every row Trail Mix stored for this member, blobs as Latin-1 text, and every cached body. */

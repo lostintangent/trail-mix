@@ -1,29 +1,17 @@
 // The Mailroom notifying a member's devices of new Inbox mail, on the local Workers runtime against
 // the test mail server, with each push opened by a stand-in push service as the device would.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
-import { ImapFlow } from 'imapflow';
-import { addressOf, type Account, type MessageRef } from '../../mail/core/index.ts';
+import { addressOf, refOf, type Account, type MessageRef } from '../../mail/core/index.ts';
 import { pushOf, type Notice } from '../../notifications/core/index.ts';
 import { standInPushService } from '../../../../tests/push-service.ts';
-import type { AccountSetup, ThisDevice } from '../client/contract.ts';
-import { caFile, empty, ports, start, stop, users } from '../../../../tests/mail-server/server.ts';
-import { mailrooms, member } from '../../../../tests/mailrooms.ts';
+import type { ThisDevice } from '../client/contract.ts';
+import { empty, overImap, start, stop, users } from '../../../../tests/mail-server/server.ts';
+import { mailrooms, member, setupOf } from '../../../../tests/mailrooms.ts';
 import type { LocalWorker } from '../../../../tests/workerd.ts';
-import type { SentPush } from './test-worker.ts';
+import type { SentPush, Wake } from './test-worker.ts';
 
 const { alice, bob } = users;
 const OPERATOR = 'operator@trailmix.test';
-const setup: AccountSetup = {
-  provider: 'imap',
-  name: 'Bob',
-  address: bob.email,
-  imap: { host: 'localhost', port: ports.imaps, secure: true },
-  smtp: { host: 'localhost', port: ports.submissions, secure: true },
-  password: bob.password,
-};
-
-let ca: string;
 
 describe('The Mailroom, notifying devices', () => {
   let worker: LocalWorker;
@@ -35,7 +23,6 @@ describe('The Mailroom, notifying devices', () => {
 
   beforeAll(async () => {
     await start('full');
-    ca = readFileSync(caFile, 'utf8');
     await empty(bob.email);
     await arrive({ id: 'waiting', subject: 'Already waiting' });
     worker = await mailrooms({ PUSH_KEY: pushKeyPem(), OPERATOR_EMAIL: OPERATOR });
@@ -52,12 +39,14 @@ describe('The Mailroom, notifying devices', () => {
    * no more follow, and returns them as the device opened them.
    */
   async function pushed(count: number) {
+    const wakes = async () => (await nia.call<Wake[]>('wakeLog')).length;
+    const before = await wakes();
     const device = nia.device();
     await device.opened;
     const sent = async () => (await nia.call<SentPush[]>('pushes')).length;
     await nia.until(async () => (await sent()) >= opened + count);
-    // Any push the same news would wrongly add goes in the same wake, right after.
-    await Bun.sleep(1_000);
+    // Any push the same news would wrongly add goes in the same wake, which is logged once it ends.
+    await nia.until(async () => (await wakes()) > before);
     device.close();
     const pushes = (await nia.call<SentPush[]>('pushes')).slice(opened);
     opened += pushes.length;
@@ -83,8 +72,8 @@ describe('The Mailroom, notifying devices', () => {
     await nia.call('notifyDevice', { ...service.subscription, expirationTime: null });
     expect(await thisDevice()).toEqual({ ...before, notified: true });
     // Bob's mail already waiting is read for the first time, and isn't news.
-    account = await nia.call<Account>('addAccount', setup);
-    await nia.until(async () => (await nia.call<Account[]>('accounts'))[0]?.status === 'ready');
+    account = await nia.call<Account>('addAccount', setupOf(bob, 'Bob'));
+    await nia.ready();
 
     await arrive({ id: 'ridge', subject: 'Ridge trip' });
     const [push, ...more] = await pushed(1);
@@ -250,32 +239,21 @@ async function arrive(fields: {
   minutesAgo?: number;
   folder?: string;
 }) {
-  const client = new ImapFlow({
-    host: 'localhost',
-    port: ports.imaps,
-    secure: true,
-    auth: { user: bob.email, pass: bob.password },
-    tls: { ca: [ca] },
-    logger: false,
-  });
-  await client.connect();
-  try {
-    const raw = [
-      `From: Alice <${alice.email}>`,
-      `To: ${bob.email}`,
-      `Subject: ${fields.subject}`,
-      `Date: ${new Date(Date.now() - (fields.minutesAgo ?? 1) * 60_000).toUTCString()}`,
-      `Message-ID: <${fields.id}@trailmix.test>`,
-      'MIME-Version: 1.0',
-      'Content-Type: text/plain; charset=utf-8',
-      '',
-      `This is ${fields.subject}.`,
-      '',
-    ].join('\r\n');
-    await client.append(fields.folder ?? 'INBOX', raw, fields.seen ? ['\\Seen'] : []);
-  } finally {
-    await client.logout();
-  }
+  const raw = [
+    `From: Alice <${alice.email}>`,
+    `To: ${bob.email}`,
+    `Subject: ${fields.subject}`,
+    `Date: ${new Date(Date.now() - (fields.minutesAgo ?? 1) * 60_000).toUTCString()}`,
+    `Message-ID: <${fields.id}@trailmix.test>`,
+    'MIME-Version: 1.0',
+    'Content-Type: text/plain; charset=utf-8',
+    '',
+    `This is ${fields.subject}.`,
+    '',
+  ].join('\r\n');
+  await overImap(bob, (client) =>
+    client.append(fields.folder ?? 'INBOX', raw, fields.seen ? ['\\Seen'] : []),
+  );
 }
 
 /** A new P-256 key in PKCS #8 PEM, as the deploy makes `PUSH_KEY`. */
@@ -291,10 +269,3 @@ function pushKeyPem() {
   if (made.exitCode !== 0) throw new Error(made.stderr.toString());
   return made.stdout.toString();
 }
-
-const refOf = ({ account, path, uidValidity, uid }: MessageRef): MessageRef => ({
-  account,
-  path,
-  uidValidity,
-  uid,
-});

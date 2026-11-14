@@ -3,6 +3,7 @@
 import { join } from 'node:path';
 import {
   isBundle,
+  type Account,
   type BundleId,
   type ConversationSummary,
   type Folder,
@@ -12,8 +13,13 @@ import {
   type Outgoing,
   type View,
 } from '../src/features/mail/core/index.ts';
-import { sendable, type BundlePage, type Page } from '../src/features/mailroom/client/contract.ts';
-import { caFile } from './mail-server/server.ts';
+import {
+  sendable,
+  type AccountSetup,
+  type BundlePage,
+  type Page,
+} from '../src/features/mailroom/client/contract.ts';
+import { caFile, ports } from './mail-server/server.ts';
 import { startWorker, type LocalWorker } from './workerd.ts';
 
 /**
@@ -43,6 +49,20 @@ export function mailrooms(
   );
 }
 
+/** A user of the test mail server as the form adds their account, named `name`, at `host`. */
+export const setupOf = (
+  user: { email: string; password: string },
+  name: string,
+  host = 'localhost',
+): Extract<AccountSetup, { provider: 'imap' }> => ({
+  provider: 'imap',
+  name,
+  address: user.email,
+  imap: { host, port: ports.imaps, secure: true },
+  smtp: { host, port: ports.submissions, secure: true },
+  password: user.password,
+});
+
 /** A member's Mailroom, reached as the test worker names it. */
 export function member(name: string, worker: () => LocalWorker) {
   const call = async <T = unknown>(method: string, ...args: unknown[]): Promise<T> => {
@@ -66,6 +86,14 @@ export function member(name: string, worker: () => LocalWorker) {
         rows.push(...(isBundle(item) ? await bundled(item.id) : [item]));
       at += page.items.length;
       if (page.items.length === 0 || at >= page.total) return rows;
+    }
+  }
+
+  async function until(done: () => Promise<boolean>, ms = 30_000) {
+    const deadline = Date.now() + ms;
+    while (!(await done())) {
+      if (Date.now() > deadline) throw new Error('Timed out');
+      await Bun.sleep(100);
     }
   }
 
@@ -106,13 +134,14 @@ export function member(name: string, worker: () => LocalWorker) {
       return { folders, inbox, lists, threads };
     },
 
-    async until(done: () => Promise<boolean>, ms = 30_000) {
-      const deadline = Date.now() + ms;
-      while (!(await done())) {
-        if (Date.now() > deadline) throw new Error('Timed out');
-        await Bun.sleep(100);
-      }
-    },
+    until,
+
+    /** Resolves once every account is ready, its first sync done. */
+    ready: (ms?: number) =>
+      until(
+        async () => (await call<Account[]>('accounts')).every(({ status }) => status === 'ready'),
+        ms,
+      ),
 
     /** An open browser: its hint socket, and every hint it has heard. */
     device() {

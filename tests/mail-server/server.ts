@@ -12,6 +12,7 @@ import { existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync } 
 import { connect } from 'node:net';
 import { tmpdir, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
+import { ImapFlow } from 'imapflow';
 import type { SMTPServerAuthentication } from 'smtp-server';
 import { until } from '../until.ts';
 import { signInStandIn as standIn } from './sign-in.ts';
@@ -243,6 +244,45 @@ export async function count(user: string, folder: string): Promise<number> {
 /** Where a user's mail lives, for anything kept beside it between runs. */
 export function homeOf(user: string): string {
   return join(state, 'mail', user);
+}
+
+type User = { email: string; password: string };
+
+/** A session as a user over IMAP, logged out once `use` is done with it. */
+export async function overImap<T>(user: User, use: (client: ImapFlow) => Promise<T>): Promise<T> {
+  const client = new ImapFlow({
+    host: 'localhost',
+    port: ports.imaps,
+    secure: true,
+    auth: { user: user.email, pass: user.password },
+    tls: { ca: [readFileSync(caFile, 'utf8')] },
+    logger: false,
+  });
+  await client.connect();
+  try {
+    return await use(client);
+  } finally {
+    await client.logout();
+  }
+}
+
+/** A session as a user in one of their folders. */
+export function inFolder<T>(user: User, path: string, use: (client: ImapFlow) => Promise<T>) {
+  return overImap(user, async (client) => {
+    const lock = await client.getMailboxLock(path);
+    try {
+      return await use(client);
+    } finally {
+      lock.release();
+    }
+  });
+}
+
+/** Messages into a user's Inbox, as if they had just arrived. */
+export function deliver(user: User, ...messages: string[]) {
+  return overImap(user, async (client) => {
+    for (const message of messages) await client.append('INBOX', message);
+  });
 }
 
 // Dovecot's configuration

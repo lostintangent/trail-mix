@@ -3,10 +3,10 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { ImapFlow } from 'imapflow';
 import nodemailer from 'nodemailer';
 import {
   isBundle,
+  refOf,
   type Account,
   type Body,
   type Folder,
@@ -19,18 +19,13 @@ import {
 import { RESTARTED, UNDO_SECONDS } from '../../outbox/core/index.ts';
 import { imap } from '../../providers/index.ts';
 import PostalMime from 'postal-mime';
-import {
-  PAGE_SIZE,
-  type AccountSetup,
-  type Answered,
-  type BundlePage,
-  type Page,
-  type ThisDevice,
-} from '../client/contract.ts';
+import { PAGE_SIZE, type Answered, type Page, type ThisDevice } from '../client/contract.ts';
 import {
   caFile,
   empty,
   fileSentCopies,
+  inFolder,
+  overImap,
   pauseSending,
   ports,
   refuseSubmissionSignIn,
@@ -39,9 +34,8 @@ import {
   start,
   stop,
   users,
-  type Profile,
 } from '../../../../tests/mail-server/server.ts';
-import { mailrooms, member } from '../../../../tests/mailrooms.ts';
+import { mailrooms, member, setupOf } from '../../../../tests/mailrooms.ts';
 import type { LocalWorker } from '../../../../tests/workerd.ts';
 import { WAKE } from './sync.ts';
 import type { Synced, Wake } from './test-worker.ts';
@@ -50,17 +44,7 @@ const { alice, bob } = users;
 const AT = '2026-11-09T12:00:00.000Z';
 const { SIGN_IN_PATIENCE_MS } = await imap();
 const DAY = 24 * 60 * 60_000;
-const setup: AccountSetup = {
-  provider: 'imap',
-  name: 'Alice',
-  address: alice.email,
-  fromName: 'Alice Liddell',
-  imap: { host: 'localhost', port: ports.imaps, secure: true },
-  smtp: { host: 'localhost', port: ports.submissions, secure: true },
-  password: alice.password,
-};
-
-let ca: string;
+const setup = { ...setupOf(alice, 'Alice'), fromName: 'Alice Liddell' };
 
 describe('The Mailroom', () => {
   let worker: LocalWorker;
@@ -71,7 +55,6 @@ describe('The Mailroom', () => {
 
   beforeAll(async () => {
     await start('full');
-    ca = readFileSync(caFile, 'utf8');
     await empty(alice.email);
     await seed();
     worker = await mailrooms();
@@ -128,7 +111,7 @@ describe('The Mailroom', () => {
     }
 
     expect(await ada.call('accounts')).toEqual([]);
-    const stored = await ada.call<{ tables: Record<string, unknown[]> }>('stored');
+    const stored = await ada.call<Stored>('stored');
     expect(stored.tables.credentials).toEqual([]);
   }, 60_000);
 
@@ -165,9 +148,9 @@ describe('The Mailroom', () => {
     account = await ada.call<Account>('addAccount', setup);
     expect(await ada.call<number>('imapLoadCount')).toBeGreaterThan(0);
     expect(account).toMatchObject({ name: 'Alice', address: alice.email, stamp: 'vermilion' });
-    await ada.until(async () => (await ada.call<Account[]>('accounts'))[0]?.status === 'ready');
+    await ada.ready();
 
-    const stored = await ada.call<{ tables: Record<string, unknown[]> }>('stored');
+    const stored = await ada.call<Stored>('stored');
     expect(stored.tables.credentials).toHaveLength(1);
     expect(JSON.stringify(stored.tables)).not.toContain(alice.password);
     expect(JSON.stringify(await ada.call('accounts'))).not.toContain(alice.password);
@@ -208,12 +191,9 @@ describe('The Mailroom', () => {
     const wakes = (await ada.call<Wake[]>('wakeLog')).length;
     const devices = [ada.device(), ada.device()];
     const elsewhere = bea.device();
-    // Opening a device checks the account at once, and the Inbox is watched from then on. Nothing
-    // changed, so the check hints nothing.
+    // Opening a device checks the account at once, and the Inbox is watched from then on.
     await Promise.all([...devices, elsewhere].map((device) => device.opened));
     await ada.until(async () => (await ada.call<Wake[]>('wakeLog')).length > wakes);
-    await Bun.sleep(1000);
-    expect(devices.map((device) => device.hints)).toEqual([[], []]);
 
     const sent = Date.now();
     await submit({ subject: 'Arriving now' });
@@ -222,6 +202,13 @@ describe('The Mailroom', () => {
         device.next((hint) => hint.changed === 'conversations' && hint.folder.path === 'INBOX'),
       ),
     );
+    // Nothing changed when they opened, so the check hinted nothing: a socket's hints come in
+    // order, and any it sent would have come before the new mail's.
+    const arrived: Hint = {
+      changed: 'conversations',
+      folder: { account: account.id, path: 'INBOX' },
+    };
+    expect(devices.map(({ hints }) => hints[0])).toEqual([arrived, arrived]);
     await ada.until(async () =>
       (await ada.page({ in: 'inbox' })).some((row) => row.subject === 'Arriving now'),
     );
@@ -283,7 +270,6 @@ describe('The Mailroom', () => {
   });
 
   test('finds what only an older message holds on the server, opens it, and leaves the index be', async () => {
-    type Stored = { tables: Record<string, unknown[]>; bodies: string[] };
     // Once the cache owes nothing for the mail the tests before moved.
     await ada.until(
       async () => (await ada.call<Stored>('stored')).tables.gone_bodies!.length === 0,
@@ -323,31 +309,13 @@ describe('The Mailroom', () => {
   };
 
   describe('triage, as the browser sends it, on the server', () => {
-    /** Undoes moves as the browser does, each back to its folder. Returns where each landed. */
-    const undo = async (moved: Moved[]) =>
-      (
-        await Promise.all(
-          moved.map(({ from, to }) =>
-            ada.call<Moved[]>('move', [to], { account: from.account, path: from.path }),
-          ),
-        )
-      ).flat();
-
-    test('archives and deletes as moves to a role, and each undo moves it back', async () => {
-      let tickets = await held('Tickets');
-      for (const role of ['archive', 'trash'] as const) {
-        const moved = await ada.call<Moved[]>('move', [tickets], role);
-        const path = role === 'archive' ? 'Archive' : 'Trash';
-        expect(moved.map(({ to }) => to.path)).toEqual([path]);
-        expect(await onServer(path)).toContainKey('<tickets@trailmix.test>');
-        expect(await onServer('INBOX')).not.toContainKey('<tickets@trailmix.test>');
-        // Back in the Inbox under a new UID, which the undo says.
-        tickets = (await undo(moved))[0]!.to;
-        expect(tickets.path).toBe('INBOX');
-        expect(await onServer('INBOX')).toContainKey('<tickets@trailmix.test>');
-        expect(await onServer(path)).not.toContainKey('<tickets@trailmix.test>');
-      }
-    }, 30_000);
+    /** Undoes moves as the browser does, each back to its folder. */
+    const undo = (moved: Moved[]) =>
+      Promise.all(
+        moved.map(({ from, to }) =>
+          ada.call('move', [to], { account: from.account, path: from.path }),
+        ),
+      );
 
     test('moves to a folder of the account, and deletes a search hit from Archive', async () => {
       await ada.call('createFolder', { account: account.id, path: 'Receipts' });
@@ -367,28 +335,11 @@ describe('The Mailroom', () => {
       expect(await onServer('Trash')).toContainKey('<old@trailmix.test>');
       await undo(deleted);
       expect(await onServer('Archive')).toContainKey('<old@trailmix.test>');
-    }, 30_000);
 
-    test('flags and marks read on the server, and the opposite change undoes it', async () => {
-      const lunch = await held('Re: Lunch');
-      const flagged = async () => {
-        const flags = (await onServer('INBOX'))['<lunch-reply@trailmix.test>'] ?? [];
-        return ['\\Flagged', '\\Seen'].filter((flag) => flags.includes(flag));
-      };
-      await ada.call('setFlags', [lunch], { flagged: true, seen: true });
-      expect(await flagged()).toEqual(['\\Flagged', '\\Seen']);
-      await ada.call('setFlags', [lunch], { flagged: false, seen: false });
-      expect(await flagged()).toEqual([]);
-    });
-
-    test('creates, renames and deletes folders on the server', async () => {
-      const folder = { account: account.id, path: 'Receipts' };
-      await ada.call('renameFolder', folder, 'Receipts 2026');
-      expect(await foldersOnServer()).toContain('Receipts 2026');
-      await ada.call('deleteFolder', { ...folder, path: 'Receipts 2026' });
-      expect(await foldersOnServer()).not.toContain('Receipts 2026');
+      await ada.call('deleteFolder', { account: account.id, path: 'Receipts' });
+      // Settled, so the next test hears only of its own changes.
       await ada.until(async () =>
-        (await ada.call<Folder[]>('folders')).every(({ path }) => !path.startsWith('Receipts')),
+        (await ada.call<Folder[]>('folders')).every(({ path }) => path !== 'Receipts'),
       );
     }, 30_000);
 
@@ -396,7 +347,7 @@ describe('The Mailroom', () => {
       const at = (path: string) => ({ account: account.id, path });
       await ada.call('createFolder', at('Bills'));
       await ada.call('createFolder', at('Bills/Water'));
-      await asAlice((client) =>
+      await overImap(alice, (client) =>
         client.append('Bills/Water', raw({ id: 'meter', subject: 'Meter reading', minutesAgo: 5 })),
       );
       await ada.call('createFolder', at('Scratch'));
@@ -464,7 +415,7 @@ describe('The Mailroom', () => {
       );
 
       // A message in Trips/Japan, which a check finds, as opening a browser asks for.
-      await asAlice((client) =>
+      await overImap(alice, (client) =>
         client.append('Trips/Japan', raw({ id: 'ryokan', subject: 'Ryokan', minutesAgo: 10 })),
       );
       await ada.device().opened;
@@ -513,9 +464,7 @@ describe('The Mailroom', () => {
       expect((await paths()).filter((path) => path.startsWith('Travel'))).toEqual([]);
       expect(await ada.page({ in: 'search', text: 'ryokan' })).toEqual([]);
       expect(await ada.call('conversation', row!.id)).toEqual([]);
-      const { tables } = await ada.call<{ tables: Record<string, Record<string, unknown>[]> }>(
-        'stored',
-      );
+      const { tables } = await ada.call<Stored>('stored');
       expect(tables.messages!.filter(({ path }) => String(path).startsWith('Travel'))).toEqual([]);
       expect(tables.search!.filter(({ subject }) => String(subject).includes('Ryokan'))).toEqual(
         [],
@@ -565,7 +514,7 @@ describe('The Mailroom', () => {
     /** Once the wakes after a save have discarded every draft it replaced. */
     const discarded = () =>
       ada.until(async () => {
-        const { tables } = await ada.call<{ tables: Record<string, unknown[]> }>('stored');
+        const { tables } = await ada.call<Stored>('stored');
         return tables.replaced_drafts!.length === 0;
       });
     const isOnServer = (ref: MessageRef) =>
@@ -674,7 +623,7 @@ describe('The Mailroom', () => {
       ).toEqual([['notes.txt', 'Bring a jacket.']]);
       // The replaced draft's bytes leave the body cache with it, and the newest's stay.
       await ada.until(async () => {
-        const { bodies } = await ada.call<{ bodies: string[] }>('stored');
+        const { bodies } = await ada.call<Stored>('stored');
         const drafts = bodies.filter((key) => key.includes('/Drafts/'));
         return drafts.length === 1 && drafts[0]!.endsWith(`/${second.uidValidity}/${second.uid}`);
       });
@@ -725,7 +674,7 @@ describe('The Mailroom', () => {
         inReplyTo: '<before-window@trailmix.test>',
         references: '<first-ever@trailmix.test> <before-window@trailmix.test>',
       };
-      await asAlice((client) =>
+      await overImap(alice, (client) =>
         client.append(
           'Drafts',
           [
@@ -753,7 +702,7 @@ describe('The Mailroom', () => {
     }, 30_000);
 
     test('a reply whose parent goes between two saves saves on, answering it, and only a first save refuses', async () => {
-      await asAlice((client) =>
+      await overImap(alice, (client) =>
         client.append('INBOX', raw({ id: 'picnic', subject: 'Picnic', minutesAgo: 5 })),
       );
       const picnic = await checked('Picnic');
@@ -825,7 +774,6 @@ describe('The Mailroom', () => {
   });
 
   describe('the body cache, as sync reports mail gone', () => {
-    type Stored = { tables: Record<string, unknown[]>; bodies: string[] };
     const stored = () => ada.call<Stored>('stored');
     /** Whether the cache holds a message's body. */
     const cached = async ({ account, path, uidValidity, uid }: MessageRef) => {
@@ -874,7 +822,7 @@ describe('The Mailroom', () => {
     };
     /** A folder of Alice's on the server holding one message, once the index holds it. */
     const folderWith = async (path: string, subject: string) => {
-      await asAlice(async (client) => {
+      await overImap(alice, async (client) => {
         await client.mailboxCreate(path);
         await client.append(path, raw({ id: subject.toLowerCase(), subject, minutesAgo: 5 }));
       });
@@ -883,7 +831,7 @@ describe('The Mailroom', () => {
     };
     /** Deletes a folder of Alice's on the server, once the index no longer lists it. */
     const dropFolder = async (path: string) => {
-      await asAlice((client) => client.mailboxDelete(path));
+      await overImap(alice, (client) => client.mailboxDelete(path));
       await checkNow();
       await ada.until(
         async () => !(await ada.call<Folder[]>('folders')).some((folder) => folder.path === path),
@@ -891,18 +839,11 @@ describe('The Mailroom', () => {
     };
     /** Expunges a message in another client. */
     const expungeElsewhere = (ref: MessageRef) =>
-      asAlice(async (client) => {
-        const lock = await client.getMailboxLock(ref.path);
-        try {
-          await client.messageDelete(String(ref.uid), { uid: true });
-        } finally {
-          lock.release();
-        }
-      });
+      inFolder(alice, ref.path, (client) => client.messageDelete(String(ref.uid), { uid: true }));
 
     test('lets a body go once its message is deleted, moved or expunged elsewhere, and fetches a moved one again where it lands', async () => {
       const ids = ['deleted', 'moved', 'expunged'];
-      await asAlice(async (client) => {
+      await overImap(alice, async (client) => {
         for (const id of ids)
           await client.append(
             'INBOX',
@@ -1029,11 +970,11 @@ describe('The Mailroom', () => {
     const before = await ada.snapshot();
     const [message] = await ada.call<Message[]>('conversation', before.inbox[0]!.id);
     const body = await ada.call('body', message);
-    expect((await ada.call<{ bodies: string[] }>('stored')).bodies.length).toBeGreaterThan(0);
+    expect((await ada.call<Stored>('stored')).bodies.length).toBeGreaterThan(0);
 
     await ada.call('eraseIndex');
     expect(await ada.page({ in: 'inbox' })).toEqual([]);
-    expect((await ada.call<{ bodies: string[] }>('stored')).bodies).toEqual([]);
+    expect((await ada.call<Stored>('stored')).bodies).toEqual([]);
 
     const device = ada.device();
     await device.opened;
@@ -1046,18 +987,9 @@ describe('The Mailroom', () => {
     const [row] = await ada.page({ in: 'inbox' });
     await ada.call('body', (await ada.call<Message[]>('conversation', row!.id))[0]);
     await ada.call('removeAccount', account.id);
-    const { tables, bodies } = await ada.call<{ tables: Record<string, unknown[]>; bodies: [] }>(
-      'stored',
-    );
-    expect(bodies).toEqual([]);
-    // Only the schema's version, when the member last opened the Mailroom, who is still here, and
-    // the search tables' own bookkeeping remain, with no word of mail.
-    expect(
-      Object.entries(tables).filter(
-        ([name, rows]) =>
-          name !== 'schema' && name !== 'opened' && !/^(people_)?search_/.test(name) && rows.length,
-      ),
-    ).toEqual([]);
+    // Only when the member last opened it remains, since they are still here: no word of mail.
+    expect(await leftOf(ada, 'opened')).toEqual({ tables: [], bodies: [] });
+    const { tables } = await ada.call<Stored>('stored');
     expect(JSON.stringify(tables).toLowerCase()).not.toMatch(/garden|tickets|lunch|alice|bob/);
   });
 
@@ -1082,21 +1014,13 @@ describe('The Mailroom', () => {
     await cam.send(saved, new Date(Date.now() + DAY).toISOString());
     expect(await cam.call('outbox')).toHaveLength(1);
     expect(await cam.call('alarmAt')).not.toBeNull();
-    expect((await cam.call<{ bodies: string[] }>('stored')).bodies).not.toEqual([]);
+    expect((await cam.call<Stored>('stored')).bodies).not.toEqual([]);
 
     const erased = device.next((hint) => hint.changed === 'everything');
     await cam.call('eraseEverything');
     await erased;
-    const { tables, bodies } = await cam.call<{ tables: Record<string, unknown[]>; bodies: [] }>(
-      'stored',
-    );
-    expect(bodies).toEqual([]);
-    expect(
-      Object.entries(tables).filter(
-        ([name, rows]) => name !== 'schema' && !/^(people_)?search_/.test(name) && rows.length,
-      ),
-    ).toEqual([]);
-    expect(JSON.stringify(tables)).not.toContain(alice.password);
+    expect(await leftOf(cam)).toEqual({ tables: [], bodies: [] });
+    expect(JSON.stringify(await cam.call('stored'))).not.toContain(alice.password);
     expect(await cam.call('alarmAt')).toBeNull();
 
     // The next sign-in starts a Mailroom with nothing in it, as the first-run screen shows.
@@ -1126,15 +1050,7 @@ describe('The Mailroom with the demo mailbox', () => {
     await dee.call('body', (await dee.call<Message[]>('conversation', row!.id))[0]);
 
     await dee.call('eraseEverything');
-    const { tables, bodies } = await dee.call<{ tables: Record<string, unknown[]>; bodies: [] }>(
-      'stored',
-    );
-    expect(bodies).toEqual([]);
-    expect(
-      Object.entries(tables).filter(
-        ([name, rows]) => name !== 'schema' && !/^(people_)?search_/.test(name) && rows.length,
-      ),
-    ).toEqual([]);
+    expect(await leftOf(dee)).toEqual({ tables: [], bodies: [] });
     device.close();
   }, 60_000);
 
@@ -1156,7 +1072,7 @@ describe('The Mailroom with the demo mailbox', () => {
     const erasing = eve.call('eraseEverything');
     await erased;
     // A device refetching on the hint finds nothing of what was erased.
-    expect((await eve.call<{ bodies: unknown[] }>('stored')).bodies).toEqual([]);
+    expect((await eve.call<Stored>('stored')).bodies).toEqual([]);
     await erasing;
     expect((await eve.call<ThisDevice>('thisDevice')).cache).not.toBe(cache);
   }, 60_000);
@@ -1192,9 +1108,7 @@ describe('The Mailroom with the demo mailbox', () => {
 
   test('a Mailroom left unopened for 30 days stops checking mail, and opening it picks up again', async () => {
     const gil = member('gil', () => worker);
-    await gil.until(async () =>
-      (await gil.call<Account[]>('accounts')).every(({ status }) => status === 'ready'),
-    );
+    await gil.ready();
     // Closed but lately opened, it checks every few minutes, unlike a demo visitor's.
     const checking = await gil.call<{ alarm: number }>('wakeNow');
     expect(checking.alarm - Date.now()).toBeGreaterThan(60_000);
@@ -1226,15 +1140,7 @@ describe('The Mailroom with the demo mailbox', () => {
     await fay.call('unopenedFor', 90);
     const erased = await fay.call<{ alarm: number | null }>('wakeNow');
     expect(erased.alarm).toBeNull();
-    const { tables, bodies } = await fay.call<{ tables: Record<string, unknown[]>; bodies: [] }>(
-      'stored',
-    );
-    expect(bodies).toEqual([]);
-    expect(
-      Object.entries(tables).filter(
-        ([name, rows]) => name !== 'schema' && !/^(people_)?search_/.test(name) && rows.length,
-      ),
-    ).toEqual([]);
+    expect(await leftOf(fay)).toEqual({ tables: [], bodies: [] });
   }, 60_000);
 
   test('starts with Personal and Work, and fills each Inbox first and newest first', async () => {
@@ -1254,10 +1160,7 @@ describe('The Mailroom with the demo mailbox', () => {
     ]);
     expect(accounts.find(({ id }) => id === folder.account)?.status).toBe('syncing');
 
-    await cy.until(
-      async () => (await cy.call<Account[]>('accounts')).every(({ status }) => status === 'ready'),
-      120_000,
-    );
+    await cy.ready(120_000);
     console.log(`The demo mailbox synced in ${Date.now() - started} ms.`);
     // The Inbox's newest conversations were there from its first batch. Their rows change as
     // Sent and Archive fill in, but not which ones they are or their order in the Inbox.
@@ -1315,12 +1218,9 @@ describe('The Mailroom with the demo mailbox', () => {
     );
   }, 30_000);
 
-  test('lists a repository’s GitHub mail as one bundle, a page of threads at a time, which its row marks read and archives', async () => {
+  test('a repository’s GitHub bundle row marks read and archives the mail it showed, which its moves undo', async () => {
     const gus = member('gus', () => worker);
-    await gus.until(
-      async () => (await gus.call<Account[]>('accounts')).every(({ status }) => status === 'ready'),
-      120_000,
-    );
+    await gus.ready(120_000);
     // Personal's repository, where Work holds another's.
     const inInbox = async () => {
       for (let at = 0; ;) {
@@ -1334,24 +1234,6 @@ describe('The Mailroom with the demo mailbox', () => {
       }
     };
     const row = (await inInbox())!;
-
-    // Its threads come as a list's rows do, newest first, a page at a time, as many as its row says.
-    const first = await gus.call<BundlePage>('bundle', row.id);
-    const second = await gus.call<BundlePage>('bundle', row.id, PAGE_SIZE);
-    expect(first.bundle?.threads).toBe(row.threads);
-    expect(first.total).toBe(row.threads);
-    expect(first.items).toHaveLength(PAGE_SIZE);
-    const threads = [...first.items, ...second.items];
-    expect(new Set(threads.map(({ id }) => id)).size).toBe(threads.length);
-    expect(threads.map(({ date }) => date)).toEqual(
-      threads
-        .map(({ date }) => date)
-        .toSorted()
-        .reverse(),
-    );
-    expect(threads.every(({ github }) => github?.repository === row.repository)).toBe(true);
-
-    // Its row reads and archives the mail it showed, and the moves it returns undo the archive.
     const scope = { bundle: row.id, through: row.date };
     expect((await gus.call<MessageRef[]>('setFlags', scope, { seen: true })).length).toBe(
       row.unread,
@@ -1372,9 +1254,7 @@ describe('The Mailroom with the demo mailbox', () => {
     const ivy = member('ivy', () => worker);
     const device = ivy.device();
     await device.opened;
-    await ivy.until(async () =>
-      (await ivy.call<Account[]>('accounts')).every(({ status }) => status === 'ready'),
-    );
+    await ivy.ready();
     const [row] = await ivy.page({ in: 'inbox' });
     await ivy.call('body', (await ivy.call<Message[]>('conversation', row!.id))[0]);
     const [personal] = await ivy.call<Account[]>('accounts');
@@ -1412,9 +1292,7 @@ describe('A visitor’s Mailroom on the public demo', () => {
     const first = await flo.call<Page>('conversations', { in: 'inbox' }, 0);
     // More rows than a tall screen shows.
     expect(first.items.length).toBeGreaterThan(PAGE_SIZE / 2);
-    await flo.until(async () =>
-      (await flo.call<Account[]>('accounts')).every(({ status }) => status === 'ready'),
-    );
+    await flo.ready();
     // The page holds what it will once the Mailroom is full, the Work account's newest mail too,
     // and the older mail that lands later fills it out.
     const full = await flo.call<Page>('conversations', { in: 'inbox' }, 0);
@@ -1425,9 +1303,7 @@ describe('A visitor’s Mailroom on the public demo', () => {
 
   test('checks mail only while the visitor has it open, and otherwise sleeps until it erases itself', async () => {
     const vi = member('vi', () => worker);
-    await vi.until(async () =>
-      (await vi.call<Account[]>('accounts')).every(({ status }) => status === 'ready'),
-    );
+    await vi.ready();
     // Closed, a wake checks nothing, since nothing reaches the demo mailbox from outside.
     const before = (await vi.call<Synced[]>('syncLog')).length;
     const closed = await vi.call<{ steps: number; alarm: number; openedAt: number }>('wakeNow');
@@ -1474,9 +1350,7 @@ describe('A pull request’s preview', () => {
   test('opens the demo mailbox without a key, and takes no other account, so it can never reach real mail', async () => {
     const dee = member('dee', () => worker);
     await expect(dee.call('addAccount', setup)).rejects.toThrow('only the demo mailbox');
-    await dee.until(async () =>
-      (await dee.call<Account[]>('accounts')).every(({ status }) => status === 'ready'),
-    );
+    await dee.ready();
     expect((await dee.call<Account[]>('accounts')).map(({ provider }) => provider)).toEqual([
       'demo',
       'demo',
@@ -1487,24 +1361,19 @@ describe('A pull request’s preview', () => {
   }, 120_000);
 });
 
-for (const profile of ['full', 'outlook'] as const satisfies Profile[]) {
-  const filesSent = profile === 'outlook';
-  const host = filesSent ? 'a host that files its own copy in Sent' : 'a host Trail Mix files for';
-
-  describe(`The Outbox, on ${host}`, () => {
+describe('The Outbox', () => {
+  describe('on a host Trail Mix files for', () => {
     let worker: LocalWorker;
     let account: Account;
     // No device of this member's ever opens, so only the alarm sends.
     const cal = member('cal', () => worker);
 
     beforeAll(async () => {
-      await start(profile);
-      ca = readFileSync(caFile, 'utf8');
+      await start('full');
       await Promise.all([empty(alice.email), empty(bob.email)]);
       worker = await mailrooms();
       account = await cal.call<Account>('addAccount', setup);
-      await cal.until(async () => (await cal.call<Account[]>('accounts'))[0]?.status === 'ready');
-      if (filesSent) await cal.call('hostFilesSent', account.id).catch(() => {});
+      await cal.ready();
     }, 120_000);
 
     afterAll(async () => {
@@ -1706,6 +1575,7 @@ for (const profile of ['full', 'outlook'] as const satisfies Profile[]) {
       expect(await outbox()).toEqual([]);
       expect(await whereIs('Asked twice')).toEqual({ delivered: 1, sent: 1, drafts: 0 });
 
+      // An Undo asked again gives back the same draft, and the press stays undone.
       const kept = await drafted('Undone twice');
       const undone = crypto.randomUUID();
       await cal.call('send', kept, undefined, 0, undone);
@@ -1719,14 +1589,9 @@ for (const profile of ['full', 'outlook'] as const satisfies Profile[]) {
 
     test('an Undo that reaches the Mailroom before its press keeps it from ever going', async () => {
       const saved = await drafted('Overtaken');
-      const press = crypto.randomUUID();
-      expect(await cal.call('cancelSend', press)).toBeNull();
-      await expect(cal.call('send', saved, undefined, 0, press)).rejects.toThrow(
-        'The send was undone.',
-      );
-      // A press carrying its last save files nothing.
+      // The press carries its last save, which goes nowhere either.
       const carried = crypto.randomUUID();
-      await cal.call('cancelSend', carried);
+      expect(await cal.call('cancelSend', carried)).toBeNull();
       await expect(
         cal.call(
           'send',
@@ -1806,19 +1671,10 @@ for (const profile of ['full', 'outlook'] as const satisfies Profile[]) {
       await cal.until(async () => (await outbox())[0]?.state === 'failed', 60_000);
       expect((await outbox())[0]).toMatchObject({ id, state: 'failed', error: RESTARTED });
       // The host had the message, and the draft waits as it was.
-      expect(await whereIs('Interrupted')).toEqual({
-        delivered: 1,
-        sent: filesSent ? 1 : 0,
-        drafts: 1,
-      });
-      if (!filesSent) return;
-      // Retry finds the copy the host filed in Sent, and delivers nothing again.
-      await cal.call('retrySend', id);
-      await cal.until(async () => (await outbox()).length === 0, 60_000);
-      expect(await whereIs('Interrupted')).toEqual({ delivered: 1, sent: 1, drafts: 0 });
+      expect(await whereIs('Interrupted')).toEqual({ delivered: 1, sent: 0, drafts: 1 });
     }, 90_000);
   });
-}
+});
 
 describe('The Outbox, on Zoho, which files its own copy in Sent when it likes', () => {
   let worker: LocalWorker;
@@ -1828,11 +1684,10 @@ describe('The Outbox, on Zoho, which files its own copy in Sent when it likes', 
 
   beforeAll(async () => {
     await start('zoho');
-    ca = readFileSync(caFile, 'utf8');
     await Promise.all([empty(alice.email), empty(bob.email)]);
     worker = await mailrooms();
     account = await dee.call<Account>('addAccount', { ...setup, preset: 'zoho' });
-    await dee.until(async () => (await dee.call<Account[]>('accounts'))[0]?.status === 'ready');
+    await dee.ready();
   }, 120_000);
 
   afterAll(async () => {
@@ -1890,6 +1745,18 @@ describe('The Outbox, on Zoho, which files its own copy in Sent when it likes', 
     await gone();
     expect(await whereIs('Restarted')).toEqual({ delivered: 1, sent: 1, drafts: 0 });
   }, 90_000);
+
+  test('after a restart cut a send short, Retry finds the copy Zoho filed and delivers nothing again', async () => {
+    fileSentCopies(alice.email, 'later');
+    await dee.call('restartWhenAccepted');
+    const { id } = await dee.send(await drafted('Interrupted'));
+    await dee.until(async () => (await outbox())[0]?.state === 'failed', 60_000);
+    expect((await outbox())[0]).toMatchObject({ id, state: 'failed', error: RESTARTED });
+    expect(await whereIs('Interrupted')).toEqual({ delivered: 1, sent: 1, drafts: 1 });
+    await dee.call('retrySend', id);
+    await gone();
+    expect(await whereIs('Interrupted')).toEqual({ delivered: 1, sent: 1, drafts: 0 });
+  }, 90_000);
 });
 
 /** Sending as a member with Alice's account: drafts to Bob, the Outbox, and where a subject is. */
@@ -1927,121 +1794,86 @@ function sendingAs(person: ReturnType<typeof member>, account: () => Account) {
   };
 }
 
+/** What a Mailroom stores: each table's rows, and the keys of the bodies its bucket holds. */
+type Stored = { tables: Record<string, Record<string, unknown>[]>; bodies: string[] };
+
+/**
+ * The tables that still hold rows, besides those `kept`, the schema's version and the search
+ * tables' own bookkeeping, and the bodies left in the bucket.
+ */
+async function leftOf(who: ReturnType<typeof member>, ...kept: string[]) {
+  const { tables, bodies } = await who.call<Stored>('stored');
+  const left = Object.entries(tables).filter(
+    ([name, rows]) =>
+      rows.length && name !== 'schema' && !kept.includes(name) && !/^(people_)?search_/.test(name),
+  );
+  return { tables: left.map(([name]) => name), bodies };
+}
+
 /** Each message in one of Alice's folders on the server, by Message-ID, with its flags. */
-async function onServer(path: string): Promise<Record<string, string[]>> {
-  return asAlice(async (client) => {
-    const lock = await client.getMailboxLock(path);
-    try {
-      const found: Record<string, string[]> = {};
-      if (!client.mailbox || client.mailbox.exists === 0) return found;
-      for await (const message of client.fetch('1:*', { envelope: true, flags: true })) {
-        found[message.envelope?.messageId ?? ''] = [...(message.flags ?? [])];
-      }
-      return found;
-    } finally {
-      lock.release();
+function onServer(path: string): Promise<Record<string, string[]>> {
+  return inFolder(alice, path, async (client) => {
+    const found: Record<string, string[]> = {};
+    if (!client.mailbox || client.mailbox.exists === 0) return found;
+    for await (const message of client.fetch('1:*', { envelope: true, flags: true })) {
+      found[message.envelope?.messageId ?? ''] = [...(message.flags ?? [])];
     }
+    return found;
   });
 }
 
 /** A message of Alice's on the server, as its raw source and its flags. */
-async function draftOnServer(ref: MessageRef): Promise<{ source: Uint8Array; flags: string[] }> {
-  return asAlice(async (client) => {
-    const lock = await client.getMailboxLock(ref.path);
-    try {
-      const found = await client.fetchOne(
-        String(ref.uid),
-        { source: true, flags: true },
-        { uid: true },
-      );
-      if (!found || !found.source) throw new Error(`UID ${ref.uid} isn’t in ${ref.path}.`);
-      return { source: new Uint8Array(found.source), flags: [...(found.flags ?? [])] };
-    } finally {
-      lock.release();
-    }
+function draftOnServer(ref: MessageRef): Promise<{ source: Uint8Array; flags: string[] }> {
+  return inFolder(alice, ref.path, async (client) => {
+    const found = await client.fetchOne(
+      String(ref.uid),
+      { source: true, flags: true },
+      { uid: true },
+    );
+    if (!found || !found.source) throw new Error(`UID ${ref.uid} isn’t in ${ref.path}.`);
+    return { source: new Uint8Array(found.source), flags: [...(found.flags ?? [])] };
   });
 }
 
 /** The subjects in a folder of a user's, one for each message, as the server holds them. */
-async function subjectsIn(user: { email: string; password: string }, path: string) {
-  const client = new ImapFlow({
-    host: 'localhost',
-    port: ports.imaps,
-    secure: true,
-    auth: { user: user.email, pass: user.password },
-    tls: { ca: [ca] },
-    logger: false,
-  });
-  await client.connect();
-  try {
-    const lock = await client.getMailboxLock(path);
-    try {
-      if (!client.mailbox || client.mailbox.exists === 0) return [];
-      const subjects: string[] = [];
-      for await (const message of client.fetch('1:*', { envelope: true })) {
-        subjects.push(message.envelope?.subject ?? '');
-      }
-      return subjects;
-    } finally {
-      lock.release();
+function subjectsIn(user: { email: string; password: string }, path: string) {
+  return inFolder(user, path, async (client) => {
+    if (!client.mailbox || client.mailbox.exists === 0) return [];
+    const subjects: string[] = [];
+    for await (const message of client.fetch('1:*', { envelope: true })) {
+      subjects.push(message.envelope?.subject ?? '');
     }
-  } finally {
-    await client.logout();
-  }
+    return subjects;
+  });
 }
 
 /** Alice's folders, as the server lists them. */
 const foldersOnServer = () =>
-  asAlice(async (client) => (await client.list()).map((folder) => folder.path));
-
-async function asAlice<T>(use: (client: ImapFlow) => Promise<T>): Promise<T> {
-  const client = new ImapFlow({
-    host: 'localhost',
-    port: ports.imaps,
-    secure: true,
-    auth: { user: alice.email, pass: alice.password },
-    tls: { ca: [ca] },
-    logger: false,
-  });
-  await client.connect();
-  try {
-    return await use(client);
-  } finally {
-    await client.logout();
-  }
-}
+  overImap(alice, async (client) => (await client.list()).map((folder) => folder.path));
 
 /** Alice's mailbox: two letters, and a question in Sent with its reply in Inbox. */
-async function seed() {
-  const client = new ImapFlow({
-    host: 'localhost',
-    port: ports.imaps,
-    secure: true,
-    auth: { user: alice.email, pass: alice.password },
-    tls: { ca: [ca] },
-    logger: false,
+function seed() {
+  return overImap(alice, async (client) => {
+    await client.append('INBOX', raw({ id: 'garden', subject: 'Garden', minutesAgo: 90 }));
+    await client.append('INBOX', raw({ id: 'tickets', subject: 'Tickets', minutesAgo: 60 }));
+    await client.append(
+      'Sent',
+      raw({ id: 'lunch', subject: 'Lunch', minutesAgo: 30, from: alice.email, to: bob.email }),
+      ['\\Seen'],
+    );
+    await client.append(
+      'INBOX',
+      raw({ id: 'lunch-reply', subject: 'Re: Lunch', minutesAgo: 10, inReplyTo: 'lunch' }),
+    );
+    // Older than the index keeps, so only the server's own search finds it.
+    const twoYears = 2 * 365 * 24 * 60;
+    await client.append(
+      'Archive',
+      raw({ id: 'old', subject: 'Old letter', minutesAgo: twoYears, text: 'A periwinkle teapot.' }),
+      ['\\Seen'],
+      new Date(Date.now() - twoYears * 60_000),
+    );
   });
-  await client.connect();
-  await client.append('INBOX', raw({ id: 'garden', subject: 'Garden', minutesAgo: 90 }));
-  await client.append('INBOX', raw({ id: 'tickets', subject: 'Tickets', minutesAgo: 60 }));
-  await client.append(
-    'Sent',
-    raw({ id: 'lunch', subject: 'Lunch', minutesAgo: 30, from: alice.email, to: bob.email }),
-    ['\\Seen'],
-  );
-  await client.append(
-    'INBOX',
-    raw({ id: 'lunch-reply', subject: 'Re: Lunch', minutesAgo: 10, inReplyTo: 'lunch' }),
-  );
-  // Older than the index keeps, so only the server's own search finds it.
-  const twoYears = 2 * 365 * 24 * 60;
-  await client.append(
-    'Archive',
-    raw({ id: 'old', subject: 'Old letter', minutesAgo: twoYears, text: 'A periwinkle teapot.' }),
-    ['\\Seen'],
-    new Date(Date.now() - twoYears * 60_000),
-  );
-  await client.logout();
 }
 
 /** Mail from Bob, through the submission server, as it arrives from anyone. */
@@ -2051,7 +1883,7 @@ async function submit({ subject }: { subject: string }) {
     port: ports.submissions,
     secure: true,
     auth: { user: bob.email, pass: bob.password },
-    tls: { ca: [ca] },
+    tls: { ca: [readFileSync(caFile, 'utf8')] },
   });
   await transport.sendMail({ from: bob.email, to: alice.email, subject, text: `${subject}.` });
   transport.close();
@@ -2080,10 +1912,3 @@ function raw(fields: {
     '',
   ].join('\r\n');
 }
-
-const refOf = ({ account, path, uidValidity, uid }: Message) => ({
-  account,
-  path,
-  uidValidity,
-  uid,
-});

@@ -1,14 +1,19 @@
 // One-click unsubscribe in the Mailroom on the local Workers runtime, against the test mail server,
 // with a stand-in on this machine for the senders' servers: which mail offers it, exactly what the
-// Mailroom posts and to whom, what each answer means, and the demo's list servers with no network.
+// Mailroom posts and to whom, and what each answer means.
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { ImapFlow } from 'imapflow';
-import type { Account, Body, ConversationSummary, Message } from '../../mail/core/index.ts';
-import type { AccountSetup, Unsubscribed } from '../client/contract.ts';
-import { caFile, empty, ports, start, stop, users } from '../../../../tests/mail-server/server.ts';
-import { mailrooms, member } from '../../../../tests/mailrooms.ts';
+import type { Body, Message } from '../../mail/core/index.ts';
+import type { Unsubscribed } from '../client/contract.ts';
+import {
+  caFile,
+  deliver,
+  empty,
+  start,
+  stop,
+  users,
+} from '../../../../tests/mail-server/server.ts';
+import { mailrooms, member, setupOf } from '../../../../tests/mailrooms.ts';
 import type { LocalWorker } from '../../../../tests/workerd.ts';
 
 const { bob } = users;
@@ -53,6 +58,7 @@ beforeAll(async () => {
     UNSUBSCRIBE_STAND_IN: here,
   });
   await deliver(
+    bob,
     offering('taken', `${here}/taken?u=bob`),
     offering('gone', `${here}/gone`),
     offering('moved', `${here}/moved`),
@@ -80,7 +86,7 @@ describe('One-click unsubscribe', () => {
   let messages: Map<string, Message>;
 
   beforeAll(async () => {
-    await ada.call('addAccount', setup());
+    await ada.call('addAccount', setupOf(bob, 'Bob'));
     await ada.until(async () => (await ada.page({ in: 'inbox' })).length === 7);
     const rows = await ada.page({ in: 'inbox' });
     const opened = await Promise.all(
@@ -158,51 +164,6 @@ describe('One-click unsubscribe', () => {
   });
 });
 
-describe('One-click unsubscribe in the demo', () => {
-  let demo: LocalWorker;
-  beforeAll(async () => {
-    demo = await mailrooms({ DEMO_MAILBOX: '400', DEMO_MAILBOX_AT: '2026-11-09T12:00:00.000Z' });
-  }, 120_000);
-  afterAll(() => demo?.stop());
-
-  test('its lists take it with no network, but the shop’s turns its first try away', async () => {
-    const dee = member('dee', () => demo);
-    await dee.until(async () => (await dee.page({ in: 'inbox' })).length > 0);
-    const personal = (await dee.call<Account[]>('accounts')).find(
-      ({ name }) => name === 'Personal',
-    )!;
-    const from = async (path: string, email: string) => {
-      const rows = await dee.page({ in: 'folder', folder: { account: personal.id, path } });
-      const row = rows.find((each: ConversationSummary) =>
-        each.senders.some((sender) => sender.email === email),
-      )!;
-      return (await dee.call<Message[]>('conversation', row.id)).at(-1)!;
-    };
-    const weekly = await from('INBOX', 'hello@kernelweekly.example.com');
-    const shop = await from('Trash', 'orders@shop.example.com');
-    expect((await dee.call<Body>('body', weekly)).unsubscribe).toBe(
-      'https://kernelweekly.example.com/unsubscribe?u=demo',
-    );
-
-    expect(await dee.call('unsubscribe', weekly)).toEqual({ taken: true });
-    expect(await dee.call('unsubscribe', shop)).toEqual({
-      taken: false,
-      reason: 'shop.example.com answered 503 Service Unavailable.',
-    });
-    expect(await dee.call('unsubscribe', shop)).toEqual({ taken: true });
-    expect(posted).not.toContainEqual(expect.objectContaining({ path: '/unsubscribe' }));
-  }, 60_000);
-});
-
-const setup = (): AccountSetup => ({
-  provider: 'imap',
-  name: 'Bob',
-  address: bob.email,
-  imap: { host: 'localhost', port: ports.imaps, secure: true },
-  smtp: { host: 'localhost', port: ports.submissions, secure: true },
-  password: bob.password,
-});
-
 /**
  * A list's message to Bob offering one-click unsubscribe at `address`, signed by the sender over
  * the headers `signed` names, with the results Bob's server wrote on top and any below them.
@@ -236,18 +197,4 @@ function offering(
     `This is ${subject}.`,
     '',
   ].join('\r\n');
-}
-
-async function deliver(...messages: string[]) {
-  const client = new ImapFlow({
-    host: 'localhost',
-    port: ports.imaps,
-    secure: true,
-    auth: { user: bob.email, pass: bob.password },
-    tls: { ca: [readFileSync(caFile, 'utf8')] },
-    logger: false,
-  });
-  await client.connect();
-  for (const message of messages) await client.append('INBOX', message);
-  await client.logout();
 }
