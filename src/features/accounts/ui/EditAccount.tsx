@@ -19,6 +19,7 @@ import { focusRing, media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, StampColor } from '../../mail/core/index.ts';
 import { VISITOR_SAID } from '../core/said.ts';
 import { accountsQuery, mailroom } from '../../mailroom/client/index.ts';
+import { formStyles } from './formStyles.ts';
 
 /** The stamps an account can wear, in the order they're given out, and what each is called. */
 const STAMPS: readonly [StampColor, string][] = [
@@ -87,10 +88,10 @@ export function EditAccount({
         event.preventDefault();
         void save();
       }}
-      {...stylex.props(styles.form)}
+      {...stylex.props(formStyles.form)}
     >
       <TextInput
-        controlXstyle={styles.control}
+        controlXstyle={formStyles.control}
         label="Name"
         value={kept.name}
         onChange={(name) => setKept({ ...kept, name })}
@@ -98,7 +99,7 @@ export function EditAccount({
         {...(hasTried && nameProblem ? { status: { type: 'error', message: nameProblem } } : {})}
       />
       <fieldset {...stylex.props(styles.stamps)}>
-        <legend {...stylex.props(styles.legend)}>Stamp</legend>
+        <legend {...stylex.props(formStyles.legend)}>Stamp</legend>
         <div role="radiogroup" aria-label="Stamp" {...stylex.props(styles.stampRow)}>
           {STAMPS.map(([stamp, label]) => (
             <label key={stamp} {...stylex.props(styles.stampTarget)}>
@@ -115,7 +116,7 @@ export function EditAccount({
         </div>
       </fieldset>
       <TextInput
-        controlXstyle={styles.control}
+        controlXstyle={formStyles.control}
         label="From name"
         isOptional
         value={kept.fromName}
@@ -143,7 +144,7 @@ export function EditAccount({
           <Banner status="error" title="The change wasn’t kept." description={refusal} />
         </div>
       )}
-      <div {...stylex.props(styles.actions)}>
+      <div {...stylex.props(formStyles.actions)}>
         <Button type="submit" variant="primary" label="Save" />
         <Button label="Cancel" variant="ghost" onClick={onDone} />
         <span {...stylex.props(styles.apart)}>
@@ -185,26 +186,11 @@ function shownAs(account: Account, change: ReturnType<typeof changeOf>): Account
 }
 
 const styles = stylex.create({
-  // Astryx draws a field at a fixed height, which a finger needs at 44px.
-  control: {
-    height: tm.target,
-  },
-  form: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: spacingVars['--spacing-4'],
-    margin: 0,
-  },
   stamps: {
     minWidth: 0,
     margin: 0,
     padding: 0,
     borderWidth: 0,
-  },
-  legend: {
-    padding: 0,
-    marginBottom: spacingVars['--spacing-1'],
-    fontWeight: fontWeightVars['--font-weight-semibold'],
   },
   stampRow: {
     display: 'flex',
@@ -266,11 +252,6 @@ const styles = stylex.create({
     resize: 'vertical',
     outline: { default: null, ':focus-visible': focusRing.line },
     outlineOffset: focusRing.outside,
-  },
-  actions: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: spacingVars['--spacing-2'],
   },
   apart: {
     display: 'flex',

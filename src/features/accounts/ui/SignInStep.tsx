@@ -14,6 +14,7 @@ import { tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account } from '../../mail/core/index.ts';
 import { accountsQuery, signInsQuery, type SignIn } from '../../mailroom/client/index.ts';
 import { EXPIRED } from '../../providers/imap/core/index.ts';
+import { formStyles } from './formStyles.ts';
 
 /**
  * A sign-in at a vendor while the member enters its code there: the code, the page to enter it at,
@@ -65,7 +66,7 @@ export function SignInStep({
         <div role="alert">
           <Banner status="error" title="The sign-in didn’t finish." description={stopped} />
         </div>
-        <div {...stylex.props(styles.actions)}>
+        <div {...stylex.props(formStyles.actions)}>
           <Button label="Get a new code" variant="primary" onClick={onAgain} />
           <Button label="Back" variant="ghost" onClick={onBack} />
         </div>
@@ -88,7 +89,7 @@ export function SignInStep({
           onClick={() => void navigator.clipboard.writeText(shown.code)}
         />
       </div>
-      <div {...stylex.props(styles.actions)}>
+      <div {...stylex.props(formStyles.actions)}>
         <Button
           label={`Open ${page}`}
           variant="primary"
@@ -162,11 +163,6 @@ const styles = stylex.create({
     lineHeight: typeScaleVars['--text-heading-1-leading'],
     whiteSpace: 'nowrap',
     userSelect: 'all',
-  },
-  actions: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: spacingVars['--spacing-2'],
   },
   quiet: {
     margin: 0,

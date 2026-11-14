@@ -2,11 +2,11 @@ import { Banner } from '@astryxdesign/core/Banner';
 import { Button } from '@astryxdesign/core/Button';
 import { SegmentedControl, SegmentedControlItem } from '@astryxdesign/core/SegmentedControl';
 import { TextInput } from '@astryxdesign/core/TextInput';
-import { fontWeightVars, spacingVars, typeScaleVars } from '@astryxdesign/core/theme/tokens.stylex';
+import { spacingVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useState } from 'react';
-import { media, tm } from '../../../app/theme/tokens.stylex.ts';
+import { media } from '../../../app/theme/tokens.stylex.ts';
 import type { Account } from '../../mail/core/index.ts';
 import {
   accountsQuery,
@@ -27,6 +27,7 @@ import {
 } from '../core/form.ts';
 import { DEMO_SAID, isDemoOnly, signInNotSetUp } from '../core/said.ts';
 import { SignInStep } from './SignInStep.tsx';
+import { formStyles } from './formStyles.ts';
 
 const ZOHO: PresetServers = PRESETS.zoho;
 const MICROSOFT = PRESETS.outlook.device.vendor;
@@ -119,7 +120,7 @@ export function AddAccount({
     onChange: (value: string) => setForm((held) => ({ ...held, [key]: value })),
     isDisabled: isBusy,
     hasSpellCheck: false,
-    controlXstyle: styles.control,
+    controlXstyle: formStyles.control,
     ...(shown[key] ? { status: { type: 'error' as const, message: shown[key] } } : {}),
   });
 
@@ -132,7 +133,7 @@ export function AddAccount({
         event.preventDefault();
         void add();
       }}
-      {...stylex.props(styles.form)}
+      {...stylex.props(formStyles.form)}
     >
       {isDemo && <Banner status="info" title={DEMO_SAID} />}
       <SegmentedControl
@@ -145,9 +146,9 @@ export function AddAccount({
         }
         isDisabled={isBusy}
       >
-        <SegmentedControlItem value="zoho" label="Zoho" xstyle={styles.control} />
-        <SegmentedControlItem value="outlook" label="Outlook" xstyle={styles.control} />
-        <SegmentedControlItem value="other" label="Another IMAP host" xstyle={styles.control} />
+        <SegmentedControlItem value="zoho" label="Zoho" xstyle={formStyles.control} />
+        <SegmentedControlItem value="outlook" label="Outlook" xstyle={formStyles.control} />
+        <SegmentedControlItem value="other" label="Another IMAP host" xstyle={formStyles.control} />
       </SegmentedControl>
 
       <TextInput
@@ -189,15 +190,15 @@ export function AddAccount({
         <Banner status="info" title={signInNotSetUp(MICROSOFT, 'MICROSOFT_CLIENT_ID')} />
       )}
       {isOutlook && canSignIn && (
-        <p {...stylex.props(styles.quiet)}>
+        <p {...stylex.props(formStyles.quiet)}>
           You sign in at Microsoft with a code, so Trail Mix never sees your password.
         </p>
       )}
 
       {!isOutlook && (
         <fieldset {...stylex.props(styles.servers)}>
-          <legend {...stylex.props(styles.legend)}>Servers</legend>
-          <p {...stylex.props(styles.quiet)}>
+          <legend {...stylex.props(formStyles.legend)}>Servers</legend>
+          <p {...stylex.props(formStyles.quiet)}>
             {form.server === 'zoho'
               ? 'Use the server names Zoho Mail lists for your account, under Settings, Mail Accounts.'
               : 'Ports 993 and 465 use TLS from the start, and 143 and 587 use STARTTLS.'}
@@ -218,7 +219,7 @@ export function AddAccount({
           <Banner status="error" title="The account wasn’t added." description={refusal} />
         </div>
       )}
-      <div {...stylex.props(styles.actions)}>
+      <div {...stylex.props(formStyles.actions)}>
         <Button
           type="submit"
           variant="primary"
@@ -235,7 +236,7 @@ export function AddAccount({
         {onCancel && <Button label="Cancel" variant="ghost" onClick={onCancel} />}
       </div>
       {isBusy && !isOutlook && (
-        <p role="status" {...stylex.props(styles.quiet)}>
+        <p role="status" {...stylex.props(formStyles.quiet)}>
           Signing in to {form.imapHost.trim()}, then {form.smtpHost.trim()}. A host that doesn’t
           answer can take half a minute.
         </p>
@@ -245,16 +246,6 @@ export function AddAccount({
 }
 
 const styles = stylex.create({
-  // Astryx draws a field and a segmented choice at a fixed height, which a finger needs at 44px.
-  control: {
-    height: tm.target,
-  },
-  form: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: spacingVars['--spacing-4'],
-    margin: 0,
-  },
   servers: {
     display: 'flex',
     flexDirection: 'column',
@@ -264,16 +255,6 @@ const styles = stylex.create({
     padding: 0,
     borderWidth: 0,
   },
-  legend: {
-    padding: 0,
-    marginBottom: spacingVars['--spacing-1'],
-    fontWeight: fontWeightVars['--font-weight-semibold'],
-  },
-  quiet: {
-    margin: 0,
-    color: tm.textQuiet,
-    fontSize: typeScaleVars['--text-supporting-size'],
-  },
   // A server's name, and beside it its port, which goes under it on a phone.
   pair: {
     display: 'grid',
@@ -282,10 +263,5 @@ const styles = stylex.create({
       [media.phone]: 'minmax(0, 1fr)',
     },
     gap: spacingVars['--spacing-3'],
-  },
-  actions: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: spacingVars['--spacing-2'],
   },
 });

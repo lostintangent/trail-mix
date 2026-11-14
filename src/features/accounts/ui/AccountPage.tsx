@@ -9,12 +9,12 @@ import {
 import * as stylex from '@stylexjs/stylex';
 import { useId } from 'react';
 import { ReaderPage } from '../../../app/theme/ReaderPage.tsx';
-import { tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, AccountId } from '../../mail/core/index.ts';
 import { AddAccount } from './AddAccount.tsx';
 import { EditAccount } from './EditAccount.tsx';
 import { SignInAgain, vendorOf } from './SignInAgain.tsx';
 import { VISITOR_SAID } from '../core/said.ts';
+import { formStyles } from './formStyles.ts';
 
 /**
  * An account page the workbench shows in place of a conversation: adding one, or editing one,
@@ -85,7 +85,7 @@ export function AccountPage({
           <h2 id={eraseId} {...stylex.props(styles.everythingTitle)}>
             All of Trail Mix
           </h2>
-          <p id={`${eraseId}-about`} {...stylex.props(styles.quiet)}>
+          <p id={`${eraseId}-about`} {...stylex.props(formStyles.quiet)}>
             {isVisitor
               ? VISITOR_SAID.erases
               : 'Erase every account and everything Trail Mix holds for you, on every device.'}
@@ -122,11 +122,6 @@ const styles = stylex.create({
     fontSize: typeScaleVars['--text-body-size'],
     fontWeight: fontWeightVars['--font-weight-semibold'],
     color: colorVars['--color-text-primary'],
-  },
-  quiet: {
-    margin: 0,
-    color: tm.textQuiet,
-    fontSize: typeScaleVars['--text-supporting-size'],
   },
   invitation: {
     display: 'flex',
