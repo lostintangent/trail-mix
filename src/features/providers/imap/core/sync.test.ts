@@ -151,17 +151,6 @@ test('a first sync reports the folder newest first, a small batch and then full 
   expect([first.more, resumed.more, again.more, last.more]).toEqual([true, true, true, false]);
 });
 
-test('a folder numbered again starts over with a small batch too', () => {
-  const mailbox = new Mailbox();
-  for (let i = 0; i < 300; i++) mailbox.deliver();
-  let batch = sync(mailbox, null);
-  while (batch.more) batch = sync(mailbox, batch.cursor);
-  mailbox.renumber();
-  const restarted = sync(mailbox, batch.cursor);
-  expect(restarted.events[0]).toEqual({ type: 'reset', folder: INBOX });
-  expect(uidsOf(restarted.events)).toHaveLength(100);
-});
-
 test('a quiet folder fetches no envelopes, and reports nothing', () => {
   const mailbox = new Mailbox();
   mailbox.deliver();
@@ -210,17 +199,17 @@ test('without CONDSTORE, every flag is compared and only real changes are report
   expect(mailroom.step(mailbox).events).toEqual([]);
 });
 
-test('when the server numbers its UIDs again, the folder is forgotten and reported afresh', () => {
+test('when the server numbers its UIDs again, the folder is reported afresh, a small batch first', () => {
   const mailbox = new Mailbox();
-  mailbox.deliver();
-  mailbox.deliver();
+  for (let i = 0; i < 300; i++) mailbox.deliver();
   const mailroom = new Mailroom().catchUp(mailbox);
 
   mailbox.renumber();
   const { events } = mailroom.step(mailbox);
 
-  expect(events.map((event) => event.type)).toEqual(['reset', 'message', 'message']);
-  mirrors(mailroom, mailbox);
+  expect(events[0]).toEqual({ type: 'reset', folder: INBOX });
+  expect(uidsOf(events)).toHaveLength(100);
+  mirrors(mailroom.catchUp(mailbox), mailbox);
 });
 
 test('a server whose UIDNEXT went backwards is not trusted with the UIDs it reported', () => {

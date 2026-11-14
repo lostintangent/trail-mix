@@ -71,25 +71,17 @@ describe('a notice', () => {
   });
 });
 
-describe('more conversations with news than one wake tells one by one', () => {
+test('past three conversations, news becomes one summary, naming the accounts, that opens the Inbox', () => {
   const news = [
     message(1),
     message(2, { account: 'work', conversation: 'work:mail:2' }),
     message(3),
-    message(4),
-    message(5, { account: 'work', conversation: 'work:mail:5' }),
+    message(4, { account: 'work', conversation: 'work:mail:4' }),
   ];
-
-  test('become one summary of every message, naming the accounts, that opens the Inbox', () => {
-    expect(noticesOf(news, nameOf)).toEqual([
-      { title: '5 new messages', body: 'In Personal and Work', tag: 'news', navigate: '/' },
-    ]);
-  });
-
-  test('start past three conversations, which are told one by one', () => {
-    expect(noticesOf(news.slice(0, 3), nameOf)).toHaveLength(3);
-    expect(noticesOf(news.slice(0, 4), nameOf)).toHaveLength(1);
-  });
+  expect(noticesOf(news.slice(0, 3), nameOf)).toHaveLength(3);
+  expect(noticesOf(news, nameOf)).toEqual([
+    { title: '4 new messages', body: 'In Personal and Work', tag: 'news', navigate: '/' },
+  ]);
 });
 
 describe('a push', () => {

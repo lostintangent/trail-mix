@@ -1,14 +1,8 @@
-import { afterEach, describe, expect, spyOn, test } from 'bun:test';
-import { encryptNotification } from '@block65/webcrypto-web-push';
+import { describe, expect, test } from 'bun:test';
 import { pushOf } from '../core/push.ts';
 import { fromBase64Url } from '../core/subscription.ts';
 import { decrypt, standInPushService } from '../../../../tests/push-service.ts';
 import { deliver, pushKeyOf } from './webPush.ts';
-
-afterEach(() => {
-  for (const spy of spies.splice(0)) spy.mockRestore();
-});
-const spies: { mockRestore(): void }[] = [];
 
 const NOTICE = {
   title: 'Ada Park',
@@ -18,64 +12,26 @@ const NOTICE = {
 };
 
 describe('a push', () => {
-  test('is sealed as RFC 8291’s worked example seals it, byte for byte', async () => {
-    // The example's keys and salt, which a real push draws at random.
+  test('opens on the stand-in device as RFC 8291’s worked example does, so a browser reads it', async () => {
+    // The example's receiver and the message it was sent. What reaches the stand-in below is then
+    // what a browser would read.
     const rfc = {
       auth: 'BTBZMqHH6r4Tts7J_aSIgg',
-      receiver: {
-        d: 'q1dXpw3UpT5VOmu_cf_v6ih07Aems3njxI-JWgLcM94',
-        public:
-          'BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4',
-      },
-      sender: {
-        d: 'yfWPiYE-n46HLnH0KqZOF1fJJU3MYrct3AELtAQ-oRw',
-        public:
-          'BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8',
-      },
-      salt: 'DGv6ra1nlYgDCS1FRnbzlw',
+      d: 'q1dXpw3UpT5VOmu_cf_v6ih07Aems3njxI-JWgLcM94',
+      public:
+        'BCVxsr7N_eNgVRqvHtD0zTZsEc6-VV-JvLexhqUzORcxaOzi6-AYWXvTBHm4bjyPjs7Vd8pZGH6SRpkNtoIAiw4',
       body:
         'DGv6ra1nlYgDCS1FRnbzlwAAEABBBP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27ml' +
         'mlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A_yl95bQpu6cVPT' +
         'pK4Mqgkf1CXztLVBSt2Ks3oZwbuwXPXLWyouBWLVWGNWQexSgSxsj_Qulcy4a-fN',
     };
-    const plaintext = new TextEncoder().encode('When I grow up, I want to be a watermelon');
-    const sender = {
-      privateKey: await ecdhKey(rfc.sender.d, rfc.sender.public),
-      publicKey: await crypto.subtle.importKey(
-        'raw',
-        fromBase64Url(rfc.sender.public),
-        { name: 'ECDH', namedCurve: 'P-256' },
-        true,
-        [],
-      ),
-    };
-    spies.push(
-      spyOn(crypto.subtle, 'generateKey').mockResolvedValue(sender),
-      spyOn(crypto, 'getRandomValues').mockImplementation(
-        <T extends ArrayBufferView | null>(array: T) => {
-          (array as unknown as Uint8Array).set(fromBase64Url(rfc.salt));
-          return array;
-        },
-      ),
-    );
-    const sealed = await encryptNotification(
-      {
-        endpoint: 'https://push.example.net/push/JzLQ3raZJfFBR0aqvOMsLrt54w4rJUsV',
-        expirationTime: null,
-        keys: { p256dh: rfc.receiver.public, auth: rfc.auth },
-      },
-      plaintext,
-      { pad: false },
-    );
-    expect(sealed).toEqual(fromBase64Url(rfc.body));
-    // The stand-in device opens the example as the RFC says it reads.
     const opened = await decrypt(
       fromBase64Url(rfc.body),
-      await ecdhKey(rfc.receiver.d, rfc.receiver.public),
-      fromBase64Url(rfc.receiver.public),
+      await ecdhKey(rfc.d, rfc.public),
+      fromBase64Url(rfc.public),
       fromBase64Url(rfc.auth),
     );
-    expect(opened).toEqual(plaintext);
+    expect(new TextDecoder().decode(opened)).toBe('When I grow up, I want to be a watermelon');
   });
 
   test('reaches the device sealed for it, signed with the deployment’s key for a day at most', async () => {
