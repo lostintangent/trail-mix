@@ -4,9 +4,11 @@ import {
   addressText,
   afterSave,
   draftInputOf,
+  isSendable,
   newMessage,
   reopened,
   replyTo,
+  sentFrom,
   type Attached,
 } from './session.ts';
 
@@ -66,6 +68,19 @@ test('a reply follows the parent’s Reply-To, and a reply to all leaves the mem
     { name: 'Engines', email: 'list@example.net' },
   ]);
   expect(replyTo(parent, noBody, account, true).to).toEqual([grace, alan]);
+});
+
+test('a message sent from another account takes its signature, and none when it has none', () => {
+  const work = { ...account, id: 'work', signature: '  Ada, at work  ' };
+  const written = { ...newMessage(account), markdown: 'See you there.' };
+  expect(sentFrom(written, work)).toMatchObject({ account: 'work', signature: 'Ada, at work' });
+  expect(sentFrom(written, { ...work, signature: ' ' }).signature).toBeUndefined();
+  expect(sentFrom(written, work).markdown).toBe('See you there.');
+});
+
+test('a message can be sent once it is to anyone, Bcc alone included', () => {
+  expect(isSendable(newMessage(account))).toBe(false);
+  expect(isSendable({ ...newMessage(account), bcc: [grace] })).toBe(true);
 });
 
 test('a draft saves its signature under the `-- ` line, and reads it back apart', () => {

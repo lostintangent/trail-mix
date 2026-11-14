@@ -5,55 +5,37 @@ import {
   borderVars,
   colorVars,
   fontWeightVars,
-  radiusVars,
   spacingVars,
   typeScaleVars,
   typographyVars,
 } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEditorState, type Editor as TiptapEditor } from '@tiptap/react';
-import {
-  Bold,
-  Code,
-  ImagePlus,
-  Italic,
-  Link as LinkIcon,
-  Paperclip,
-  Trash2,
-  X,
-} from 'lucide-react';
+import { type Editor as TiptapEditor } from '@tiptap/react';
+import { ImagePlus, Paperclip, Trash2 } from 'lucide-react';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { StampDot } from '../../../app/theme/StampDot.tsx';
-import { sizeText } from '../../../shared/size.ts';
 import { useMediaQuery } from '../../../shared/useMediaQuery.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
-import {
-  addressesIn,
-  refOf,
-  type Account,
-  type Message,
-  type MessageRef,
-} from '../../mail/core/index.ts';
-import { bodyQuery, partUrl } from '../../mailroom/client/index.ts';
+import { refOf, type Account, type Message, type MessageRef } from '../../mail/core/index.ts';
+import { bodyQuery } from '../../mailroom/client/index.ts';
 import { useReach } from '../../offline/index.ts';
-import { contentIdFor } from '../core/draft.ts';
-import { visibleBand, type Band } from '../core/keyboard.ts';
-import { linkOf } from '../core/links.ts';
 import {
-  addressText,
+  isSendable,
   newMessage,
   recipientsOf,
   reopened,
   replyTo,
-  type Attached,
   type Writing,
 } from '../core/session.ts';
-import { AddressInput } from './AddressInput.tsx';
 import { Editor, placeImages, type EditorProps } from './Editor.tsx';
+import { Fields } from './Fields.tsx';
+import { Attachments, FilePicker } from './Files.tsx';
+import { Formatting, LinkField, type LinkRange } from './Formatting.tsx';
 import { ComposerSkeleton, isDocked, Over, sheetStyles } from './sheet.tsx';
 import { startDrafting, type Drafting, type SaveState, type Showing } from './drafting.ts';
 import { useAutosave } from './useAutosave.ts';
+import { useVisibleBand } from './useVisibleBand.ts';
+import { useWriting } from './useWriting.ts';
 
 /**
  * What the member asked to write: a new message, a reply, a draft opened again, or what was being
@@ -211,16 +193,9 @@ function Writer({
   /** Whether it answers another message, which names it a reply. */
   isReply: boolean;
 } & Omit<ComposerProps, 'compose'>) {
-  const [writing, setWriting] = useState(start);
-  const [edits, setEdits] = useState(0);
-  const [fields, setFields] = useState(() => ({
-    to: addressText(start.to),
-    cc: addressText(start.cc),
-    bcc: addressText(start.bcc),
-  }));
-  const [hasCopies, setHasCopies] = useState(start.cc.length + start.bcc.length > 0);
+  const message = useWriting(start, recipients);
+  const { writing } = message;
   const [editor, setEditor] = useState<TiptapEditor>();
-  const fileUrl = useFileUrls();
   const queryClient = useQueryClient();
   const [drafting] = useState(
     () => resumed ?? startDrafting(queryClient, { draft, writing: start }),
@@ -228,63 +203,16 @@ function Writer({
   const autosave = useAutosave({
     drafting,
     writing,
-    edits,
+    edits: message.edits,
     onDraft,
-    onNamed: (named) =>
-      setWriting((was) => ({
-        ...was,
-        attachments: was.attachments.map((attached) => named.get(attached) ?? attached),
-      })),
+    onNamed: message.nameFiles,
   });
-
-  const edit = (change: (was: Writing) => Partial<Writing>) => {
-    setWriting((was) => ({ ...was, ...change(was) }));
-    setEdits((count) => count + 1);
-  };
-  const setAddresses = (field: 'to' | 'cc' | 'bcc', text: string) => {
-    hasChosen.current = true;
-    setFields((was) => ({ ...was, [field]: text }));
-    edit(() => ({ [field]: addressesIn(text) }));
-  };
-  // The parent's Reply-To arrives with its body. Until the member has chosen whom it's to, the
-  // reply goes there instead. That alone is no change of theirs, so nothing saves for it, but once
-  // they have written, the draft saved is the one sent, so it saves again to go where it says.
-  const hasChosen = useRef(false);
-  useEffect(() => {
-    if (!recipients || hasChosen.current) return;
-    setFields((was) => ({
-      ...was,
-      to: addressText(recipients.to),
-      cc: addressText(recipients.cc),
-    }));
-    setWriting((was) => ({ ...was, ...recipients }));
-    setEdits((count) => (count > 0 ? count + 1 : count));
-    if (recipients.cc.length > 0) setHasCopies(true);
-  }, [recipients]);
-  const take = (files: File[], inline: boolean) => {
-    const added: Attached[] = files.map((file) =>
-      inline && file.type.startsWith('image/')
-        ? { file, contentId: contentIdFor(crypto.randomUUID()) }
-        : { file },
-    );
-    edit((was) => ({ attachments: [...was.attachments, ...added] }));
-    return added.flatMap((attached) =>
-      'file' in attached && attached.contentId
-        ? [{ file: attached.file, contentId: attached.contentId }]
-        : [],
-    );
-  };
-  const imageUrl = (contentId: string) => {
-    const found = writing.attachments.find((attached) => attached.contentId === contentId);
-    if (!found) return undefined;
-    return 'file' in found ? fileUrl(found.file) : partUrl(found.in, found.id);
-  };
   // Send hands the message over and closes at once, as its last save finishes behind it. A second
   // press before it closes does nothing.
   const isSent = useRef(false);
-  const isSendable = writing.to.length + writing.cc.length + writing.bcc.length > 0;
+  const canSend = isSendable(writing);
   const send = (at?: string) => {
-    if (isSent.current || !isSendable) return;
+    if (isSent.current || !canSend) return;
     isSent.current = true;
     autosave.flush();
     onSend(drafting, at, { ...writing });
@@ -294,16 +222,14 @@ function Writer({
     sender.current = send;
   });
   useEffect(() => () => void (sender.current = undefined), [sender]);
-  useEffect(() => onSendable(isSendable), [isSendable, onSendable]);
+  useEffect(() => onSendable(canSend), [canSend, onSendable]);
   const discard = () => {
     void drafting.discard();
     onClose();
   };
-  const account = accounts.find((each) => each.id === writing.account);
-  const files = writing.attachments.filter((attached) => attached.contentId === undefined);
   const isCoarse = useMediaQuery(media.coarse);
   const isOffline = useReach() !== 'online';
-  const [linking, setLinking] = useState<Range>();
+  const [linking, setLinking] = useState<LinkRange>();
   const band = useVisibleBand(isSheet);
 
   const title = isReply ? 'Reply' : 'New message';
@@ -343,87 +269,22 @@ function Writer({
         </header>
       )}
       <div {...stylex.props(isSheet && styles.sheetBody)}>
-        <div {...stylex.props(styles.fields, !isSheet && styles.fieldsOnPage)}>
-          <div {...stylex.props(styles.row, styles.fromRow)}>
-            <div {...stylex.props(styles.fromBox)}>
-              <span {...stylex.props(styles.fromLabel)}>From</span>
-              <label {...stylex.props(styles.from)}>
-                {account && <StampDot stamp={account.stamp} />}
-                <span {...stylex.props(styles.hidden)}>From</span>
-                <select
-                  value={writing.account}
-                  onChange={(event) => {
-                    const next = event.target.value;
-                    const chosen = accounts.find((each) => each.id === next);
-                    edit(() => ({
-                      account: next,
-                      signature: chosen?.signature?.trim() || undefined,
-                    }));
-                  }}
-                  {...stylex.props(styles.select)}
-                >
-                  {accounts.map((each) => (
-                    <option key={each.id} value={each.id}>
-                      {each.name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            <Field
-              label="To"
-              value={fields.to}
-              onChange={(text) => setAddresses('to', text)}
-              isFocused={start.to.length === 0}
-            />
-            {!hasCopies && (
-              <button
-                type="button"
-                onClick={() => setHasCopies(true)}
-                {...stylex.props(styles.copies)}
-              >
-                Cc Bcc
-              </button>
-            )}
-          </div>
-          {hasCopies && (
-            <>
-              <div {...stylex.props(styles.row)}>
-                <Field label="Cc" value={fields.cc} onChange={(text) => setAddresses('cc', text)} />
-              </div>
-              <div {...stylex.props(styles.row)}>
-                <Field
-                  label="Bcc"
-                  value={fields.bcc}
-                  onChange={(text) => setAddresses('bcc', text)}
-                />
-              </div>
-            </>
-          )}
-          {isNew && (
-            <div {...stylex.props(styles.row)}>
-              <label {...stylex.props(styles.field)}>
-                <span {...stylex.props(styles.label)}>Subject</span>
-                <input
-                  value={writing.subject}
-                  onChange={(event) => edit(() => ({ subject: event.target.value }))}
-                  autoComplete="off"
-                  spellCheck
-                  {...stylex.props(styles.input)}
-                />
-              </label>
-            </div>
-          )}
-        </div>
-
+        <Fields
+          accounts={accounts}
+          account={writing.account}
+          typed={message.typed}
+          subject={isNew ? writing.subject : undefined}
+          isToFocused={start.to.length === 0}
+          isSheet={isSheet}
+          onAccount={message.sendFrom}
+          onAddress={message.address}
+          onSubject={message.setSubject}
+        />
         <Editor
           start={from}
-          onChange={(markdown, isEdit) => {
-            if (isEdit) edit(() => ({ markdown }));
-            else setWriting((was) => ({ ...was, markdown }));
-          }}
-          imageUrl={imageUrl}
-          onFiles={(dropped) => take(dropped, true)}
+          onChange={message.write}
+          imageUrl={message.imageUrl}
+          onFiles={(dropped) => message.take(dropped, true)}
           onEditor={setEditor}
           label={isReply ? 'Reply' : 'Message'}
           isFocused={start.to.length > 0}
@@ -433,31 +294,7 @@ function Writer({
             {`-- \n${writing.signature}`}
           </pre>
         )}
-
-        {files.length > 0 && (
-          <ul aria-label="Attachments" {...stylex.props(styles.files)}>
-            {files.map((attached, at) => {
-              const { name, size } = 'file' in attached ? attached.file : attached;
-              return (
-                <li key={`${name}-${at}`} {...stylex.props(styles.file)}>
-                  <span {...stylex.props(styles.fileName)}>{name}</span>
-                  <span {...stylex.props(styles.fileSize)}>{sizeText(size)}</span>
-                  <IconButton
-                    label={`Remove ${name}`}
-                    icon={<Icon icon={X} />}
-                    variant="ghost"
-                    size="sm"
-                    onClick={() =>
-                      edit((was) => ({
-                        attachments: was.attachments.filter((each) => each !== attached),
-                      }))
-                    }
-                  />
-                </li>
-              );
-            })}
-          </ul>
-        )}
+        <Attachments attachments={writing.attachments} onRemove={message.remove} />
       </div>
 
       {linking && editor && (
@@ -468,23 +305,14 @@ function Writer({
         aria-label="Formatting and files"
         {...stylex.props(styles.toolbar, isSheet && styles.sheetToolbar)}
       >
-        {editor && (
-          <Formatting
-            editor={editor}
-            tip={tip}
-            onLink={() => {
-              const { from, to } = editor.state.selection;
-              setLinking({ from, to });
-            }}
-          />
-        )}
+        {editor && <Formatting editor={editor} tip={tip} onLink={setLinking} />}
         <FilePicker
           label="Insert an image"
           tip={tip}
           icon={ImagePlus}
           accept="image/*"
           onFiles={(picked) => {
-            const images = take(picked, true);
+            const images = message.take(picked, true);
             if (editor) placeImages(editor, images);
           }}
         />
@@ -492,7 +320,7 @@ function Writer({
           label="Attach files"
           tip={tip}
           icon={Paperclip}
-          onFiles={(picked) => take(picked, false)}
+          onFiles={(picked) => message.take(picked, false)}
         />
         {isSheet ? <span {...stylex.props(styles.grow)} /> : status}
         <IconButton
@@ -509,11 +337,6 @@ function Writer({
   return isSheet ? <Over onClose={onClose}>{writer}</Over> : writer;
 }
 
-/**
- * On a phone the sheet lies over the whole app, outside the sliding panes, with the app dimmed
- * behind it. A tap on what's dimmed closes it, keeping the draft.
- */
-
 const SAVED: Record<SaveState, string> = {
   unsaved: '',
   saving: 'Saving…',
@@ -526,236 +349,6 @@ const SAVED: Record<SaveState, string> = {
  */
 const OFFLINE = 'Offline. Send once you’re back.';
 
-/**
- * Bold, italic, code and a link, each pressed while the text at the cursor has it. Link asks for
- * an address, or takes the link away from text that has one.
- */
-function Formatting({
-  editor,
-  tip,
-  onLink,
-}: {
-  editor: TiptapEditor;
-  tip: (label: string) => string | undefined;
-  onLink: () => void;
-}) {
-  const active = useEditorState({
-    editor,
-    selector: ({ editor: current }) => ({
-      bold: current.isActive('bold'),
-      italic: current.isActive('italic'),
-      code: current.isActive('code'),
-      link: current.isActive('link'),
-    }),
-  });
-  const buttons: [label: string, icon: typeof Bold, key: keyof typeof active, run: () => void][] = [
-    ['Bold', Bold, 'bold', () => editor.chain().focus().toggleBold().run()],
-    ['Italic', Italic, 'italic', () => editor.chain().focus().toggleItalic().run()],
-    ['Code', Code, 'code', () => editor.chain().focus().toggleCode().run()],
-    [
-      'Link',
-      LinkIcon,
-      'link',
-      () =>
-        active.link ? editor.chain().focus().extendMarkRange('link').unsetLink().run() : onLink(),
-    ],
-  ];
-  // Pressing one leaves the focus, and so the selection it acts on, in the text.
-  return (
-    <span onMouseDown={(event) => event.preventDefault()} {...stylex.props(styles.contents)}>
-      {buttons.map(([label, icon, key, run]) => (
-        <IconButton
-          key={label}
-          label={label}
-          tooltip={tip(label)}
-          icon={<Icon icon={icon} />}
-          variant="ghost"
-          aria-pressed={active[key]}
-          onClick={run}
-        />
-      ))}
-    </span>
-  );
-}
-
-/**
- * Where the member gives a link's address: for the selected text, or, with nothing selected, as
- * a link of its own where the cursor is. Enter adds it and Esc goes back to the text.
- */
-function LinkField({
-  editor,
-  range,
-  onDone,
-}: {
-  editor: TiptapEditor;
-  /** The selection as Link was pressed. Focus moving into the field can lose the live one. */
-  range: Range;
-  onDone: () => void;
-}) {
-  const [typed, setTyped] = useState('');
-  const href = linkOf(typed);
-  const done = () => {
-    onDone();
-    editor.commands.focus();
-  };
-  return (
-    <form
-      aria-label="Link"
-      onSubmit={(event) => {
-        event.preventDefault();
-        if (!href) return;
-        const chain = editor.chain().focus().setTextSelection(range);
-        if (range.from === range.to) {
-          chain
-            .insertContent({
-              type: 'text',
-              text: typed.trim(),
-              marks: [{ type: 'link', attrs: { href } }],
-            })
-            .run();
-        } else {
-          chain.extendMarkRange('link').setLink({ href }).run();
-        }
-        onDone();
-      }}
-      {...stylex.props(styles.linkField)}
-    >
-      <input
-        aria-label="Link address"
-        placeholder="Paste or type a link"
-        inputMode="url"
-        autoComplete="off"
-        spellCheck={false}
-        autoFocus
-        value={typed}
-        onChange={(event) => setTyped(event.target.value)}
-        onKeyDown={(event) => {
-          // Esc leaves the link unmade, and doesn't close the composer as Back.
-          if (event.key !== 'Escape') return;
-          event.preventDefault();
-          done();
-        }}
-        {...stylex.props(styles.input)}
-      />
-      <Button label="Add link" type="submit" variant="secondary" size="sm" isDisabled={!href} />
-      <IconButton
-        label="Cancel"
-        icon={<Icon icon={X} />}
-        variant="ghost"
-        size="sm"
-        onClick={done}
-      />
-    </form>
-  );
-}
-
-/** A toolbar button that picks files. */
-function FilePicker({
-  label,
-  tip,
-  icon,
-  accept,
-  onFiles,
-}: {
-  label: string;
-  tip: (label: string) => string | undefined;
-  icon: typeof Bold;
-  accept?: string;
-  onFiles: (files: File[]) => void;
-}) {
-  const input = useRef<HTMLInputElement>(null);
-  return (
-    <>
-      <IconButton
-        label={label}
-        tooltip={tip(label)}
-        icon={<Icon icon={icon} />}
-        variant="ghost"
-        onClick={() => input.current?.click()}
-      />
-      <input
-        ref={input}
-        type="file"
-        multiple
-        accept={accept}
-        tabIndex={-1}
-        aria-hidden
-        onChange={(event) => {
-          onFiles([...(event.target.files ?? [])]);
-          event.target.value = '';
-        }}
-        {...stylex.props(styles.hidden)}
-      />
-    </>
-  );
-}
-
-/** A line of the header: a label and the addresses typed beside it, completed as they're typed. */
-function Field({
-  label,
-  value,
-  onChange,
-  isFocused = false,
-}: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  isFocused?: boolean;
-}): ReactNode {
-  return (
-    <label {...stylex.props(styles.field)}>
-      <span {...stylex.props(styles.label)}>{label}</span>
-      <AddressInput value={value} onChange={onChange} isFocused={isFocused} xstyle={styles.input} />
-    </label>
-  );
-}
-
-/** Where each new file shows from while it is written, for as long as the composer is open. */
-function useFileUrls() {
-  const urls = useRef(new Map<File, string>());
-  useEffect(() => {
-    const made = urls.current;
-    return () => {
-      for (const url of made.values()) URL.revokeObjectURL(url);
-    };
-  }, []);
-  return (file: File) => {
-    let url = urls.current.get(file);
-    if (!url) {
-      url = URL.createObjectURL(file);
-      urls.current.set(file, url);
-    }
-    return url;
-  };
-}
-
-/**
- * Where a phone's sheet can lie as the on-screen keyboard comes and goes, from the visual viewport,
- * which shrinks for the keyboard while the page it covers doesn't.
- */
-function useVisibleBand(isWanted: boolean): Band {
-  const [band, setBand] = useState<Band>({ top: 0, bottom: 0 });
-  useEffect(() => {
-    const viewport = window.visualViewport;
-    if (!isWanted || !viewport) return;
-    const follow = () => {
-      const next = visibleBand(window.innerHeight, viewport);
-      setBand((was) => (was.top === next.top && was.bottom === next.bottom ? was : next));
-    };
-    follow();
-    viewport.addEventListener('resize', follow);
-    viewport.addEventListener('scroll', follow);
-    return () => {
-      viewport.removeEventListener('resize', follow);
-      viewport.removeEventListener('scroll', follow);
-    };
-  }, [isWanted]);
-  return band;
-}
-
-/** Where in the text something applies, from one position to another. */
-type Range = { from: number; to: number };
-
 const styles = stylex.create({
   // Above the on-screen keyboard, within what the page still shows, so the toolbar stays in reach.
   band: (top: number, bottom: number) => ({
@@ -763,19 +356,6 @@ const styles = stylex.create({
     bottom: `${bottom}px`,
     paddingBottom: bottom > 0 ? 0 : tm.safeBottom,
   }),
-  contents: {
-    display: 'contents',
-  },
-  linkField: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: spacingVars['--spacing-2'],
-    paddingInline: spacingVars['--spacing-2'],
-    borderRadius: radiusVars['--radius-element'],
-    borderWidth: borderVars['--border-width'],
-    borderStyle: 'solid',
-    borderColor: colorVars['--color-border'],
-  },
   sheetHeader: {
     display: 'flex',
     alignItems: 'center',
@@ -827,127 +407,12 @@ const styles = stylex.create({
     borderTopStyle: 'solid',
     borderTopColor: colorVars['--color-border'],
   },
-  // On a phone the From chip has a line of its own, named as the prototype names it.
-  fromRow: {
-    flexWrap: { default: 'nowrap', [media.phone]: 'wrap' },
-  },
-  fromBox: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: spacingVars['--spacing-2'],
-    flexBasis: { default: 'auto', [media.phone]: '100%' },
-    minHeight: tm.target,
-  },
-  fromLabel: {
-    display: { default: 'none', [media.phone]: 'inline' },
-    color: tm.textQuiet,
-    fontSize: typeScaleVars['--text-body-size'],
-  },
-  fields: {
-    display: 'flex',
-    flexDirection: 'column',
-    borderBottomWidth: borderVars['--border-width'],
-    borderBottomStyle: 'solid',
-    borderBottomColor: colorVars['--color-border'],
-  },
-  // The rule lies as far under the fields as the text lies under it, the editor's padding.
-  fieldsOnPage: {
-    paddingBlockEnd: spacingVars['--spacing-2'],
-  },
-  row: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: spacingVars['--spacing-2'],
-    minHeight: tm.target,
-  },
-  from: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: spacingVars['--spacing-1'],
-    paddingInline: spacingVars['--spacing-2'],
-    borderRadius: radiusVars['--radius-full'],
-    borderWidth: borderVars['--border-width'],
-    borderStyle: 'solid',
-    borderColor: colorVars['--color-border'],
-  },
-  select: {
-    appearance: 'none',
-    borderWidth: 0,
-    backgroundColor: 'transparent',
-    color: colorVars['--color-text-primary'],
-    fontFamily: typographyVars['--font-family-body'],
-    fontSize: typeScaleVars['--text-body-size'],
-    fontWeight: fontWeightVars['--font-weight-semibold'],
-    minHeight: tm.target,
-    cursor: 'pointer',
-  },
-  field: {
-    flexGrow: 1,
-    display: 'flex',
-    alignItems: 'center',
-    gap: spacingVars['--spacing-2'],
-    minWidth: 0,
-  },
-  label: {
-    color: tm.textQuiet,
-    fontSize: typeScaleVars['--text-body-size'],
-  },
-  input: {
-    flexGrow: 1,
-    minWidth: 0,
-    minHeight: tm.target,
-    padding: 0,
-    borderWidth: 0,
-    outline: 'none',
-    backgroundColor: 'transparent',
-    color: colorVars['--color-text-primary'],
-    fontFamily: typographyVars['--font-family-body'],
-    fontSize: typeScaleVars['--text-body-size'],
-  },
-  copies: {
-    borderWidth: 0,
-    backgroundColor: 'transparent',
-    color: tm.textQuiet,
-    fontFamily: typographyVars['--font-family-body'],
-    fontSize: typeScaleVars['--text-supporting-size'],
-    whiteSpace: 'nowrap',
-    minHeight: tm.target,
-    cursor: 'pointer',
-  },
   signature: {
     margin: 0,
     color: tm.textQuiet,
     fontFamily: typographyVars['--font-family-body'],
     fontSize: typeScaleVars['--text-supporting-size'],
     whiteSpace: 'pre-wrap',
-  },
-  files: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    gap: spacingVars['--spacing-2'],
-    margin: 0,
-    padding: 0,
-    listStyle: 'none',
-  },
-  file: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: spacingVars['--spacing-2'],
-    paddingInlineStart: spacingVars['--spacing-2'],
-    borderRadius: radiusVars['--radius-element'],
-    borderWidth: borderVars['--border-width'],
-    borderStyle: 'solid',
-    borderColor: colorVars['--color-border'],
-    fontSize: typeScaleVars['--text-supporting-size'],
-  },
-  fileName: {
-    maxWidth: '24ch',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  fileSize: {
-    color: tm.textQuiet,
   },
   toolbar: {
     display: 'flex',
@@ -976,13 +441,5 @@ const styles = stylex.create({
     minWidth: 0,
     textAlign: 'end',
     paddingInlineEnd: spacingVars['--spacing-2'],
-  },
-  hidden: {
-    position: 'absolute',
-    width: '1px',
-    height: '1px',
-    overflow: 'hidden',
-    clipPath: 'inset(50%)',
-    whiteSpace: 'nowrap',
   },
 });

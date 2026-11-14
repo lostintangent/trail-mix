@@ -52,17 +52,21 @@ export const SAVE_AT_LEAST_EVERY_MS = 5_000;
 
 /** A new message from an account, signed with its signature. */
 export function newMessage(account: Account): Writing {
-  const signature = account.signature?.trim();
-  return {
-    account: account.id,
-    to: [],
-    cc: [],
-    bcc: [],
-    subject: '',
-    markdown: '',
-    ...(signature ? { signature } : {}),
-    attachments: [],
-  };
+  return { ...from(account), to: [], cc: [], bcc: [], subject: '', markdown: '', attachments: [] };
+}
+
+/** The message sent from another of the member's accounts, signed with that one's signature. */
+export function sentFrom(writing: Writing, account: Account): Writing {
+  return { ...writing, ...from(account) };
+}
+
+/** Whether a message can be sent, which it can once it is to anyone, Bcc alone included. */
+export function isSendable({ to, cc, bcc }: Writing): boolean {
+  return to.length + cc.length + bcc.length > 0;
+}
+
+function from(account: Account): Pick<Writing, 'account' | 'signature'> {
+  return { account: account.id, signature: account.signature?.trim() || undefined };
 }
 
 /**
