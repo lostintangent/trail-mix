@@ -3,22 +3,27 @@ export type Output =
   | {
       type: 'chunk';
       fileName: string;
+      isEntry?: boolean;
       imports: readonly string[];
+      dynamicImports?: readonly string[];
       modules?: Readonly<Record<string, { renderedLength: number }>>;
     }
   | { type: 'asset'; fileName: string };
 
 type Bundle = Readonly<Record<string, Output>>;
 
-/** The chunks loaded by the time `file` runs: itself and those it imports statically, at any depth. */
-export function loadedWith(bundle: Bundle, file: string): Set<string> {
+/**
+ * The chunks loaded by the time `files` run: themselves and those they import statically, at any
+ * depth. With `isEver`, those they may ever load, through their dynamic imports too.
+ */
+export function loadedWith(bundle: Bundle, files: readonly string[], isEver = false): Set<string> {
   const loaded = new Set<string>();
-  const next = [file];
+  const next = [...files];
   for (let name = next.pop(); name !== undefined; name = next.pop()) {
     const output = bundle[name];
     if (loaded.has(name) || output?.type !== 'chunk') continue;
     loaded.add(name);
-    next.push(...output.imports);
+    next.push(...output.imports, ...(isEver ? (output.dynamicImports ?? []) : []));
   }
   return loaded;
 }
@@ -43,7 +48,7 @@ export function loadedAlongside(
     );
   const [first] = holding(module);
   if (!first) return [];
-  const loaded = loadedWith(bundle, first.fileName);
+  const loaded = loadedWith(bundle, [first.fileName]);
   return later.flatMap((end) => {
     const chunk = holding(end).find(({ fileName }) => loaded.has(fileName));
     return chunk ? [{ end, fileName: chunk.fileName }] : [];

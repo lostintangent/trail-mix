@@ -1,4 +1,5 @@
 import type { Plugin } from 'vite';
+import { loadedWith, type Output } from './chunks.ts';
 
 /**
  * Keeps the Worker's build to the modules its entry can reach. Rolldown writes a chunk for every
@@ -17,30 +18,13 @@ export function workerModules(): Plugin {
   };
 }
 
-/** What `unreachable` reads of each file Rolldown writes. */
-type Output =
-  | {
-      type: 'chunk';
-      fileName: string;
-      isEntry: boolean;
-      imports: readonly string[];
-      dynamicImports: readonly string[];
-    }
-  | { type: 'asset'; fileName: string };
-
 /** The files of a bundle that no entry reaches by its imports, each with its source map. */
 export function unreachable(bundle: Readonly<Record<string, Output>>): string[] {
   const chunks = Object.values(bundle).flatMap((output) =>
     output.type === 'chunk' ? [output] : [],
   );
-  const reached = new Set<string>();
-  const next = chunks.filter((chunk) => chunk.isEntry).map((chunk) => chunk.fileName);
-  for (let file = next.pop(); file !== undefined; file = next.pop()) {
-    const chunk = bundle[file];
-    if (reached.has(file) || chunk?.type !== 'chunk') continue;
-    reached.add(file);
-    next.push(...chunk.imports, ...chunk.dynamicImports);
-  }
+  const entries = chunks.filter((chunk) => chunk.isEntry).map((chunk) => chunk.fileName);
+  const reached = loadedWith(bundle, entries, true);
   return chunks
     .filter((chunk) => !reached.has(chunk.fileName))
     .flatMap(({ fileName }) => [fileName, `${fileName}.map`].filter((file) => file in bundle));

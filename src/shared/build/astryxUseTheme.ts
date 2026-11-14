@@ -35,27 +35,17 @@ export function astryxUseTheme(): Plugin {
     load(id) {
       if (!id.endsWith(USE_THEME + HOOK)) return null;
       const file = id.slice(0, -HOOK.length);
-      try {
-        const { hook } = splitUseTheme(readFileSync(file, 'utf8'));
-        // Its imports name their files outright, since its own id carries a query.
-        return hook.replace(RELATIVE, (_, quote: string, path: string) => {
-          return `from ${quote}${resolve(dirname(file), path)}${quote}`;
-        });
-      } catch (error) {
-        return this.error(String(error));
-      }
+      const { hook } = splitUseTheme(readFileSync(file, 'utf8'));
+      // Its imports name their files outright, since its own id carries a query.
+      return hook.replace(RELATIVE, (_, quote: string, path: string) => {
+        return `from ${quote}${resolve(dirname(file), path)}${quote}`;
+      });
     },
     transform(code, id) {
-      if (id.endsWith(USE_THEME)) {
-        try {
-          return { code: splitUseTheme(code).rest, map: null };
-        } catch (error) {
-          return this.error(String(error));
-        }
-      }
+      if (id.endsWith(USE_THEME)) return { code: splitUseTheme(code).rest, map: null };
       if (!id.includes(DIST)) return null;
       const next = hookImportsOf(code);
-      return next === null ? null : { code: next, map: null };
+      return next === code ? null : { code: next, map: null };
     },
     generateBundle(_, bundle) {
       for (const { fileName } of loadedAlongside(bundle, USE_THEME, [GENERATOR])) {
@@ -114,44 +104,30 @@ export function splitUseTheme(code: string): { rest: string; hook: string } {
 
 /**
  * An Astryx module's code with each `useTheme` it imports or re-exports from `useTheme.js` named
- * from the hook's own module instead, or null when it names none.
+ * from the hook's own module instead.
  */
-function hookImportsOf(code: string): string | null {
-  let isChanged = false;
-  const next = code.replace(
-    IMPORTS_USE_THEME,
-    (whole, kind: string, list: string, from: string) => {
-      const names = list
-        .split(',')
-        .map((name) => name.trim())
-        .filter(Boolean);
-      const hooks = names.filter((name) => /^useTheme(?:\s+as\s+[\w$]+)?$/.test(name));
-      if (!hooks.length) return whole;
-      isChanged = true;
-      const others = names.filter((name) => !hooks.includes(name));
-      return [
-        ...(others.length ? [`${kind} { ${others.join(', ')} } from "${from}";`] : []),
-        `${kind} { ${hooks.join(', ')} } from "${from}${HOOK}";`,
-      ].join('\n');
-    },
-  );
-  return isChanged ? next : null;
+function hookImportsOf(code: string): string {
+  return code.replace(IMPORTS_USE_THEME, (whole, kind: string, list: string, from: string) => {
+    const names = list.split(',').map((name) => name.trim());
+    const hooks = names.filter((name) => /^useTheme(?:\s+as\s+[\w$]+)?$/.test(name));
+    if (!hooks.length) return whole;
+    const others = names.filter((name) => name && !hooks.includes(name));
+    const named = (some: string[], path: string) =>
+      `${kind} { ${some.join(', ')} } from "${path}";`;
+    return (others.length ? `${named(others, from)}\n` : '') + named(hooks, from + HOOK);
+  });
 }
 
 /** The local names an import statement binds. A bare import binds none. */
 function importedNames(line: string): string[] {
-  const clause = /^import\s+([\s\S]*?)\s+from\s/.exec(line)?.[1];
-  if (!clause) return [];
+  const clause = /^import\s+([\s\S]*?)\s+from\s/.exec(line)?.[1] ?? '';
   return clause
-    .replace(/[{}]/g, ',')
-    .split(',')
+    .split(/[{},]/)
     .map((item) =>
       item
         .trim()
         .split(/\s+as\s+/)
-        .at(-1)!
-        .replace(/^\*\s*/, '')
-        .trim(),
+        .at(-1)!,
     )
     .filter(Boolean);
 }

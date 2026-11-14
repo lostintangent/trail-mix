@@ -59,12 +59,8 @@ export function astryxBuiltTheme({ isTrapped = false } = {}): Plugin {
       readers.clear();
     },
     transform(code, id) {
-      try {
-        if (isAppTheme(id, code)) return { code: leanBuiltTheme(code, isTrapped), map: null };
-        if (isTrapped && id.endsWith(HOOK)) return { code: trapResolvedTokens(code), map: null };
-      } catch (error) {
-        return this.error(String(error));
-      }
+      if (isAppTheme(id, code)) return { code: leanBuiltTheme(code, isTrapped), map: null };
+      if (isTrapped && id.endsWith(HOOK)) return { code: trapResolvedTokens(code), map: null };
       const reader = readerOf(id);
       if (reader !== null && READS_THEME.test(code.replace(COMMENT, ''))) readers.set(id, reader);
       return null;

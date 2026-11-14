@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import { parseAst, type Plugin } from 'vite';
+import type { Plugin } from 'vite';
 import { loadedAlongside } from './chunks.ts';
 
 const DIST = '/@astryxdesign/core/dist/';
@@ -32,11 +32,7 @@ export function astryxButtonTooltip(): Plugin {
     applyToEnvironment: (environment) => environment.name === 'client',
     transform(code, id) {
       if (!id.endsWith(BUTTON)) return null;
-      try {
-        return { code: laterButtonTooltip(code, LATER_TOOLTIP), map: null };
-      } catch (error) {
-        return this.error(String(error));
-      }
+      return { code: laterButtonTooltip(code, LATER_TOOLTIP), map: null };
     },
     generateBundle(_, bundle) {
       for (const { end, fileName } of loadedAlongside(bundle, BUTTON, LATER)) {
@@ -51,92 +47,30 @@ export function astryxButtonTooltip(): Plugin {
 
 /**
  * Astryx's `Button.js`, importing its tooltip hook from `from` rather than from Astryx. Throws if
- * it no longer imports `useTooltip` once, or reads of the hook's result more than `READ` holds.
+ * it no longer imports `useTooltip` alone and keeps one call's result under one name, or reads
+ * more of that result than `READ` holds. It reads the file by pattern, so a change it can't vouch
+ * for stops the build even when it's harmless.
  */
 export function laterButtonTooltip(code: string, from: string): string {
-  const program = parseAst(code);
-  const imports = program.body.flatMap((node) =>
-    node.type === 'ImportDeclaration' && node.source.value === SOURCE ? [node] : [],
-  );
-  const [statement] = imports;
-  const [specifier] = statement?.specifiers ?? [];
-  if (
-    imports.length !== 1 ||
-    statement?.specifiers.length !== 1 ||
-    specifier?.type !== 'ImportSpecifier' ||
-    specifier.imported.type !== 'Identifier' ||
-    specifier.imported.name !== HOOK
-  ) {
+  const statement = `import { ${HOOK} } from ${JSON.stringify(SOURCE)};`;
+  if (code.split(SOURCE).length !== 2 || !code.includes(statement)) {
     throw new Error(`Astryx's Button.js no longer imports ${HOOK} alone from ${SOURCE}.`);
   }
-  const hook = specifier.local.name;
-
-  // Every name the hook's result is kept under, and each way the file reads one.
-  const results = new Set<string>();
-  const reads: { name: string; parent: Node; node: Node }[] = [];
-  walk(program, null, (node, parent) => {
-    if (
-      node.type === 'VariableDeclarator' &&
-      (node.init as Node | null)?.type === 'CallExpression' &&
-      ((node.init as Node).callee as Node).type === 'Identifier' &&
-      ((node.init as Node).callee as Node).name === hook
-    ) {
-      const id = node.id as Node;
-      if (id.type !== 'Identifier') {
-        throw new Error(`Astryx's Button no longer keeps what ${HOOK} returns under one name.`);
-      }
-      results.add(id.name as string);
-    }
-    if (node.type === 'Identifier' && parent)
-      reads.push({ name: node.name as string, parent, node });
-  });
-  if (results.size !== 1) {
-    throw new Error(`Astryx's Button no longer calls ${HOOK} once.`);
+  const calls = [...code.matchAll(new RegExp(`\\bconst (\\w+) = ${HOOK}\\(`, 'g'))];
+  const [call] = calls;
+  if (calls.length !== 1 || !call) {
+    throw new Error(`Astryx's Button no longer keeps what one call of ${HOOK} returns.`);
   }
-  for (const { name, parent, node } of reads) {
-    if (!results.has(name)) continue;
-    if (parent.type === 'VariableDeclarator' && parent.id === node) continue;
-    const isMember = parent.type === 'MemberExpression' && !parent.computed;
-    // A property of something else that shares the name.
-    if (isMember && parent.property === node) continue;
-    if (
-      parent.type === 'Property' &&
-      parent.key === node &&
-      !parent.computed &&
-      !parent.shorthand
-    ) {
-      continue;
-    }
-    const property = isMember ? (parent.property as Node) : null;
-    if (property?.type !== 'Identifier' || !READ.has(property.name as string)) {
-      throw new Error(
-        `Astryx's Button reads ${code.slice(parent.start, parent.end)}, which the later ` +
-          `${HOOK} doesn't give it.`,
-      );
-    }
+  const declared = call.index + 'const '.length;
+  for (const read of code.matchAll(new RegExp(`\\b${call[1]}\\b(?:\\.(\\w+))?`, 'g'))) {
+    if (read.index === declared || READ.has(read[1] ?? '')) continue;
+    const line = code.slice(code.lastIndexOf('\n', read.index) + 1, code.indexOf('\n', read.index));
+    throw new Error(
+      `Astryx's Button reads ${line.trim()}, which the later ${HOOK} doesn't give it.`,
+    );
   }
-
-  return (
-    code.slice(0, statement.start) +
-    `import { useLaterTooltip as ${hook} } from ${JSON.stringify(from)};` +
-    code.slice(statement.end)
+  return code.replace(
+    statement,
+    `import { useLaterTooltip as ${HOOK} } from ${JSON.stringify(from)};`,
   );
-}
-
-type Node = { type: string; start: number; end: number; [key: string]: unknown };
-
-/** Visits `node` and every node inside it, with the node it lies in. */
-function walk(
-  node: unknown,
-  parent: Node | null,
-  visit: (node: Node, parent: Node | null) => void,
-) {
-  if (Array.isArray(node)) {
-    for (const item of node) walk(item, parent, visit);
-    return;
-  }
-  if (node === null || typeof node !== 'object') return;
-  const isNode = typeof (node as Node).type === 'string';
-  if (isNode) visit(node as Node, parent);
-  for (const value of Object.values(node)) walk(value, isNode ? (node as Node) : parent, visit);
 }

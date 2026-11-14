@@ -40,7 +40,7 @@ export function lacking(
   const loaded = new Map<string, ReadonlySet<string>>();
   return (deps, host) => {
     let have = loaded.get(host);
-    if (!have) loaded.set(host, (have = loadedWith(bundle, host)));
+    if (!have) loaded.set(host, (have = loadedWith(bundle, [host])));
     return deps.filter((dep) => !have.has(dep));
   };
 }

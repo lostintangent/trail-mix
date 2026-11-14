@@ -10,12 +10,12 @@ const LATER = '/app/src/shared/LaterTooltip.tsx';
 
 test('a Button.js that reads more of the hook than the later one gives, or imports it otherwise, stops the build', () => {
   const variants = [
-    ['tooltipHook.describedBy', 'tooltipHook.anchorId', /reads tooltipHook\.anchorId/],
-    ['tooltipHook.describedBy', 'tooltipHook["describedBy"]', /reads tooltipHook\["describedBy"\]/],
+    ['tooltipHook.describedBy', 'tooltipHook.anchorId', /reads .*tooltipHook\.anchorId/],
+    ['tooltipHook.describedBy', 'tooltipHook["describedBy"]', /reads .*\["describedBy"\]/],
     [
       'const mergedButtonRef = useMergedRefs(',
       'void [tooltipHook];\n  const mergedButtonRef = useMergedRefs(',
-      /reads \[tooltipHook\]/,
+      /reads void \[tooltipHook\]/,
     ],
     [
       'from "../Tooltip/useTooltip.js"',

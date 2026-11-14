@@ -157,12 +157,8 @@ export async function deploy({ config, args, env, wrangler, log }: Deploy): Prom
       : `${worker} hasn’t been deployed yet.`,
   );
   const make = secretsToMake(found, secretsUsedBy(built));
-  for (const bucket of await makeBuckets(
-    (built.r2_buckets ?? []).map((b) => b.bucket_name),
-    run,
-  )) {
-    log(`Made the R2 bucket ${bucket}.`);
-  }
+  const buckets = (built.r2_buckets ?? []).map((b) => b.bucket_name);
+  for (const bucket of await makeBuckets(buckets, run)) log(`Made the R2 bucket ${bucket}.`);
 
   const secrets: Record<string, string> = Object.fromEntries(
     make.map((name) => [name, mint(name)]),
