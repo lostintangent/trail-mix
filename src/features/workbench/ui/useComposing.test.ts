@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { Message, MessageRef } from '../../mail/core/index.ts';
-import { hiddenIn } from './useComposing.ts';
+import { hiddenIn, leftBySend } from './useComposing.ts';
 
 const thread = 'thread-lunch';
 
@@ -18,6 +18,33 @@ test('the drafts its conversation held as the composer started stay in sight', (
   const conversation = [message(1), message(5, true), message(9, true)];
 
   expect(uids(hiddenIn({ writing: [writing], gone: [] }, thread, conversation))).toEqual([9]);
+});
+
+test('a draft sent from among the messages it answers leaves its conversation open', () => {
+  const conversation = [message(1), message(9, true)];
+
+  expect(
+    leftBySend({ as: 'draft', draft: message(9, true), conversation }, thread, false, []),
+  ).toBe(undefined);
+});
+
+test('a draft sent from a conversation it was alone in gives way to the next', () => {
+  const conversation = [message(9, true)];
+
+  expect(
+    leftBySend({ as: 'draft', draft: message(9, true), conversation }, thread, false, []),
+  ).toBe(thread);
+});
+
+test('in Drafts, a sent draft gives way once its conversation’s other drafts are on their way too', () => {
+  const conversation = [message(1), message(5, true), message(9, true)];
+  const compose = { as: 'draft', draft: message(9, true), conversation } as const;
+  const sendingFive = { id: 'press-5', drafts: [draft(5)], closes: 0 };
+
+  expect(leftBySend(compose, thread, true, [])).toBe(undefined);
+  expect(leftBySend(compose, thread, true, [sendingFive])).toBe(thread);
+  // Anywhere else its answered message still shows.
+  expect(leftBySend(compose, thread, false, [sendingFive])).toBe(undefined);
 });
 
 function uids(refs: readonly MessageRef[]): number[] {

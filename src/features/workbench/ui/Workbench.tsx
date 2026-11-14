@@ -13,13 +13,12 @@ import {
   type ReactNode,
 } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
-import { toast, Toasts } from '../../../shared/toasts.tsx';
+import { Toasts } from '../../../shared/toasts.tsx';
 import {
   bundlePartsOf,
   isBundle,
   newestShown,
   repositoryAddressOf,
-  sameRef,
   threadAddressOf,
   type Account,
   type AccountId,
@@ -28,7 +27,6 @@ import {
   type Folder,
   type ListItem,
   type Message,
-  type MessageRef,
   type Place,
   type View,
 } from '../../mail/core/index.ts';
@@ -43,14 +41,11 @@ import {
 } from '../../mailroom/client/index.ts';
 import {
   isDraftsView,
-  leavesDrafts,
   OutboxList,
   SendActions,
-  useSendCommands,
   type LeavingSends,
   useLeavingToasts,
   useOutboxCommands,
-  useSend,
 } from '../../outbox/index.ts';
 import { ListPane } from './ListPane.tsx';
 import { PanelEdge } from './PanelEdge.tsx';
@@ -119,11 +114,9 @@ import {
   ComposerSkeleton,
   isDocked,
   useIsReplyOnItsWay,
-  type Drafting,
-  type Sender,
-  type Writing,
 } from '../../composer/ui/index.ts';
 import { useComposing } from './useComposing.ts';
+import { useSendWritten } from './useSendWritten.ts';
 
 import { useReach, type Reach } from '../../offline/index.ts';
 import {
@@ -748,99 +741,13 @@ export function Workbench({
   );
   const outbox = useOutboxCommands();
 
-  // Send closes the composer at once and hands what it holds to the Mailroom, carrying its last save.
-  // Undo, or a send that fails, brings the same message back, under its conversation if that's still
-  // the one open, unless another composer has opened meanwhile, when a failure's toast offers to
-  // open it.
-  const send = useSend();
-  const sender = useRef<Sender['current']>(undefined);
-  const [isSendable, setSendable] = useState(false);
-  const shownNow = useRef(opened);
-  const composeNow = useRef(compose);
-  useLayoutEffect(() => {
-    shownNow.current = opened;
-    composeNow.current = compose;
-  });
-  // A reply is on its way at the end of its conversation in the frame its composer closes, as is a
-  // draft opened in its own, and leaves it again if the send fails or Undo takes it back. A new
-  // message has no conversation until the Outbox names one.
-  const sendWritten = (drafting: Drafting, at: string | undefined, writing: Writing) => {
-    // Before the composer closes, which would save what it owes.
-    drafting.hand();
-    const from = { conversation: opened, isDocked: compose !== undefined && isDocked(compose) };
-    // A draft opened from its conversation gives way to the next conversation, as one archived
-    // does, when its send leaves nothing to show: a draft alone there, or a Drafts list the
-    // conversation leaves.
-    // The draft sent is the one opened, under whatever ref its last save gave it.
-    if (compose?.as === 'draft' && compose.draft.conversation === opened) {
-      const edited = compose.draft;
-      const others = compose.conversation.filter(
-        (message) => message.flags.draft && !sameRef(message, edited),
-      );
-      const isLeft =
-        !from.isDocked || (isDraftsView(view, folders) && leavesDrafts(leaving.all, others));
-      if (isLeft) leave(edited.conversation);
-    }
-    const id = crypto.randomUUID();
-    const pressedAt = Date.now();
-    // Whom it goes to, as the Outbox will say: everyone it names but Bcc.
-    const to = [...writing.to, ...writing.cc];
-    leaving.pressed(id, {
-      draft: drafting.draft,
-      in: from.isDocked
-        ? from.conversation
-        : compose?.as === 'draft'
-          ? compose.draft.conversation
-          : undefined,
-      written: writing.markdown,
-      to,
-      at,
-      pressedAt,
-    });
-    composing.sent(id);
-    const unwatch = drafting.watch((saved) => leaving.named(id, saved));
-    // Until the Mailroom has the send, the drafts it makes are the leaving’s, and stay out of sight.
-    const handed = (draft: MessageRef | undefined) => {
-      if (draft) drafting.took(draft);
-      unwatch();
-      composing.saved(id);
-    };
-    const back = () => {
-      leaving.forgotten(id);
-      composing.resume(drafting, from.isDocked && shownNow.current === from.conversation);
-    };
-    send({
-      id,
-      last: (signal, onUnreached) => drafting.last(signal, onUnreached),
-      to,
-      at,
-      pressedAt,
-      onSent: handed,
-      onUndone: (draft) => {
-        handed(draft);
-        drafting.resume();
-        back();
-      },
-      onFailed: (reason) => {
-        handed(undefined);
-        drafting.resume();
-        const body = `Couldn’t send. ${reason}`;
-        if (composeNow.current === undefined) {
-          back();
-          void toast({ type: 'error', body });
-          return;
-        }
-        leaving.forgotten(id);
-        void toast({ type: 'error', body, action: { label: 'Open', onAction: back } });
-      },
-    });
-  };
-  // With no network nothing can be sent, and writing offline is out of scope, so Send and Send
-  // later wait, and the composer says why.
-  const writingCommands = useSendCommands(compose !== undefined, {
-    onSend: (at) => sender.current?.(at),
-    isEnabled: isSendable && reach === 'online',
-    shortcut: 'Mod+Enter',
+  const sending = useSendWritten({
+    composing,
+    leaving,
+    opened,
+    isDraftsList: isDraftsView(view, folders),
+    isOnline: reach === 'online',
+    onLeft: leave,
   });
 
   // The registry: every command the workbench can run now, gathered from each feature, which binds
@@ -1030,7 +937,7 @@ export function Workbench({
     ...folderEditing.commands,
     ...accountsCommands,
     ...memberCommands(openMembers),
-    ...writingCommands,
+    ...sending.commands,
     ...extraCommands(openSettings),
   ]);
   useCommandKeys(commands);
@@ -1071,13 +978,11 @@ export function Workbench({
             compose={compose}
             accounts={accounts}
             onDraft={(saved, older) => composing.noteDraft(compose, saved, older)}
-            onSend={sendWritten}
-            sender={sender}
-            onSendable={setSendable}
+            onSend={sending.onSend}
+            sender={sending.sender}
+            onSendable={sending.onSendable}
             // Send has no boundary of its own, so the composer shows only once Send can.
-            sendActions={
-              <SendActions commands={writingCommands} onPick={(at) => sender.current?.(at)} />
-            }
+            sendActions={<SendActions commands={sending.commands} onPick={sending.sendAt} />}
             isSheet={isPhone}
             onClose={closeComposer}
           />

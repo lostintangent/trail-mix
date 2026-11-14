@@ -9,7 +9,14 @@ import {
   type MessageRef,
 } from '../../mail/core/index.ts';
 import { conversationQuery } from '../../mailroom/client/index.ts';
-import { holdKeys, releaseKeys, type Compose, type Drafting } from '../../composer/ui/index.ts';
+import {
+  holdKeys,
+  isDocked,
+  releaseKeys,
+  type Compose,
+  type Drafting,
+} from '../../composer/ui/index.ts';
+import { leavesDrafts, type Leaving } from '../../outbox/index.ts';
 
 /**
  * What the member is writing, if anything, and how writing starts and ends. A composer belongs to
@@ -212,4 +219,25 @@ export function hiddenIn(
     ...(editing ? [editing] : []),
   ]);
   return [...gone, ...written];
+}
+
+/**
+ * The conversation a draft's send leaves with nothing to show, which then gives way to the next, as
+ * one archived does: one the draft was alone in, or, in a Drafts list, one whose other drafts are
+ * all on their way too. A send of anything else, or from another conversation, leaves it open.
+ */
+export function leftBySend(
+  compose: Compose | undefined,
+  opened: ConversationId | undefined,
+  isDraftsList: boolean,
+  leaving: readonly Leaving[],
+): ConversationId | undefined {
+  if (compose?.as !== 'draft' || compose.draft.conversation !== opened) return undefined;
+  // The draft sent is the one opened, under whatever ref its last save gave it.
+  const edited = compose.draft;
+  const others = compose.conversation.filter(
+    (message) => message.flags.draft && !sameRef(message, edited),
+  );
+  const isLeft = !isDocked(compose) || (isDraftsList && leavesDrafts(leaving, others));
+  return isLeft ? edited.conversation : undefined;
 }
