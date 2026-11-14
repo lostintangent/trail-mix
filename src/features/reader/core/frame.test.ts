@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { FIRST_PART, frameDocument, type FrameLook, type SafeMail } from './sanitize.ts';
+import { FIRST_PART, frameDocument, type FrameLook } from './frame.ts';
 
 const look: FrameLook = {
   colorScheme: 'light',
@@ -13,15 +13,7 @@ const look: FrameLook = {
   quotes: 'folded',
 };
 
-const mail = (html: string): SafeMail => ({
-  html,
-  blockedImages: false,
-  trackers: 0,
-  paper: 'theme',
-  quote: false,
-  inlineParts: [],
-  sources: [],
-});
+const mail = (html: string) => ({ html, sources: [] });
 
 /** A paragraph of about 50 characters, repeated to `size`. */
 const paragraphs = (size: number) =>

@@ -12,7 +12,8 @@ import {
 } from 'react';
 import { tm } from '../../../app/theme/tokens.stylex.ts';
 import { REST_MS } from '../core/rest.ts';
-import { frameDocument, type FrameLook, type SafeMail } from '../core/sanitize.ts';
+import { frameDocument, type FrameLook } from '../core/frame.ts';
+import type { SafeMail } from '../core/sanitize.ts';
 import { hearsListeners, returnFocusFrom } from './focus.ts';
 
 /**

@@ -1,6 +1,12 @@
+import { schemeRule, SCHEME_ATTRIBUTE, type Adapted } from './colors.ts';
+
 /**
- * Every resource a piece of CSS can load, found the way a browser's tokenizer finds it (CSS Syntax
- * Level 3), so no escape, case or quoting can hide one.
+ * A message's CSS, made safe to keep: its style sheets' rules, as the browser parsed them, kept
+ * only when nothing in them loads what no rewrite can make safe, and every resource in the text
+ * that remains rewritten.
+ *
+ * Every resource a piece of CSS can load is found the way a browser's tokenizer finds it (CSS
+ * Syntax Level 3), so no escape, case or quoting can hide one.
  *
  * A resource is the target of a `url()`, or a string inside a function that takes images as
  * strings, such as `image-set("a.png" 1x)`. Each is replaced by what `resolve` returns, or by
@@ -281,3 +287,73 @@ const isNonPrintable = (c: string) => {
   const code = c.codePointAt(0) ?? 0;
   return code <= 0x08 || code === 0x0b || (code >= 0x0e && code <= 0x1f) || code === 0x7f;
 };
+
+/**
+ * Drops the rules that load something no image rewrite can make safe: fonts, and counter styles
+ * and registered properties, whose images CSS reaches without `url()` in a value. Every rule kept
+ * has its colors adapted, and a rule for one color scheme is rewritten to follow the frame's.
+ */
+export function keepSafeRules(
+  rules: CSSRuleList,
+  adapt: (style: CSSStyleDeclaration) => Adapted,
+  lightInk: string,
+) {
+  for (let i = rules.length - 1; i >= 0; i--) {
+    const rule = rules[i];
+    if (!rule) continue;
+    const name = rule.constructor.name;
+    if (
+      name === 'CSSFontFaceRule' ||
+      name === 'CSSCounterStyleRule' ||
+      name === 'CSSPropertyRule'
+    ) {
+      deleteRule(rule, i);
+      continue;
+    }
+    if ('style' in rule && rule.style instanceof CSSStyleDeclaration) {
+      const { needsInk } = adapt(rule.style);
+      // Text in what the rule paints takes the light theme's ink in the dark theme, short of any
+      // color the message sets on it, which `:where` lets win.
+      if (needsInk && 'selectorText' in rule && typeof rule.selectorText === 'string') {
+        insertAfter(
+          rule,
+          i,
+          `@scope (:root[${SCHEME_ATTRIBUTE}="dark"]) { :where(${rule.selectorText}) { color: ${lightInk}; } }`,
+        );
+      }
+    }
+    if ('cssRules' in rule && rule.cssRules instanceof CSSRuleList) {
+      keepSafeRules(rule.cssRules, adapt, lightInk);
+    }
+    const themed = name === 'CSSMediaRule' ? schemeRule(rule as CSSMediaRule) : undefined;
+    if (themed) replaceRule(rule, i, themed);
+  }
+}
+
+/** Puts `text` just after a rule, or nothing where a browser can't read it. */
+function insertAfter(rule: CSSRule, index: number, text: string) {
+  const parent = rule.parentRule ?? rule.parentStyleSheet;
+  if (!parent || !('insertRule' in parent)) return;
+  try {
+    parent.insertRule(text, index + 1);
+  } catch {
+    // A browser that reads no `@scope` leaves the text in the dark theme's ink.
+  }
+}
+
+function deleteRule(rule: CSSRule, index: number) {
+  const parent = rule.parentRule ?? rule.parentStyleSheet;
+  if (parent && 'deleteRule' in parent) parent.deleteRule(index);
+}
+
+/** Puts `text` in the place of a rule, or leaves the rule as it is where a browser can't read it. */
+function replaceRule(rule: CSSRule, index: number, text: string) {
+  const parent = rule.parentRule ?? rule.parentStyleSheet;
+  if (!parent || !('insertRule' in parent)) return;
+  try {
+    parent.insertRule(text, index);
+  } catch {
+    return;
+  }
+  parent.deleteRule(index + 1);
+}

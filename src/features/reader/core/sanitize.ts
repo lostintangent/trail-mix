@@ -1,15 +1,10 @@
 import DOMPurify from 'dompurify';
 import { hexOf } from '../../../shared/color.ts';
-import {
-  mailColors,
-  schemeRule,
-  SCHEME_ATTRIBUTE,
-  type Adapted,
-  type DarkPaper,
-  type Paper,
-} from './colors.ts';
-import { rewriteCssResources } from './css.ts';
-import { isAttribution, isForward, quoteMarker, type QuoteMarker } from './quotes.ts';
+import { mailColors, type Adapted, type DarkPaper, type Paper } from './colors.ts';
+import { keepSafeRules, rewriteCssResources } from './css.ts';
+import { FOLD, HELD, INK } from './frame.ts';
+import { foldingQuote } from './quotes.ts';
+import { parseSrcset, rewriteSrcset } from './srcset.ts';
 import { isTrackingAddress, unseenImages } from './trackers.ts';
 
 /**
@@ -29,7 +24,7 @@ import { isTrackingAddress, unseenImages } from './trackers.ts';
  *   kept as sent is marked, or given a rule, to take the light theme's ink in the dark theme.
  *
  * The frame is a second, independent wall: a sandbox without scripts or forms, and a content
- * security policy that names exactly the images this sanitizer let through.
+ * security policy that names exactly the images this sanitizer let through, as `frame.ts` writes.
  */
 
 /** Where a message's images may load from. */
@@ -229,21 +224,16 @@ export function sanitizeMail(html: string, images: Images, dark: DarkPaper): Saf
       element.setAttribute(FOLD, '');
       return;
     }
-    const marker = markerOf(element);
-    if (!marker || element.parentElement?.closest(`[${FOLD}]`) || !foldable(element, marker)) {
-      return;
-    }
+    const quote = foldingQuote(element);
+    if (!quote) return;
     element.setAttribute(FOLD, '');
     mail.quote = true;
-    if (marker === 'rest') {
+    if (quote.marker === 'rest') {
       for (let next = element.nextElementSibling; next; next = next.nextElementSibling) {
         folding.add(next);
       }
     }
-    const attribution = previousMeaningful(element);
-    if (attribution && isAttribution(attribution.textContent ?? '')) {
-      attribution.setAttribute(FOLD, '');
-    }
+    quote.attribution?.setAttribute(FOLD, '');
   });
 
   const markup = purify.sanitize(html, {
@@ -265,138 +255,8 @@ export function sanitizeMail(html: string, images: Images, dark: DarkPaper): Saf
   };
 }
 
-/** How the frame looks: values resolved from the reader's theme, never from the message. */
-export type FrameLook = {
-  colorScheme: 'light' | 'dark';
-  paper: string;
-  ink: string;
-  link: string;
-  /** The light theme's ink and links, for what lies on mail's own light colors in the dark theme. */
-  lightInk: string;
-  lightLink: string;
-  font: string;
-  monospace: string;
-  quotes: 'folded' | 'shown';
-};
-
-/**
- * The document a message's frame shows, under its own content security policy, in the parts it is
- * written in. Long mail comes in two: its start, with the head, which is laid out and shown at once,
- * and the rest, written once the member stays on it. Short mail is all `start`.
- */
-type FrameDocument = { start: string; rest: string };
-
-/** How much of long mail is written first: several screens of most mail, a few kilobytes of it. */
-export const FIRST_PART = 32_000;
-
-export function frameDocument(mail: SafeMail, look: FrameLook): FrameDocument {
-  const images = ['data:', ...new Set(mail.sources.map(cspSource).filter(Boolean))];
-  const policy = [
-    "default-src 'none'",
-    `img-src ${images.join(' ')}`,
-    "style-src 'unsafe-inline'",
-    'font-src data:',
-    "form-action 'none'",
-    "base-uri 'none'",
-  ].join('; ');
-  const style = frameStyle(look);
-  const head = `<!doctype html><html ${SCHEME_ATTRIBUTE}="${look.colorScheme}"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${escapeAttribute(policy)}"><meta name="referrer" content="no-referrer"><base target="_blank"><style>${style}</style></head><body>`;
-  const end = '</body></html>';
-  const cut = cutOf(mail.html);
-  return cut === undefined
-    ? { start: head + mail.html + end, rest: '' }
-    : { start: head + mail.html.slice(0, cut), rest: mail.html.slice(cut) + end };
-}
-
-/**
- * Where long mail is cut in two: at the first tag past its first part and past every style it sets,
- * so what shows first is styled as it will stay. Mail that is short, or whose styles come late, is
- * not cut, and the whole of it is the start.
- */
-function cutOf(html: string): number | undefined {
-  if (html.length < FIRST_PART * 2) return undefined;
-  const styled = html.toLowerCase().lastIndexOf('</style');
-  const cut = html.indexOf('<', Math.max(FIRST_PART, styled + 1));
-  return cut > 0 && cut < html.length * 0.75 ? cut : undefined;
-}
-
-const FOLD = 'data-tm-quote';
-/** Marks an element whose text takes the light theme's ink in the dark theme, as its frame says. */
-const INK = 'data-tm-ink';
-/** Marks an image held back until the member allows its sender's images, as its frame draws it. */
-const HELD = 'data-tm-held';
 const FORMS = ['form', 'input', 'button', 'select', 'option', 'optgroup', 'textarea', 'datalist'];
 const POPOVERS = ['popover', 'popovertarget', 'popovertargetaction', 'command', 'commandfor'];
-
-/**
- * Drops the rules that load something no image rewrite can make safe: fonts, and counter styles
- * and registered properties, whose images CSS reaches without `url()` in a value. Every rule kept
- * has its colors adapted, and a rule for one color scheme is rewritten to follow the frame's.
- */
-function keepSafeRules(
-  rules: CSSRuleList,
-  adapt: (style: CSSStyleDeclaration) => Adapted,
-  lightInk: string,
-) {
-  for (let i = rules.length - 1; i >= 0; i--) {
-    const rule = rules[i];
-    if (!rule) continue;
-    const name = rule.constructor.name;
-    if (
-      name === 'CSSFontFaceRule' ||
-      name === 'CSSCounterStyleRule' ||
-      name === 'CSSPropertyRule'
-    ) {
-      deleteRule(rule, i);
-      continue;
-    }
-    if ('style' in rule && rule.style instanceof CSSStyleDeclaration) {
-      const { needsInk } = adapt(rule.style);
-      // Text in what the rule paints takes the light theme's ink in the dark theme, short of any
-      // color the message sets on it, which `:where` lets win.
-      if (needsInk && 'selectorText' in rule && typeof rule.selectorText === 'string') {
-        insertAfter(
-          rule,
-          i,
-          `@scope (:root[${SCHEME_ATTRIBUTE}="dark"]) { :where(${rule.selectorText}) { color: ${lightInk}; } }`,
-        );
-      }
-    }
-    if ('cssRules' in rule && rule.cssRules instanceof CSSRuleList) {
-      keepSafeRules(rule.cssRules, adapt, lightInk);
-    }
-    const themed = name === 'CSSMediaRule' ? schemeRule(rule as CSSMediaRule) : undefined;
-    if (themed) replaceRule(rule, i, themed);
-  }
-}
-
-/** Puts `text` just after a rule, or nothing where a browser can't read it. */
-function insertAfter(rule: CSSRule, index: number, text: string) {
-  const parent = rule.parentRule ?? rule.parentStyleSheet;
-  if (!parent || !('insertRule' in parent)) return;
-  try {
-    parent.insertRule(text, index + 1);
-  } catch {
-    // A browser that reads no `@scope` leaves the text in the dark theme's ink.
-  }
-}
-
-function deleteRule(rule: CSSRule, index: number) {
-  const parent = rule.parentRule ?? rule.parentStyleSheet;
-  if (parent && 'deleteRule' in parent) parent.deleteRule(index);
-}
-
-/** Puts `text` in the place of a rule, or leaves the rule as it is where a browser can't read it. */
-function replaceRule(rule: CSSRule, index: number, text: string) {
-  const parent = rule.parentRule ?? rule.parentStyleSheet;
-  if (!parent || !('insertRule' in parent)) return;
-  try {
-    parent.insertRule(text, index);
-  } catch {
-    return;
-  }
-  parent.deleteRule(index + 1);
-}
 
 /**
  * Moves the message's body into a div that carries its attributes. Only the body's contents are
@@ -416,84 +276,6 @@ function wrapBody(body: HTMLElement) {
   for (const { name } of [...body.attributes]) body.removeAttribute(name);
   while (body.firstChild) wrapper.appendChild(body.firstChild);
   body.appendChild(wrapper);
-}
-
-function markerOf(element: Element): QuoteMarker | null {
-  const marker = quoteMarker({
-    tag: element.localName,
-    id: element.id,
-    className: element.getAttribute('class') ?? '',
-    type: element.getAttribute('type') ?? '',
-  });
-  if (marker) return marker;
-  // Outlook's desktop app opens its quoted original with a ruled header block and no marker.
-  const style = element.getAttribute('style') ?? '';
-  if (style.includes('border') && element instanceof HTMLDivElement) {
-    if (element.style.borderTopStyle !== 'solid') return null;
-    if (isAttribution(leadingText(element))) return 'rest';
-  }
-  return null;
-}
-
-/** A quote folds when the writer said something before it, and nothing of theirs follows it. */
-function foldable(element: Element, marker: QuoteMarker): boolean {
-  if (isForward(leadingText(element))) return false;
-  if (!hasText(element, 'before')) return false;
-  return marker === 'rest' || !hasText(element, 'after');
-}
-
-/** Whether the writer's own words, outside any quote, come before or after `element`. */
-function hasText(element: Element, direction: 'before' | 'after'): boolean {
-  const document = element.ownerDocument;
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-  walker.currentNode = element;
-  const step = () => (direction === 'before' ? walker.previousNode() : walker.nextNode());
-  for (let node = step(); node; node = step()) {
-    if (element.contains(node) || !node.textContent?.trim()) continue;
-    const parent = node.parentElement;
-    if (!parent || parent.closest('style, title, template')) continue;
-    if (insideQuote(parent)) continue;
-    return true;
-  }
-  return false;
-}
-
-function insideQuote(element: Element): boolean {
-  for (let at: Element | null = element; at; at = at.parentElement) {
-    if (at.hasAttribute(FOLD) || markerOf(at)) return true;
-  }
-  return false;
-}
-
-/**
- * The element just before `element` that holds text, looking past wrappers that hold nothing else,
- * as an attribution sits just before the quote it introduces.
- */
-function previousMeaningful(element: Element): Element | null {
-  let at: Element | null = element;
-  for (let level = 0; at && level < 3 && at.localName !== 'body'; level++) {
-    for (
-      let sibling = at.previousElementSibling;
-      sibling;
-      sibling = sibling.previousElementSibling
-    ) {
-      if (sibling.textContent?.trim()) return sibling;
-    }
-    const parent: Element | null = at.parentElement;
-    if (!parent || parent.textContent?.trim() !== at.textContent?.trim()) return null;
-    at = parent;
-  }
-  return null;
-}
-
-/** The first few hundred characters of text inside `element`, without reading all of it. */
-function leadingText(element: Element, length = 400): string {
-  const walker = element.ownerDocument.createTreeWalker(element, NodeFilter.SHOW_TEXT);
-  let text = '';
-  for (let node = walker.nextNode(); node && text.length < length; node = walker.nextNode()) {
-    text += `${node.textContent ?? ''} `;
-  }
-  return text.slice(0, length);
 }
 
 function linkTarget(raw: string): string | null {
@@ -533,129 +315,6 @@ function contentIdOf(url: URL): string {
   return id.replace(/^<|>$/g, '');
 }
 
-/** Rewrites each candidate of a `srcset`, keeping only those that resolve. */
-function rewriteSrcset(value: string, resolve: (url: string) => string | null): string | null {
-  const candidates: string[] = [];
-  for (const { url, descriptor } of parseSrcset(value)) {
-    const source = resolve(url);
-    if (source) candidates.push(descriptor ? `${source} ${descriptor}` : source);
-  }
-  return candidates.length ? candidates.join(', ') : null;
-}
-
-/**
- * The candidates of a `srcset`, split as the HTML standard splits them. A candidate a browser would
- * drop is dropped, and the one descriptor kept must match the standard's grammar whole, so no text
- * after a URL can carry another candidate.
- */
-function parseSrcset(value: string): { url: string; descriptor: string }[] {
-  const candidates: { url: string; descriptor: string }[] = [];
-  let i = 0;
-  while (i < value.length) {
-    while (i < value.length && /[\t\n\f\r ,]/.test(value[i] ?? '')) i++;
-    if (i >= value.length) break;
-    const start = i;
-    while (i < value.length && !isHtmlSpace(value[i] ?? '')) i++;
-    let url = value.slice(start, i);
-    const descriptors: string[] = [];
-    if (url.endsWith(',')) {
-      url = url.replace(/,+$/, '');
-    } else {
-      // The standard's descriptor tokenizer: a `(` holds commas and spaces until the next `)`,
-      // and parentheses don't nest.
-      let state: 'descriptor' | 'parens' | 'after' = 'descriptor';
-      let current = '';
-      for (; ; i++) {
-        const c = value[i];
-        if (state === 'parens') {
-          if (c === undefined) {
-            descriptors.push(current);
-            break;
-          }
-          current += c;
-          if (c === ')') state = 'descriptor';
-        } else if (state === 'after') {
-          if (c === undefined) break;
-          if (!isHtmlSpace(c)) {
-            state = 'descriptor';
-            i--;
-          }
-        } else if (c === undefined || c === ',') {
-          if (current) descriptors.push(current);
-          if (c === ',') i++;
-          break;
-        } else if (isHtmlSpace(c)) {
-          if (current) descriptors.push(current);
-          current = '';
-          state = 'after';
-        } else {
-          current += c;
-          if (c === '(') state = 'parens';
-        }
-      }
-    }
-    const descriptor = srcsetDescriptor(descriptors);
-    if (descriptor !== null) candidates.push({ url, descriptor });
-  }
-  return candidates;
-}
-
-/**
- * A candidate's descriptors as one a browser would use: a width, a density or none. Null when a
- * browser would drop the candidate. A height is valid only beside a width, and browsers ignore it.
- */
-function srcsetDescriptor(descriptors: string[]): string | null {
-  let width: string | undefined;
-  let density: string | undefined;
-  let height: string | undefined;
-  for (const descriptor of descriptors) {
-    const [, number = '', kind] = /^(.*)([wxh])$/.exec(descriptor) ?? [];
-    const count = /^[0-9]+$/.test(number) ? Number(number) : 0;
-    const float = /^-?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][-+]?[0-9]+)?$/.test(number);
-    if (kind === 'w' && count > 0 && !width && !density) width = descriptor;
-    else if (kind === 'x' && float && Number(number) >= 0 && !width && !density && !height) {
-      density = descriptor;
-    } else if (kind === 'h' && count > 0 && !height && !density) height = descriptor;
-    else return null;
-  }
-  if (height && !width) return null;
-  return width ?? density ?? '';
-}
-
-/** ASCII whitespace, as HTML defines it. */
-const isHtmlSpace = (c: string) =>
-  c === ' ' || c === '\t' || c === '\n' || c === '\f' || c === '\r';
-
-/** An image URL as a content security policy source: its origin and path. */
-function cspSource(url: string): string {
-  const parsed = URL.parse(url);
-  if (!parsed) return '';
-  const path = parsed.pathname.replace(/[;,\s']/g, (c) => `%${c.charCodeAt(0).toString(16)}`);
-  return `${parsed.origin}${path}`;
-}
-
-function frameStyle(look: FrameLook): string {
-  const value = (css: string) => css.replace(/[<>{};]/g, '');
-  // In the dark theme, what lies on a color the message keeps as sent is in the light scheme, so
-  // links there take the light theme's color, and marked text its ink.
-  const onKept =
-    look.colorScheme === 'dark'
-      ? `a{color:light-dark(${value(look.lightLink)},${value(look.link)})}
-:where([${INK}]){color:${value(look.lightInk)}}`
-      : `a{color:${value(look.link)}}`;
-  return `:root{color-scheme:${look.colorScheme};background:${value(look.paper)};color:${value(look.ink)};font:${value(look.font)};overflow-wrap:break-word;-webkit-text-size-adjust:100%}
-:root:not(#tm),body:not(#tm){height:auto!important;min-height:0!important}
-body{margin:0}
-${onKept}
-img{max-width:100%;height:auto}
-img[${HELD}]{background:color-mix(in oklab,currentcolor 8%,transparent) url("${HELD_ICON}") center/min(20px,80%) no-repeat;border-radius:4px}
-img[${HELD}]:not([width]):not([height]){vertical-align:middle}
-pre,code,kbd,samp,tt{font-family:${value(look.monospace)}}
-pre{white-space:pre-wrap}
-blockquote[type=cite]{margin:0 0 0 .8ex;padding-left:1ex;border-left:2px solid color-mix(in oklab,currentcolor 25%,transparent)}
-${look.quotes === 'folded' ? `[${FOLD}]{display:none!important}` : ''}`;
-}
-
 /**
  * What a held image shows instead of its source: an empty picture as large as its attributes say
  * the source is, so it keeps its place and its proportions, and the browser draws no broken image
@@ -681,13 +340,4 @@ function heldImage(image: Element): string {
             ? [300, 100]
             : [20, 20];
   return `data:image/svg+xml,${encodeURIComponent(`<svg xmlns='http://www.w3.org/2000/svg' width='${w}' height='${h}'/>`)}`;
-}
-
-/** A small picture's outline, centered on a held image: something is here, held back. */
-const HELD_ICON = `data:image/svg+xml,${encodeURIComponent(
-  "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='#8a8f98' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'><rect width='18' height='18' x='3' y='3' rx='2'/><circle cx='9' cy='9' r='2'/><path d='m21 15-3.1-3.1a2 2 0 0 0-2.8 0L6 21'/></svg>",
-)}`;
-
-function escapeAttribute(value: string): string {
-  return value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 }

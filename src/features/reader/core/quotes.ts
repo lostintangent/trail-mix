@@ -1,10 +1,12 @@
+import { FOLD } from './frame.ts';
+
 /**
  * Where a message stops being its writer's own words and starts quoting the conversation it
  * replies to. Only a quote that runs to the end of the message folds: replies written between
  * quoted lines stay as they are, and so does a message that is nothing but a quote or a forward.
  *
- * Plain text is folded here whole. HTML is folded by the sanitizer's hooks, which ask
- * `quoteMarker` and `isAttribution` about each element they visit.
+ * Plain text is folded here whole. HTML is folded as the sanitizer walks it, which asks
+ * `foldingQuote` about each element it visits.
  */
 
 /** Plain text split at its trailing quote. `quote` is empty when nothing folds. */
@@ -44,8 +46,25 @@ export function isAttribution(text: string): boolean {
 }
 
 /** A forward is the point of its message, so it never folds. */
-export function isForward(text: string): boolean {
+function isForward(text: string): boolean {
   return FORWARD.test(text.slice(0, 400));
+}
+
+/**
+ * How `element` folds as the quote that ends its message: itself, or, as `rest`, with everything
+ * after it, and with the attribution that introduces it. Null when it isn't such a quote, or lies
+ * inside one already marked to fold.
+ */
+export function foldingQuote(
+  element: Element,
+): { marker: QuoteMarker; attribution: Element | undefined } | null {
+  const marker = markerOf(element);
+  if (!marker || element.parentElement?.closest(`[${FOLD}]`) || !foldable(element, marker)) {
+    return null;
+  }
+  const before = previousMeaningful(element);
+  const attribution = before && isAttribution(before.textContent ?? '') ? before : undefined;
+  return { marker, attribution };
 }
 
 // Gmail, Apple Mail, Thunderbird, Proton, Yahoo, Zoho and Outlook, including the `x_` prefix that
@@ -128,3 +147,81 @@ function trimTrailingBlankLines(lines: string[]): string[] {
 const isQuoted = (line: string) => /^\s*>/.test(line);
 const isBlank = (line: string) => line.trim() === '';
 const isMeaningful = (line: string) => !isBlank(line) && !isQuoted(line);
+
+function markerOf(element: Element): QuoteMarker | null {
+  const marker = quoteMarker({
+    tag: element.localName,
+    id: element.id,
+    className: element.getAttribute('class') ?? '',
+    type: element.getAttribute('type') ?? '',
+  });
+  if (marker) return marker;
+  // Outlook's desktop app opens its quoted original with a ruled header block and no marker.
+  const style = element.getAttribute('style') ?? '';
+  if (style.includes('border') && element instanceof HTMLDivElement) {
+    if (element.style.borderTopStyle !== 'solid') return null;
+    if (isAttribution(leadingText(element))) return 'rest';
+  }
+  return null;
+}
+
+/** A quote folds when the writer said something before it, and nothing of theirs follows it. */
+function foldable(element: Element, marker: QuoteMarker): boolean {
+  if (isForward(leadingText(element))) return false;
+  if (!hasText(element, 'before')) return false;
+  return marker === 'rest' || !hasText(element, 'after');
+}
+
+/** Whether the writer's own words, outside any quote, come before or after `element`. */
+function hasText(element: Element, direction: 'before' | 'after'): boolean {
+  const document = element.ownerDocument;
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  walker.currentNode = element;
+  const step = () => (direction === 'before' ? walker.previousNode() : walker.nextNode());
+  for (let node = step(); node; node = step()) {
+    if (element.contains(node) || !node.textContent?.trim()) continue;
+    const parent = node.parentElement;
+    if (!parent || parent.closest('style, title, template')) continue;
+    if (insideQuote(parent)) continue;
+    return true;
+  }
+  return false;
+}
+
+function insideQuote(element: Element): boolean {
+  for (let at: Element | null = element; at; at = at.parentElement) {
+    if (at.hasAttribute(FOLD) || markerOf(at)) return true;
+  }
+  return false;
+}
+
+/**
+ * The element just before `element` that holds text, looking past wrappers that hold nothing else,
+ * as an attribution sits just before the quote it introduces.
+ */
+function previousMeaningful(element: Element): Element | null {
+  let at: Element | null = element;
+  for (let level = 0; at && level < 3 && at.localName !== 'body'; level++) {
+    for (
+      let sibling = at.previousElementSibling;
+      sibling;
+      sibling = sibling.previousElementSibling
+    ) {
+      if (sibling.textContent?.trim()) return sibling;
+    }
+    const parent: Element | null = at.parentElement;
+    if (!parent || parent.textContent?.trim() !== at.textContent?.trim()) return null;
+    at = parent;
+  }
+  return null;
+}
+
+/** The first few hundred characters of text inside `element`, without reading all of it. */
+function leadingText(element: Element, length = 400): string {
+  const walker = element.ownerDocument.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+  let text = '';
+  for (let node = walker.nextNode(); node && text.length < length; node = walker.nextNode()) {
+    text += `${node.textContent ?? ''} `;
+  }
+  return text.slice(0, length);
+}
