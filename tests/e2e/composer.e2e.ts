@@ -110,48 +110,6 @@ test('a reply is saved as it is written, opens again with its words and files, a
   await expect(page.evaluate(() => 'isBack' in window)).resolves.toBe(false);
 }, 60_000);
 
-test('a pasted image shows as it is pasted, once its draft is saved, and when it opens again', async () => {
-  const page = await app.open(SIZE);
-  // The page itself never asks for a `cid:` address, which only the draft can answer.
-  const asked: string[] = [];
-  page.on('request', (request) => {
-    if (/^cid:/i.test(request.url())) asked.push(request.url());
-  });
-  // A conversation of its own, where the third and fourth rows are the demo's GitHub bundles.
-  await page.getByRole('option').nth(1).click();
-  await replyButton(page).click();
-  const composer = composerNamed(page, 'Reply');
-  const text = composer.getByRole('textbox', { name: 'Reply' });
-  await text.waitFor();
-  await page.keyboard.type('The chart: ');
-  await pasteImage(page);
-
-  // From the pasted bytes until the draft holds them, and from the draft once it does.
-  const image = text.locator('img');
-  await expect(shown(image, 'blob:')).resolves.toEqual([4, 3]);
-  // What is typed next goes on the line after it, rather than in its place.
-  await page.keyboard.type('Up and to the right.');
-  await expect(
-    text
-      .locator('img + p')
-      .filter({ hasText: /^Up and to the right\.$/ })
-      .count(),
-  ).resolves.toBe(1);
-  await saved(page).waitFor({ timeout: 10_000 });
-  await expect(shown(image, '/messages/')).resolves.toEqual([4, 3]);
-  await leave(page, composer);
-
-  const draft = reader(page).getByRole('button', { name: /^Draft/ });
-  await draft.waitFor({ timeout: 10_000 });
-  await draft.click();
-  const reopened = composerNamed(page, 'Reply');
-  const again = reopened.getByRole('textbox', { name: 'Reply' }).locator('img');
-  await expect(shown(again, '/messages/')).resolves.toEqual([4, 3]);
-  await reopened.getByRole('button', { name: 'Discard draft' }).click();
-  await reopened.waitFor({ state: 'detached' });
-  expect(asked).toEqual([]);
-}, 60_000);
-
 test('pasted HTML brings no remote image, which never loads, even as the composer closes', async () => {
   const page = await app.open(SIZE);
   const tracked: string[] = [];
@@ -205,23 +163,40 @@ async function shown(image: Locator, from: 'blob:' | '/messages/') {
   });
 }
 
-test('Undo of a send that carried changes brings back its files, which save and show from the draft it filed', async () => {
+test('a pasted image shows as it is pasted, once saved, after Undo of a send that carried changes, and when its draft opens again', async () => {
   const page = await app.open(SIZE);
-  await page.getByRole('option').first().click();
+  // The page itself never asks for a `cid:` address, which only the draft can answer.
+  const asked: string[] = [];
+  page.on('request', (request) => {
+    if (/^cid:/i.test(request.url())) asked.push(request.url());
+  });
+  // A conversation of its own, where the third and fourth rows are the demo's GitHub bundles.
+  await page.getByRole('option').nth(1).click();
   await replyButton(page).click();
   const reply = composerNamed(page, 'Reply');
   const text = reply.getByRole('textbox', { name: 'Reply' });
   await text.waitFor();
-  await page.keyboard.type('See you at noon. ');
+  await page.keyboard.type('The chart: ');
   await pasteImage(page);
+
+  // From the pasted bytes until the draft holds them, and from the draft once it does.
+  const image = text.locator('img');
+  await expect(shown(image, 'blob:')).resolves.toEqual([4, 3]);
+  // What is typed next goes on the line after it, rather than in its place.
+  await page.keyboard.type('Up and to the right.');
+  await expect(
+    text
+      .locator('img + p')
+      .filter({ hasText: /^Up and to the right\.$/ })
+      .count(),
+  ).resolves.toBe(1);
   await reply.locator('input[type="file"]:not([accept])').setInputFiles({
     name: 'agenda.txt',
     mimeType: 'text/plain',
     buffer: Buffer.from('1. Lunch\n2. The engine\n'),
   });
   await saved(page).waitFor({ timeout: 10_000 });
-  const image = text.locator('img');
-  await shown(image, '/messages/');
+  await expect(shown(image, '/messages/')).resolves.toEqual([4, 3]);
   const before = (await image.getAttribute('src'))!;
 
   // Sent before the change saves, so Send carries it, and the draft it is filed as replaces the one
@@ -260,6 +235,15 @@ test('Undo of a send that carried changes brings back its files, which save and 
   await expect(reply.getByRole('list', { name: 'Attachments' }).textContent()).resolves.toMatch(
     /^agenda\.txt/,
   );
+  await leave(page, reply);
+
+  const draft = reader(page).getByRole('button', { name: /^Draft/ });
+  await draft.waitFor({ timeout: 10_000 });
+  await draft.click();
+  await expect(shown(image, '/messages/')).resolves.toEqual([4, 3]);
+  await reply.getByRole('button', { name: 'Discard draft' }).click();
+  await reply.waitFor({ state: 'detached' });
+  expect(asked).toEqual([]);
 }, 90_000);
 
 test('a new message sent counts down in a toast, since it has no conversation on screen', async () => {
