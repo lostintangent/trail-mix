@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { isReasonOf, threadOf } from './github.ts';
 import type { Envelope } from './model.ts';
-import { envelope } from './testFixtures.ts';
+import { envelope } from '../../../../tests/envelopes.ts';
 
 /** A verified notification of `owner/repo`'s pull request 12, as GitHub sends one. */
 function notification(init: Partial<Envelope> = {}, repository = 'trailmix-demo/toy-box') {

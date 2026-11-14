@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
-import { foldForSearch, highlight, marksOf, type Envelope } from '../../mail/core/index.ts';
+import { foldForSearch, highlight, marksOf } from '../../mail/core/index.ts';
+import { arrive, envelope as base } from '../../../../tests/envelopes.ts';
 import { envelopeIndex } from './envelope-index.ts';
 import { searchable } from './rows.ts';
 import { testSql } from './test-sql.ts';
@@ -114,9 +115,7 @@ test('the index finds a row exactly when every word typed is marked in it', () =
   store.listFolders('personal', [
     { account: 'personal', path: 'INBOX', name: 'INBOX', role: 'inbox', unread: 0, total: 0 },
   ]);
-  store.fold(
-    SUBJECTS.map((subject, at) => ({ type: 'message', envelope: envelope(subject, at + 1) })),
-  );
+  store.fold(arrive(...SUBJECTS.map(envelope)));
 
   const disagree: string[] = [];
   for (const search of SEARCHES) {
@@ -136,22 +135,4 @@ test('the index finds a row exactly when every word typed is marked in it', () =
 });
 
 /** A message whose only searchable words are its subject's. */
-function envelope(subject: string, uid: number): Envelope {
-  return {
-    account: 'personal',
-    path: 'INBOX',
-    uidValidity: 1,
-    uid,
-    messageId: `<${uid}@zz.zz>`,
-    references: [],
-    from: { email: 'zz@zz.zz' },
-    to: [],
-    cc: [],
-    subject,
-    date: `2026-11-09T12:00:${String(uid).padStart(2, '0')}.000Z`,
-    preview: '',
-    flags: { seen: false, flagged: false, answered: false, draft: false },
-    hasAttachments: false,
-    verified: false,
-  };
-}
+const envelope = (subject: string) => base(subject, { from: { email: 'zz@zz.zz' }, to: [] });

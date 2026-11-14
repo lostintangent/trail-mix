@@ -2,16 +2,15 @@ import { expect, test } from 'bun:test';
 import PostalMime from 'postal-mime';
 import {
   applySyncEvent,
-  memoryIndex,
   oneClickUnsubscribe,
   referencesOf,
   writeMime,
   type Folder,
-  type MemoryIndex,
   type Message,
   type MessageRef,
 } from '../../mail/core/index.ts';
 import { seededRandom } from '../../../shared/random.ts';
+import { memoryIndex, type MemoryIndex } from '../../../../tests/memoryIndex.ts';
 import { SendFailure, type MailProvider } from '../provider.ts';
 import { DEMO_SIGNERS } from './stories.ts';
 import {

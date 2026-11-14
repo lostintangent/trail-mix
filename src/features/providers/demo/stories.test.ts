@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
-import { applySyncEvent, memoryIndex, oneClickUnsubscribe } from '../../mail/core/index.ts';
+import { applySyncEvent, oneClickUnsubscribe } from '../../mail/core/index.ts';
+import { memoryIndex } from '../../../../tests/memoryIndex.ts';
 import {
   DEMO_SIGNERS,
   SEEDED_FOLDERS,

@@ -1,36 +1,12 @@
 import { expect, test } from 'bun:test';
-import {
-  isBundle,
-  type ConversationSummary,
-  type Envelope,
-  type SyncEvent,
-} from '../../mail/core/index.ts';
+import { isBundle, type ConversationSummary, type Envelope } from '../../mail/core/index.ts';
+import { arrive, envelope as base } from '../../../../tests/envelopes.ts';
 import { envelopeIndex } from './envelope-index.ts';
 import type { Sql } from './schema.ts';
 import { FOUND_LIMIT, foundOf, opened } from './search.ts';
 import { testSql } from './test-sql.ts';
 
-let uid = 1;
-function envelope(id: string, init: Partial<Envelope> = {}): Envelope {
-  return {
-    account: 'personal',
-    path: 'INBOX',
-    uidValidity: 1,
-    uid: uid++,
-    messageId: `<${id}@example.com>`,
-    references: [],
-    from: { name: 'Ada Park', email: 'ada@example.com' },
-    to: [{ email: 'me@trailmix.test' }],
-    cc: [],
-    subject: id,
-    date: '2026-11-09T12:00:00.000Z',
-    preview: id,
-    flags: { seen: true, flagged: false, answered: false, draft: false },
-    hasAttachments: false,
-    verified: false,
-    ...init,
-  };
-}
+const envelope = (id: string, init: Partial<Envelope> = {}) => base(id, { preview: id, ...init });
 
 function indexed(...envelopes: Envelope[]) {
   const sql = testSql();
@@ -39,7 +15,7 @@ function indexed(...envelopes: Envelope[]) {
     { account: 'personal', path: 'INBOX', name: 'INBOX', role: 'inbox', unread: 0, total: 0 },
     { account: 'personal', path: 'Archive', name: 'Archive', role: 'archive', unread: 0, total: 0 },
   ]);
-  store.fold(envelopes.map((e): SyncEvent => ({ type: 'message', envelope: e })));
+  store.fold(arrive(...envelopes));
   return { sql, store };
 }
 

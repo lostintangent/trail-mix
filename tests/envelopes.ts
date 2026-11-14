@@ -1,5 +1,11 @@
-import { applySyncEvent, memoryIndex, type MemoryIndex, type SyncEvent } from './fold.ts';
-import type { Envelope, FolderRef, FolderRole } from './model.ts';
+import {
+  applySyncEvent,
+  type Envelope,
+  type FolderRef,
+  type FolderRole,
+  type SyncEvent,
+} from '../src/features/mail/core/index.ts';
+import { memoryIndex, type MemoryIndex } from './memoryIndex.ts';
 
 /** Two accounts: `personal` with a folder for every role and one of its own, and `work` with an Inbox. */
 export const FOLDERS: (FolderRef & { role?: FolderRole })[] = [

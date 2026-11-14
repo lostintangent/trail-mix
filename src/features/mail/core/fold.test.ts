@@ -1,8 +1,9 @@
 import { expect, test } from 'bun:test';
 import { gatheringOf, linkConversations } from './conversations.ts';
-import { applySyncEvent, memoryIndex, type MemoryIndex, type SyncEvent } from './fold.ts';
+import { applySyncEvent, type SyncEvent } from './fold.ts';
 import type { Envelope, Message } from './model.ts';
-import { FOLDERS, arrive, envelope, fold, threads } from './testFixtures.ts';
+import { FOLDERS, arrive, envelope, fold, threads } from '../../../../tests/envelopes.ts';
+import { memoryIndex, type MemoryIndex } from '../../../../tests/memoryIndex.ts';
 import { seededRandom } from '../../../shared/random.ts';
 
 const NOTHING = { put: [], remove: [] };

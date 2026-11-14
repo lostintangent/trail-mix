@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { messageIdOf, newestShown, referencesOf } from './conversations.ts';
-import { arrive, envelope, fold, threads } from './testFixtures.ts';
+import { arrive, envelope, fold, threads } from '../../../../tests/envelopes.ts';
 
 // Linking
 

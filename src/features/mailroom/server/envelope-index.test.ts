@@ -3,17 +3,17 @@ import {
   applySyncEvent,
   bundleIdOf,
   isBundle,
-  memoryIndex,
   type BundleSummary,
   type ConversationSummary,
   type Envelope,
   type FolderRef,
   type FolderRole,
   type ListItem,
-  type MemoryIndex,
   type SyncEvent,
 } from '../../mail/core/index.ts';
 import { seededRandom } from '../../../shared/random.ts';
+import { arrive, envelope as base } from '../../../../tests/envelopes.ts';
+import { memoryIndex, type MemoryIndex } from '../../../../tests/memoryIndex.ts';
 import type { Page, PageAt } from '../client/contract.ts';
 import { envelopeIndex, type EnvelopeIndex } from './envelope-index.ts';
 import { pageAfter } from './lists.ts';
@@ -49,28 +49,8 @@ function fresh(own: readonly string[] = [], sql: Sql = testSql()): EnvelopeIndex
 const FLAGS = { seen: false, flagged: false, answered: false, draft: false };
 
 let uid = 1;
-function envelope(id: string, init: Partial<Envelope> = {}): Envelope {
-  return {
-    account: 'personal',
-    path: 'INBOX',
-    uidValidity: 1,
-    uid: uid++,
-    messageId: `<${id}@example.com>`,
-    references: [],
-    from: { name: 'Ada Park', email: 'ada@example.com' },
-    to: [{ email: 'me@trailmix.test' }],
-    cc: [],
-    subject: id,
-    date: '2026-11-09T12:00:00.000Z',
-    preview: id,
-    flags: { seen: false, flagged: false, answered: false, draft: false },
-    hasAttachments: false,
-    verified: false,
-    ...init,
-  };
-}
-const arrive = (...envelopes: Envelope[]): SyncEvent[] =>
-  envelopes.map((e) => ({ type: 'message', envelope: e }));
+const envelope = (id: string, init: Partial<Envelope> = {}) =>
+  base(id, { uid: uid++, preview: id, ...init });
 const TIES = ['2026-11-01', '2026-11-02', '2026-11-02', '2026-11-03', '2026-11-02'];
 /** The `i`th of a run of dates that often tie, which a list orders by something else. */
 const tied = (i: number) => `${TIES[i % 5]}T08:00:00.000Z`;

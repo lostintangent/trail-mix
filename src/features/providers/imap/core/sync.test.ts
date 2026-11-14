@@ -1,12 +1,7 @@
 import { expect, test } from 'bun:test';
-import {
-  applySyncEvent,
-  memoryIndex,
-  type Envelope,
-  type Flags,
-  type MemoryIndex,
-} from '../../../mail/core/index.ts';
+import { applySyncEvent, type Envelope, type Flags } from '../../../mail/core/index.ts';
 import { seededRandom } from '../../../../shared/random.ts';
+import { memoryIndex, type MemoryIndex } from '../../../../../tests/memoryIndex.ts';
 import { flagsOf, planSync, type FolderState, type SyncPlan } from './sync.ts';
 
 const INBOX = { account: 'personal', path: 'INBOX' };

@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
-import type { Message, Outgoing } from '../../mail/core/index.ts';
+import type { Envelope, Message, Outgoing } from '../../mail/core/index.ts';
+import { envelope as base } from '../../../../tests/envelopes.ts';
 import {
   draftOf,
   draftsLeaving,
@@ -253,24 +254,8 @@ function pressedWith(): Parameters<typeof press>[1] {
   };
 }
 
-function message(
-  fields: Partial<Message> & Pick<Message, 'uid' | 'path' | 'messageId'>,
-  isDraft = false,
-): Message {
-  return {
-    account: 'personal',
-    uidValidity: 7,
-    conversation: thread,
-    date: iso(0),
-    from: { email: 'me@example.com' },
-    to: [],
-    cc: [],
-    subject: 'Lunch',
-    preview: '',
-    flags: { seen: true, flagged: false, answered: false, draft: isDraft },
-    hasAttachments: false,
-    verified: false,
-    references: [],
-    ...fields,
-  };
+/** A message of the reply's conversation, a draft when `isDraft`. */
+function message(fields: Partial<Envelope>, isDraft = false): Message {
+  const held = base('Lunch', fields);
+  return { ...held, flags: { ...held.flags, draft: isDraft }, conversation: thread };
 }

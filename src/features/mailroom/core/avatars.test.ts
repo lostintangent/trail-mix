@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
-import type { ConversationSummary, Envelope, Message, SyncEvent } from '../../mail/core/index.ts';
+import type { ConversationSummary, Message, SyncEvent } from '../../mail/core/index.ts';
 import { DEMO_PICTURES } from '../../providers/index.ts';
+import { envelope as base } from '../../../../tests/envelopes.ts';
 import {
   avatarOf,
   bimiOf,
@@ -22,26 +23,9 @@ import {
   type Dmarc,
 } from './avatars.ts';
 
-const envelope = (email: string, verified: boolean, uid = 1): Envelope => ({
-  account: 'personal',
-  path: 'INBOX',
-  uidValidity: 1,
-  uid,
-  messageId: `<${uid}@example.com>`,
-  references: [],
-  from: { email },
-  to: [],
-  cc: [],
-  subject: 'Hello',
-  date: '2026-11-09T12:00:00.000Z',
-  preview: '',
-  flags: { seen: false, flagged: false, answered: false, draft: false },
-  hasAttachments: false,
-  verified,
-});
-
-const message = (email: string, verified: boolean, uid = 1): Message => ({
-  ...envelope(email, verified, uid),
+const envelope = (email: string, verified: boolean) => base('Hello', { from: { email }, verified });
+const message = (email: string, verified: boolean): Message => ({
+  ...envelope(email, verified),
   conversation: 'c',
 });
 
@@ -63,11 +47,11 @@ const row = (id: string, avatar?: string): ConversationSummary => ({
 describe('who may show a picture', () => {
   test('a batch’s verified senders are the From addresses of its verified messages, once each', () => {
     const events: SyncEvent[] = [
-      { type: 'message', envelope: envelope('news@Brand.Example', true, 1) },
-      { type: 'message', envelope: envelope('deals@brand.example', true, 2) },
-      { type: 'message', envelope: envelope('friend@mail.example', false, 3) },
-      { type: 'flags', ref: envelope('x@other.example', true, 4), flags: envelope('', true).flags },
-      { type: 'gone', ref: envelope('x@gone.example', true, 5) },
+      { type: 'message', envelope: envelope('news@Brand.Example', true) },
+      { type: 'message', envelope: envelope('deals@brand.example', true) },
+      { type: 'message', envelope: envelope('friend@mail.example', false) },
+      { type: 'flags', ref: envelope('x@other.example', true), flags: envelope('', true).flags },
+      { type: 'gone', ref: envelope('x@gone.example', true) },
     ];
     expect(verifiedSenders(events)).toEqual(['news@brand.example', 'deals@brand.example']);
   });
