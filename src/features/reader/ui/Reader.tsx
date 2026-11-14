@@ -30,7 +30,6 @@ import {
   leavingIn,
   useLeavingLine,
   type Leaving,
-  type Shown,
 } from '../../outbox/index.ts';
 import { folderOf, receivedIn } from '../core/folder.ts';
 import { REST_MS } from '../core/rest.ts';
@@ -221,8 +220,8 @@ const Conversation = memo(function Conversation({
           </button>
         ),
       )}
-      {leavingIn(leaving, newest.conversation, conversation).map((shown) => (
-        <OnItsWay key={shown.leaving.id} shown={shown} />
+      {leavingIn(leaving, newest.conversation, conversation).map((each) => (
+        <OnItsWay key={each.id} leaving={each} />
       ))}
     </div>
   );
@@ -235,7 +234,7 @@ const Conversation = memo(function Conversation({
  * this device has just sent comes into view, so the member sees it leave: on a phone, clear of the
  * island below it.
  */
-function OnItsWay({ shown: { leaving, preview } }: { shown: Shown }) {
+function OnItsWay({ leaving }: { leaving: Leaving & { preview: string } }) {
   const { standing, said, reason, action, told } = useLeavingLine(leaving);
   const row = useRef<HTMLDivElement>(null);
   const isPhone = useMediaQuery(media.phone);
@@ -255,7 +254,7 @@ function OnItsWay({ shown: { leaving, preview } }: { shown: Shown }) {
     <div ref={row} {...stylex.props(threadStyles.folded, styles.onItsWay)}>
       {isLeaving(standing) && <Airmail isRunning={isOnItsWay(standing)} xstyle={styles.airmail} />}
       <strong {...stylex.props(styles.foldedFrom)}>You</strong>
-      <span {...stylex.props(styles.foldedPreview, styles.leavingPreview)}>{preview}</span>
+      <span {...stylex.props(styles.foldedPreview, styles.leavingPreview)}>{leaving.preview}</span>
       <span {...stylex.props(styles.said)}>{said}</span>
       {action && (
         <Button

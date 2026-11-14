@@ -2,7 +2,7 @@ import { useCallback, useLayoutEffect, useRef, useState } from 'react';
 import { toast } from '../../../shared/toasts.tsx';
 import type { ConversationId, MessageRef } from '../../mail/core/index.ts';
 import { isDocked, type Drafting, type Sender } from '../../composer/ui/index.ts';
-import { useSend, useSendCommands, type LeavingSends } from '../../outbox/index.ts';
+import { useSend, useSendCommands, type useLeaving } from '../../outbox/index.ts';
 import { leftBySend, type useComposing } from './useComposing.ts';
 
 /**
@@ -21,7 +21,7 @@ export function useSendWritten({
   onLeft,
 }: {
   composing: ReturnType<typeof useComposing>;
-  leaving: LeavingSends;
+  leaving: ReturnType<typeof useLeaving>;
   /** The conversation open in the reader. */
   opened: ConversationId | undefined;
   /** Whether the list is of drafts, which a conversation leaves once its drafts are all sent. */

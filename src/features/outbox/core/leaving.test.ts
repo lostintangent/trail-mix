@@ -49,7 +49,7 @@ const pressed = press([], {
 
 test('a reply pressed is on its way at once, at the end of its conversation, as it was written', () => {
   expect(leavingIn(pressed, thread, [parent])).toEqual([
-    { leaving: pressed[0]!, preview: 'Thursday works. See you there.' },
+    { ...pressed[0]!, preview: 'Thursday works. See you there.' },
   ]);
   expect(standingOfLeaving(pressed[0]!, at(1))).toEqual({ is: 'counting', seconds: 9 });
   expect(draftsLeaving(pressed)).toEqual([draft]);
@@ -74,7 +74,7 @@ test('a snapshot older than a press leaves it on its way', () => {
 test('a send asked for elsewhere is on its way in the conversation the Outbox names', () => {
   const all = observe([], [outgoing()], at(1), closesFor);
   expect(leavingIn(all, thread, [parent, indexed])).toEqual([
-    { leaving: all[0]!, preview: 'Thursday works. See you there.' },
+    { ...all[0]!, preview: 'Thursday works. See you there.' },
   ]);
   expect(standingOfLeaving(all[0]!, at(1))).toEqual({ is: 'counting', seconds: 9 });
   expect(draftsLeaving(all)).toEqual([draft]);
@@ -117,7 +117,7 @@ test('a failed send stays at the end of its conversation saying why, back in Dra
   const failed = submitted(begin(outgoing()), refused, iso(11));
   let all = observe(pressed, [failed], at(11), closesFor);
   expect(leavingIn(all, thread, [parent, indexed])).toEqual([
-    { leaving: all[0]!, preview: 'Thursday works. See you there.' },
+    { ...all[0]!, preview: 'Thursday works. See you there.' },
   ]);
   expect(standingOfLeaving(all[0]!, at(11))).toEqual({ is: 'failed', error: '554 refused' });
   expect(draftsLeaving(all)).toEqual([draft]);
@@ -152,7 +152,7 @@ test('replies on their way lie soonest to go first, and a new message waits for 
     draft: { ...draft, uid: 44 },
     pressedAt: at(1),
   });
-  expect(leavingIn(sooner, thread, [parent]).map(({ leaving }) => draftOf(leaving)?.uid)).toEqual([
+  expect(leavingIn(sooner, thread, [parent]).map((leaving) => draftOf(leaving)?.uid)).toEqual([
     42, 44, 43,
   ]);
   const fresh = press([], { ...pressedWith(), pressedIn: undefined });
@@ -198,7 +198,7 @@ test('a send first seen away from its conversation shows its toast, as a new mes
 test('a message pressed before it was ever saved is on its way, and its draft joins it once saved', () => {
   const unsaved = press([], { ...pressedWith(), draft: undefined });
   expect(leavingIn(unsaved, thread, [parent])).toEqual([
-    { leaving: unsaved[0]!, preview: 'Thursday works.' },
+    { ...unsaved[0]!, preview: 'Thursday works.' },
   ]);
   expect(standingOfLeaving(unsaved[0]!, at(1))).toEqual({ is: 'counting', seconds: 9 });
   expect(draftsLeaving(unsaved)).toEqual([]);

@@ -95,9 +95,6 @@ export function useLeaving() {
   return { all, drafts, pressed, named, forgotten };
 }
 
-/** The sends this device follows, the drafts they hold, and how a press, a save or a failure moves them. */
-export type LeavingSends = ReturnType<typeof useLeaving>;
-
 /**
  * Whether any send followed is under way, as far as the Outbox has said: due, begun, or set to try
  * again, and not yet seen gone. Each window that closes makes one due, so it looks again then.

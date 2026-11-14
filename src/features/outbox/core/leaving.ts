@@ -37,7 +37,10 @@ export type Leaving = {
   to?: readonly Address[];
   /** The conversation a reply was pressed in. One asked for elsewhere is where the Outbox says. */
   pressedIn?: ConversationId;
-  /** What the press sent, as a conversation's line reads it, until the index has the draft. */
+  /**
+   * What the press sent, as a conversation's line reads it. One asked for elsewhere reads its
+   * draft's, once the index has it.
+   */
   preview?: string;
   /** When its undo window closes on this device's clock. */
   closes: number;
@@ -185,16 +188,17 @@ export const conversationOf = (leaving: Leaving): ConversationId | undefined =>
 
 /**
  * The replies on their way at the end of a conversation, and those that didn't go, given its
- * messages, soonest to go first. One gives way to its copy once the conversation holds a message by
- * its Message-ID that is not a draft, in the same snapshot that shows the copy.
+ * messages, soonest to go first, each with its preview, as its copy will read. One gives way to its
+ * copy once the conversation holds a message by its Message-ID that is not a draft, in the same
+ * snapshot that shows the copy.
  */
 export function leavingIn(
   all: readonly Leaving[],
   conversation: ConversationId,
   messages: readonly Message[],
-): Shown[] {
+): (Leaving & { preview: string })[] {
   return all
-    .flatMap((leaving): Shown[] => {
+    .flatMap((leaving) => {
       const draft = messages.find((message) =>
         leaving.drafts.some((each) => sameRef(message, each)),
       );
@@ -202,9 +206,9 @@ export function leavingIn(
       const messageId = leaving.seen?.last.messageId ?? draft?.messageId;
       return holdsCopy(messages, messageId)
         ? []
-        : [{ leaving, preview: leaving.preview ?? draft?.preview ?? '' }];
+        : [{ ...leaving, preview: leaving.preview ?? draft?.preview ?? '' }];
     })
-    .toSorted((a, b) => a.leaving.closes - b.leaving.closes);
+    .toSorted((a, b) => a.closes - b.closes);
 }
 
 /** Whether a conversation's messages hold a send's copy: one by its Message-ID that isn't a draft. */
@@ -212,11 +216,8 @@ export const holdsCopy = (messages: readonly Message[], messageId: string | unde
   !!messageId &&
   messages.some((message) => !message.flags.draft && message.messageId === messageId);
 
-/** A reply on its way as its conversation shows it: what it says, the way its copy will. */
-export type Shown = { leaving: Leaving; preview: string };
-
 /** Whether a reply gone from the Outbox waits for its copy, which its conversation should fetch. */
-export const isAwaitingCopy = ({ leaving }: Shown) => leaving.seen?.goneAt !== undefined;
+export const isAwaitingCopy = (leaving: Leaving) => leaving.seen?.goneAt !== undefined;
 
 /**
  * What a send's toast does as the member moves. While they're on the send's conversation, its line

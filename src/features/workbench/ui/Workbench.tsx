@@ -41,7 +41,7 @@ import {
   isDraftsView,
   OutboxList,
   SendActions,
-  type LeavingSends,
+  type useLeaving,
   useLeavingToasts,
   useOutboxCommands,
 } from '../../outbox/index.ts';
@@ -226,7 +226,7 @@ export function Workbench({
   /** Commands from outside the workbench, such as the accent's, made with a way to open Settings. */
   extraCommands: (openSettings: (at?: SettingsAt) => void) => readonly Command[];
   /** The sends this device follows, which the counts and the Drafts list read too. */
-  leaving: LeavingSends;
+  leaving: ReturnType<typeof useLeaving>;
 }) {
   const queryClient = useQueryClient();
   const { view } = place;
