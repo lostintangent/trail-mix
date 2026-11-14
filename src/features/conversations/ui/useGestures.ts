@@ -1,22 +1,33 @@
 import { colorVars, durationVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { useRef, type MouseEvent, type PointerEvent } from 'react';
+import { useEffect, useRef, type MouseEvent, type PointerEvent } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { archives, driftOf } from '../core/gestures.ts';
 
 /** How long a finger rests on a row before it starts picking. */
 const LONG_PRESS_MS = 500;
 
+/** How long a mouse rests on a row before the row counts as about to be opened. */
+const REST_MS = 150;
+
 /** The custom property a swipe moves its row by, which the row's place adds to its own. */
 export const SWIPE = '--tm-swipe';
 
 /**
- * What a finger does to a row. Held still for a moment, it starts picking. Moved sideways first, it
- * swipes the row, which follows it left, and let go far enough, archives it, or else slides back.
- * Moved up or down first, it scrolls the list as usual. After a long press or a swipe, the click
- * that ends it isn't a click, and a touch screen's context menu doesn't open.
+ * What a pointer does to a row. A finger held still for a moment starts picking. Moved sideways
+ * first, it swipes the row, which follows it left, and let go far enough, archives it, or else
+ * slides back. Moved up or down first, it scrolls the list as usual. After a long press or a swipe,
+ * the click that ends it isn't a click, and a touch screen's context menu doesn't open.
+ *
+ * The row is about to be opened once a mouse rests on it, which a pointer passing over it on its
+ * way elsewhere doesn't, and as a mouse or pen presses it, a moment before the click. A finger that
+ * touches a row may be starting a scroll, so it says nothing.
  */
-export function useTouch(onLongPress: () => void, onSwipe: () => void) {
+export function useGestures(
+  onLongPress: () => void,
+  onSwipe: () => void,
+  onAhead: (isPressed: boolean) => void,
+) {
   const gesture = useRef<{
     x: number;
     y: number;
@@ -25,6 +36,8 @@ export function useTouch(onLongPress: () => void, onSwipe: () => void) {
     isSwiping: boolean;
   }>(null);
   const isClickTaken = useRef(false);
+  const resting = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(resting.current), []);
   const end = () => {
     if (gesture.current) clearTimeout(gesture.current.timer);
     gesture.current = null;
@@ -44,7 +57,15 @@ export function useTouch(onLongPress: () => void, onSwipe: () => void) {
       return taken;
     },
     handlers: {
+      onPointerEnter: (event: PointerEvent) => {
+        if (event.pointerType !== 'mouse') return;
+        clearTimeout(resting.current);
+        resting.current = setTimeout(() => onAhead(false), REST_MS);
+      },
+      onPointerLeave: () => clearTimeout(resting.current),
       onPointerDown: (event: PointerEvent<HTMLElement>) => {
+        clearTimeout(resting.current);
+        if (event.pointerType !== 'touch') onAhead(true);
         if (event.pointerType === 'mouse') return;
         isClickTaken.current = false;
         const timer = setTimeout(() => {

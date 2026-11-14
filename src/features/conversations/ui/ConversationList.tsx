@@ -172,11 +172,11 @@ export function ConversationList({
     awaited.current = undefined;
   }, [selection.active]);
   useLayoutEffect(() => {
-    const row = awaited.current && conversations[awaited.current.index];
-    if (!row || !awaited.current) return;
-    const { by } = awaited.current;
+    const wanted = awaited.current;
+    const row = wanted && conversations[wanted.index];
+    if (!row) return;
     awaited.current = undefined;
-    onSelect(row.id, by);
+    onSelect(row.id, wanted.by);
   }, [conversations, onSelect]);
   const optionId = (index: number) => `${listId}-${index}`;
 

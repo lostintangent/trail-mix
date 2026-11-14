@@ -6,7 +6,7 @@ import { whenIdle } from '../../../shared/whenIdle.ts';
 import { afterPaint } from '../../../shared/afterPaint.ts';
 import { reasonOf } from '../../../shared/reasons.ts';
 import { toast } from '../../../shared/toasts.tsx';
-import { overlaysOf, type ListOf } from './overlays.ts';
+import { laidOn, overlaysOf, type ListOf } from './overlays.ts';
 import { fetchedRows } from './useConversations.ts';
 import { useLatest } from '../../../shared/useLatest.ts';
 
@@ -75,7 +75,7 @@ export function useTriage(
       const overlays = overlaysOf(queryClient);
       const list: ListOf = bundle ?? view;
       const fetched = fetchedRows(queryClient, list, ids);
-      const listed = overlaid<ListItem>(fetched, overlays.on(list));
+      const listed = overlaid<ListItem>(fetched, laidOn(overlays.all(), list));
       const earlierRows = listed.filter(
         (row): row is ListItem => row !== undefined && ids.includes(row.id),
       );

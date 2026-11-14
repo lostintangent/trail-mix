@@ -38,10 +38,6 @@ export class Overlays {
 
   all = () => this.#laid;
 
-  on(list: ListOf): Overlay[] {
-    return laidOn(this.#laid, list);
-  }
-
   lay(list: ListOf, overlay: Overlay): Laid {
     const laid: Laid = { list: keyOf(list), overlay };
     this.#set([...this.#laid, laid]);
@@ -74,7 +70,8 @@ export class Overlays {
 
 const keyOf = (list: ListOf) => hashKey(listKeyOf(list));
 
-function laidOn(laid: readonly Laid[], list: ListOf): Overlay[] {
+/** The overlays laid on a list. */
+export function laidOn(laid: readonly Laid[], list: ListOf): Overlay[] {
   const key = keyOf(list);
   return laid.filter((each) => each.list === key).map(({ overlay }) => overlay);
 }

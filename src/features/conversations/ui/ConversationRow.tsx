@@ -11,7 +11,7 @@ import {
 import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
 import * as stylex from '@stylexjs/stylex';
 import { Paperclip, Star } from 'lucide-react';
-import { memo, useEffect, useRef, type MouseEvent, type PointerEvent, type RefObject } from 'react';
+import { memo, useRef, type MouseEvent, type RefObject } from 'react';
 import { pendingStyles, TextSkeleton } from '../../../app/theme/Pending.tsx';
 import { SenderAvatar } from '../../../app/theme/SenderAvatar.tsx';
 import { focusRing, media, tm } from '../../../app/theme/tokens.stylex.ts';
@@ -29,7 +29,7 @@ import type { SelectBy } from '../core/selection.ts';
 import { formatListDate } from './dates.ts';
 import { BundleChips } from './github.tsx';
 import { Marked } from './search.tsx';
-import { SWIPE, useTouch } from './useTouch.ts';
+import { SWIPE, useGestures } from './useGestures.ts';
 
 /** What a list hands every one of its rows alike. */
 export type EveryRow = {
@@ -87,13 +87,13 @@ export const ConversationRow = memo(function ConversationRow({
   const name = people ? (people.face ? people.face.name || people.face.email : '') : 'GitHub';
   // A finger that taps the avatar picks the row instead of opening it.
   const pointer = useRef('');
-  const touch = useTouch(
+  const gestures = useGestures(
     () => onLongPress(item.id),
     () => onSwipe(item.id),
+    (isPressed) => onAhead(item.id, isPressed),
   );
-  const ahead = useAhead((isPressed) => onAhead(item.id, isPressed));
   const select = (event: MouseEvent) => {
-    if (touch.tookClick()) return;
+    if (gestures.tookClick()) return;
     const by: SelectBy = event.shiftKey
       ? 'extend'
       : event.metaKey || event.ctrlKey || isPicking
@@ -109,13 +109,7 @@ export const ConversationRow = memo(function ConversationRow({
       aria-posinset={position}
       aria-setsize={size}
       onClick={select}
-      {...touch.handlers}
-      onPointerDown={(event) => {
-        ahead.onPointerDown(event);
-        touch.handlers.onPointerDown(event);
-      }}
-      onPointerEnter={ahead.onPointerEnter}
-      onPointerLeave={ahead.onPointerLeave}
+      {...gestures.handlers}
       {...stylex.props(
         styles.row,
         styles.placed(top),
@@ -128,7 +122,7 @@ export const ConversationRow = memo(function ConversationRow({
         onClick={(event) => {
           if (pointer.current !== 'touch') return;
           event.stopPropagation();
-          if (!touch.tookClick()) onPick(item.id);
+          if (!gestures.tookClick()) onPick(item.id);
         }}
         {...stylex.props(styles.avatar)}
       >
@@ -271,31 +265,6 @@ export function RowSkeleton({ row, top }: { row: number; top?: number }) {
 const SENDER_WIDTHS = ['38%', '52%', '30%', '45%', '60%'];
 const SUBJECT_WIDTHS = ['72%', '58%', '84%', '64%', '76%', '50%'];
 const PREVIEW_WIDTHS = ['92%', '86%', '96%', '80%'];
-
-/**
- * When a row is about to be opened: once a mouse rests on it, which a pointer passing over it on
- * its way elsewhere doesn't, and as a mouse or pen presses it, a moment before the click. A finger
- * that touches a row may be starting a scroll, so it says nothing.
- */
-function useAhead(onAhead: (isPressed: boolean) => void) {
-  const resting = useRef<ReturnType<typeof setTimeout>>(undefined);
-  useEffect(() => () => clearTimeout(resting.current), []);
-  return {
-    onPointerEnter: (event: PointerEvent) => {
-      if (event.pointerType !== 'mouse') return;
-      clearTimeout(resting.current);
-      resting.current = setTimeout(() => onAhead(false), REST_MS);
-    },
-    onPointerLeave: () => clearTimeout(resting.current),
-    onPointerDown: (event: PointerEvent) => {
-      clearTimeout(resting.current);
-      if (event.pointerType !== 'touch') onAhead(true);
-    },
-  };
-}
-
-/** How long a mouse rests on a row before the row counts as about to be opened. */
-const REST_MS = 150;
 
 const styles = stylex.create({
   row: {
