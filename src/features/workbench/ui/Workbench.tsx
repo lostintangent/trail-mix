@@ -1015,7 +1015,7 @@ export function Workbench({
                       <UnreadToggle />
                       {view.in === 'folder' && (
                         <Suspense>
-                          <FolderMenu commands={folderEditing.commands} />
+                          <FolderMenu commands={folderEditing.inView} />
                         </Suspense>
                       )}
                     </>

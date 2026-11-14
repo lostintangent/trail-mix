@@ -1,4 +1,5 @@
 import type { Account, Folder, FolderRef, FolderRole, View } from '../../mail/core/index.ts';
+import { isAt } from '../core/names.ts';
 import type { FolderEdit } from './commands.ts';
 import { foldKey } from './folds.ts';
 import { folderName } from './name.ts';
@@ -64,9 +65,7 @@ export function accountLine(
   { view, folds, editing }: TreeState,
 ) {
   const isNamedIn =
-    editing?.do === 'create'
-      ? editing.account.id === account.id
-      : editing?.folder.account === account.id;
+    (editing?.do === 'create' ? editing.account : editing?.folder.account) === account.id;
   const isOpen = !folds.has(foldKey({ account: account.id })) || isNamedIn;
   return {
     isOpen,
@@ -114,7 +113,7 @@ export function newFolderAt(
   account: string,
   parent?: Folder,
 ): number | undefined {
-  if (editing?.do !== 'create' || editing.account.id !== account) return undefined;
+  if (editing?.do !== 'create' || editing.account !== account) return undefined;
   if (editing.parent?.path !== parent?.path) return undefined;
   if (parent) return 0;
   const bins = nodes.findIndex(({ folder }) => folder.role === 'junk' || folder.role === 'trash');
@@ -137,6 +136,3 @@ const unreadInAccount = (nodes: readonly FolderNode[]): number =>
 /** Whether a folder is this node's or sits inside it. */
 const holds = ({ folder, children }: FolderNode, ref: FolderRef): boolean =>
   isAt(ref, folder) || children.some((child) => holds(child, ref));
-
-const isAt = (ref: FolderRef, folder: Folder) =>
-  ref.account === folder.account && ref.path === folder.path;

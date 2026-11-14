@@ -1,5 +1,5 @@
 import type { Folder } from '../../mail/core/index.ts';
-import { inside, isOwn, nestingOf } from './names.ts';
+import { inside, isOwn, nestingOf, prefixOf } from './names.ts';
 
 /**
  * Why a folder change can't be made, as a sentence the member reads. The browser checks a name
@@ -57,8 +57,7 @@ export function renameProblem(
   folders: readonly Folder[],
 ): string | undefined {
   if (!isOwn(folder, folders)) return ownProblem(folder, folders);
-  const within =
-    folder.parent !== undefined && folder.delimiter ? `${folder.parent}${folder.delimiter}` : '';
+  const within = prefixOf(folder);
   if (!to.startsWith(within)) return 'A rename keeps a folder where it is.';
   return nameProblem(to.slice(within.length), {
     folders,

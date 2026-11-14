@@ -38,74 +38,41 @@ export function viewCommands(
  * folder, or one being renamed.
  */
 export type FolderEdit =
-  { do: 'create'; account: Account; parent?: Folder } | { do: 'rename'; folder: Folder };
+  { do: 'create'; account: string; parent?: Folder } | { do: 'rename'; folder: Folder };
 
 /** The prefix of the commands that make a folder at the top of an account, one for each. */
 export const CREATE = 'folder.create:';
 
-/**
- * Making a folder at the top of each account or inside the folder in view, and renaming or
- * deleting the folder in view.
- */
-export function folderCommands({
-  accounts,
-  folders,
-  view,
-  edit,
-  remove,
-}: {
-  accounts: readonly Account[];
-  folders: readonly Folder[];
-  view: View;
-  edit: (edit: FolderEdit) => void;
-  /** Asks before deleting a folder, since a delete can't be undone. */
-  remove: (folder: Folder) => void;
-}): Command[] {
-  const inView =
-    view.in === 'folder'
-      ? folders.find(
-          ({ account, path }) => account === view.folder.account && path === view.folder.path,
-        )
-      : undefined;
-  return [
-    ...accounts.map((each): Command => ({
-      id: `${CREATE}${each.id}`,
-      title: `New folder in ${each.name}`,
-      group: GROUP,
-      menuIcon: 'folderPlus',
-      run: () => edit({ do: 'create', account: each }),
-    })),
-    ...folderActions({ folder: inView, accounts, folders, edit, remove }),
-  ];
-}
+/** Making a folder at the top of each account. */
+export const createCommands = (accounts: readonly Account[], edit: (edit: FolderEdit) => void) =>
+  accounts.map((each): Command => ({
+    id: `${CREATE}${each.id}`,
+    title: `New folder in ${each.name}`,
+    group: GROUP,
+    menuIcon: 'folderPlus',
+    run: () => edit({ do: 'create', account: each.id }),
+  }));
 
 /**
  * What can be done to one folder: a new folder inside it, renaming it and deleting it, each
  * disabled where it can't be done. Only the member's own folders change: one with a role, or
- * holding one, is the server's to keep. The folder in view's are in the registry, and every
- * folder's are in the menu on its row.
+ * holding one, is the server's to keep. The folder in view's are in the registry and its menu at
+ * the head of the list, and every folder's are in the menu on its row.
  */
 export function folderActions({
   folder,
-  accounts,
   folders,
   edit,
   remove,
 }: {
   /** None where no folder is in view, which disables them all. */
   folder: Folder | undefined;
-  accounts: readonly Account[];
   folders: readonly Folder[];
   edit: (edit: FolderEdit) => void;
+  /** Asks before deleting a folder, since a delete can't be undone. */
   remove: (folder: Folder) => void;
 }): Command[] {
-  const account = folder && accounts.find(({ id }) => id === folder.account);
-  const isMine =
-    folder !== undefined &&
-    isOwn(
-      folder,
-      folders.filter((each) => each.account === folder.account),
-    );
+  const isMine = folder !== undefined && isOwn(folder, folders);
   const name = folder ? folderName(folder) : 'folder';
   return [
     {
@@ -113,8 +80,8 @@ export function folderActions({
       title: `New folder in ${name}`,
       group: GROUP,
       menuIcon: 'folderPlus',
-      isEnabled: account !== undefined && folder !== undefined && canHoldFolders(folder),
-      run: () => account && folder && edit({ do: 'create', account, parent: folder }),
+      isEnabled: folder !== undefined && canHoldFolders(folder),
+      run: () => folder && edit({ do: 'create', account: folder.account, parent: folder }),
     },
     {
       id: 'folder.rename',

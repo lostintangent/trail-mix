@@ -1,5 +1,5 @@
 import type { Folder, View } from '../../mail/core/index.ts';
-import { inside } from './names.ts';
+import { folderAt, isWithin, prefixOf } from './names.ts';
 
 /**
  * A change to an account's folders on its way to the server, which the browser shows at once by
@@ -11,29 +11,19 @@ export type FolderChange =
   | { do: 'rename'; folder: Folder; to: string }
   | { do: 'delete'; folder: Folder };
 
-const at = (folders: readonly Folder[], { account, path }: Pick<Folder, 'account' | 'path'>) =>
-  folders.some((held) => held.account === account && held.path === path);
-
 /** An account's folders with a change made: a rename carries the folders inside along. */
 export function changed(folders: readonly Folder[], change: FolderChange): Folder[] {
   const { folder } = change;
-  const mine = folders.filter(({ account }) => account === folder.account);
   switch (change.do) {
     case 'create':
-      return at(folders, folder) ? [...folders] : [...folders, folder];
-    case 'delete': {
-      const goes = new Set([folder.path, ...inside(folder, mine).map(({ path }) => path)]);
-      return folders.filter(({ account, path }) => account !== folder.account || !goes.has(path));
-    }
+      return folderAt(folders, folder) ? [...folders] : [...folders, folder];
+    case 'delete':
+      return folders.filter((held) => !isWithin(held, folder));
     case 'rename': {
-      const moves = new Set([folder.path, ...inside(folder, mine).map(({ path }) => path)]);
       const moved = (path: string) => `${change.to}${path.slice(folder.path.length)}`;
-      const name =
-        folder.parent !== undefined && folder.delimiter
-          ? change.to.slice(folder.parent.length + folder.delimiter.length)
-          : change.to;
+      const name = change.to.slice(prefixOf(folder).length);
       return folders.map((held) =>
-        held.account !== folder.account || !moves.has(held.path)
+        !isWithin(held, folder)
           ? held
           : held.path === folder.path
             ? { ...held, path: change.to, name }
@@ -45,14 +35,15 @@ export function changed(folders: readonly Folder[], change: FolderChange): Folde
 
 /** Whether a snapshot of the folders already shows a change, so laying it over is done. */
 export function isShown(folders: readonly Folder[], change: FolderChange): boolean {
-  const { folder } = change;
+  const { account, path } = change.folder;
+  const isListed = (at: string) => folderAt(folders, { account, path: at }) !== undefined;
   switch (change.do) {
     case 'create':
-      return at(folders, folder);
+      return isListed(path);
     case 'delete':
-      return !at(folders, folder);
+      return !isListed(path);
     case 'rename':
-      return !at(folders, folder) && at(folders, { account: folder.account, path: change.to });
+      return !isListed(path) && isListed(change.to);
   }
 }
 
@@ -62,18 +53,13 @@ export function isShown(folders: readonly Folder[], change: FolderChange): boole
  * stays.
  */
 export function followed(view: View, change: FolderChange): View {
-  if (view.in !== 'folder' || change.do === 'create') return view;
-  const { folder } = change;
-  const { account, path } = view.folder;
-  const isWithin =
-    account === folder.account &&
-    (path === folder.path ||
-      (folder.delimiter !== undefined && path.startsWith(`${folder.path}${folder.delimiter}`)));
-  if (!isWithin) return view;
+  if (view.in !== 'folder' || change.do === 'create' || !isWithin(view.folder, change.folder))
+    return view;
   if (change.do === 'delete') return { in: 'inbox' };
+  const { account, path } = view.folder;
   return {
     ...view,
-    folder: { account, path: `${change.to}${path.slice(folder.path.length)}` },
+    folder: { account, path: `${change.to}${path.slice(change.folder.path.length)}` },
   };
 }
 
@@ -82,5 +68,5 @@ export function followed(view: View, change: FolderChange): View {
  * gone, gives way to the Inbox, as an address saved before it went does. Any other view stays.
  */
 export function standing(view: View, folders: readonly Folder[]): View {
-  return view.in === 'folder' && !at(folders, view.folder) ? { in: 'inbox' } : view;
+  return view.in === 'folder' && !folderAt(folders, view.folder) ? { in: 'inbox' } : view;
 }

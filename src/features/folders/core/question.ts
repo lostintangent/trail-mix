@@ -9,10 +9,7 @@ const counted = (count: number, one: string, many: string) =>
  * folders inside it, and the messages in them all.
  */
 export function deleteSaid(folder: Folder, folders: readonly Folder[]): string {
-  const within = inside(
-    folder,
-    folders.filter(({ account }) => account === folder.account),
-  );
+  const within = inside(folder, folders);
   const messages = [folder, ...within].reduce((sum, { total }) => sum + total, 0);
   const what = [
     ...(within.length ? [counted(within.length, 'folder inside it', 'folders inside it')] : []),

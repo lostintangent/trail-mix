@@ -11,7 +11,8 @@ import {
   Trash2,
   type LucideIcon,
 } from 'lucide-react';
-import type { Account, Folder, FolderRef, FolderRole, View } from '../../mail/core/index.ts';
+import type { Account, Folder, FolderRole, View } from '../../mail/core/index.ts';
+import { folderAt } from '../core/names.ts';
 import { folderName } from './name.ts';
 
 /**
@@ -33,6 +34,8 @@ export const UNIFIED_VIEWS = [
   { in: 'outbox', label: 'Outbox', icon: ClockArrowUp },
 ] as const satisfies readonly { in: UnifiedView; label: string; icon: LucideIcon }[];
 
+const unifiedOf = (view: View) => UNIFIED_VIEWS.find((unified) => unified.in === view.in);
+
 /** A folder with a role shows the role's icon, the unified view's where there is one. */
 const ROLE_ICONS: Record<FolderRole, LucideIcon> = {
   inbox: Inbox,
@@ -50,15 +53,13 @@ export const folderIcon = ({ role }: Folder): LucideIcon => (role ? ROLE_ICONS[r
 export function viewIcon(view: View, folders: readonly Folder[]): LucideIcon {
   switch (view.in) {
     case 'folder': {
-      const folder = folderOf(view.folder, folders);
+      const folder = folderAt(folders, view.folder);
       return folder ? folderIcon(folder) : FolderIcon;
     }
     case 'search':
       return Search;
-    default: {
-      const unified = view.in;
-      return UNIFIED_VIEWS.find((each) => each.in === unified)?.icon ?? Inbox;
-    }
+    default:
+      return unifiedOf(view)?.icon ?? Inbox;
   }
 }
 
@@ -74,7 +75,7 @@ export function describeView(
 ): { title: string; unread?: number; scope?: Account } {
   switch (view.in) {
     case 'folder': {
-      const folder = folderOf(view.folder, folders);
+      const folder = folderAt(folders, view.folder);
       return {
         title: folder ? folderName(folder) : view.folder.path,
         unread: folder?.unread,
@@ -85,12 +86,8 @@ export function describeView(
       return { title: 'Search' };
     default:
       return {
-        title: UNIFIED_VIEWS.find((unified) => unified.in === view.in)?.label ?? '',
+        title: unifiedOf(view)?.label ?? '',
         unread: view.in === 'inbox' ? counts.inbox : undefined,
       };
   }
 }
-
-/** The folder a folder view lists, while the server lists it. */
-const folderOf = ({ account, path }: FolderRef, folders: readonly Folder[]) =>
-  folders.find((each) => each.account === account && each.path === path);

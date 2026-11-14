@@ -13,6 +13,7 @@ import { memo, type ReactNode } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Command } from '../../commands/index.ts';
 import type { Account, Folder, View } from '../../mail/core/index.ts';
+import { folderAt } from '../core/names.ts';
 import type { FolderEdit } from './commands.ts';
 import { control } from './controls.ts';
 import { useFolds } from './folds.ts';
@@ -107,11 +108,7 @@ export const Sidebar = memo(function Sidebar({
   const isRail = canFold && isCollapsed;
   // Whether a line of the tree lifts for the view, which a search's or a folder's on its way doesn't.
   const isViewHere =
-    view.in === 'folder'
-      ? folders.some(
-          ({ account, path }) => account === view.folder.account && path === view.folder.path,
-        )
-      : view.in !== 'search';
+    view.in === 'folder' ? folderAt(folders, view.folder) !== undefined : view.in !== 'search';
   return (
     <nav id={id} aria-label="Mailboxes" aria-busy={isBusy} {...stylex.props(styles.sidebar)}>
       {/* First, as it reads: it heads both layouts. */}

@@ -1,9 +1,10 @@
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { useLatest } from '../../../shared/useLatest.ts';
 import type { Account, Folder, View } from '../../mail/core/index.ts';
 import { followed, type FolderChange } from '../core/changes.ts';
-import { childPath, renamedPath } from '../core/names.ts';
+import { childPath, folderAt, renamedPath } from '../core/names.ts';
 import { useFolderChange } from './changes.ts';
-import { folderActions, folderCommands, type FolderEdit } from './commands.ts';
+import { createCommands, folderActions, type FolderEdit } from './commands.ts';
 
 const sameView = (a: View, b: View) => JSON.stringify(a) === JSON.stringify(b);
 
@@ -32,10 +33,7 @@ export function useFolderEditing({
   const change = useFolderChange();
   // What the handlers read as they run, so the ones the sidebar holds stay the same as the folders'
   // counts change, and a count redraws only the lines that show it.
-  const latest = useRef({ accounts, folders, view, editing, reveal });
-  useLayoutEffect(() => {
-    latest.current = { accounts, folders, view, editing, reveal };
-  });
+  const latest = useLatest({ folders, view, editing, reveal });
 
   const make = useCallback(
     async (made: FolderChange) => {
@@ -46,13 +44,16 @@ export function useFolderEditing({
       // A refused change brings the view back to where it was, if the member hasn't moved on.
       if (!isAccepted && after !== before && sameView(latest.current.view, after)) open(before);
     },
-    [change, open],
+    [change, open, latest],
   );
 
-  const edit = useCallback((next: FolderEdit) => {
-    setEditing(next);
-    latest.current.reveal();
-  }, []);
+  const edit = useCallback(
+    (next: FolderEdit) => {
+      setEditing(next);
+      latest.current.reveal();
+    },
+    [latest],
+  );
 
   const onEdited = useCallback(
     (name: string | undefined) => {
@@ -66,11 +67,11 @@ export function useFolderEditing({
       const { account, parent } = editing;
       const delimiter =
         parent?.delimiter ??
-        folders.find((folder) => folder.account === account.id && folder.delimiter)?.delimiter;
+        folders.find((folder) => folder.account === account && folder.delimiter)?.delimiter;
       void make({
         do: 'create',
         folder: {
-          account: account.id,
+          account,
           path: childPath(parent, name),
           name,
           ...(parent ? { parent: parent.path } : {}),
@@ -80,20 +81,29 @@ export function useFolderEditing({
         },
       });
     },
-    [make],
+    [make, latest],
   );
 
+  // The folder in view's, in the registry and the menu at the head of its list.
+  const inView = useMemo(
+    () =>
+      folderActions({
+        folder: view.in === 'folder' ? folderAt(folders, view.folder) : undefined,
+        folders,
+        edit,
+        remove: setDeleting,
+      }),
+    [folders, view, edit],
+  );
   const commands = useMemo(
-    () => folderCommands({ accounts, folders, view, edit, remove: setDeleting }),
-    [accounts, folders, view, edit],
+    () => [...createCommands(accounts, edit), ...inView],
+    [accounts, edit, inView],
   );
   // Each folder's own, for the menu on its row, asked as the menu opens.
   const actionsFor = useCallback(
-    (folder: Folder) => {
-      const { accounts, folders } = latest.current;
-      return folderActions({ folder, accounts, folders, edit, remove: setDeleting });
-    },
-    [edit],
+    (folder: Folder) =>
+      folderActions({ folder, folders: latest.current.folders, edit, remove: setDeleting }),
+    [edit, latest],
   );
 
   return {
@@ -106,6 +116,7 @@ export function useFolderEditing({
       [deleting, make],
     ),
     commands,
+    inView,
     actionsFor,
   };
 }

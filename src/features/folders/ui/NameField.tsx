@@ -37,16 +37,16 @@ export function NameField({
   const [shown, setShown] = useState<string>();
   const [isDone, setDone] = useState(false);
   const problemId = useId();
+  const wanted = name.trim();
+  const why = wanted === initial ? undefined : nameProblem(wanted, place);
   const finish = (kept: string | undefined) => {
     if (isDone) return;
     setDone(true);
     onDone(kept);
   };
   const keep = () => {
-    const wanted = name.trim();
-    if (wanted === initial) return finish(undefined);
-    const why = nameProblem(wanted, place);
-    if (why) setShown(why);
+    if (wanted === initial) finish(undefined);
+    else if (why) setShown(why);
     else finish(wanted);
   };
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
@@ -77,10 +77,7 @@ export function NameField({
           setShown(undefined);
         }}
         onKeyDown={onKeyDown}
-        onBlur={() => {
-          const wanted = name.trim();
-          finish(wanted !== initial && !nameProblem(wanted, place) ? wanted : undefined);
-        }}
+        onBlur={() => finish(wanted === initial || why ? undefined : wanted)}
         {...stylex.props(styles.input, shown !== undefined && styles.invalid)}
       />
       {shown && (

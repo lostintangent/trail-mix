@@ -171,7 +171,7 @@ test('naming a folder unfolds every folder around it for as long as it’s named
   const folded = [{ account: 'personal' }, folder('Projects'), folder('Projects/Trail Mix')];
   const creating: FolderEdit = {
     do: 'create',
-    account: account('personal'),
+    account: 'personal',
     parent: folder('Projects/Trail Mix', { delimiter: '/' }),
   };
   expect(
@@ -192,7 +192,7 @@ test('naming a folder unfolds every folder around it for as long as it’s named
 test('a folder a new one is named in opens to hold its field, though nothing is inside it yet', () => {
   const editing: FolderEdit = {
     do: 'create',
-    account: account('personal'),
+    account: 'personal',
     parent: folder('Projects/Toy Box', { delimiter: '/' }),
   };
   expect(line('Projects/Toy Box', state([], { editing }))).toMatchObject({
@@ -207,7 +207,7 @@ test('another account’s folder at the same path is not named, unfolded or lift
   const work = (path: string) => folder(path, { account: 'work', delimiter: '/' });
   const edits: FolderEdit[] = [
     { do: 'rename', folder: work('Projects/Trail Mix') },
-    { do: 'create', account: account('work'), parent: work('Projects/Trail Mix') },
+    { do: 'create', account: 'work', parent: work('Projects/Trail Mix') },
   ];
   for (const editing of edits) {
     const at = state(folded, { editing, view: inFolder('Projects/Trail Mix/Design', 'work') });
@@ -234,7 +234,7 @@ test('a new folder is named first inside a folder, and before Junk and Trash at 
   const projectsFolder = folder('Projects', { delimiter: '/' });
   const at = (parent?: Folder): FolderEdit => ({
     do: 'create',
-    account: account('personal'),
+    account: 'personal',
     parent,
   });
 

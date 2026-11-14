@@ -1,9 +1,23 @@
-import type { Folder } from '../../mail/core/index.ts';
+import type { Folder, FolderRef } from '../../mail/core/index.ts';
 
 /**
  * How a folder nests in its account's tree. Paths are the server's: the parent's path, its
  * delimiter, then the name, or the name alone at the top.
  */
+
+/** Whether two refs name the same folder. */
+export const isAt = (ref: FolderRef, folder: FolderRef) =>
+  ref.account === folder.account && ref.path === folder.path;
+
+/** The folder a ref names, while the server lists it. */
+export const folderAt = (folders: readonly Folder[], ref: FolderRef) =>
+  folders.find((folder) => isAt(ref, folder));
+
+/** Whether a ref names `folder` or a folder inside it, however deep. */
+export const isWithin = (ref: FolderRef, folder: Folder) =>
+  ref.account === folder.account &&
+  (ref.path === folder.path ||
+    (folder.delimiter !== undefined && ref.path.startsWith(`${folder.path}${folder.delimiter}`)));
 
 /** Where a folder nests: the folder it's inside, if any, and its own name. */
 export type Nesting = { parent?: Folder; name: string };
@@ -33,19 +47,16 @@ export function childPath(parent: Folder | undefined, name: string): string {
   return `${parent.path}${parent.delimiter}${name}`;
 }
 
+/** What a folder's path holds before its name: its parent's path and delimiter, or nothing. */
+export const prefixOf = (folder: Folder) =>
+  folder.parent !== undefined && folder.delimiter ? `${folder.parent}${folder.delimiter}` : '';
+
 /** The path a folder takes when it's renamed to `name`, in the same parent. */
-export function renamedPath(folder: Folder, name: string): string {
-  return folder.parent !== undefined && folder.delimiter
-    ? `${folder.parent}${folder.delimiter}${name}`
-    : name;
-}
+export const renamedPath = (folder: Folder, name: string) => `${prefixOf(folder)}${name}`;
 
 /** The folders inside a folder, however deep. */
-export function inside(folder: Folder, folders: readonly Folder[]): Folder[] {
-  if (!folder.delimiter) return [];
-  const above = `${folder.path}${folder.delimiter}`;
-  return folders.filter(({ path }) => path.startsWith(above));
-}
+export const inside = (folder: Folder, folders: readonly Folder[]) =>
+  folders.filter((each) => each.path !== folder.path && isWithin(each, folder));
 
 /**
  * Whether a folder is the member's own, to rename or delete: neither it nor any folder inside it
