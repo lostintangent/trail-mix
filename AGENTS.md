@@ -2,6 +2,8 @@
 
 Trail Mix is an open-source, keyboard-first mail client that you host yourself. A TanStack Start single-page app, styled with Astryx and StyleX, runs as one Cloudflare Worker. That one deployment serves its operator and the people they invite, and each of them gets a private Mailroom for their own IMAP accounts. It is dense, quiet and fast, and as good on a phone as on a desktop.
 
+It is also a reference for building on Cloudflare Workers with Astryx and StyleX, and other projects take their patterns from it. So where Workers, TanStack, Astryx or StyleX has its own way to do something, Trail Mix does it that way, with as little code as the product allows.
+
 This file is the working agreement for everyone who changes this repository, human or agent. A change is reviewed against the rules below. When a change needs a concept, a guarantee or a folder that this file does not name, stop and get this file amended first. Do not invent it in code.
 
 ## How it fits together
