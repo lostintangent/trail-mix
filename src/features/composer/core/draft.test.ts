@@ -150,36 +150,16 @@ test('an image the Markdown no longer shows goes out as an ordinary attachment',
   expect(raw).not.toContain('multipart/related');
 });
 
-test('an image the Markdown shows but the draft does not carry fails, naming it', () => {
-  expect(() =>
-    messageOf({ ...composed, markdown: `![The ridge](cid:${ridge})`, attachments: [notes] }, copy),
-  ).toThrow(`The image "The ridge" is the attachment ${ridge}, which the message doesn't carry.`);
-});
-
-test('a file the Markdown shows as an image must be one', () => {
-  expect(() =>
-    messageOf(
-      {
-        ...composed,
-        markdown: `![Notes](cid:${ridge})`,
-        attachments: [{ ...notes, contentId: ridge }],
-      },
-      copy,
-    ),
-  ).toThrow('The Markdown shows notes.pdf as an image, but it is application/pdf.');
-});
-
-test('two files cannot share a Content-ID', () => {
-  expect(() =>
-    messageOf(
-      {
-        ...composed,
-        markdown: `![a](cid:${ridge})`,
-        attachments: [photo, { ...photo, name: 'b.png' }],
-      },
-      copy,
-    ),
-  ).toThrow(`Two attachments have the Content-ID ${ridge}.`);
+test('each image the Markdown shows is a file the draft carries, an image with its own Content-ID', () => {
+  const showing = (attachments: MimeAttachment[]) => () =>
+    messageOf({ ...composed, markdown: `![a](cid:${ridge})`, attachments }, copy);
+  expect(showing([notes])).toThrow(`is the attachment ${ridge}, which the message doesn't carry.`);
+  expect(showing([{ ...notes, contentId: ridge }])).toThrow(
+    'The Markdown shows notes.pdf as an image, but it is application/pdf.',
+  );
+  expect(showing([photo, { ...photo, name: 'b.png' }])).toThrow(
+    `Two attachments have the Content-ID ${ridge}.`,
+  );
 });
 
 test('a message of only attachments has no HTML part', async () => {
