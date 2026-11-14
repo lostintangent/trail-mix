@@ -873,10 +873,9 @@ const styles = stylex.create({
     borderBottomStyle: 'solid',
     borderBottomColor: colorVars['--color-border'],
   },
-  // The From chip is the fields' tallest line, and the sheet's padding is the room above it, so
-  // the rule under the fields keeps as much below them.
+  // The rule lies as far under the fields as the text lies under it, the editor's padding.
   fieldsOnPage: {
-    paddingBlockEnd: spacingVars['--spacing-4'],
+    paddingBlockEnd: spacingVars['--spacing-2'],
   },
   row: {
     display: 'flex',
