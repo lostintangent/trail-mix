@@ -57,7 +57,7 @@ export class DeployStopped extends Error {}
  */
 export function secretsToMake(
   { deployed, held }: Found,
-  used: readonly MadeSecret[] = ['CREDENTIALS_KEY', 'PUSH_KEY'],
+  used: readonly MadeSecret[],
 ): MadeSecret[] {
   if (used.includes('CREDENTIALS_KEY') && deployed && !held.has('CREDENTIALS_KEY')) {
     throw new DeployStopped(

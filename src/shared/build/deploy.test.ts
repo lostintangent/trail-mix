@@ -18,23 +18,26 @@ import {
 
 describe('the secrets a deploy makes', () => {
   const found = (deployed: boolean, ...held: string[]) => ({ deployed, held: new Set(held) });
+  const production = secretsUsedBy({ name: 'trail-mix' });
 
   test('are both, for a Worker never deployed', () => {
-    expect(secretsToMake(found(false))).toEqual(['CREDENTIALS_KEY', 'PUSH_KEY']);
+    expect(secretsToMake(found(false), production)).toEqual(['CREDENTIALS_KEY', 'PUSH_KEY']);
     // A Worker made by some other way first, with nothing deployed yet, still gets its key.
-    expect(secretsToMake(found(false, 'PUSH_KEY'))).toEqual(['CREDENTIALS_KEY']);
+    expect(secretsToMake(found(false, 'PUSH_KEY'), production)).toEqual(['CREDENTIALS_KEY']);
   });
 
   test('are only a missing push key, for a deployed Worker that has its credentials key', () => {
-    expect(secretsToMake(found(true, 'CREDENTIALS_KEY', 'PUSH_KEY'))).toEqual([]);
-    expect(secretsToMake(found(true, 'CREDENTIALS_KEY', 'ACCESS_API_TOKEN'))).toEqual(['PUSH_KEY']);
+    expect(secretsToMake(found(true, 'CREDENTIALS_KEY', 'PUSH_KEY'), production)).toEqual([]);
+    expect(secretsToMake(found(true, 'CREDENTIALS_KEY', 'ACCESS_API_TOKEN'), production)).toEqual([
+      'PUSH_KEY',
+    ]);
   });
 
   test('never include a new credentials key for a Worker that has been deployed', () => {
     for (const held of [[], ['PUSH_KEY'], ['ACCESS_API_TOKEN', 'credentials_key']]) {
-      expect(() => secretsToMake(found(true, ...held))).toThrow(DeployStopped);
+      expect(() => secretsToMake(found(true, ...held), production)).toThrow(DeployStopped);
     }
-    expect(() => secretsToMake(found(true))).toThrow('Put the key it had back');
+    expect(() => secretsToMake(found(true), production)).toThrow('Put the key it had back');
   });
 
   test('for the public demo are its visitor key alone, which it may make again', () => {
@@ -210,7 +213,7 @@ describe('what the account holds, as Wrangler reads it', () => {
     given({ 'trail-mix': { deployments: 1, secrets: [] } });
     const found = await lookUp('trail-mix', wrangler);
     expect(found).toEqual({ deployed: true, held: new Set() });
-    expect(() => secretsToMake(found)).toThrow(DeployStopped);
+    expect(() => secretsToMake(found, secretsUsedBy({ name: 'trail-mix' }))).toThrow(DeployStopped);
   }, 30_000);
 
   test('any other failure stops the deploy, rather than take a key for missing', async () => {

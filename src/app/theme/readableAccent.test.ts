@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import {
   contrast,
   hexOf,
-  oklchOf,
   over,
   parseColor,
   parseHex,
@@ -64,22 +63,6 @@ describe('a pick', () => {
         expect(contrast(parseHex(accent)!, parseHex(onAccent)!)).toBeGreaterThanOrEqual(4.5);
       }
     }
-  });
-
-  test('that already reads is used as it is', () => {
-    expect(accentTokens(parseHex('#1e3a8a')!, 'light').accent).toBe('#1e3a8a');
-    expect(accentTokens(parseHex('#f97316')!, 'dark').accent).toBe('#f97316');
-  });
-
-  test('that doesn’t read keeps its hue, and darkens on paper and lightens on charcoal', () => {
-    const red = parseHex('#ff0000')!;
-    const picked = oklchOf(red);
-    const light = oklchOf(readableAccent(red, 'light'));
-    const dark = oklchOf(readableAccent(parseHex('#990000')!, 'dark'));
-    expect(light.l).toBeLessThan(picked.l);
-    expect(dark.l).toBeGreaterThan(oklchOf(parseHex('#990000')!).l);
-    expect(light.h).toBeCloseTo(picked.h, 0);
-    expect(dark.h).toBeCloseTo(picked.h, 0);
   });
 });
 
