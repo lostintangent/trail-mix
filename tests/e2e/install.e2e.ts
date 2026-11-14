@@ -2,7 +2,6 @@ import { expect } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BrowserContextOptions, Page } from 'playwright';
-import { ICONS } from '../../src/app/icons.ts';
 import { atRest } from '../atRest.ts';
 import { suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
@@ -59,22 +58,15 @@ test('Chromium can install Trail Mix, and asks for its manifest with the memberâ
   await context.close();
 });
 
-test('every icon is a PNG at its size, the touch icon included', async () => {
+// install.test.ts holds every icon to its size, and installing fetches the manifest's.
+test('the shell names a touch icon the Worker serves as a PNG', async () => {
   const context = await app.context();
   const page = await context.newPage();
   await page.goto(app.url, { waitUntil: 'load' });
   const touch = await page.locator('link[rel="apple-touch-icon"]').getAttribute('href');
   expect(touch).toBe('/icons/apple-touch-icon.png');
-  for (const { file, size } of ICONS) {
-    const response = await page.request.get(new URL(`/icons/${file}`, app.url).href);
-    const header = new DataView((await response.body()).buffer);
-    expect({
-      file,
-      type: response.headers()['content-type'],
-      width: header.getUint32(16),
-      height: header.getUint32(20),
-    }).toEqual({ file, type: 'image/png', width: size, height: size });
-  }
+  const response = await page.request.get(new URL(touch!, app.url).href);
+  expect(response.headers()['content-type']).toBe('image/png');
   await context.close();
 });
 
