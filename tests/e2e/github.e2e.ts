@@ -188,9 +188,11 @@ test("a bundle's actions act on every thread in it, and Undo brings them all bac
   // Shift+I reads every thread, and Undo leaves them unread again.
   await page.keyboard.press('Shift+I');
   await row.getByText('Unread', { exact: true }).waitFor({ state: 'detached' });
-  await expect(
-    threadTitles(page).first().getByRole('img', { name: 'Unread' }).count(),
-  ).resolves.toBe(0);
+  // The row changes at once, and its threads once the Mailroom has carried the bundle's command.
+  await threadTitles(page)
+    .first()
+    .getByRole('img', { name: 'Unread' })
+    .waitFor({ state: 'detached' });
   await undoButton(page).click();
   await row.getByText('Unread', { exact: true }).waitFor();
 
