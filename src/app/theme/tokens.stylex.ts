@@ -17,7 +17,9 @@ export const media = stylex.defineConsts({
 
 export const tm = stylex.defineVars({
   // Geometry
-  deskGap: '9px', // the gutter between sheets: Toy Box's, a card's 4px inset either side of a 1px rule
+  // The gutter between sheets: 9px of desk between their rings, which lie outside them, as Toy Box
+  // shows between its cards' borders, a card's 4px inset either side of a 1px rule.
+  deskGap: '11px',
   deskEdge: '8px', // the desk's margin around them and the sidebar, as in Toy Box
   // From the sidebar's edge to its lines, which puts its icons 20px in, as GistPad's are. A phone's
   // sidebar fills the screen, so it keeps a wider margin, and so does one built for a finger.

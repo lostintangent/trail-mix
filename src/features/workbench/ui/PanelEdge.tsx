@@ -111,14 +111,15 @@ const styles = stylex.create({
       position: 'absolute',
       insetBlock: 0,
     },
-    // Nothing shows at rest. On hover or drag a line of the accent runs down the gutter's middle,
-    // fading out toward both ends, as Toy Box's does, and twice as wide for the keyboard's focus.
+    // Nothing shows at rest. On hover or drag a line of the accent runs down the middle of the desk
+    // the gutter shows, fading out toward both ends, as Toy Box's does. For the keyboard's focus it
+    // is three pixels wide, as Toy Box rings its rule, so it stays centered on whole pixels.
     '::after': {
       content: '""',
       position: 'absolute',
       insetBlock: 0,
-      insetInlineStart: { default: '50%', ':focus-visible': 'calc(50% - 1px)' },
-      width: { default: '1px', ':focus-visible': '2px' },
+      marginInline: 'auto',
+      width: { default: '1px', ':focus-visible': '3px' },
       backgroundImage: tm.resizeAccent,
       opacity: { default: 0, ':hover': 1, ':focus-visible': 1 },
       transitionProperty: 'opacity',
@@ -134,13 +135,17 @@ const styles = stylex.create({
 });
 
 // Each gutter's edge is as wide as the gutter, and under a finger reaches a target's width about it.
+// A sheet's 1px ring lies outside it, in the gutter, so the line centers on the desk between the
+// rings: the list's alone after the sidebar, and one on each side between sheets.
 const gutters = stylex.create({
   desk: {
     width: tm.deskEdge,
     '::before': { insetInline: `calc((${tm.deskEdge} - ${tm.target}) / 2)` },
+    '::after': { insetInlineStart: 0, insetInlineEnd: '1px' },
   },
   sheets: {
     width: tm.deskGap,
     '::before': { insetInline: `calc((${tm.deskGap} - ${tm.target}) / 2)` },
+    '::after': { insetInlineStart: '1px', insetInlineEnd: '1px' },
   },
 });
