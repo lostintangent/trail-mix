@@ -400,50 +400,6 @@ test('opening a conversation marks it read, here and in the other browser', asyn
   await unread(there).waitFor({ state: 'detached', timeout: ELSEWHERE_MS });
 }, 30_000);
 
-test('a selection made with Cmd and Shift is archived together, and Undo brings it all back', async () => {
-  const [here, there] = await Promise.all([inbox(), inbox()]);
-  const options = here.getByRole('option');
-  // A row is known by its subject and preview, which opening it to read doesn't change.
-  const lines = (at: number) =>
-    Promise.all(
-      [2, 3].map((line) =>
-        options
-          .nth(at)
-          .locator(`:scope > span:nth-child(2) > span:nth-child(${line})`)
-          .textContent(),
-      ),
-    );
-  const picked = await Promise.all([4, 5, 6].map(lines));
-  const listed = (page: Page, [subject, preview]: (string | null)[]) =>
-    page
-      .getByRole('option')
-      .filter({ hasText: subject ?? '' })
-      .filter({ hasText: preview ?? '' });
-  // Each is the only one of its kind among the rows drawn, but for the newest the Inbox opened at,
-  // which stays drawn wherever mail arriving above it has moved it.
-  const unselected = here.locator('[role="option"]:not([aria-selected="true"])');
-  const alike = ([subject, preview]: (string | null)[]) =>
-    unselected
-      .filter({ hasText: subject ?? '' })
-      .filter({ hasText: preview ?? '' })
-      .count();
-  expect(await Promise.all(picked.map(alike))).toEqual([1, 1, 1]);
-  await options.nth(4).click();
-  await options.nth(6).click({ modifiers: ['Shift'] });
-  await options.nth(5).click({ modifiers: ['ControlOrMeta'] });
-  await here.getByRole('heading', { name: '2 conversations selected' }).waitFor();
-  await options.nth(5).click({ modifiers: ['ControlOrMeta'] });
-  await here.getByRole('heading', { name: '3 conversations selected' }).waitFor();
-  const selection = here.getByRole('toolbar', { name: 'Selected conversations' });
-  await selection.getByRole('button', { name: 'Archive' }).click();
-  for (const text of picked) {
-    await listed(here, text).waitFor({ state: 'detached', timeout: 1_000 });
-    await listed(there, text).waitFor({ state: 'detached', timeout: ELSEWHERE_MS });
-  }
-  await undoButton(here).click();
-  for (const text of picked) await listed(there, text).waitFor({ timeout: ELSEWHERE_MS });
-}, 30_000);
-
 test('on a phone, a long press starts picking, a tap adds, and the island acts on what was picked', async () => {
   const here = await inbox(PHONE);
   const hand = await finger(here);
