@@ -11,7 +11,8 @@ import {
 import type { MailProvider } from '../../providers/index.ts';
 import type { Page, PageAt } from '../client/contract.ts';
 import type { AccountBook } from './accounts.ts';
-import { matchedRow, pageAfter, type EnvelopeIndex } from './envelope-index.ts';
+import type { EnvelopeIndex } from './envelope-index.ts';
+import { matchedRow, pageAfter } from './lists.ts';
 import { report } from './report.ts';
 
 /**

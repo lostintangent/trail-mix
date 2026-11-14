@@ -14,7 +14,8 @@ import {
   type SyncEvent,
 } from '../../mail/core/index.ts';
 import type { Page, PageAt } from '../client/contract.ts';
-import { envelopeIndex, pageAfter, type EnvelopeIndex } from './envelope-index.ts';
+import { envelopeIndex, type EnvelopeIndex } from './envelope-index.ts';
+import { pageAfter } from './lists.ts';
 import { RESUMMARIZE, upgrade, type Sql, type SqlValue } from './schema.ts';
 import { testSql } from './test-sql.ts';
 
