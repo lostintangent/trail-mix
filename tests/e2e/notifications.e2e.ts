@@ -6,7 +6,7 @@ import type { BrowserContext, BrowserContextOptions, Page } from 'playwright';
 import { addressOf } from '../../src/features/mail/core/index.ts';
 import { readMessagePath } from '../../src/features/mailroom/client/urls.ts';
 import { pushOf, type Notice } from '../../src/features/notifications/core/index.ts';
-import { unreadableText } from './contrast.ts';
+import { unusable } from './usable.ts';
 import { suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 import { atRest } from '../atRest.ts';
@@ -188,25 +188,14 @@ test('the installed app turns notifications on and off in Settings, and the Mail
   await isOn(page, false);
 }, 60_000);
 
-test('on a phone, Settings’ gear and switch are 44-pixel targets, in both themes', async () => {
+test('on a phone, Settings’ switch turns on with a tap, in both themes', async () => {
   for (const colorScheme of ['light', 'dark'] as const) {
     const { page, context } = await installed(PHONE);
     await page.emulateMedia({ colorScheme });
     await page.getByRole('button', { name: 'Folders', exact: true }).click();
-    // The sidebar has slid into view.
-    await atRest(page);
-    const gear = (await page.getByRole('button', { name: 'Open settings' }).boundingBox())!;
-    expect(Math.min(gear.width, gear.height)).toBeGreaterThanOrEqual(44);
     await page.getByRole('button', { name: 'Open settings' }).click();
     await notifying(page).waitFor();
     await atRest(page);
-    // The switch takes a tap anywhere on its line, label and all.
-    expect(
-      await notifying(page).evaluate((toggle) => {
-        const { height } = (toggle.closest('label') ?? toggle).getBoundingClientRect();
-        return height;
-      }),
-    ).toBeGreaterThanOrEqual(44);
     await notifying(page).tap();
     await isOn(page, true);
     await rowsAgree(page);
@@ -410,7 +399,7 @@ async function rowsAgree(page: Page) {
 
 async function shot(page: Page, screen: string) {
   await page.screenshot({ path: join(SHOTS, `notifications-${screen}.png`) });
-  expect({ screen, unreadable: await unreadableText(page) }).toEqual({ screen, unreadable: [] });
+  expect({ screen, unusable: await unusable(page) }).toEqual({ screen, unusable: [] });
 }
 
 /** In the page: a PushManager that subscribes one device and keeps it in the page's storage. */

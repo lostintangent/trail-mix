@@ -2,7 +2,7 @@ import { afterEach, beforeAll, expect } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BrowserContextOptions, Page } from 'playwright';
-import { unreadableText } from './contrast.ts';
+import { unusable } from './usable.ts';
 import { suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 
@@ -143,7 +143,7 @@ const retrying = (page: Page) =>
 
 async function readable(page: Page, screen: string) {
   await page.screenshot({ path: join(SHOTS, `outbox-${screen}.png`) });
-  expect({ screen, unreadable: await unreadableText(page) }).toEqual({ screen, unreadable: [] });
+  expect({ screen, unusable: await unusable(page) }).toEqual({ screen, unusable: [] });
 }
 
 test('the countdown matches the time the Mailroom stored, and Undo leaves the draft unsent', async () => {

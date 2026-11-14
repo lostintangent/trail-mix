@@ -8,7 +8,7 @@ import { DESK_HEX } from '../../src/app/theme/palette.ts';
 import { accentRule, accentTokens } from '../../src/app/theme/readableAccent.ts';
 import { PAGE_SIZE } from '../../src/features/mailroom/client/contract.ts';
 import { REST_MS } from '../../src/features/reader/core/rest.ts';
-import { textContrasts, unreadableText } from './contrast.ts';
+import { textContrasts, unusable } from './usable.ts';
 import { suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 import { atRest } from '../atRest.ts';
@@ -125,9 +125,9 @@ for (const accent of ACCENTS) {
           await atRest(page);
           const shot = [size, colorScheme, screen, accent?.slice(1)].filter(Boolean).join('-');
           await page.screenshot({ path: join(SHOTS, `${shot}.png`) });
-          expect({ screen: shot, unreadable: await unreadableText(page) }).toEqual({
+          expect({ screen: shot, unusable: await unusable(page) }).toEqual({
             screen: shot,
-            unreadable: [],
+            unusable: [],
           });
         }
         expect(problems).toEqual([]);
@@ -1104,7 +1104,7 @@ test('a folder view keeps its own menu beside the title while the sidebar is fol
   ]);
   await page.keyboard.press('Escape');
   await page.screenshot({ path: join(SHOTS, 't75-folder-menu-folded.png') });
-  expect({ unreadable: await unreadableText(page) }).toEqual({ unreadable: [] });
+  expect({ unusable: await unusable(page) }).toEqual({ unusable: [] });
   expect(problems).toEqual([]);
   await context.close();
 }, 30_000);
@@ -1246,9 +1246,9 @@ test('a folder with nothing unread, listed only for its unread mail, says so in 
       .waitFor();
     await expect(toggle.getAttribute('aria-pressed')).resolves.toBe('true');
     await page.screenshot({ path: join(SHOTS, `t90-desktop-${colorScheme}-nothing-unread.png`) });
-    expect({ colorScheme, unreadable: await unreadableText(page) }).toEqual({
+    expect({ colorScheme, unusable: await unusable(page) }).toEqual({
       colorScheme,
-      unreadable: [],
+      unusable: [],
     });
   }
 
@@ -1263,7 +1263,7 @@ test('a folder with nothing unread, listed only for its unread mail, says so in 
 test('reader triage sits at the left of its bar, with place at the right, in both themes and panes', async () => {
   const screenshot = async (page: Page, name: string) => {
     await page.screenshot({ path: join(SHOTS, `${name}.png`) });
-    expect({ name, unreadable: await unreadableText(page) }).toEqual({ name, unreadable: [] });
+    expect({ name, unusable: await unusable(page) }).toEqual({ name, unusable: [] });
   };
   for (const colorScheme of THEMES) {
     const { context, page, problems } = await open({ ...SIZES.desktop, colorScheme });

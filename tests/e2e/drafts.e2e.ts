@@ -2,7 +2,7 @@ import { afterEach, beforeAll, expect } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BrowserContextOptions, Page, Route } from 'playwright';
-import { unreadableText } from './contrast.ts';
+import { unusable } from './usable.ts';
 import { suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 import { atRest } from '../atRest.ts';
@@ -197,7 +197,7 @@ async function slow(page: Page, query: 'folders' | 'outbox', ms: number) {
 
 async function readable(page: Page, screen: string) {
   await page.screenshot({ path: join(SHOTS, `drafts-${screen}.png`) });
-  expect({ screen, unreadable: await unreadableText(page) }).toEqual({ screen, unreadable: [] });
+  expect({ screen, unusable: await unusable(page) }).toEqual({ screen, unusable: [] });
 }
 
 test('a send undone leaves Drafts at the press, and comes back to it as it was', async () => {

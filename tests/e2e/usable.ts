@@ -1,10 +1,42 @@
 import type { Locator, Page } from 'playwright';
+import { atRest } from '../atRest.ts';
 
-/** Every visible text node whose contrast against what lies behind it falls under 4.5:1. */
-export async function unreadableText(page: Page): Promise<string[]> {
-  return (await textContrasts(page.locator('body')))
-    .filter(({ ratio }) => ratio < 4.5)
-    .map(({ text, ratio }) => `${ratio.toFixed(2)}:1 "${text.slice(0, 40)}"`);
+/**
+ * Everything on screen a member can't use, once it comes to rest: text whose contrast against what
+ * lies behind it falls under 4.5:1 and, under a finger, a target under 44 pixels.
+ */
+export async function unusable(page: Page): Promise<string[]> {
+  await atRest(page);
+  return [
+    ...(await textContrasts(page.locator('body')))
+      .filter(({ ratio }) => ratio < 4.5)
+      .map(({ text, ratio }) => `${ratio.toFixed(2)}:1 "${text.slice(0, 40)}"`),
+    ...(await smallTargets(page)),
+  ];
+}
+
+/**
+ * Each control a tap can reach whose target is under 44 pixels either way, when the pointer is
+ * coarse. A control's target is its label or, for a field, Astryx's box around it, which hands
+ * every tap on it to the field.
+ */
+function smallTargets(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    if (!matchMedia('(pointer: coarse)').matches) return [];
+    const controls = document.querySelectorAll(
+      'a[href], button, input, select, textarea, [role=button], [role=link], [role=switch], [role=checkbox], [role=radio], [role=tab], [role=option], [role=treeitem], [role=menuitem], [role=menuitemradio], [role=menuitemcheckbox]',
+    );
+    return [...controls].flatMap((control) => {
+      if (control.closest('[inert]')) return [];
+      const target = control.closest('label, .astryx-text-input') ?? control;
+      const { left, top, width, height } = target.getBoundingClientRect();
+      // Off screen, or under something else, nothing is tapped.
+      const tapped = document.elementFromPoint(left + width / 2, top + height / 2);
+      if (!tapped || !target.contains(tapped) || Math.min(width, height) >= 44) return [];
+      const name = control.getAttribute('aria-label') ?? control.textContent ?? '';
+      return [`${+width.toFixed(2)}×${+height.toFixed(2)} "${name.trim().slice(0, 40)}"`];
+    });
+  });
 }
 
 /** Each visible text node under `root`, in document order, with its contrast against what lies behind it. */

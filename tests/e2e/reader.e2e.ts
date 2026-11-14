@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { BrowserContextOptions, Locator, Page, Request, Route } from 'playwright';
 import { REST_MS } from '../../src/features/reader/core/rest.ts';
 import { bareSubject } from '../../src/features/reader/core/subject.ts';
-import { unreadableText } from './contrast.ts';
+import { unusable } from './usable.ts';
 import { suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 
@@ -57,7 +57,7 @@ const folder = (page: Page, account: string, name: string) =>
 
 async function readable(page: Page, screen: string) {
   await page.screenshot({ path: join(SHOTS, `reader-${screen}.png`) });
-  expect({ screen, unreadable: await unreadableText(page) }).toEqual({ screen, unreadable: [] });
+  expect({ screen, unusable: await unusable(page) }).toEqual({ screen, unusable: [] });
 }
 
 test('the line under the subject names the folder the conversation lies in', async () => {

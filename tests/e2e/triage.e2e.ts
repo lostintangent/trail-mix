@@ -2,7 +2,7 @@ import { afterEach, beforeAll, expect } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Page, Request, Route } from 'playwright';
-import { unreadableText } from './contrast.ts';
+import { unusable } from './usable.ts';
 import { suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 import { atRest } from '../atRest.ts';
@@ -648,10 +648,10 @@ test("a toast's Undo is its icon alone, ruled off from the close, and its toolti
         await here.getByRole('tooltip').filter({ hasText: 'Undo (Z)' }).waitFor();
       }
       await here.screenshot({ path: join(SHOTS, `toast-undo-${size}-${colorScheme}.png`) });
-      expect({ colorScheme, size, unreadable: await unreadableText(here) }).toEqual({
+      expect({ colorScheme, size, unusable: await unusable(here) }).toEqual({
         colorScheme,
         size,
-        unreadable: [],
+        unusable: [],
       });
       await undo.click();
       await target.waitFor({ timeout: ELSEWHERE_MS });

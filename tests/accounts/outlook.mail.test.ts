@@ -7,7 +7,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { BrowserContextOptions, Locator, Page, Response } from 'playwright';
-import { unreadableText } from '../e2e/contrast.ts';
+import { unusable } from '../e2e/usable.ts';
 import { atRest } from '../atRest.ts';
 import { suite } from '../e2e/suite.ts';
 import {
@@ -251,5 +251,5 @@ async function readable(page: Page, size: string, screen: string) {
   // A theme changes over 125 ms, and a screen read mid-change has colors from both.
   await atRest(page);
   await page.screenshot({ path: join(SHOTS, `outlook-${size}-${screen}.png`) });
-  expect({ screen, unreadable: await unreadableText(page) }).toEqual({ screen, unreadable: [] });
+  expect({ screen, unusable: await unusable(page) }).toEqual({ screen, unusable: [] });
 }

@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { BrowserContextOptions, Locator, Page } from 'playwright';
 import { PRESETS } from '../../src/features/providers/imap/core/index.ts';
-import { unreadableText } from '../e2e/contrast.ts';
+import { unusable } from '../e2e/usable.ts';
 import { suite } from '../e2e/suite.ts';
 import { caFile, count, empty, importInbox, ports, start, users } from '../mail-server/server.ts';
 
@@ -273,5 +273,5 @@ function smallTargets(within: Locator): Promise<string[]> {
 /** Saves the screen, and fails if any of its text falls under 4.5:1. */
 async function readable(page: Page, size: string, scheme: string, screen: string) {
   await page.screenshot({ path: join(SHOTS, `accounts-${size}-${scheme}-${screen}.png`) });
-  expect({ screen, unreadable: await unreadableText(page) }).toEqual({ screen, unreadable: [] });
+  expect({ screen, unusable: await unusable(page) }).toEqual({ screen, unusable: [] });
 }

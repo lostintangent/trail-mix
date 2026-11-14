@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BrowserContextOptions, Page } from 'playwright';
 import { cloudflareStandIn, STAND_IN_AUD } from '../cloudflare-stand-in.ts';
-import { unreadableText } from './contrast.ts';
+import { unusable } from './usable.ts';
 import { suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 
@@ -65,7 +65,7 @@ const row = (page: Page, email: string) =>
 
 async function readable(page: Page, screen: string) {
   await page.screenshot({ path: join(SHOTS, `members-${screen}.png`) });
-  expect({ screen, unreadable: await unreadableText(page) }).toEqual({ screen, unreadable: [] });
+  expect({ screen, unusable: await unusable(page) }).toEqual({ screen, unusable: [] });
 }
 
 test('the operator sees each member’s last sign-in, and what else the policy admits, in Settings', async () => {

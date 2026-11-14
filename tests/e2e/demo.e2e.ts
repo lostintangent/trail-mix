@@ -3,7 +3,7 @@ import { mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { toJSON } from 'seroval';
 import type { Page } from 'playwright';
-import { unreadableText } from './contrast.ts';
+import { unusable } from './usable.ts';
 import { checkDemo } from './demo-check.ts';
 import { PANELS } from '../../src/features/workbench/ui/panels.ts';
 import { VISITOR_SECONDS } from '../../src/server/access.ts';
@@ -311,9 +311,9 @@ test('a page load makes no Mailroom, and a script makes no more new visitors tha
         .waitFor({ timeout: 10_000 });
       await page.screenshot({ path: join(SHOTS, `${size}-${colorScheme}-demo-full.png`) });
       const screen = `${size} ${colorScheme} demo full`;
-      expect({ screen, unreadable: await unreadableText(page) }).toEqual({
+      expect({ screen, unusable: await unusable(page) }).toEqual({
         screen,
-        unreadable: [],
+        unusable: [],
       });
       await context.close();
     }

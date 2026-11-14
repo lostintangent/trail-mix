@@ -3,7 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium, webkit, type Locator, type Page } from 'playwright';
 import { SAVE_AFTER_MS, SAVE_AT_LEAST_EVERY_MS } from '../../src/features/composer/core/session.ts';
-import { unreadableText } from './contrast.ts';
+import { unusable } from './usable.ts';
 import { suite } from './suite.ts';
 import { atRest } from '../atRest.ts';
 import { mailIsIn } from '../mailIsIn.ts';
@@ -332,9 +332,9 @@ test('To completes from the people in the mail, by keys on a desktop and by a ta
     await page.emulateMedia({ colorScheme });
     // A theme changes over 125 ms, and a screen read mid-change has colors from both.
     await atRest(page);
-    expect({ colorScheme, unreadable: await unreadableText(page) }).toEqual({
+    expect({ colorScheme, unusable: await unusable(page) }).toEqual({
       colorScheme,
-      unreadable: [],
+      unusable: [],
     });
   }
   if (IS_PHONE) {

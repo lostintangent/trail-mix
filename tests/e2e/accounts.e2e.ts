@@ -2,7 +2,7 @@ import { afterEach, beforeAll, describe, expect } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BrowserContextOptions, Page } from 'playwright';
-import { unreadableText } from './contrast.ts';
+import { unusable } from './usable.ts';
 import { suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 import { atRest } from '../atRest.ts';
@@ -72,8 +72,8 @@ describe('The first-run screen', () => {
           ),
           // On a desktop in the desk's middle, and on a phone the whole screen.
           place,
-          unreadable: await unreadableText(page),
-        }).toEqual({ screen, workbench: false, place: true, unreadable: [] });
+          unusable: await unusable(page),
+        }).toEqual({ screen, workbench: false, place: true, unusable: [] });
         await page.close();
       }
     }
@@ -197,5 +197,5 @@ for (const [size, options] of Object.entries(SIZES)) {
 async function shown(page: Page, screen: string) {
   await atRest(page);
   await page.screenshot({ path: join(SHOTS, `accounts-${screen}.png`) });
-  expect({ screen, unreadable: await unreadableText(page) }).toEqual({ screen, unreadable: [] });
+  expect({ screen, unusable: await unusable(page) }).toEqual({ screen, unusable: [] });
 }

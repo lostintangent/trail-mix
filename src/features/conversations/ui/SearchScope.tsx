@@ -2,7 +2,7 @@ import { Link } from '@astryxdesign/core/Link';
 import { Spinner } from '@astryxdesign/core/Spinner';
 import { spacingVars, typeScaleVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
-import { tm } from '../../../app/theme/tokens.stylex.ts';
+import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { MATCHES_LISTED } from '../../mailroom/client/index.ts';
 
 export type SearchScopeProps = {
@@ -40,7 +40,7 @@ export function SearchScope({
       <span>
         {isLimited ? `The newest ${MATCHES_LISTED.toLocaleString('en')} matches` : 'Matches'} in
         people, subjects and previews.{' '}
-        <Link type="supporting" onClick={onSearchBodies}>
+        <Link type="supporting" onClick={onSearchBodies} xstyle={styles.bodies}>
           Search message bodies too
         </Link>
         , which is slower.
@@ -57,5 +57,10 @@ const styles = stylex.create({
     margin: 0,
     color: tm.textQuiet,
     fontSize: typeScaleVars['--text-supporting-size'],
+  },
+  // A finger's target that takes no room in its line, so the sentence lies as it did.
+  bodies: {
+    minHeight: { default: null, [media.coarse]: tm.target },
+    marginBlock: { default: null, [media.coarse]: `calc(${tm.target} / -2)` },
   },
 });

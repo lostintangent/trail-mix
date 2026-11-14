@@ -6,7 +6,7 @@
 import { afterEach, describe, expect } from 'bun:test';
 import { join } from 'node:path';
 import type { BrowserContextOptions, Page, Route } from 'playwright';
-import { unreadableText } from './contrast.ts';
+import { unusable } from './usable.ts';
 import { suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 import { atRest } from '../atRest.ts';
@@ -749,5 +749,5 @@ async function readable(page: Page, size: string, screen: string) {
   // Running airmail never finishes, so only what ends is waited for.
   await atRest(page);
   await page.screenshot({ path: join(SHOTS, `reply-${size}-${screen}.png`) });
-  expect({ screen, unreadable: await unreadableText(page) }).toEqual({ screen, unreadable: [] });
+  expect({ screen, unusable: await unusable(page) }).toEqual({ screen, unusable: [] });
 }

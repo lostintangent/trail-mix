@@ -2,7 +2,7 @@ import { afterEach, beforeAll, expect } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BrowserContextOptions, Page, Route } from 'playwright';
-import { unreadableText } from './contrast.ts';
+import { unusable } from './usable.ts';
 import { suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 
@@ -59,7 +59,7 @@ async function holdCommands(page: Page): Promise<() => Promise<void>> {
 
 async function readable(page: Page, screen: string) {
   await page.screenshot({ path: join(SHOTS, `folders-${screen}.png`) });
-  expect({ screen, unreadable: await unreadableText(page) }).toEqual({ screen, unreadable: [] });
+  expect({ screen, unusable: await unusable(page) }).toEqual({ screen, unusable: [] });
 }
 
 test('folders are made, nested and renamed in place, and show before the server answers', async () => {
@@ -168,10 +168,9 @@ test('a delete asks first with what goes, comes back with the server’s reason,
   await expect(folderRow(page, 'Toy Box').count()).resolves.toBe(0);
 }, 60_000);
 
-test('on a phone, folder controls are 44 pixels, and a folder is named in the sidebar', async () => {
+test('on a phone, a folder is named in the sidebar', async () => {
   const page = await open({ ...PHONE, colorScheme: 'light' });
   await page.getByRole('button', { name: 'Folders', exact: true }).click();
-  const more = page.getByRole('button', { name: 'More for Work' });
   await folderRow(page, 'Archive').click();
   const folderMenu = page.getByRole('button', { name: 'Folder', exact: true });
   await folderMenu.waitFor();
@@ -183,16 +182,6 @@ test('on a phone, folder controls are 44 pixels, and a folder is named in the si
   await field.waitFor();
   await expect(field.getAttribute('placeholder')).resolves.toBe('Folder name');
   await expect(field.evaluate((input) => !input.closest('[inert]'))).resolves.toBe(true);
-  const account = personal(page).getByRole('button', { name: /^Personal/ });
-  for (const control of [
-    more,
-    personal(page).getByRole('button', { name: 'More for Archive' }),
-    account,
-    field,
-  ]) {
-    const box = (await control.boundingBox())!;
-    expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(44);
-  }
   await readable(page, 'phone-light-naming');
   await field.fill('2026');
   await field.press('Enter');

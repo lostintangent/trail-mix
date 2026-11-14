@@ -2,7 +2,7 @@ import { afterEach, beforeAll, expect } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { BrowserContext, BrowserContextOptions, Locator, Page } from 'playwright';
-import { unreadableText } from './contrast.ts';
+import { unusable } from './usable.ts';
 import { suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 import { atRest } from '../atRest.ts';
@@ -152,7 +152,7 @@ function searchSays(page: Page) {
 
 async function readable(page: Page, screen: string) {
   await page.screenshot({ path: join(SHOTS, `sidebar-${screen}.png`) });
-  expect({ screen, unreadable: await unreadableText(page) }).toEqual({ screen, unreadable: [] });
+  expect({ screen, unusable: await unusable(page) }).toEqual({ screen, unusable: [] });
 }
 
 test('the sidebar folds to its rail and back by button and key, keeping every view, account and action in reach', async () => {
@@ -336,9 +336,6 @@ test('the foot holds the Settings gear, a rule and Trail Mix, and says nothing a
       });
       expect((await sidebar.getByRole('status').allTextContents()).join('')).toBe('');
       expect(await page.getByText(/Up to date|Checking for mail/).count()).toBe(0);
-      if (size === 'phone') {
-        expect(Math.min(gearBox!.width, gearBox!.height)).toBeGreaterThanOrEqual(44);
-      }
       await readable(page, `${size}-${colorScheme}-foot`);
       if (size === 'desktop') {
         // Folded, the rail keeps the gear where it was, with a rule over it and New message above
@@ -393,13 +390,6 @@ test('the foot holds the Settings gear, a rule and Trail Mix, and says nothing a
         .getByRole('heading', { name: 'Settings', level: 1 })
         .waitFor();
       await atRest(page);
-      if (size === 'phone') {
-        const swatch = await page.getByLabel('Accent color').evaluate((input) => {
-          const { width, height } = input.getBoundingClientRect();
-          return Math.min(width, height);
-        });
-        expect(swatch).toBeGreaterThanOrEqual(44);
-      }
       await readable(page, `${size}-${colorScheme}-settings`);
 
       // A Tab onto the swatch rings the color, whole, within what Settings shows.
@@ -698,19 +688,11 @@ test('accounts and folders fold by click and by key, count what’s unread insid
   await expect(folderRow(page, 'Toy Box').count()).resolves.toBe(0);
 }, 60_000);
 
-test('on a phone, the sidebar never folds, and its chevrons and menus are 44 pixels', async () => {
+test('on a phone, the sidebar never folds', async () => {
   const page = await open({ ...PHONE, colorScheme: 'light' });
   await page.getByRole('button', { name: 'Folders', exact: true }).click();
   await expect(page.getByRole('button', { name: /the sidebar$/ }).count()).resolves.toBe(0);
-  const chevron = personal(page).getByRole('button', { name: 'Fold Projects' });
-  for (const control of [
-    chevron,
-    personal(page).getByRole('button', { name: 'More for Projects' }),
-  ]) {
-    const box = (await control.boundingBox())!;
-    expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(44);
-  }
-  await chevron.click();
+  await personal(page).getByRole('button', { name: 'Fold Projects' }).click();
   await folderRow(page, 'Toy Box').waitFor({ state: 'detached' });
   await readable(page, 'phone-light-folded');
 }, 60_000);
