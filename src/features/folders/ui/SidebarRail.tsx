@@ -12,7 +12,7 @@ import { LaterTooltip } from '../../../shared/LaterTooltip.tsx';
 import { StampDot } from '../../../app/theme/StampDot.tsx';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, Folder, View } from '../../mail/core/index.ts';
-import { lift, troubleOf } from './Tree.tsx';
+import { lift, troubleOf } from './TreeLine.tsx';
 import { UNIFIED_VIEWS, type ViewCounts } from './views.ts';
 
 /**
