@@ -16,12 +16,12 @@ class CloudflareRefused extends Error {}
 type Application = { id: string; aud?: string; policies?: AccessPolicy[] };
 
 export function cloudflareApi({
-  base = CLOUDFLARE_API,
+  base,
   account,
   token,
   fetch: send = fetch,
 }: {
-  base?: string;
+  base: string;
   account: string;
   token: string;
   fetch?: typeof fetch;

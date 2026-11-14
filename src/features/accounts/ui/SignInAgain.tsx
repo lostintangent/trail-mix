@@ -28,7 +28,7 @@ export function SignInAgain({
   account: Account;
   vendor: string;
   /** Starts the sign-in at once, as the palette's command and the Outbox ask. */
-  isStarting?: boolean;
+  isStarting: boolean | undefined;
 }) {
   const queryClient = useQueryClient();
   const [signingIn, setSigningIn] = useState<SignIn>();

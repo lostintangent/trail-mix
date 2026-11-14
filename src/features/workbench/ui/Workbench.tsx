@@ -129,9 +129,6 @@ import {
 } from '../../composer/ui/index.ts';
 import { useComposing } from './useComposing.ts';
 
-/** No commands from outside the workbench. */
-const noCommands = (): readonly Command[] => [];
-
 /**
  * How many threads on each side of the one open are fetched, so a held J or K finds the next page
  * there before it reaches it.
@@ -229,7 +226,7 @@ export function Workbench({
   isFetching,
   onListShown,
   settings,
-  extraCommands = noCommands,
+  extraCommands,
   leaving,
 }: {
   /** Where the member is, as the address holds it: the view, and the conversation open in it. */
@@ -250,7 +247,7 @@ export function Workbench({
   /** Settings, which opens as a page in the reader's place, at its top or where it's asked to. */
   settings: (at: SettingsAt | undefined) => ReactNode;
   /** Commands from outside the workbench, such as the accent's, made with a way to open Settings. */
-  extraCommands?: (openSettings: (at?: SettingsAt) => void) => readonly Command[];
+  extraCommands: (openSettings: (at?: SettingsAt) => void) => readonly Command[];
   /** The sends this device follows, which the counts and the Drafts list read too. */
   leaving: LeavingSends;
 }) {
@@ -434,7 +431,6 @@ export function Workbench({
     conversationsQuery(view, { around: seeking ?? '' }, isUnreadOnly ? seeking : undefined),
   );
   if (seeking !== undefined && around.isDone) setSeeking(undefined);
-  const awaitsAround = around.awaits;
   const threadAround = useAround(
     seekingThread?.open,
     inBundle.threads && inBundle.places,
@@ -1098,7 +1094,7 @@ export function Workbench({
             : undefined,
       back: page
         ? closePage
-        : composing.compose
+        : compose
           ? closeComposer
           : thread !== undefined
             ? closeThread
@@ -1207,7 +1203,6 @@ export function Workbench({
     <Commands value={commands}>
       <SearchContext value={search}>
         <div {...stylex.props(styles.desk)}>
-          {/* On a phone, toasts rise above the island, where the pane's actions float. */}
           <Toasts layerInset={isPhone ? ABOVE_ISLAND : undefined} />
           <div
             {...stylex.props(
@@ -1288,7 +1283,7 @@ export function Workbench({
                 viewIn={view.in}
                 listKey={hashKey([view])}
                 conversations={
-                  (isFilling && conversations?.length === 0) || awaitsAround
+                  (isFilling && conversations?.length === 0) || around.awaits
                     ? undefined
                     : conversations
                 }

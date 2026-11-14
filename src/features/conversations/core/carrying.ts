@@ -109,7 +109,7 @@ export function bundleCommandFor(
 }
 
 /** What undoes a command: each moved message back to the folder it left, or each flag back. */
-export function undoOf(command: Command, moved: readonly Moved[] = []): Command[] {
+export function undoOf(command: Command, moved: readonly Moved[]): Command[] {
   if ('setFlags' in command) {
     const change = Object.fromEntries(
       Object.entries(command.change).map(([flag, value]) => [flag, !value]),

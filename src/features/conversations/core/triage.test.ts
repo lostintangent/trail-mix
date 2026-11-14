@@ -176,7 +176,7 @@ test('Undo of a read mark makes unread again only the messages it marked', () =>
   ];
   const command = commandFor({ do: 'read' }, inbox, [conversation], folders)!;
 
-  expect(undoOf(command)).toEqual([
+  expect(undoOf(command, [])).toEqual([
     { setFlags: 'setFlags' in command ? command.setFlags : [], change: { seen: false } },
   ]);
   expect(changeMessages(conversation, command).map(({ flags }) => flags.seen)).toEqual([

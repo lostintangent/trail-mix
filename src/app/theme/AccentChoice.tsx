@@ -23,8 +23,8 @@ export function AccentChoice({
 }: {
   accent: string | undefined;
   onChange: (color: string | undefined) => void;
-  id?: string;
-  describedBy?: string;
+  id: string;
+  describedBy: string;
 }) {
   const target = useRef<HTMLSpanElement>(null);
   return (

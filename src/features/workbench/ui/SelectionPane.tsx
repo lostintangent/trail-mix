@@ -26,7 +26,7 @@ export function SelectionPane({
   count: number;
   onClear: () => void;
   /** The actions for the selection, where the list's header doesn't show them. */
-  children?: ReactNode;
+  children: ReactNode;
 }) {
   return (
     <section aria-label="Selection" {...stylex.props(styles.sheet)}>
@@ -34,11 +34,9 @@ export function SelectionPane({
         <Heading level={1} xstyle={styles.count}>
           {count} conversations selected
         </Heading>
-        {children && (
-          <div role="toolbar" aria-label="Selected conversations" {...stylex.props(styles.bar)}>
-            {children}
-          </div>
-        )}
+        <div role="toolbar" aria-label="Selected conversations" {...stylex.props(styles.bar)}>
+          {children}
+        </div>
         <Button label="Clear selection" variant="ghost" onClick={onClear} />
       </div>
     </section>

@@ -116,46 +116,46 @@ export function ReaderPane({
    * Called each time the reader starts showing a conversation, which is what opening it means. A
    * conversation the selection passes on its way elsewhere is never shown.
    */
-  onShown?: (conversation: ConversationId) => void;
+  onShown: (conversation: ConversationId) => void;
   /**
    * What can be done to the conversation shown: in the reader's bar on a desktop, and on a phone
    * split between the bar at the top of the screen and the island at the bottom. The island, whose
    * Reply needs the conversation, waits for it.
    */
-  actions?: (acting: Acting, place: ActionsPlace) => ReactNode;
+  actions: (acting: Acting, place: ActionsPlace) => ReactNode;
   /** Where the conversation shown sits in the list, at the end of a desktop's bar. */
-  place?: (shown: ConversationId) => ReactNode;
+  place: (shown: ConversationId) => ReactNode;
   /** What can be done with one of its messages, as the reader's own. The same function each render. */
-  actionsFor?: (message: Message) => readonly Command[];
+  actionsFor: (message: Message) => readonly Command[];
   /** Keys pressed inside a message, which the window never hears. The same function each render. */
-  onMessageKey?: (event: KeyboardEvent) => void;
+  onMessageKey: (event: KeyboardEvent) => void;
   /**
    * The composer, while the member writes: docked under the conversation it answers, or filling
    * the sheet for a message of its own.
    */
-  writing?: { composer: ReactNode; place: 'docked' | 'filled' | 'over' };
+  writing: { composer: ReactNode; place: 'docked' | 'filled' | 'over' } | undefined;
   /** Drafts the reader leaves out, such as the one being written. */
-  hiding?: Hiding;
+  hiding: Hiding;
   /** The sends this device follows, each at the end of its conversation while it is on its way. */
-  leaving?: readonly Leaving[];
+  leaving: readonly Leaving[];
   /** Opens a draft in the conversation to go on writing it. */
-  onOpenDraft?: (draft: Message, conversation: Message[]) => void;
+  onOpenDraft: (draft: Message, conversation: Message[]) => void;
   /** A page that lies on the sheet in place of a conversation, such as an account's. */
-  page?: ReactNode;
+  page: ReactNode;
   /**
    * A conversation's row in the list, whose subject and actions show at once while the rest is on
    * its way.
    */
-  rowOf?: (id: ConversationId) => ConversationSummary | undefined;
+  rowOf: (id: ConversationId) => ConversationSummary | undefined;
   /** What lies on the sheet while no conversation is selected, as a bundle's threads do. */
-  sheet?: ReaderSheet;
+  sheet: ReaderSheet | undefined;
   /**
    * What the conversation was opened from, other than the list, as a bundle: a way back to it above
    * the conversation on a desktop, and on a phone what Back names, shorter, and goes to.
    */
-  backTo?: { label: string; short: string; go: () => void };
+  backTo: { label: string; short: string; go: () => void } | undefined;
   /** What the empty reader asks the member to choose, in the words of the list beside it. */
-  choose?: string;
+  choose: string | undefined;
   onBack: () => void;
 }) {
   const { shown: rested, isPassing } = useRestingSelection(selectedSheet?.id ?? selected);
@@ -181,7 +181,7 @@ export function ReaderPane({
     enabled: shown !== undefined,
     // A reply gone from the Outbox waits for its copy, which a lost hint can't keep from showing.
     refetchInterval: ({ state: { data } }) =>
-      shown && data && leavingIn(leaving ?? [], shown, data).some(isAwaitingCopy)
+      shown && data && leavingIn(leaving, shown, data).some(isAwaitingCopy)
         ? AWAITING_COPY_MS
         : false,
   });
@@ -194,7 +194,7 @@ export function ReaderPane({
   const isShowing = reading !== undefined;
   // Decided from the messages about to show, so the two always agree.
   const hidden = useMemo(
-    () => reading && hiding && hiddenIn(hiding, reading.id, reading.conversation),
+    () => reading && hiddenIn(hiding, reading.id, reading.conversation),
     [reading, hiding],
   );
   // Asked for and refused, or with no network asked for once in vain and waiting to ask again, as
@@ -214,11 +214,11 @@ export function ReaderPane({
   // Where it sits in the list is known before it arrives, so the bar stands still as it does.
   const placed = useMemo(
     () =>
-      shown !== undefined && (isShowing || isOpening || isUnopened) ? place?.(shown) : undefined,
+      shown !== undefined && (isShowing || isOpening || isUnopened) ? place(shown) : undefined,
     [shown, isShowing, isOpening, isUnopened, place],
   );
   // So are its actions, from its row, so the bar doesn't fill in as the conversation arrives.
-  const row = shown !== undefined && (isOpening || isUnopened) ? rowOf?.(shown) : undefined;
+  const row = shown !== undefined && (isOpening || isUnopened) ? rowOf(shown) : undefined;
   const acting = useMemo<Acting | undefined>(() => {
     if (reading) {
       const { id, account, conversation } = reading;
@@ -236,20 +236,20 @@ export function ReaderPane({
       : undefined;
   }, [reading, row, accounts]);
   // Made once for each conversation shown, so the moves of a held key pass them by.
-  const bar = useMemo(() => acting && actions?.(acting, 'bar'), [acting, actions]);
-  const top = useMemo(() => acting && actions?.(acting, 'top'), [acting, actions]);
+  const bar = useMemo(() => acting && actions(acting, 'bar'), [acting, actions]);
+  const top = useMemo(() => acting && actions(acting, 'top'), [acting, actions]);
   const island = useMemo(
-    () => acting?.conversation && actions?.(acting, 'island'),
+    () => acting?.conversation && actions(acting, 'island'),
     [acting, actions],
   );
   const openDraft = useMemo(
-    () => reading && onOpenDraft && ((draft: Message) => onOpenDraft(draft, reading.conversation)),
+    () => reading && ((draft: Message) => onOpenDraft(draft, reading.conversation)),
     [reading, onOpenDraft],
   );
   const isDocked = writing?.place === 'docked';
   // A page lies on the sheet as a new message's composer does, filling it.
   const isFilled = writing?.place === 'filled' || page !== undefined;
-  const announce = useEffectEvent((id: ConversationId) => onShown?.(id));
+  const announce = useEffectEvent((id: ConversationId) => onShown(id));
   // A conversation counts as shown once a frame has drawn it, so what that sets off, its read mark,
   // waits for that frame instead of holding up the key or click that opened it.
   useEffect(() => {
@@ -318,9 +318,9 @@ export function ReaderPane({
           {sheet.content(sheetScroller)}
         </div>
       ) : reading ? (
-        <div {...stylex.props(styles.scroll, actions && styles.underBar)}>
+        <div {...stylex.props(styles.scroll, styles.underBar)}>
           {crumbed}
-          <Suspense fallback={<ReaderSkeleton subject={headingOf(rowOf?.(reading.id))} />}>
+          <Suspense fallback={<ReaderSkeleton subject={headingOf(rowOf(reading.id))} />}>
             <Reader
               conversation={reading.conversation}
               account={reading.account}
@@ -339,15 +339,15 @@ export function ReaderPane({
           )}
         </div>
       ) : isOpening ? (
-        <div {...stylex.props(styles.scroll, actions && styles.underBar)}>
+        <div {...stylex.props(styles.scroll, styles.underBar)}>
           {crumbed}
-          <ReaderSkeleton subject={shown && headingOf(rowOf?.(shown))} />
+          <ReaderSkeleton subject={shown && headingOf(rowOf(shown))} />
         </div>
       ) : isUnopened ? (
-        <div {...stylex.props(styles.scroll, actions && styles.underBar)}>
+        <div {...stylex.props(styles.scroll, styles.underBar)}>
           {crumbed}
           <ConversationUnopened
-            subject={headingOf(rowOf?.(shown))}
+            subject={headingOf(rowOf(shown))}
             isOffline={isOffline}
             onTryAgain={() => void refetch()}
           />

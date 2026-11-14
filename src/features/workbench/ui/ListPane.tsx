@@ -49,7 +49,7 @@ export function ListPane({
   below,
   list,
   viewIn,
-  isUnreadOnly = false,
+  isUnreadOnly,
   listKey,
   conversations,
   isUpdating,
@@ -81,17 +81,17 @@ export function ListPane({
    * then may be old: a word, and more where there's room. The title matters more, so they give way
    * before it does, the more first, though the status still says all of them.
    */
-  offline?: { said: string; more?: string };
+  offline: { said: string; more?: string } | undefined;
   /** The one account the view holds, or nothing when it gathers every account. */
   scope: Account | undefined;
   /** What sits under the title, such as the search field on a phone and what a search covers. */
-  below?: ReactNode;
+  below: ReactNode;
   /** A list of the view's own in place of its conversations, as the Outbox lists its sends. */
-  list?: ReactNode;
+  list: ReactNode;
   /** What kind of view the list shows, which says what an empty list means. */
   viewIn: View['in'];
   /** Whether the list shows only the view's unread mail, and the conversation open. */
-  isUnreadOnly?: boolean;
+  isUnreadOnly: boolean;
   /** Names the view's list. Another list starts at its top. */
   listKey: string;
   /** The view's whole list, with places not yet fetched empty. Nothing until its first page arrives. */
@@ -101,7 +101,7 @@ export function ListPane({
   /** What a search matched, marked in each row. */
   marks: Marks;
   /** Each account's stamp color, by account id, where the list mixes accounts. */
-  stamps?: ReadonlyMap<string, StampColor>;
+  stamps: ReadonlyMap<string, StampColor> | undefined;
   /** The member's own addresses, lowercased. */
   selves: ReadonlySet<string>;
   selection: Selection;
@@ -111,7 +111,7 @@ export function ListPane({
   onPick: (id: ConversationId) => void;
   onSwipe: (id: ConversationId) => void;
   /** Asks for a conversation the member is about to open, before the click. */
-  onAhead?: (id: ConversationId, isPressed: boolean) => void;
+  onAhead: (id: ConversationId, isPressed: boolean) => void;
   /** While picking on a phone, what the island offers for the conversations picked. */
   picked: ReactNode;
   /** Says which rows the list shows, so the pages they lie on are fetched. */
@@ -120,9 +120,9 @@ export function ListPane({
   onExpand: () => void;
   onShowFolders: () => void;
   /** On a phone, what the island holds after the way to the folders: search, then Write. */
-  island?: ReactNode;
+  island: ReactNode;
   /** What can be done to the view, at the header's end: a filter, and a folder's own menu. */
-  actions?: ReactNode;
+  actions: ReactNode;
 }) {
   const titleId = useId();
   if (isCollapsed) {
@@ -180,7 +180,7 @@ export function ListPane({
           </span>
         )}
       </header>
-      {below && <div {...stylex.props(styles.below)}>{below}</div>}
+      <div {...stylex.props(styles.below)}>{below}</div>
       <div {...stylex.props(styles.sheet, !list && conversations?.length === 0 && styles.empty)}>
         {list ? (
           list
@@ -211,7 +211,7 @@ export function ListPane({
       {isPicking ? (
         <PhoneIsland label="Picked conversations">{picked}</PhoneIsland>
       ) : (
-        <PhoneIsland label="Mailbox actions" spans={island !== undefined}>
+        <PhoneIsland label="Mailbox actions" spans>
           <FoldersButton onClick={onShowFolders} />
           {island}
         </PhoneIsland>

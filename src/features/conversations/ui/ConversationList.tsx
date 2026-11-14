@@ -52,9 +52,6 @@ import { formatListDate } from './dates.ts';
 import { BundleChips } from './github.tsx';
 import { Marked } from './search.tsx';
 
-/** A list that shows no search. */
-const NO_MARKS: Marks = [];
-
 /** A row's height before the list is first laid out: three lines of text and the row's padding. */
 const FIRST_GUESS = 72;
 
@@ -91,12 +88,12 @@ export function ConversationList({
   label,
   listKey,
   conversations,
-  marks = NO_MARKS,
-  isUpdating = false,
+  marks,
+  isUpdating,
   stamps,
   selves,
   selection,
-  isPicking = false,
+  isPicking,
   onSelect,
   onLongPress,
   onPick,
@@ -110,26 +107,26 @@ export function ConversationList({
   /** Every row in the list, with those whose page hasn't arrived yet empty. */
   conversations: Listed<ListItem>;
   /** What a search matched, marked in each row. The same while the search stays the same. */
-  marks?: Marks;
+  marks: Marks;
   /** Whether newer rows are on their way, as while a search is typed. */
-  isUpdating?: boolean;
+  isUpdating: boolean;
   /** Each account's stamp color, by account id, where the list mixes accounts. Elsewhere none shows. */
-  stamps?: ReadonlyMap<string, StampColor>;
+  stamps: ReadonlyMap<string, StampColor> | undefined;
   /** The member's own addresses, lowercased, whom a row passes over for the others in it. */
   selves: ReadonlySet<string>;
   selection: Selection;
   /** Whether a tap adds a row to the selection, as after a long press, instead of opening it. */
-  isPicking?: boolean;
+  isPicking: boolean;
   onSelect: (id: ConversationId, by: SelectBy) => void;
-  onLongPress?: (id: ConversationId) => void;
+  onLongPress: (id: ConversationId) => void;
   /** Picks a row, or lets it go while picking, as a finger tapping its avatar does. */
-  onPick?: (id: ConversationId) => void;
-  onSwipe?: (id: ConversationId) => void;
+  onPick: (id: ConversationId) => void;
+  onSwipe: (id: ConversationId) => void;
   /**
    * Called as a conversation is about to be opened, ahead of the click: once the pointer rests on
    * its row, and again with `isPressed` as a mouse or pen presses it. The same function each render.
    */
-  onAhead?: (id: ConversationId, isPressed: boolean) => void;
+  onAhead: (id: ConversationId, isPressed: boolean) => void;
   /**
    * Says which rows the list shows: from the first to the last in sight, with some to spare either
    * side, and the selected one, which stays drawn out of sight.
@@ -358,18 +355,21 @@ const Row = memo(function Row({
   isKeyboardFocused: boolean;
   isPicking: boolean;
   onSelect: (id: ConversationId, by: SelectBy) => void;
-  onLongPress: ((id: ConversationId) => void) | undefined;
-  onPick: ((id: ConversationId) => void) | undefined;
-  onSwipe: ((id: ConversationId) => void) | undefined;
-  onAhead: ((id: ConversationId, isPressed: boolean) => void) | undefined;
+  onLongPress: (id: ConversationId) => void;
+  onPick: (id: ConversationId) => void;
+  onSwipe: (id: ConversationId) => void;
+  onAhead: (id: ConversationId, isPressed: boolean) => void;
 }) {
   const people = isBundle(item) ? undefined : peopleOf(item, selves);
   // A bundle leads with GitHub's picture, which its newest conversation names.
   const name = people ? (people.face ? people.face.name || people.face.email : '') : 'GitHub';
   // A finger that taps the avatar picks the row instead of opening it.
   const pointer = useRef('');
-  const touch = useTouch(() => onLongPress?.(item.id), onSwipe && (() => onSwipe(item.id)));
-  const ahead = useAhead((isPressed) => onAhead?.(item.id, isPressed));
+  const touch = useTouch(
+    () => onLongPress(item.id),
+    () => onSwipe(item.id),
+  );
+  const ahead = useAhead((isPressed) => onAhead(item.id, isPressed));
   const select = (event: MouseEvent) => {
     if (touch.tookClick()) return;
     const by: SelectBy = event.shiftKey
@@ -404,7 +404,7 @@ const Row = memo(function Row({
       <span
         onPointerDown={(event) => (pointer.current = event.pointerType)}
         onClick={(event) => {
-          if (pointer.current !== 'touch' || !onPick) return;
+          if (pointer.current !== 'touch') return;
           event.stopPropagation();
           if (!touch.tookClick()) onPick(item.id);
         }}
@@ -607,7 +607,7 @@ const REST_MS = 150;
  * it, or else slides back. Moved up or down first, it scrolls the list as usual. After a long press
  * or a swipe, the click that ends it isn't a click, and a touch screen's context menu doesn't open.
  */
-function useTouch(onLongPress: () => void, onSwipe: (() => void) | undefined) {
+function useTouch(onLongPress: () => void, onSwipe: () => void) {
   const gesture = useRef<{
     x: number;
     y: number;
@@ -625,7 +625,7 @@ function useTouch(onLongPress: () => void, onSwipe: (() => void) | undefined) {
     end();
     if (!at?.isSwiping) return;
     isClickTaken.current = true;
-    if (canArchive && at.x - event.clientX > at.row.offsetWidth * SWIPE_SHARE) onSwipe?.();
+    if (canArchive && at.x - event.clientX > at.row.offsetWidth * SWIPE_SHARE) onSwipe();
     slideBack(at.row);
   };
   return {
@@ -659,7 +659,7 @@ function useTouch(onLongPress: () => void, onSwipe: (() => void) | undefined) {
         if (!at.isSwiping) {
           if (Math.hypot(dx, dy) <= LONG_PRESS_SLOP) return;
           clearTimeout(at.timer);
-          if (!onSwipe || Math.abs(dx) <= Math.abs(dy) || dx > 0) return end();
+          if (Math.abs(dx) <= Math.abs(dy) || dx > 0) return end();
           at.isSwiping = true;
           at.row.setPointerCapture(event.pointerId);
           at.row.classList.add(...classesOf(swiping.lifted));

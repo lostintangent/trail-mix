@@ -32,13 +32,13 @@ const FIRST_PAGE: readonly number[] = [0];
 export function useConversations(
   view: View,
   {
-    enabled = true,
+    enabled,
     keep,
   }: {
-    enabled?: boolean;
+    enabled: boolean;
     /** The conversation or bundle open in the list. */
-    keep?: ConversationId | undefined;
-  } = {},
+    keep: ConversationId | undefined;
+  },
 ): {
   conversations: Listed<ListItem> | undefined;
   /** Whether a page the list shows is on its way. */

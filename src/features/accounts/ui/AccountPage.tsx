@@ -32,7 +32,7 @@ export type AccountPageOf =
 export function AccountPage({
   page,
   accounts,
-  isVisitor = false,
+  isVisitor,
   onClose,
   onRemove,
   onErase,
@@ -40,7 +40,7 @@ export function AccountPage({
   page: AccountPageOf;
   accounts: readonly Account[];
   /** Whether this is a visitor's Mailroom on the public demo. */
-  isVisitor?: boolean;
+  isVisitor: boolean;
   onClose: () => void;
   onRemove: (account: Account) => void;
   /** Asks first, then erases everything Trail Mix holds for the member. */

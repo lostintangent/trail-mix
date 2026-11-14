@@ -41,13 +41,13 @@ export function EditAccount({
   account,
   onDone,
   onRemove,
-  keeps = false,
+  keeps,
 }: {
   account: Account;
   onDone: () => void;
   onRemove: () => void;
   /** Whether the Mailroom keeps its accounts, as a demo visitor's does, so none is removed. */
-  keeps?: boolean;
+  keeps: boolean;
 }) {
   const queryClient = useQueryClient();
   const [kept, setKept] = useState<Kept>(() => ({
