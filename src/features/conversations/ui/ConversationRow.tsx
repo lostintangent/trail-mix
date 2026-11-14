@@ -2,7 +2,6 @@ import { Icon } from '@astryxdesign/core/Icon';
 import { Skeleton } from '@astryxdesign/core/Skeleton';
 import {
   colorVars,
-  focusVars,
   fontWeightVars,
   radiusVars,
   spacingVars,
@@ -15,7 +14,7 @@ import { Paperclip, Star } from 'lucide-react';
 import { memo, useEffect, useRef, type MouseEvent, type PointerEvent, type RefObject } from 'react';
 import { pendingStyles, TextSkeleton } from '../../../app/theme/Pending.tsx';
 import { SenderAvatar } from '../../../app/theme/SenderAvatar.tsx';
-import { media, tm } from '../../../app/theme/tokens.stylex.ts';
+import { focusRing, media, tm } from '../../../app/theme/tokens.stylex.ts';
 import {
   isBundle,
   type BundleSummary,
@@ -402,10 +401,10 @@ const styles = stylex.create({
   // The keyboard's active descendant gets the same focus ring as the folder tree's focused line.
   keyboardFocused: {
     outline: {
-      default: `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`,
+      default: focusRing.line,
       [media.forcedColors]: '2px solid Highlight',
     },
-    outlineOffset: '-2px',
+    outlineOffset: focusRing.inside,
   },
   dot: {
     flexShrink: 0,

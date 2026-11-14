@@ -2,7 +2,6 @@ import { Icon } from '@astryxdesign/core/Icon';
 import { IconButton } from '@astryxdesign/core/IconButton';
 import {
   colorVars,
-  focusVars,
   fontWeightVars,
   spacingVars,
   typeScaleVars,
@@ -13,7 +12,7 @@ import { ExternalLink } from 'lucide-react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { pendingStyles } from '../../../app/theme/Pending.tsx';
-import { media, tm } from '../../../app/theme/tokens.stylex.ts';
+import { focusRing, media, tm } from '../../../app/theme/tokens.stylex.ts';
 import {
   Chip,
   factsOf,
@@ -269,8 +268,8 @@ const styles = stylex.create({
       borderRadius: tm.sheetRadius,
     },
     ':focus-visible::after': {
-      outline: `${focusVars['--focus-outline-width']} ${focusVars['--focus-outline-style']} ${focusVars['--focus-outline-color']}`,
-      outlineOffset: focusVars['--focus-outline-offset'],
+      outline: focusRing.line,
+      outlineOffset: focusRing.outside,
     },
   },
   unread: {
