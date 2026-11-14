@@ -7,6 +7,7 @@ export {
   type Selection,
 } from './core/selection.ts';
 export { rowChange, type Action } from './core/triage.ts';
+export { listsUnreadOnly, unreadFilter } from './core/unread.ts';
 export { ConversationList, ConversationListSkeleton } from './ui/ConversationList.tsx';
 export { preloadTriageMenus, TriageActions } from './ui/TriageActions.tsx';
 export { useTriage } from './ui/useTriage.tsx';

@@ -11,7 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import type { ConversationId, ListItem, View } from '../../mail/core/index.ts';
 import { conversationsQuery, PAGE_SIZE, type Page } from '../../mailroom/client/index.ts';
 import { listOf, pagesCovering, type Listed } from '../core/pages.ts';
-import { unreadOnly } from '../core/triage.ts';
+import { listsUnreadOnly, unreadOnly } from '../core/unread.ts';
 import { listKeyOf, useTriagedList, type ListOf } from './overlays.ts';
 
 /**
@@ -47,7 +47,7 @@ export function useConversations(
   /** Says which rows the list shows: from `first` to `last`, and the one at `selected`, if any. */
   show: Show;
 } {
-  const isUnread = 'unread' in view && view.unread === true;
+  const isUnread = listsUnreadOnly(view);
   const kept = isUnread ? keep : undefined;
   const first = useQuery({
     ...conversationsQuery(view, 0, kept),

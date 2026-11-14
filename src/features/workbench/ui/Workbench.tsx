@@ -78,6 +78,7 @@ import {
   gitHubCommand,
   idsIn,
   isSameSelection,
+  listsUnreadOnly,
   NOTHING_SELECTED,
   neighbors,
   rowChange,
@@ -88,6 +89,7 @@ import {
   selectOnly,
   TriageActions,
   triageCommands,
+  unreadFilter,
   useAround,
   useBundle,
   useSearch,
@@ -352,22 +354,16 @@ export function Workbench({
     },
   });
   const { search, marks, searchBodies, returnTo } = useSearch(view, onViewChange);
-  // A folder or the unified Inbox may list only its unread mail, offered while it has some. The
-  // conversation open stays open, and the list keeps it while it is. A search offers it for the
-  // view it began from, since the palette's field goes back there before it runs a command.
-  const isUnreadOnly = 'unread' in view && view.unread === true;
-  const listed = view.in === 'search' ? returnTo : view;
-  const isListedUnreadOnly = 'unread' in listed && listed.unread === true;
-  const listedUnread =
-    listed === view ? unread : describeView(listed, accounts, folders, counts).unread;
-  const unreadOnly =
-    (listed.in === 'folder' || listed.in === 'inbox') &&
-    (isListedUnreadOnly || (listedUnread ?? 0) > 0)
-      ? {
-          isOn: isListedUnreadOnly,
-          toggle: () => onViewChange(listing(listed, !isListedUnreadOnly), 'replace'),
-        }
-      : undefined;
+  // A folder or the unified Inbox may list only its unread mail. The conversation open stays open,
+  // and the list keeps it while it is.
+  const isUnreadOnly = listsUnreadOnly(view);
+  const filter = unreadFilter(view, returnTo, (listed) =>
+    listed === view ? unread : describeView(listed, accounts, folders, counts).unread,
+  );
+  const unreadToggle = filter && {
+    isOn: filter.isOn,
+    toggle: () => onViewChange(filter.turnsTo, 'replace'),
+  };
   // On a desktop New message and the search field top the sidebar. Folded to its rail, New message
   // leads the rail and the field sits above the list, as it does on a phone.
   const isFieldInSidebar = !isPhone && !sidebar.isCollapsed;
@@ -1102,7 +1098,7 @@ export function Workbench({
       // While a send can still be taken back, Undo takes it back first.
       undo: outbox.undoSend ?? (canUndo ? undoLast : undefined),
       focusSearch,
-      unread: unreadOnly,
+      unread: unreadToggle,
       fold: isPhone
         ? undefined
         : {
@@ -1437,14 +1433,6 @@ const opensNewest = (view: View, isPhone: boolean) => !isPhone && view.in !== 'o
 /** A selection of the one conversation an address opens, or of none. */
 const openOnly = (open: ConversationId | undefined): Selection =>
   open === undefined ? NOTHING_SELECTED : selectOnly(open);
-
-/** A folder's or the unified Inbox's view, listing only its unread mail or all of it. */
-function listing(view: View & { in: 'folder' | 'inbox' }, unreadOnly: boolean): View {
-  const unread = unreadOnly ? ({ unread: true } as const) : {};
-  return view.in === 'folder'
-    ? { in: 'folder', folder: view.folder, ...unread }
-    : { in: 'inbox', ...unread };
-}
 
 const NO_PLACES: ReadonlyMap<ConversationId, number> = new Map();
 

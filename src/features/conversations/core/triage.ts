@@ -63,19 +63,6 @@ export function changeRows<Row extends { id: ConversationId }>(
 }
 
 /**
- * A list of unread mail as it shows ahead of the Mailroom's: its unread rows, and the one `keep`
- * names whether or not it is, so a conversation read while it's open stays until the member leaves
- * it. Places not yet fetched stay as they are.
- */
-export function unreadOnly<Row extends { id: ConversationId; unread: number }>(
-  rows: Listed<Row>,
-  keep: ConversationId | undefined,
-): Listed<Row> {
-  const shown = rows.filter((row) => !row || row.unread > 0 || row.id === keep);
-  return shown.length === rows.length ? rows : shown;
-}
-
-/**
  * A list's rows with some conversations' earlier rows put back, as an Undo or a refusal shows them:
  * a row still listed takes its earlier self, and a row that left returns where the Mailroom lists
  * it, newest first, and by id, highest first, among rows of one date. Among places not yet fetched,
