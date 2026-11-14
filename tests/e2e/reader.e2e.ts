@@ -95,7 +95,7 @@ test('each message answers and shows the source of its own, and the palette the 
   const earlierName = senders.find((name) => ![newestName, 'You', 'Draft'].includes(name))!;
 
   // R answers the newest message, and the arrow on an earlier one answers that one.
-  const to = page.getByRole('region', { name: 'Reply' }).getByRole('textbox', { name: 'To' });
+  const to = page.getByRole('region', { name: 'Reply' }).getByRole('combobox', { name: 'To' });
   const answered = async () => {
     const value = await to.inputValue();
     await page.keyboard.press('Escape');

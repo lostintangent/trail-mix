@@ -86,7 +86,7 @@ test('mail that arrives while the list is scrolled down moves nothing in sight, 
   const subject = `Arrived while scrolled down ${Date.now()}`;
   await page.keyboard.press('c');
   const composer = page.locator('section[aria-label="New message"]');
-  await composer.getByRole('textbox', { name: 'To' }).fill('sam@trailmix.test');
+  await composer.getByRole('combobox', { name: 'To' }).fill('sam@trailmix.test');
   await composer.getByRole('textbox', { name: 'Subject' }).fill(subject);
   await page.getByRole('status').filter({ hasText: 'Saved to Drafts' }).waitFor();
   await page.getByRole('button', { name: 'Send', exact: true }).filter({ visible: true }).click();

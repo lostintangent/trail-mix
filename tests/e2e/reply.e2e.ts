@@ -119,7 +119,7 @@ for (const [size, options] of Object.entries(SIZES)) {
       await editor.waitFor({ timeout: SLOW_MS / 2 });
       expect(await reply.getByText('Opening…').count()).toBe(0);
       expect(await editor.innerText()).toBe('Count me in.');
-      const to = reply.getByRole('textbox', { name: 'To' });
+      const to = reply.getByRole('combobox', { name: 'To' });
       expect(await to.inputValue()).not.toContain(LIST);
       // Once the parent says, the reply goes to the list, and so does the draft that will be sent.
       await savedToSender;
@@ -216,7 +216,7 @@ for (const [size, options] of Object.entries(SIZES)) {
       );
       await open(page);
       await page.keyboard.press('r');
-      const to = composer(page).getByRole('textbox', { name: 'To' });
+      const to = composer(page).getByRole('combobox', { name: 'To' });
       await to.fill('kwame@example.net');
       await bodyCame;
       await painted(page);
@@ -483,7 +483,7 @@ for (const [size, options] of Object.entries(SIZES)) {
       await page.keyboard.press('r');
       const reply = composer(page);
       // The demo's server turns away the first try of each message to unreachable.example.
-      await reply.getByRole('textbox', { name: 'To' }).fill('rae@unreachable.example');
+      await reply.getByRole('combobox', { name: 'To' }).fill('rae@unreachable.example');
       await reply.getByRole('textbox', { name: 'Reply' }).click();
       const text = 'This one won’t get through.';
       await page.keyboard.type(text);

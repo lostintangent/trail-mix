@@ -231,7 +231,7 @@ test('offline, a conversation never opened says it opens once online, and Send k
   // written stays.
   await page.keyboard.press('c');
   const composer = page.getByRole('region', { name: 'New message' });
-  await composer.getByRole('textbox', { name: 'To' }).fill('sam@trailmix.test');
+  await composer.getByRole('combobox', { name: 'To' }).fill('sam@trailmix.test');
   await composer.getByRole('textbox', { name: 'Subject' }).fill('Written offline');
   const message = composer.getByRole('textbox', { name: 'Message' });
   await message.fill('Kept until the network is back.');

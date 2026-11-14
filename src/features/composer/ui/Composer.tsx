@@ -51,6 +51,7 @@ import {
   type Attached,
   type Writing,
 } from '../core/session.ts';
+import { AddressInput } from './AddressInput.tsx';
 import { Editor, type EditorProps } from './Editor.tsx';
 import { ComposerSkeleton, isDocked, Over, sheetStyles } from './sheet.tsx';
 import { startDrafting, type Drafting } from './drafting.ts';
@@ -698,7 +699,10 @@ function FilePicker({
   );
 }
 
-/** One line of the header: a label and what the member types beside it. */
+/**
+ * One line of the header: a label and what the member types beside it, which completes addresses
+ * in To, Cc and Bcc.
+ */
 function Field({
   label,
   value,
@@ -713,14 +717,23 @@ function Field({
   return (
     <label {...stylex.props(styles.field)}>
       <span {...stylex.props(styles.label)}>{label}</span>
-      <input
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        autoComplete="off"
-        autoFocus={isFocused}
-        spellCheck={label === 'Subject'}
-        {...stylex.props(styles.input)}
-      />
+      {label === 'Subject' ? (
+        <input
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          autoComplete="off"
+          autoFocus={isFocused}
+          spellCheck
+          {...stylex.props(styles.input)}
+        />
+      ) : (
+        <AddressInput
+          value={value}
+          onChange={onChange}
+          isFocused={isFocused}
+          xstyle={styles.input}
+        />
+      )}
     </label>
   );
 }

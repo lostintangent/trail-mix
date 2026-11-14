@@ -3,7 +3,9 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { chromium, webkit, type Locator, type Page } from 'playwright';
 import { SAVE_AFTER_MS, SAVE_AT_LEAST_EVERY_MS } from '../../src/features/composer/core/session.ts';
+import { unreadableText } from './contrast.ts';
 import { suite } from './suite.ts';
+import { atRest } from '../atRest.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 
 /**
@@ -230,7 +232,7 @@ test('a new message sent counts down in a toast, since it has no conversation on
   const page = await inbox();
   await page.keyboard.press('c');
   const composer = composerNamed(page, 'New message');
-  await composer.getByRole('textbox', { name: 'To' }).fill('sam@trailmix.test');
+  await composer.getByRole('combobox', { name: 'To' }).fill('sam@trailmix.test');
   await composer.getByRole('textbox', { name: 'Subject' }).fill('Trailhead at eight');
   await composer.getByRole('textbox', { name: 'Message' }).click();
   await page.keyboard.type('Bring the map.');
@@ -244,6 +246,57 @@ test('a new message sent counts down in a toast, since it has no conversation on
   await expect(
     composer.getByRole('textbox', { name: 'Message' }).textContent({ timeout: 10_000 }),
   ).resolves.toBe('Bring the map.');
+}, 60_000);
+
+test('To completes from the people in the mail, by keys on a desktop and by a tap on a phone', async () => {
+  const page = await inbox();
+  await page.keyboard.press('c');
+  const composer = composerNamed(page, 'New message');
+  const to = composer.getByRole('combobox', { name: 'To' });
+  const people = page.getByRole('listbox', { name: 'People' });
+  const person = (name: string) => people.getByRole('option', { name: new RegExp(`^${name}`) });
+  await to.click();
+
+  await page.keyboard.type('the');
+  await person('Theo Lindqvist').waitFor();
+  await expect(to.getAttribute('aria-expanded')).resolves.toBe('true');
+  if (IS_PHONE) {
+    // Every person is a finger's target, and a tap picks one and leaves the keyboard up.
+    expect((await person('Theo Lindqvist').boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    await person('Theo Lindqvist').tap();
+  } else {
+    await page.keyboard.press('Enter');
+  }
+  await people.waitFor({ state: 'hidden' });
+  await expect(to.inputValue()).resolves.toBe('Theo Lindqvist <theo@example.com>, ');
+
+  // What's typed next completes the next address, and the list reads in both themes.
+  await page.keyboard.type('pri');
+  await person('Priya Raman').waitFor();
+  for (const colorScheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme });
+    // A theme changes over 125 ms, and a screen read mid-change has colors from both.
+    await atRest(page);
+    expect({ colorScheme, unreadable: await unreadableText(page) }).toEqual({
+      colorScheme,
+      unreadable: [],
+    });
+  }
+  if (IS_PHONE) {
+    await person('Priya Raman').tap();
+  } else {
+    // Escape closes the list and leaves the composer open, and typing on opens it again.
+    await page.keyboard.press('Escape');
+    await people.waitFor({ state: 'hidden' });
+    await page.keyboard.type('y');
+    await person('Priya Raman').waitFor();
+    // Tab picks too, and keeps the focus in the field for the next.
+    await page.keyboard.press('Tab');
+  }
+  await expect(to.inputValue()).resolves.toBe(
+    'Theo Lindqvist <theo@example.com>, Priya Raman <priya@example.com>, ',
+  );
+  await expect(to.evaluate((field) => field === document.activeElement)).resolves.toBe(true);
 }, 60_000);
 
 test('Link turns the selected words into a link, adding https to an address typed without it', async () => {
