@@ -20,37 +20,40 @@ export type LinkRange = { from: number; to: number };
 /**
  * Bold, italic, code and a link, each pressed while the text at the cursor has it. Link asks for
  * an address for the selection as it was pressed, or takes the link away from text that has one.
+ * They lie in place before the editor comes, so nothing moves as it does, and do nothing till then.
  */
 export function Formatting({
   editor,
   tip,
   onLink,
 }: {
-  editor: TiptapEditor;
+  editor: TiptapEditor | null;
   tip: (label: string) => string | undefined;
   onLink: (range: LinkRange) => void;
 }) {
+  // Asked of the editor as given, since the snapshot keeps none until the editor's next change.
   const active = useEditorState({
     editor,
-    selector: ({ editor: current }) => ({
-      bold: current.isActive('bold'),
-      italic: current.isActive('italic'),
-      code: current.isActive('code'),
-      link: current.isActive('link'),
+    selector: () => ({
+      bold: editor?.isActive('bold'),
+      italic: editor?.isActive('italic'),
+      code: editor?.isActive('code'),
+      link: editor?.isActive('link'),
     }),
   });
   const link = () => {
-    if (active.link) {
-      editor.chain().focus().extendMarkRange('link').unsetLink().run();
-    } else {
+    if (active?.link) {
+      editor?.chain().focus().extendMarkRange('link').unsetLink().run();
+    } else if (editor) {
       const { from, to } = editor.state.selection;
       onLink({ from, to });
     }
   };
-  const buttons: [label: string, icon: typeof Bold, key: keyof typeof active, run: () => void][] = [
-    ['Bold', Bold, 'bold', () => editor.chain().focus().toggleBold().run()],
-    ['Italic', Italic, 'italic', () => editor.chain().focus().toggleItalic().run()],
-    ['Code', Code, 'code', () => editor.chain().focus().toggleCode().run()],
+  type Mark = keyof NonNullable<typeof active>;
+  const buttons: [label: string, icon: typeof Bold, key: Mark, run: () => void][] = [
+    ['Bold', Bold, 'bold', () => editor?.chain().focus().toggleBold().run()],
+    ['Italic', Italic, 'italic', () => editor?.chain().focus().toggleItalic().run()],
+    ['Code', Code, 'code', () => editor?.chain().focus().toggleCode().run()],
     ['Link', LinkIcon, 'link', link],
   ];
   // Pressing one leaves the focus, and so the selection it acts on, in the text.
@@ -63,7 +66,7 @@ export function Formatting({
           tooltip={tip(label)}
           icon={<Icon icon={icon} />}
           variant="ghost"
-          aria-pressed={active[key]}
+          aria-pressed={active?.[key] ?? false}
           onClick={run}
         />
       ))}

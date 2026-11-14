@@ -16,7 +16,7 @@ import { useEffect, useLayoutEffect, useRef } from 'react';
 import { tm } from '../../../app/theme/tokens.stylex.ts';
 import { DraftImage, DraftParagraph } from './draftImage.ts';
 import { editableHtml } from './editable.ts';
-import { heldTyping, releaseKeys } from './heldKeys.ts';
+import { releaseKeys } from './heldKeys.ts';
 
 /**
  * Where the member writes: Markdown, edited as the text it makes. Typing Markdown formats it as it
@@ -61,7 +61,10 @@ export function Editor({
   // Every image's way to look up where it shows from again, since that changes as the composer
   // takes a pasted file and as a save moves it into the draft.
   const images = useRef(new Set<() => void>());
+  // Made once the composer is in the page, as Tiptap made in render loses it to a render that
+  // pauses, as one does when the composer's code comes late, and makes it again.
   const editor = useEditor({
+    immediatelyRender: false,
     extensions: [
       StarterKit.configure({
         heading: { levels: [1, 2, 3], HTMLAttributes: { class: css(styles.heading) } },
@@ -139,23 +142,17 @@ export function Editor({
   useEffect(() => {
     if (editor) onEditor(editor);
   }, [editor, onEditor]);
-  // The cursor is in the text in the commit that shows it, so a phone raises its keyboard for the
-  // tap on Reply and a key pressed straight after is the editor's. Tiptap makes its editor again
-  // when the commit that shows the first is slow to run its effects, and even the one it lets go
-  // is created, so the cursor and what was typed while a reply was on its way go into the editor it
-  // keeps, once its effects have run. What was typed is the member's own edit. An editor the cursor
-  // doesn't start in lets the keys go, and what they typed with them.
+  // The cursor is in the text in the commit that shows the editor, which a tap's own render reaches
+  // before it paints, so a phone raises its keyboard for the tap on Reply and a key pressed straight
+  // after is the editor's. What was typed while a reply was on its way goes in as the member's own
+  // edit. An editor the cursor doesn't start in lets the keys go, and what they typed with them.
   const isFocusedAtStart = useRef(isFocused);
   useLayoutEffect(() => {
-    const placed: Placed | null = editor;
-    if (!isFocusedAtStart.current) releaseKeys();
-    else if (placed?.isEditorContentInitialized && !heldTyping()) focusAtEnd(placed, '');
-  }, [editor]);
-  useEffect(() => {
-    if (!editor || editor.isDestroyed || !isFocusedAtStart.current) return;
+    if (!editor) return;
     const typed = releaseKeys();
+    if (!isFocusedAtStart.current) return;
     if (typed !== '') known.current ??= editor.getMarkdown();
-    if (typed !== '' || !editor.isFocused) focusAtEnd(editor, typed);
+    focusAtEnd(editor, typed);
   }, [editor]);
   // A file the composer took shows once the composer has it, and a saved one from its draft.
   useEffect(() => {
@@ -177,9 +174,6 @@ export function placeImages(editor: TiptapEditor, images: { contentId: string; f
   }
 }
 
-/** An editor as `@tiptap/react` marks it once its container has placed its view in the page. */
-type Placed = TiptapEditor & { isEditorContentInitialized?: boolean };
-
 /**
  * Puts the cursor at the end of the text, after what is `typed` there. Tiptap's own `focus` builds
  * its transaction before it focuses the page on a phone, which applies one of its own first, so its
@@ -198,11 +192,14 @@ function css(...styles: stylex.StyleXStyles[]): string {
 }
 
 const styles = stylex.create({
+  // Until the editor is in it, it holds the room the empty text takes, so nothing moves as it comes.
   editor: {
     flexGrow: 1,
-    minHeight: 0,
+    minHeight: { default: 0, ':empty': `calc(6lh + 2 * ${spacingVars['--spacing-2']})` },
     overflowY: 'auto',
     scrollbarWidth: 'thin',
+    fontSize: typeScaleVars['--text-body-size'],
+    lineHeight: typeScaleVars['--text-body-leading'],
   },
   prose: {
     minHeight: '6lh',
@@ -211,8 +208,6 @@ const styles = stylex.create({
     outline: 'none',
     color: colorVars['--color-text-primary'],
     fontFamily: typographyVars['--font-family-body'],
-    fontSize: typeScaleVars['--text-body-size'],
-    lineHeight: typeScaleVars['--text-body-leading'],
     overflowWrap: 'break-word',
   },
   block: {

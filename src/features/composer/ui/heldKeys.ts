@@ -32,11 +32,6 @@ export function releaseKeys(): string {
   return was;
 }
 
-/** What the keys held so far have typed, or nothing when none are held. */
-export function heldTyping(): string | undefined {
-  return typed;
-}
-
 /** Whether a reply is on its way, holding keys for its editor. */
 export function useIsReplyOnItsWay(): boolean {
   return useSyncExternalStore(listen, () => typed !== undefined);

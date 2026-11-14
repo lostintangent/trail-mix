@@ -195,7 +195,7 @@ function Writer({
 } & Omit<ComposerProps, 'compose'>) {
   const message = useWriting(start, recipients);
   const { writing } = message;
-  const [editor, setEditor] = useState<TiptapEditor>();
+  const [editor, setEditor] = useState<TiptapEditor | null>(null);
   const queryClient = useQueryClient();
   const [drafting] = useState(
     () => resumed ?? startDrafting(queryClient, { draft, writing: start }),
@@ -305,7 +305,7 @@ function Writer({
         aria-label="Formatting and files"
         {...stylex.props(styles.toolbar, isSheet && styles.sheetToolbar)}
       >
-        {editor && <Formatting editor={editor} tip={tip} onLink={setLinking} />}
+        <Formatting editor={editor} tip={tip} onLink={setLinking} />
         <FilePicker
           label="Insert an image"
           tip={tip}
