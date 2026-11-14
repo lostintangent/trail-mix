@@ -28,6 +28,9 @@ export const tm = stylex.defineVars({
   paneRadius: '14px',
   sheetRadius: '12px', // a message, the composer
   target: { default: '32px', [COARSE]: '44px' },
+  // The room a list leaves below its last row for controls floating over its foot, which keys keep
+  // the selection clear of too. None, except where the list pane sets it for a phone's island.
+  listFoot: '0px',
   rowPad: { default: '8px', [COARSE]: '11px' },
   measure: '72ch', // longest line of message text
   swatch: '14px', // a color to pick, the size of an icon

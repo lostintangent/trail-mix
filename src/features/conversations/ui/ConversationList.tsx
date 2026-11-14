@@ -135,6 +135,7 @@ export function ConversationList({
   const [isKeyboardFocused, setKeyboardFocused] = useState(false);
   const listId = useId();
   const rowHeight = useRowHeight(ruler);
+  const padding = useScrollPadding(scroller, rowHeight);
   // The row the keys move from and the list names as active: the last one picked.
   const selectedIndex = useMemo(() => {
     const { anchor } = selection;
@@ -153,6 +154,9 @@ export function ConversationList({
     // measured again as rows arrive.
     estimateSize: () => rowHeight,
     overscan: 6,
+    // A row scrolled to lands clear of the scroll padding, as one a browser scrolls to itself does.
+    scrollPaddingStart: padding.start,
+    scrollPaddingEnd: padding.end,
     // The selected row stays drawn when it scrolls away, since the list names it as the active one.
     rangeExtractor: (range) => {
       const drawn = defaultRangeExtractor(range);
@@ -233,7 +237,8 @@ export function ConversationList({
   const optionId = (index: number) => `${listId}-${index}`;
 
   const move = (event: KeyboardEvent<HTMLDivElement>) => {
-    const page = Math.max(1, Math.floor((scroller.current?.clientHeight ?? 0) / rowHeight) - 1);
+    const clear = (scroller.current?.clientHeight ?? 0) - padding.start - padding.end;
+    const page = Math.max(1, Math.floor(clear / rowHeight) - 1);
     const last = conversations.length - 1;
     const from = selectedIndex < 0 ? -1 : selectedIndex;
     const to = {
@@ -717,13 +722,43 @@ function useRowHeight(ruler: RefObject<HTMLDivElement | null>): number {
   return height;
 }
 
+/**
+ * The scroller's scroll padding, in pixels, which the list keeps a row it scrolls to clear of. It is
+ * read again as the scroller's size changes, as between a phone's layout and a desktop's or as a
+ * phone turns, and as the row height does, since a coarse pointer resizes what floats over the list.
+ */
+function useScrollPadding(
+  scroller: RefObject<HTMLDivElement | null>,
+  rowHeight: number,
+): { start: number; end: number } {
+  const [padding, setPadding] = useState({ start: 0, end: 0 });
+  useLayoutEffect(() => {
+    const element = scroller.current;
+    if (!element) return;
+    const read = () => {
+      const style = getComputedStyle(element);
+      const start = parseFloat(style.scrollPaddingBlockStart) || 0;
+      const end = parseFloat(style.scrollPaddingBlockEnd) || 0;
+      setPadding((was) => (was.start === start && was.end === end ? was : { start, end }));
+    };
+    read();
+    const observer = new ResizeObserver(read);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [scroller, rowHeight]);
+  return padding;
+}
+
 const styles = stylex.create({
   scroller: {
     position: 'relative',
+    boxSizing: 'border-box',
     height: '100%',
     overflowY: 'auto',
     overscrollBehavior: 'contain',
     paddingInline: spacingVars['--spacing-1-5'],
+    paddingBlockEnd: tm.listFoot,
+    scrollPaddingBlockEnd: tm.listFoot,
     outline: 'none',
   },
   canvas: (height: number) => ({ position: 'relative', height }),

@@ -1,4 +1,6 @@
-import { expect } from 'bun:test';
+import { beforeAll, expect } from 'bun:test';
+import { mkdirSync } from 'node:fs';
+import { join } from 'node:path';
 import type { BrowserContext, BrowserContextOptions, Locator, Page } from 'playwright';
 import { PAGE_SIZE } from '../../src/features/mailroom/client/contract.ts';
 import { suite } from './suite.ts';
@@ -16,6 +18,11 @@ const { test } = app;
 
 const DESKTOP = { viewport: { width: 1440, height: 900 } };
 const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
+const SHOTS = join(import.meta.dir, '../../test-results');
+
+beforeAll(() => {
+  mkdirSync(SHOTS, { recursive: true });
+});
 
 /**
  * The rows drawn where the list is scrolled. The conversation open, the Inbox's newest, stays drawn
@@ -302,6 +309,95 @@ test('on a phone, tapping a row’s avatar picks the row, on a target 44 pixels 
   expect(problems).toEqual([]);
   await context.close();
 }, 30_000);
+
+test('on a phone, rows run under the floating controls, and the last row and a row moved to by key stay clear of them', async () => {
+  for (const [width, colorScheme] of [
+    [390, 'light'],
+    [390, 'dark'],
+    [320, 'light'],
+  ] as const) {
+    const { context, page, problems } = await open({
+      ...PHONE,
+      viewport: { width, height: 844 },
+      colorScheme,
+    });
+    const list = page.locator('[role="listbox"][aria-multiselectable]');
+    await list.getByRole('option').first().waitFor();
+    const shot = (moment: string) =>
+      page.screenshot({
+        path: join(SHOTS, `list-under-island-${width}-${colorScheme}-${moment}.png`),
+      });
+    /**
+     * The top of the controls floating over the list, and where the list and the last row it draws
+     * of those `row` matches lie under them.
+     */
+    const sight = (controls: string, row: string) =>
+      list.evaluate(
+        (list, { controls, row }) => {
+          const island = document.querySelector(`[role="toolbar"][aria-label="${controls}"]`);
+          const shown = [...list.querySelectorAll(row)].at(-1);
+          return {
+            screen: innerHeight,
+            list: list.getBoundingClientRect().bottom,
+            island: island!.getBoundingClientRect().top,
+            row: shown && {
+              top: shown.getBoundingClientRect().top,
+              bottom: shown.getBoundingClientRect().bottom,
+            },
+            under: [...list.querySelectorAll('[role="option"]')].some(
+              (option) =>
+                option.getBoundingClientRect().bottom > island!.getBoundingClientRect().top,
+            ),
+          };
+        },
+        { controls, row },
+      );
+
+    // At rest the list runs to the screen's foot, and rows pass under the controls.
+    const rest = await sight('Mailbox actions', '[role="option"]');
+    expect(rest.list).toBe(rest.screen);
+    expect(rest.under).toBe(true);
+    await shot('rest');
+
+    // A key that moves the selection onto a row under the controls scrolls it clear of them. Picking
+    // the last row that lies clear keeps the list in view, and Shift moves on from it.
+    const clear = await list.evaluate((list) => {
+      const island = document.querySelector('[role="toolbar"][aria-label="Mailbox actions"]');
+      const top = island!.getBoundingClientRect().top;
+      const rows = [...list.querySelectorAll('[role="option"]')];
+      return rows.filter((option) => option.getBoundingClientRect().bottom <= top).length;
+    });
+    await list.locator(`[role="option"][aria-posinset="${clear}"] > span`).first().tap();
+    await list.evaluate((list) => list.focus({ preventScroll: true }));
+    for (const key of ['Shift+ArrowDown', 'Shift+PageDown']) {
+      await page.keyboard.press(key);
+      const moved = await sight('Picked conversations', '[role="option"][aria-selected="true"]');
+      expect({ key, clear: moved.row!.bottom <= moved.island }).toEqual({ key, clear: true });
+    }
+    await page.getByRole('button', { name: 'Stop picking' }).tap();
+    await page.getByRole('toolbar', { name: 'Mailbox actions' }).waitFor();
+
+    // Scrolled to its end, the last row lies just clear of the controls, and of the island that
+    // offers what was picked.
+    const length = Number(await list.getByRole('option').first().getAttribute('aria-setsize'));
+    const last = `[role="option"][aria-posinset="${length}"]`;
+    await list.evaluate((list) => (list.scrollTop = list.scrollHeight));
+    await list.locator(last).waitFor();
+    await page.waitForFunction(
+      () => document.querySelector('[role="listbox"]')?.getAttribute('aria-busy') === 'false',
+    );
+    const end = await sight('Mailbox actions', last);
+    expect(end.island - end.row!.bottom).toBeGreaterThanOrEqual(0);
+    expect(end.island - end.row!.bottom).toBeLessThanOrEqual(16);
+    await shot('end');
+    await list.locator(last).locator(':scope > span').first().tap();
+    await page.getByRole('toolbar', { name: 'Picked conversations' }).waitFor();
+    const picking = await sight('Picked conversations', last);
+    expect(picking.island - picking.row!.bottom).toBeGreaterThanOrEqual(0);
+    expect(problems).toEqual([]);
+    await context.close();
+  }
+}, 60_000);
 
 test('a conversation only the member wrote names whom it went to, and leads with the first of them', async () => {
   const { context, page, problems } = await open();

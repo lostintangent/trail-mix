@@ -284,6 +284,7 @@ const styles = stylex.create({
     display: 'grid',
     placeItems: 'center',
     padding: spacingVars['--spacing-6'],
+    paddingBottom: `calc(${spacingVars['--spacing-6']} + ${tm.listFoot})`,
   },
   rail: {
     alignItems: 'center',
@@ -406,8 +407,10 @@ const styles = stylex.create({
   sheet: {
     flexGrow: 1,
     minHeight: 0,
-    // On a phone the list ends above the island: its height, its padding, and the gap below it.
-    paddingBottom: {
+    // On a phone the list runs to the screen's foot, under the island, as a conversation does. Its
+    // last row scrolls clear of the island: its height, its padding, the gap below it, and a gap
+    // above it.
+    [tm.listFoot]: {
       default: null,
       [media.phone]: `calc(${tm.target} + ${spacingVars['--spacing-1']} * 2 + ${spacingVars['--spacing-3']} + ${tm.safeBottom})`,
     },
