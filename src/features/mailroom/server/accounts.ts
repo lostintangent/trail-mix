@@ -1,11 +1,17 @@
-import type { Account, AccountId, StampColor } from '../../mail/core/index.ts';
+import { DEMO_SAID } from '../../accounts/core/index.ts';
+import type { Account, AccountId, Hint, StampColor } from '../../mail/core/index.ts';
 import {
+  DEMO_ACCOUNTS,
   PRESETS,
+  demoMailbox,
   type DemoKind,
   type DemoMailbox,
   type Endpoint,
   type PresetName,
+  type SyncWindow,
 } from '../../providers/index.ts';
+import type { AccountSetup } from '../client/contract.ts';
+import type { Credentials } from './credentials.ts';
 import type { Sql } from './schema.ts';
 
 /**
@@ -160,6 +166,145 @@ export function accountBook(sql: Sql) {
     /** Keeps a demo account's server as it changes, in the same turn, as the provider expects. */
     saveDemo(id: AccountId, mailbox: DemoMailbox) {
       sql.run(`UPDATE demo SET state = ? WHERE account = ?`, JSON.stringify(mailbox), id);
+    },
+  };
+}
+
+/**
+ * What a member does with the accounts they connect: adding one, whose password both its hosts
+ * take before anything of it is kept, or one of the demo's, and changing what they see of each.
+ */
+export type ConnectedAccounts = ReturnType<typeof connectedAccounts>;
+
+/** How far back mail is indexed. Older mail stays on the server. */
+const WINDOW_DAYS = 365;
+
+export function connectedAccounts(ports: {
+  book: AccountBook;
+  credentials: Credentials;
+  demo: DemoSettings | undefined;
+  /** Signs in to both of an account's hosts with its password, or rejects with the host's reason. */
+  checkSignIn: (
+    account: AccountId,
+    connection: Extract<Connection, { provider: 'imap' }>,
+    secret: { pass: string },
+  ) => Promise<void>;
+  hint: (hint: Hint) => void;
+  /** Owes an account a check, and has the next wake land it at once. */
+  check: (account: AccountId) => Promise<void>;
+}) {
+  const { book, hint } = ports;
+
+  /** Adds the first demo account not yet here, Personal and then Work. */
+  const addDemo = (): Account => {
+    if (!ports.demo) throw new Error('This deployment has no demo mailbox.');
+    const { inbox: size, createdAt = new Date().toISOString() } = ports.demo;
+    const here = new Set(
+      book
+        .connections()
+        .flatMap(({ connection }) => (connection.provider === 'demo' ? [connection.kind] : [])),
+    );
+    const kind = (Object.keys(DEMO_ACCOUNTS) as DemoKind[]).find((held) => !here.has(held));
+    if (!kind) throw new Error('Both demo accounts are already here.');
+    const { name, me } = DEMO_ACCOUNTS[kind];
+    const inbox = kind === 'personal' ? size : Math.ceil(size / 10);
+    return book.add(
+      {
+        id: crypto.randomUUID(),
+        name,
+        address: me.email,
+        ...(me.name ? { fromName: me.name } : {}),
+        provider: 'demo',
+      },
+      { provider: 'demo', kind },
+      { demo: demoMailbox(kind, inbox, createdAt) },
+    );
+  };
+
+  /** Changes an account as `change` says, and tells every device. */
+  const updated = (id: AccountId, change: (account: Account) => Account) => {
+    if (!book.update(id, change)) throw new Error('There is no such account.');
+    hint({ changed: 'accounts' });
+  };
+
+  return {
+    async add(setup: AccountSetup): Promise<Account> {
+      if (setup.provider === 'demo') {
+        const account = addDemo();
+        hint({ changed: 'accounts' });
+        await ports.check(account.id);
+        return account;
+      }
+      // Preview and demo deployments hold the demo mailbox, and can never reach a real account.
+      if (ports.demo) throw new Error(DEMO_SAID);
+      if (!('password' in setup)) throw new Error('Outlook sign-in arrives with its own step.');
+      const address = setup.address.toLowerCase();
+      if (book.all().some((held) => held.address.toLowerCase() === address)) {
+        throw new Error(`${setup.address} is already connected.`);
+      }
+      const connection = connectionOf(setup);
+
+      // Nothing is kept until both hosts accept the password.
+      const id = crypto.randomUUID();
+      await ports.checkSignIn(id, connection, { pass: setup.password });
+
+      const account = book.add(
+        {
+          id,
+          name: setup.name,
+          address: setup.address,
+          ...(setup.fromName ? { fromName: setup.fromName } : {}),
+          provider: 'imap',
+          ...(setup.preset ? { preset: setup.preset } : {}),
+        },
+        connection,
+        { sealed: await ports.credentials.seal(setup.password, id) },
+      );
+      hint({ changed: 'accounts' });
+      await ports.check(id);
+      return account;
+    },
+
+    addDemo,
+
+    update(
+      id: AccountId,
+      change: Partial<Pick<Account, 'name' | 'fromName' | 'stamp' | 'signature'>>,
+    ) {
+      const { fromName, ...rest } = change;
+      updated(id, ({ fromName: held, ...account }) => {
+        const name = fromName ?? held;
+        return { ...account, ...rest, ...(name ? { fromName: name } : {}) };
+      });
+    },
+
+    allowImages(account: AccountId, sender: string) {
+      updated(account, (held) =>
+        held.allowImagesFrom.includes(sender)
+          ? held
+          : { ...held, allowImagesFrom: [...held.allowImagesFrom, sender] },
+      );
+    },
+
+    setLightPaper(account: AccountId, sender: string, on: boolean) {
+      updated(account, (held) => {
+        const others = held.lightPaperFrom.filter((each) => each !== sender);
+        return { ...held, lightPaperFrom: on ? [...others, sender] : others };
+      });
+    },
+
+    /** Says how an account is doing, telling devices only when it changes. */
+    setStatus(account: AccountId, status: Account['status']) {
+      const before = book.get(account)?.account.status;
+      if (before === undefined || before === status) return;
+      book.update(account, (held) => ({ ...held, status }));
+      hint({ changed: 'accounts' });
+    },
+
+    /** What the index holds of an account: its last year, or a demo mailbox's year before it was made. */
+    windowOf(account: AccountId): SyncWindow {
+      const until = book.demo(account)?.createdAt ?? new Date().toISOString();
+      return { since: new Date(Date.parse(until) - WINDOW_DAYS * 86_400_000).toISOString() };
     },
   };
 }

@@ -6,8 +6,28 @@
 
 const INFO = new TextEncoder().encode('Trail Mix credentials, v1');
 
+export type Credentials = ReturnType<typeof credentialsOf>;
+
+/** One member's credentials: their key is derived once, on first use, and kept for the Mailroom's life. */
+export function credentialsOf(workerSecret: string | undefined, member: string) {
+  let key: Promise<CryptoKey> | undefined;
+  const keyOf = (): Promise<CryptoKey> => {
+    if (!workerSecret) return Promise.reject(new Error('The operator hasn’t set CREDENTIALS_KEY.'));
+    key ??= memberKey(workerSecret, member);
+    return key;
+  };
+  return {
+    async seal(secret: string, account: string): Promise<Uint8Array> {
+      return seal(await keyOf(), secret, account);
+    },
+    async open(sealed: Uint8Array, account: string): Promise<string> {
+      return open(await keyOf(), sealed, account);
+    },
+  };
+}
+
 /** The member's key: HKDF over the Worker secret, salted with the member's Mailroom id. */
-export async function memberKey(workerSecret: string, member: string): Promise<CryptoKey> {
+async function memberKey(workerSecret: string, member: string): Promise<CryptoKey> {
   if (workerSecret.length < 32) throw new Error('CREDENTIALS_KEY must be at least 32 characters.');
   const material = await crypto.subtle.importKey(
     'raw',
@@ -26,7 +46,7 @@ export async function memberKey(workerSecret: string, member: string): Promise<C
 }
 
 /** The secret, sealed: a fresh 12-byte nonce, then the ciphertext and its tag. */
-export async function seal(key: CryptoKey, secret: string, account: string): Promise<Uint8Array> {
+async function seal(key: CryptoKey, secret: string, account: string): Promise<Uint8Array> {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const sealed = new Uint8Array(
     await crypto.subtle.encrypt(
@@ -42,7 +62,7 @@ export async function seal(key: CryptoKey, secret: string, account: string): Pro
   return out;
 }
 
-export async function open(key: CryptoKey, sealed: Uint8Array, account: string): Promise<string> {
+async function open(key: CryptoKey, sealed: Uint8Array, account: string): Promise<string> {
   const plain = await crypto.subtle.decrypt(
     { name: 'AES-GCM', iv: sealed.slice(0, 12), additionalData: new TextEncoder().encode(account) },
     key,
