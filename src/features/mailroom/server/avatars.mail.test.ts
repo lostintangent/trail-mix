@@ -141,7 +141,7 @@ beforeAll(async () => {
     AVATARS_STAND_IN: here,
   });
   await deliver(
-    bob,
+    bob.email,
     signed('brand', 'news@brand.test', 'pass'),
     // The server found DMARC failed, and the sender wrote a header of their own beneath that says
     // it passed, in the server's name.
@@ -264,7 +264,7 @@ describe('Verified senders’ avatars', () => {
   test('a picture found after its mail arrived reaches every open device', async () => {
     const answer = Promise.withResolvers<void>();
     held.set('_dmarc.late.test', answer);
-    await deliver(bob, signed('late', 'news@late.test', 'pass'));
+    await deliver(bob.email, signed('late', 'news@late.test', 'pass'));
     // A device opening has the Mailroom check for mail at once.
     const device = ada.device();
     await device.opened;

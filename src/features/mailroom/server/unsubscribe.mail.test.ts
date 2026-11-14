@@ -58,7 +58,7 @@ beforeAll(async () => {
     UNSUBSCRIBE_STAND_IN: here,
   });
   await deliver(
-    bob,
+    bob.email,
     offering('taken', `${here}/taken?u=bob`),
     offering('gone', `${here}/gone`),
     offering('moved', `${here}/moved`),

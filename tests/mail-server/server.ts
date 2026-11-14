@@ -222,10 +222,12 @@ export async function importInbox(user: string, mbox: string) {
   await $`${doveadm} -c ${conf} import -u ${user} -p mail_inbox_path=${mbox} mbox:${dirname(mbox)} ${''} mailbox INBOX all`.quiet();
 }
 
-/** Puts one message in a user's Inbox, as delivery would. */
-export async function deliver(user: string, message: string) {
+/** Puts messages in a user's Inbox, in order, as delivery would. */
+export async function deliver(user: string, ...messages: string[]) {
   const { doveadm } = await dovecot();
-  await $`${doveadm} -c ${conf} save -u ${user} -m INBOX < ${Buffer.from(message)}`.quiet();
+  for (const message of messages) {
+    await $`${doveadm} -c ${conf} save -u ${user} -m INBOX < ${Buffer.from(message)}`.quiet();
+  }
 }
 
 /** Expunges every message in one of a user's folders. */
@@ -275,13 +277,6 @@ export function inFolder<T>(user: User, path: string, use: (client: ImapFlow) =>
     } finally {
       lock.release();
     }
-  });
-}
-
-/** Messages into a user's Inbox, as if they had just arrived. */
-export function deliver(user: User, ...messages: string[]) {
-  return overImap(user, async (client) => {
-    for (const message of messages) await client.append('INBOX', message);
   });
 }
 
