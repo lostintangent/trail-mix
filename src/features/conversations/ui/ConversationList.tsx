@@ -2,7 +2,6 @@ import { Icon } from '@astryxdesign/core/Icon';
 import { Skeleton } from '@astryxdesign/core/Skeleton';
 import {
   colorVars,
-  durationVars,
   focusVars,
   fontWeightVars,
   radiusVars,
@@ -51,6 +50,7 @@ import type { SelectBy, Selection } from '../core/selection.ts';
 import { formatListDate } from './dates.ts';
 import { BundleChips } from './github.tsx';
 import { Marked } from './search.tsx';
+import { SWIPE, useTouch } from './useTouch.ts';
 
 /** A row's height before the list is first laid out: three lines of text and the row's padding. */
 const FIRST_GUESS = 72;
@@ -63,13 +63,6 @@ const RING = 1;
 
 /** How many rows beyond those in sight the list says it shows, so their pages arrive in time. */
 const AHEAD = 30;
-
-/** How long a finger rests on a row before it starts picking, and how far it may drift meanwhile. */
-const LONG_PRESS_MS = 500;
-const LONG_PRESS_SLOP = 10;
-
-/** How far left, as a share of its width, a finger swipes a row before letting go archives it. */
-const SWIPE_SHARE = 0.4;
 
 /**
  * The conversations of a view, newest first, drawn only where the list is scrolled to. In an Inbox
@@ -602,96 +595,6 @@ function useAhead(onAhead: (isPressed: boolean) => void) {
 const REST_MS = 150;
 
 /**
- * What a finger does to a row. Held still for a moment, it starts picking. Moved sideways first, it
- * swipes the row, which follows it left, and let go past `SWIPE_SHARE` of the row's width, archives
- * it, or else slides back. Moved up or down first, it scrolls the list as usual. After a long press
- * or a swipe, the click that ends it isn't a click, and a touch screen's context menu doesn't open.
- */
-function useTouch(onLongPress: () => void, onSwipe: () => void) {
-  const gesture = useRef<{
-    x: number;
-    y: number;
-    timer: ReturnType<typeof setTimeout>;
-    row: HTMLElement;
-    isSwiping: boolean;
-  }>(null);
-  const isClickTaken = useRef(false);
-  const end = () => {
-    if (gesture.current) clearTimeout(gesture.current.timer);
-    gesture.current = null;
-  };
-  const letGo = (event: PointerEvent, canArchive: boolean) => {
-    const at = gesture.current;
-    end();
-    if (!at?.isSwiping) return;
-    isClickTaken.current = true;
-    if (canArchive && at.x - event.clientX > at.row.offsetWidth * SWIPE_SHARE) onSwipe();
-    slideBack(at.row);
-  };
-  return {
-    tookClick: () => {
-      const taken = isClickTaken.current;
-      isClickTaken.current = false;
-      return taken;
-    },
-    handlers: {
-      onPointerDown: (event: PointerEvent<HTMLElement>) => {
-        if (event.pointerType === 'mouse') return;
-        isClickTaken.current = false;
-        const timer = setTimeout(() => {
-          isClickTaken.current = true;
-          gesture.current = null;
-          onLongPress();
-        }, LONG_PRESS_MS);
-        gesture.current = {
-          x: event.clientX,
-          y: event.clientY,
-          timer,
-          row: event.currentTarget,
-          isSwiping: false,
-        };
-      },
-      onPointerMove: (event: PointerEvent<HTMLElement>) => {
-        const at = gesture.current;
-        if (!at) return;
-        const dx = event.clientX - at.x;
-        const dy = event.clientY - at.y;
-        if (!at.isSwiping) {
-          if (Math.hypot(dx, dy) <= LONG_PRESS_SLOP) return;
-          clearTimeout(at.timer);
-          if (Math.abs(dx) <= Math.abs(dy) || dx > 0) return end();
-          at.isSwiping = true;
-          at.row.setPointerCapture(event.pointerId);
-          at.row.classList.add(...classesOf(swiping.lifted));
-        }
-        at.row.style.setProperty(SWIPE, `${Math.min(0, dx)}px`);
-      },
-      onPointerUp: (event: PointerEvent) => letGo(event, true),
-      onPointerCancel: (event: PointerEvent) => letGo(event, false),
-      onContextMenu: (event: MouseEvent) => {
-        if (isClickTaken.current || gesture.current) event.preventDefault();
-      },
-    },
-  };
-}
-
-/** The custom property a swipe moves its row by. */
-const SWIPE = '--tm-swipe';
-
-/** Slides a swiped row back into place, and lowers it onto the sheet again. */
-function slideBack(row: HTMLElement) {
-  const settling = classesOf(swiping.settling);
-  row.classList.add(...settling);
-  row.style.setProperty(SWIPE, '0px');
-  const done = () => row.classList.remove(...settling, ...classesOf(swiping.lifted));
-  row.addEventListener('transitionend', done, { once: true });
-  // Under reduced motion there is no transition to end.
-  setTimeout(done, 300);
-}
-
-const classesOf = (style: stylex.StyleXStyles) => stylex.props(style).className?.split(' ') ?? [];
-
-/**
  * An empty row, out of sight, that the list measures for every row's height. Each of a row's three
  * lines is exactly one line of its type tall, whatever it holds or leaves empty, so the height
  * follows from the row's type and padding alone. No row's content can change it, while a coarse
@@ -958,17 +861,5 @@ const styles = stylex.create({
     display: 'flex',
     alignItems: 'center',
     minWidth: 0,
-  },
-});
-
-const swiping = stylex.create({
-  // A row being swiped rises off the sheet, as a selected one does.
-  lifted: {
-    backgroundColor: colorVars['--color-background-card'],
-    boxShadow: `0 0 0 1px ${colorVars['--color-border']}, 0 6px 16px -10px ${tm.shade}`,
-  },
-  settling: {
-    transitionProperty: 'transform',
-    transitionDuration: { default: durationVars['--duration-fast'], [media.reducedMotion]: '0s' },
   },
 });
