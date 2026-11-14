@@ -164,10 +164,10 @@ src/
       imap/            the IMAP and SMTP provider, with sync reconciliation and vendor presets in core/
       demo/            the demo provider and its seeded mailbox
     mailroom/
-      core/            when an unopened Mailroom winds down, which senders' pictures it keeps, and whom mail puts the member in touch with
-      server/          the Durable Object: schema versions, sync, Outbox, credentials, the Avatar cache, unsubscribing
+      core/            when an unopened Mailroom winds down and when its alarm next wakes, which senders' pictures it keeps, and whom mail puts the member in touch with
+      server/          the Durable Object, which mailroom.ts composes from one module per capability
       client/          queries and commands, and the hint socket
-    workbench/ui/      the panes, the side panels and the phone track
+    workbench/ui/      the panes, the side panels and the phone track, which compose a hook for each capability
     folders/           core/ places folders and names the rules a change must meet, ui/ is the sidebar
     conversations/     core/ pages, selects and triages the list and reads GitHub bundles, ui/ is the list
     reader/            core/ sanitizes, drops trackers, folds quotes and finds a conversation's folder, ui/ renders the sandboxed frame
@@ -203,6 +203,8 @@ public/                the manifest, favicon.svg and the icons made from it, ser
 - Features reach each other only through an `index.ts`. Inside a feature, modules import each other freely.
 - `mail/core` is the shared vocabulary that every other feature imports.
 - `src/app` and `src/server` compose features. `src/shared` holds only generic mechanics and knows no feature.
+- `mailroom.ts` is the Mailroom's one class. It builds a module for each capability when it starts, hands each call to the module that owns it, and itself coordinates only what spans several, such as removing an account or erasing everything. `accounts.ts` keeps the accounts, `credentials.ts` seals their secrets, `sign-ins.ts` signs in at a vendor, and `connections.ts` reaches each server. `sync.ts` syncs, watches and checks mail. `envelope-index.ts` folds what sync reports, `rows.ts` is how its tables hold it, and `lists.ts`, `search.ts` and `people.ts` read it. `bodies.ts` is the Body cache and `avatars.ts` the Avatar cache. `drafts.ts` saves drafts, `replaced.ts` owes the versions they replace a discard, and `outbox.ts` drives the Outbox. `folders.ts` and `messages.ts` carry out the commands on each, `notifying.ts` tells notified devices, `unsubscribe.ts` posts one-click unsubscribes, `schema.ts` upgrades storage, `input.ts` checks what a browser sends, and `report.ts` logs what fails in work no call waits for.
+- `Workbench.tsx` lays out the panes and the phone track, and composes a hook for each capability. `useSelectedPlace` keeps the place and the open conversation together, `useOpensNewest` opens a view's newest conversation, and `useReadMark` marks it read. `useComposing` and `useSendWritten` own writing and sending, `usePanel` keeps a side panel, and `commands.ts` holds the workbench's own commands and which pane a phone shows. `ReaderPane.tsx` shows the selection, which `useRestingSelection` lets wait while it moves quickly, and `usePreloads` loads the reader and the composer before they're needed.
 - Imports are relative and carry their file extension. There is no path alias.
 - One name, one meaning. An exported type is declared in one module, under a name no other module in `src` exports, and an `index.ts` only re-exports it. A name that means two things is renamed where it has fewer readers.
 - `tests/boundaries.test.ts` walks the import graph and fails on a shortcut between features, on a `core` that reaches a framework, or on two modules in `src` that export a type of the same name.
