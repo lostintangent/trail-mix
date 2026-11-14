@@ -162,6 +162,67 @@ test('each message answers and shows the source of its own, and the palette the 
   await expect(from.textContent()).resolves.toContain(address(newestTo));
 }, 30_000);
 
+/** Holds the tooltips' code from a page, which asks for it once its first screen has settled. */
+async function holdTooltips(page: Page) {
+  const code = /\/assets\/Tooltip-[^/]+\.js$/;
+  let release = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  await page.route(code, async (route) => {
+    await held;
+    await route.continue();
+  });
+  return { asked: page.waitForRequest(code), release: () => release() };
+}
+
+test('a button drawn before the tooltips’ code gains its tooltip as it arrives, under a resting pointer or key but never a press or tap', async () => {
+  let tooltips!: Awaited<ReturnType<typeof holdTooltips>>;
+  const page = await open(DESKTOP, async (page) => (tooltips = await holdTooltips(page)));
+  const more = reader(page).getByRole('button', { name: 'More for this message' }).last();
+  const tooltip = page.getByRole('tooltip').filter({ hasText: /^More$/ });
+
+  // A pointer resting on it as the code arrives opens its tooltip, which describes it from then on.
+  await more.hover();
+  await tooltips.asked;
+  expect(await page.getByRole('tooltip').count()).toBe(0);
+  expect(await more.getAttribute('aria-describedby')).toBeNull();
+  tooltips.release();
+  await tooltip.waitFor({ timeout: 2_000 });
+  const about = await more.and(page.locator('[aria-describedby]')).getAttribute('aria-describedby');
+  await expect(page.locator(`[id="${about}"]`).textContent()).resolves.toBe('More');
+
+  // Keyboard focus opens it too, and a menu that takes the tooltip away as it opens gives it back.
+  await page.mouse.move(0, 0);
+  await tooltip.waitFor({ state: 'detached' });
+  await reader(page).getByRole('button', { name: 'Reply', exact: true }).last().focus();
+  await page.keyboard.press('Tab');
+  await tooltip.waitFor({ timeout: 2_000 });
+  await page.keyboard.press('Enter');
+  const menu = page.getByRole('menu');
+  await menu.waitFor();
+  await tooltip.waitFor({ state: 'detached' });
+  await page.keyboard.press('Escape');
+  await menu.waitFor({ state: 'detached' });
+  await more.hover();
+  await tooltip.waitFor({ timeout: 2_000 });
+  const again = await more.getAttribute('aria-describedby');
+  await expect(page.locator(`[id="${again}"]`).textContent()).resolves.toBe('More');
+
+  // A press leaves the button without one, though the pointer rests on it still, and so does a tap,
+  // though the tapped button keeps a sticky hover.
+  for (const [options, press] of [
+    [DESKTOP, (button: Locator) => button.click()],
+    [PHONE, (button: Locator) => button.tap()],
+  ] as const) {
+    const pressed = await open(options, async (page) => (tooltips = await holdTooltips(page)));
+    const unread = pressed.getByRole('button', { name: 'Unread only' });
+    await press(unread);
+    await tooltips.asked;
+    tooltips.release();
+    await unread.and(pressed.locator('[aria-describedby]')).waitFor();
+    expect(await pressed.getByRole('tooltip').count()).toBe(0);
+  }
+}, 30_000);
+
 test('light paper, chosen in the palette, holds for a sender on every device until turned off', async () => {
   // Two devices of the same member, both in the dark theme, where painted mail is darkened.
   const [first, second] = [

@@ -6,8 +6,8 @@ import react from '@vitejs/plugin-react';
 import { Features } from 'lightningcss';
 import { defineConfig } from 'vite';
 import { astryxBuiltTheme } from './src/shared/build/astryxBuiltTheme.ts';
+import { astryxButtonTooltip } from './src/shared/build/astryxButtonTooltip.ts';
 import { astryxIcons } from './src/shared/build/astryxIcons.ts';
-import { astryxKeyboardClearance } from './src/shared/build/astryxKeyboardClearance.ts';
 import { astryxStyles } from './src/shared/build/astryxStyles.ts';
 import { astryxMessages } from './src/shared/build/astryxMessages.ts';
 import { astryxUseTheme } from './src/shared/build/astryxUseTheme.ts';
@@ -52,12 +52,12 @@ export default defineConfig(({ isPreview }) => ({
       client: { entry: 'app/main.tsx' },
     }),
     // Astryx's message formatter and its fallback icons, kept to what the bundled components use,
-    // its theme generator, kept with the toasts, the only screen that runs it, and its software
-    // keyboard's code, kept until a layer first opens.
+    // its theme generator, kept with the toasts, the only screen that runs it, and its buttons'
+    // tooltips, kept until the first screen has settled.
     astryxMessages(),
     astryxIcons(),
     astryxUseTheme(),
-    astryxKeyboardClearance(),
+    astryxButtonTooltip(),
     // A built theme's fields that only generate its CSS, which its stylesheet already holds. The
     // e2e suite drives a build that throws where Astryx reads one.
     astryxBuiltTheme({ isTrapped: process.env.THEME_TRAPS === '1' }),
