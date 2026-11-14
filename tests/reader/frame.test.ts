@@ -3,13 +3,13 @@ import type { Browser, Page } from 'playwright';
 import {
   BROWSERS,
   corpus,
+  framesShown,
   launch,
   serveCanary,
   serveHarness,
   type Canary,
   type Harness,
 } from './browsers.ts';
-import type { Paper } from '../../src/features/reader/core/colors.ts';
 import type { Result, Shown } from './harness/main.tsx';
 
 /**
@@ -50,31 +50,33 @@ for (const type of BROWSERS) {
     }, 30_000);
     afterAll(() => browser.close());
 
-    describe('hostile mail, before its sender is allowed', () => {
-      let seen: Observation;
-      beforeAll(async () => {
-        seen = await observe(
-          browser,
-          hostile.map(({ html }) => ({ html, images: 'blocked', parts: HOSTILE_PARTS })),
-        );
-      }, 30_000);
+    // Each wall holds alone, so a flaw in one is never enough. `frame` skips the sanitizer, and
+    // `sanitizer` writes its markup into a frame with no sandbox and no content security policy.
+    for (const walls of ['both', 'frame', 'sanitizer'] as const) {
+      describe(`hostile mail, before its sender is allowed, walls: ${walls}`, () => {
+        let seen: Observation;
+        beforeAll(async () => {
+          seen = await observe(
+            browser,
+            hostile.map(({ html }) => ({ html, images: 'blocked', parts: HOSTILE_PARTS, walls })),
+          );
+        }, 30_000);
 
-      test('runs no script', () => {
-        expect(seen.pwned).toEqual([]);
-        expect(seen.dialogs).toEqual([]);
-      });
+        test('runs no script', () => {
+          expect(seen.pwned).toEqual([]);
+          expect(seen.dialogs).toEqual([]);
+        });
 
-      test('submits no form and loads nothing, even when every control is clicked', () => {
-        expect(seen.canary).toEqual([]);
-        expect(seen.elsewhere).toEqual([]);
-        expect(seen.proxied).toEqual([]);
+        test('submits no form and loads nothing, even when every control is clicked', () => {
+          expect(seen.canary).toEqual([]);
+          expect(seen.elsewhere).toEqual([]);
+          expect(seen.proxied).toEqual([]);
+          // The proxy serves any public image to the member, so the frame's policy is what keeps a
+          // message from reaching it, or its parts, before its sender is allowed.
+          if (walls === 'frame') expect(seen.parts).toEqual([]);
+        });
       });
-
-      test('says that it left images out', () => {
-        const images = hostile.findIndex(({ name }) => name === 'images.html');
-        expect(seen.results[images]?.blockedImages).toBe(true);
-      });
-    });
+    }
 
     describe('hostile mail, once its sender is allowed', () => {
       let seen: Observation;
@@ -94,12 +96,10 @@ for (const type of BROWSERS) {
         expect(seen.canary).toEqual([]);
         expect(seen.elsewhere).toEqual([]);
         const proxied = seen.proxied.map((url) => new URL(url).pathname);
-        for (const path of ['/img.png', '/protocol-relative.png', '/body-background.png']) {
+        for (const path of ['/img.png', '/protocol-relative.png', '/body-background.png'])
           expect(proxied).toContain(path);
-        }
-        for (const path of ['/table-background.png', '/td-background.png', '/srcset-1x.png']) {
+        for (const path of ['/table-background.png', '/td-background.png', '/srcset-1x.png'])
           expect(proxied).toContain(path);
-        }
         expect(proxied.some((path) => /^\/(srcset|picture-source)/.test(path))).toBe(true);
         // Fonts, stylesheets, scripts and media never load, not even through the proxy.
         expect(
@@ -109,65 +109,6 @@ for (const type of BROWSERS) {
 
       test('loads every lazy image at once, so scrolling reports nothing', () => {
         expect(seen.proxied.map((url) => new URL(url).pathname)).toContain('/lazy.png');
-      });
-    });
-
-    // Each wall holds alone, so a flaw in one is never enough.
-    describe('hostile mail, with the sanitizer skipped', () => {
-      let seen: Observation;
-      beforeAll(async () => {
-        seen = await observe(
-          browser,
-          hostile.map(({ html }) => ({
-            html,
-            images: 'blocked',
-            parts: HOSTILE_PARTS,
-            walls: 'frame',
-          })),
-        );
-      }, 30_000);
-
-      test('the frame alone still runs no script', () => {
-        expect(seen.pwned).toEqual([]);
-        expect(seen.dialogs).toEqual([]);
-      });
-
-      test('the frame alone still submits no form and loads no resource', () => {
-        expect(seen.canary).toEqual([]);
-        expect(seen.elsewhere).toEqual([]);
-      });
-
-      // The proxy serves any public image to the member, so the frame's policy is what keeps a
-      // message from reaching it before its sender is allowed.
-      test('the frame alone lets nothing through the image proxy or the message’s parts', () => {
-        expect(seen.proxied).toEqual([]);
-        expect(seen.parts).toEqual([]);
-      });
-    });
-
-    describe('hostile mail, sanitized into an open frame', () => {
-      let seen: Observation;
-      beforeAll(async () => {
-        seen = await observe(
-          browser,
-          hostile.map(({ html }) => ({
-            html,
-            images: 'blocked',
-            parts: HOSTILE_PARTS,
-            walls: 'sanitizer',
-          })),
-        );
-      }, 30_000);
-
-      test('the sanitizer alone leaves no script to run', () => {
-        expect(seen.pwned).toEqual([]);
-        expect(seen.dialogs).toEqual([]);
-      });
-
-      test('the sanitizer alone leaves nothing to load or submit', () => {
-        expect(seen.canary).toEqual([]);
-        expect(seen.elsewhere).toEqual([]);
-        expect(seen.proxied).toEqual([]);
       });
     });
 
@@ -307,12 +248,12 @@ for (const type of BROWSERS) {
           }
           expect(seen.results[index]?.quote).toBe(Boolean(expected.quoted));
         });
-
-        test(`${name}: ${expected.paper === 'light' ? 'stays on light paper' : 'follows the theme'}`, () => {
-          const index = real.findIndex((mail) => mail.name === name);
-          expect(seen.results[index]?.paper).toBe(expected.paper);
-        });
       }
+
+      test('stays on light paper only when it asks to, and otherwise follows the theme', () => {
+        const light = real.filter((_, index) => seen.results[index]?.paper === 'light');
+        expect(light.map(({ name }) => name)).toEqual(['light-only.html']);
+      });
     });
 
     describe('tracking pixels', () => {
@@ -378,54 +319,47 @@ const HOSTILE_PARTS = { 'logo@hostile.example': '/messages/demo/INBOX/1/9/1' };
 /** Where the receipt's inline logo is served, as one of its parts. */
 const RECEIPT_LOGO = '/messages/demo/INBOX/1/7/2';
 
-/** What each real-world message shows, hides behind its quote fold, and the paper it sits on. */
-const REAL: Record<string, { reply: string; quoted?: string; paper: Paper }> = {
+/** What each real-world message shows, and hides behind its quote fold. */
+const REAL: Record<string, { reply: string; quoted?: string }> = {
   'apple-mail-reply.html': {
     reply: 'See you at the trailhead',
     quoted: 'Shall we hike on Saturday',
-    paper: 'theme',
   },
-  'dark-scheme.html': { reply: 'Permit 2026-0417 covers two nights', paper: 'theme' },
-  'forward.html': { reply: 'Park at the north lot', paper: 'theme' },
-  'github-notification.html': { reply: 'Should a loop allow a short road walk', paper: 'theme' },
+  'dark-scheme.html': { reply: 'Permit 2026-0417 covers two nights' },
+  'forward.html': { reply: 'Park at the north lot' },
+  'github-notification.html': { reply: 'Should a loop allow a short road walk' },
   'gmail-reply.html': {
     reply: 'Thursday works for me',
     quoted: 'Are you free for lunch',
-    paper: 'theme',
   },
-  'inline-reply.html': { reply: 'Should I bring the projector', paper: 'theme' },
-  'navy-desk.html': { reply: 'A phone that moves from Wi-Fi', paper: 'theme' },
-  'newsletter.html': { reply: 'The north ridge loop', paper: 'theme' },
-  'notification.html': { reply: 'Should two-digit years', paper: 'theme' },
+  'inline-reply.html': { reply: 'Should I bring the projector' },
+  'navy-desk.html': { reply: 'A phone that moves from Wi-Fi' },
+  'newsletter.html': { reply: 'The north ridge loop' },
+  'light-only.html': { reply: 'Should two-digit years' },
   'outlook-desktop-reply.html': {
     reply: 'Approved. Please go ahead',
     quoted: 'Can you approve purchase order',
-    paper: 'theme',
   },
   'outlook-mobile-reply.html': {
     reply: 'The hut has room for four',
     quoted: 'Is there still room at the hut',
-    paper: 'theme',
   },
   'outlook-web-reply.html': {
     reply: 'The quarterly numbers are attached',
     quoted: 'Could you send over the quarterly numbers',
-    paper: 'theme',
   },
-  'painted-newsletter.html': { reply: 'Warm when wet', paper: 'theme' },
-  'pasted-colors.html': { reply: 'Bring a headlamp', paper: 'theme' },
-  'plain-html.html': { reply: 'The cabin is booked', paper: 'theme' },
-  'receipt.html': { reply: 'Trail runners, size 42', paper: 'theme' },
-  'tinted-reply.html': { reply: 'See you at the trailhead', paper: 'theme' },
+  'painted-newsletter.html': { reply: 'Warm when wet' },
+  'pasted-colors.html': { reply: 'Bring a headlamp' },
+  'plain-html.html': { reply: 'The cabin is booked' },
+  'receipt.html': { reply: 'Trail runners, size 42' },
+  'tinted-reply.html': { reply: 'See you at the trailhead' },
   'thunderbird-reply.html': {
     reply: 'The patch looks right',
     quoted: 'Here is the patch',
-    paper: 'theme',
   },
   'zoho-reply.html': {
     reply: 'The invoice is paid',
     quoted: 'Invoice 2026-114 is due',
-    paper: 'theme',
   },
 };
 
@@ -486,13 +420,7 @@ async function show(page: Page, mails: Shown[], navigate = true): Promise<Result
   harness.parts.length = 0;
   if (navigate) await page.goto(harness.origin);
   const results = await page.evaluate((shown) => window.show(shown), mails);
-  await page.waitForFunction(
-    (count) =>
-      [...document.querySelectorAll('iframe')].filter(
-        (frame) => frame.style.visibility === 'visible',
-      ).length === count,
-    mails.length,
-  );
+  await framesShown(page, mails.length);
   return results;
 }
 

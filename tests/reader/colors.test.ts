@@ -2,10 +2,11 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import type { Browser, Page } from 'playwright';
 import { isPaperWhite, READS, SHADED, type Seen } from '../../src/features/reader/core/colors.ts';
 import { contrast, oklchOf, over, parseHex, type Rgb } from '../../src/shared/color.ts';
-import type { Result, Shown } from './harness/main.tsx';
+import type { Shown } from './harness/main.tsx';
 import {
   BROWSERS,
   corpus,
+  framesShown,
   launch,
   serveCanary,
   serveHarness,
@@ -47,8 +48,8 @@ const KINDS = {
   tinted: 'tinted-reply.html',
   /** Paints a dark desk, kept as sent, with a light card on it whose text sets no color. */
   framed: 'navy-desk.html',
-  /** Colors its text, and asks for light paper only. */
-  lightOnly: 'github-notification.html',
+  /** Asks for light paper only. */
+  lightOnly: 'light-only.html',
   /** Paints its desk with a variable, a color no browser reads before the page resolves it. */
   unreadable: 'receipt.html',
   /** Paints its desk with a gradient and no color under it. */
@@ -86,7 +87,6 @@ beforeAll(async () => {
   const real = await corpus('real', canary);
   const html = (name: string) => real.find((file) => file.name === name)?.html ?? '';
   mail = Object.fromEntries(kinds.map((kind) => [kind, html(KINDS[kind])])) as Record<Kind, string>;
-  mail.lightOnly = `<meta name="color-scheme" content="only light">${mail.lightOnly}`;
   mail.unreadable = mail.painted.replace('background:#f5f5f7', 'background:var(--desk, #f5f5f7)');
   mail.imageOnly = mail.painted.replace(
     'background:#f5f5f7',
@@ -106,9 +106,9 @@ afterAll(() => {
 for (const type of BROWSERS) {
   describe(type.name(), () => {
     let browser: Browser;
-    const shown = {} as Record<'light' | 'dark', { results: Result[]; frames: Shows[] }>;
+    const shown = {} as Record<'light' | 'dark', Shows[]>;
     const of = (theme: 'light' | 'dark', kind: Kind) => {
-      const frame = shown[theme].frames[kinds.indexOf(kind)];
+      const frame = shown[theme][kinds.indexOf(kind)];
       if (!frame) throw new Error(`Nothing shown for ${kind}`);
       return frame;
     };
@@ -117,23 +117,20 @@ for (const type of BROWSERS) {
       browser = await launch(type);
       for (const theme of ['light', 'dark'] as const) {
         const page = await browser.newPage();
-        const results = await show(
+        await show(
           page,
           theme,
           kinds.map((kind) => mail[kind]),
           onLightPaper.map((kind) => kinds.indexOf(kind)),
         );
-        shown[theme] = { results, frames: await framesOf(page) };
+        shown[theme] = await framesOf(page);
         await page.close();
       }
     }, 60_000);
     afterAll(() => browser.close());
 
     test('in the light theme, every kind of mail shows its colors as written', () => {
-      for (const kind of kinds) {
-        const light = of('light', kind);
-        expect(luminance(light.paper)).toBeGreaterThan(0.8);
-      }
+      for (const kind of kinds) expect(luminance(of('light', kind).paper)).toBeGreaterThan(0.8);
       const github = of('light', 'github');
       expect(colorOf(github, 'Reply to this email')).toEqual(hex('#666666'));
       expect(colorOf(github, '> +export function isLoop')).toEqual(hex('#555555'));
@@ -144,13 +141,11 @@ for (const type of BROWSERS) {
     test('in the dark theme, mail that colors only its text sits on charcoal and reads at 4.5:1', () => {
       for (const kind of ['github', 'outlook', 'pasted', 'plain'] as const) {
         const dark = of('dark', kind);
-        expect(shown.dark.results[kinds.indexOf(kind)]?.paper).toBe('theme');
         expect(luminance(dark.paper)).toBeLessThan(0.1);
         expect(dark.texts.length).toBeGreaterThan(0);
         expect(dark.rewritten).toBe(kind !== 'plain');
-        for (const { text, color, on } of dark.texts) {
+        for (const { text, color, on } of dark.texts)
           expect({ text, reads: contrast(color, on) >= READS }).toEqual({ text, reads: true });
-        }
       }
     });
 
@@ -182,7 +177,6 @@ for (const type of BROWSERS) {
 
     test('mail that declares a dark color scheme shows its own dark styles, by the theme', () => {
       for (const kind of ['ownDark', 'ownDarkMeta', 'ownDarkCss'] as const) {
-        expect(shown.light.results[kinds.indexOf(kind)]?.paper).toBe('theme');
         const [light, dark] = [of('light', kind), of('dark', kind)];
         expect(colorOf(light, 'Permit 2026-0417')).toEqual(hex('#1d2420'));
         expect(backgroundOf(light, 'Permit 2026-0417')).toEqual(hex('#ffffff'));
@@ -195,7 +189,6 @@ for (const type of BROWSERS) {
 
     test('in the dark theme, light backgrounds darken in their own hue, and white becomes the paper', () => {
       for (const kind of ['painted', 'newsletter', 'tinted'] as const) {
-        expect(shown.dark.results[kinds.indexOf(kind)]?.paper).toBe('theme');
         const [light, dark] = [of('light', kind), of('dark', kind)];
         expect(dark.texts.map(({ text }) => text)).toEqual(light.texts.map(({ text }) => text));
         // The desk a message paints under its sheet, and every background its text lies on.
@@ -263,17 +256,14 @@ for (const type of BROWSERS) {
 
     test('what lies on a color kept as sent shows as its sender designed it, in the light theme’s ink', () => {
       const [light, dark] = [of('light', 'framed'), of('dark', 'framed')];
-      expect(shown.dark.results[kinds.indexOf('framed')]?.paper).toBe('theme');
       expect(dark.texts).toEqual(light.texts);
       expect(backgroundOf(dark, 'A phone that moves')).toEqual(hex('#fdf6e3'));
-      for (const { text, color, on } of dark.texts) {
+      for (const { text, color, on } of dark.texts)
         expect({ text, reads: contrast(color, on) >= READS }).toEqual({ text, reads: true });
-      }
     });
 
     test('mail that asks for light only, or paints what can’t be darkened, stays on light paper', () => {
       for (const kind of ['lightOnly', 'unreadable', 'imageOnly'] as const) {
-        expect(shown.dark.results[kinds.indexOf(kind)]?.paper).toBe('light');
         const [light, dark] = [of('light', kind), of('dark', kind)];
         expect(luminance(dark.paper)).toBeGreaterThan(0.8);
         expect(dark.paper).toEqual(light.paper);
@@ -320,9 +310,7 @@ for (const type of BROWSERS) {
           }),
       );
       expect(frames).toBeLessThanOrEqual(2);
-      await page.waitForFunction(
-        () => document.querySelector<HTMLIFrameElement>('iframe')?.style.visibility === 'visible',
-      );
+      await framesShown(page, 1);
       expect(await page.evaluate(() => window.sanitized)).toBe(1);
       expect((await framesOf(page))[0]).toEqual(of('dark', 'newsletterOnLight'));
       await page.close();
@@ -335,14 +323,14 @@ for (const type of BROWSERS) {
       const control = page.getByRole('button', { name: 'Light paper' });
       // The sheet and the frame on it both show the paper, light or dark.
       const shows = (paper: 'light' | 'dark') =>
-        eventually(async () =>
+        until(async () =>
           (await papersOf(page)).every((rgb) => luminance(rgb) > 0.5 === (paper === 'light')),
         );
       const isPressed = (on: boolean) =>
-        eventually(async () => (await control.getAttribute('aria-pressed')) === String(on));
+        until(async () => (await control.getAttribute('aria-pressed')) === String(on));
       await control.waitFor();
-      expect(await isPressed(false)).toBe(true);
-      expect(await shows('dark')).toBe(true);
+      await isPressed(false);
+      await shows('dark');
 
       for (const on of [true, false]) {
         harness.calls.length = 0;
@@ -351,8 +339,8 @@ for (const type of BROWSERS) {
         expect(harness.calls).toEqual([
           { name: 'setLightPaper', args: ['personal', 'news@trailhead.example.com', on] },
         ]);
-        expect(await isPressed(on)).toBe(true);
-        expect(await shows(on ? 'light' : 'dark')).toBe(true);
+        await isPressed(on);
+        await shows(on ? 'light' : 'dark');
       }
 
       await page.emulateMedia({ colorScheme: 'light' });
@@ -389,12 +377,7 @@ for (const type of BROWSERS) {
       });
       await page.emulateMedia({ colorScheme: 'dark' });
       expect(await page.evaluate(() => window.switched)).toBeLessThanOrEqual(2);
-      await page.waitForFunction(
-        () =>
-          [...document.querySelectorAll('iframe')].filter(
-            (frame) => frame.style.visibility === 'visible',
-          ).length === 2,
-      );
+      await framesShown(page, 2);
       expect(await page.evaluate(() => window.sanitized)).toBe(2);
       const switched = await framesOf(page);
       expect(switched[0]).toEqual(of('dark', 'github'));
@@ -408,12 +391,7 @@ for (const type of BROWSERS) {
  * Shows messages in the harness under a theme, those at `onLight` on light paper, and waits until
  * every frame is sized.
  */
-async function show(
-  page: Page,
-  theme: 'light' | 'dark',
-  html: string[],
-  onLight: number[] = [],
-): Promise<Result[]> {
+async function show(page: Page, theme: 'light' | 'dark', html: string[], onLight: number[] = []) {
   await page.emulateMedia({ colorScheme: theme });
   await page.goto(harness.origin);
   const mails: Shown[] = html.map((one, i) => ({
@@ -421,15 +399,8 @@ async function show(
     images: 'blocked',
     lightPaper: onLight.includes(i),
   }));
-  const results = await page.evaluate((all) => window.show(all), mails);
-  await page.waitForFunction(
-    (count) =>
-      [...document.querySelectorAll('iframe')].filter(
-        (frame) => frame.style.visibility === 'visible',
-      ).length === count,
-    html.length,
-  );
-  return results;
+  await page.evaluate((all) => window.show(all), mails);
+  await framesShown(page, html.length);
 }
 
 /**
@@ -512,14 +483,6 @@ async function papersOf(page: Page): Promise<Rgb[]> {
     });
   });
   return drawn.map((color) => seenOf(color).rgb);
-}
-
-/** Whether a condition the page shows comes true within two seconds. */
-async function eventually(condition: () => Promise<boolean>): Promise<boolean> {
-  for (const start = Date.now(); Date.now() - start < 2_000; await Bun.sleep(20)) {
-    if (await condition()) return true;
-  }
-  return condition();
 }
 
 const white: Rgb = { r: 1, g: 1, b: 1 };

@@ -18,13 +18,17 @@ import { startWorker, type LocalWorker } from './workerd.ts';
 
 /**
  * The test worker, with its own storage, and with `vars` added to its environment. A variable given
- * as `undefined` is left out, as `CREDENTIALS_KEY` is from a preview.
+ * as `undefined` is left out, as `CREDENTIALS_KEY` is from a preview. A test that serves more routes
+ * names its own `main`, which wraps the test worker.
  */
-export function mailrooms(vars: Record<string, string | undefined> = {}) {
+export function mailrooms(
+  vars: Record<string, string | undefined> = {},
+  main = join(import.meta.dir, '../src/features/mailroom/server/test-worker.ts'),
+) {
   return startWorker(
     {
       name: 'trail-mix-mailroom-test',
-      main: join(import.meta.dir, '../src/features/mailroom/server/test-worker.ts'),
+      main,
       durable_objects: { bindings: [{ name: 'MAILROOM', class_name: 'TestMailroom' }] },
       migrations: [{ tag: 'v1', new_sqlite_classes: ['TestMailroom'] }],
       r2_buckets: [{ binding: 'BODIES', bucket_name: 'bodies' }],
@@ -48,7 +52,7 @@ export function member(name: string, worker: () => LocalWorker) {
       method: 'POST',
       body: sent instanceof FormData ? sent : JSON.stringify(sent),
     });
-    const result = await response.json<{ value?: T; error?: string }>();
+    const result = (await response.json()) as { value?: T; error?: string };
     if (result.error !== undefined) throw new Error(result.error);
     return result.value as T;
   };

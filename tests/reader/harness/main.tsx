@@ -82,13 +82,7 @@ window.show = (mails) => {
   );
   showing = { mails, safe, at: Date.now() };
   render();
-  return safe.map(({ blockedImages, trackers, paper, quote, inlineParts }) => ({
-    blockedImages,
-    trackers,
-    paper,
-    quote,
-    inlineParts,
-  }));
+  return safe.map(({ html, sources, ...result }) => result);
 };
 
 window.showOnLightPaper = (index, on) => {

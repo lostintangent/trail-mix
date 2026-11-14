@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import type { Browser, Page } from 'playwright';
 import {
   BROWSERS,
@@ -49,6 +49,7 @@ for (const type of BROWSERS) {
         await open('lunch');
         await page.close();
       }, 60_000);
+      afterEach(() => page.close());
       afterAll(() => browser.close());
 
       async function open(fixture: 'lunch' | 'newsletter', upcoming: string[] = []) {
@@ -86,7 +87,6 @@ for (const type of BROWSERS) {
         expect(await attachments.first().getAttribute('href')).toBe(
           '/messages/personal/INBOX/1/7/1',
         );
-        await page.close();
       });
 
       test('folds the quote until it is asked for', async () => {
@@ -96,7 +96,6 @@ for (const type of BROWSERS) {
         await page.getByRole('button', { name: 'Quoted text' }).click();
         await framesFitted(page);
         await frame.getByText('book the table by the window').waitFor({ state: 'visible' });
-        await page.close();
       });
 
       test('opens an older message from its folded line, with its own quote folded', async () => {
@@ -108,7 +107,6 @@ for (const type of BROWSERS) {
         expect(await sheet.getByText('> Ada').count()).toBe(0);
         await sheet.getByRole('button', { name: 'Quoted text' }).click();
         expect(await sheet.getByText('> Ada', { exact: false }).isVisible()).toBe(true);
-        await page.close();
       });
 
       /** Every key a shortcut could hear: those the page heard and those a message handed on. */
@@ -151,7 +149,6 @@ for (const type of BROWSERS) {
         await keysFree();
         await page.keyboard.press('e');
         expect(await heard()).toEqual(['e']);
-        await page.close();
       });
 
       test('text selected inside a message keeps the focus there, to copy, until a click lets it go', async () => {
@@ -166,7 +163,6 @@ for (const type of BROWSERS) {
         await keysFree();
         await page.keyboard.press('e');
         expect(await heard()).toEqual(['e']);
-        await page.close();
       });
 
       // Only WebKit takes the focus back from a message, and in Chromium a Playwright drag over a
@@ -184,7 +180,6 @@ for (const type of BROWSERS) {
           await page.mouse.up();
           await page.waitForFunction(() => document.activeElement?.tagName === 'IFRAME');
           expect(await selected()).toStartWith('Perfect');
-          await page.close();
         },
       );
 
@@ -198,7 +193,6 @@ for (const type of BROWSERS) {
           .waitFor({ state: 'visible' });
         expect(await dialog.getByText('Message-ID').isVisible()).toBe(true);
         expect(await page.evaluate(() => window.pwned)).toEqual([]);
-        await page.close();
       });
 
       test('shows the start of long mail at once, and all of it once the member stays', async () => {
@@ -233,7 +227,6 @@ for (const type of BROWSERS) {
             };
           }),
         ).toEqual({ end: true, fits: true });
-        await page.close();
       });
 
       test('loads a sender’s images only when asked, and only through the proxy', async () => {
@@ -243,7 +236,6 @@ for (const type of BROWSERS) {
         await until(() => proxiedLogo());
         expect(proxiedLogo()).toBe(true);
         expect(canary.hits).toEqual([]);
-        await page.close();
       });
 
       test('allows a sender’s images from now on, and shows them at once', async () => {
@@ -256,7 +248,6 @@ for (const type of BROWSERS) {
         ]);
         await until(() => proxiedLogo());
         expect(proxiedLogo()).toBe(true);
-        await page.close();
       });
 
       test('says quietly how many trackers a message held, with its images hidden or shown', async () => {
@@ -270,7 +261,6 @@ for (const type of BROWSERS) {
         await page.close();
         await open('lunch');
         expect(await page.getByText(/tracker/).count()).toBe(0);
-        await page.close();
       });
 
       test('fetches the newest body of each conversation that may open next', async () => {
@@ -281,7 +271,6 @@ for (const type of BROWSERS) {
           ['conversation', 'trailhead'],
           ['body', { account: 'personal', path: 'INBOX', uidValidity: 1, uid: 9 }],
         ]);
-        await page.close();
       });
 
       test('fits wide mail to the reader’s width', async () => {
@@ -291,7 +280,6 @@ for (const type of BROWSERS) {
           return box.scrollWidth - box.clientWidth;
         });
         expect(overflow).toBeLessThanOrEqual(1);
-        await page.close();
       });
     });
   }

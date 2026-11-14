@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { chromium, webkit, type BrowserType } from 'playwright';
+import { chromium, webkit, type BrowserType, type Page } from 'playwright';
 import { Features } from 'lightningcss';
 import { build } from 'vite';
 import { stylexOptions } from '../../src/shared/build/stylexOptions.ts';
@@ -166,6 +166,16 @@ export async function launch(type: BrowserType) {
     throw error;
   }
 }
+
+/** Waits until the page shows `count` messages' frames, each sized to its mail. */
+export const framesShown = (page: Page, count: number) =>
+  page.waitForFunction(
+    (count) =>
+      [...document.querySelectorAll('iframe')].filter(
+        (frame) => frame.style.visibility === 'visible',
+      ).length === count,
+    count,
+  );
 
 /** Every corpus file in a folder, with the canary standing in for each remote host. */
 export async function corpus(folder: 'hostile' | 'real' | 'trackers', canary: Canary) {

@@ -4,19 +4,11 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { join } from 'node:path';
 import type { Browser } from 'playwright';
-import {
-  isBundle,
-  type Account,
-  type Body,
-  type ConversationSummary,
-  type Message,
-  type MessageRef,
-} from '../../src/features/mail/core/index.ts';
-import type { BundlePage, Page } from '../../src/features/mailroom/client/index.ts';
+import type { Account, Body, Message } from '../../src/features/mail/core/index.ts';
 import { messageUrl, partUrl } from '../../src/features/mailroom/client/urls.ts';
-import { startWorker, type LocalWorker } from '../workerd.ts';
-import { until } from '../until.ts';
-import { BROWSERS, launch, serveHarness, type Harness } from './browsers.ts';
+import { mailrooms, member } from '../mailrooms.ts';
+import type { LocalWorker } from '../workerd.ts';
+import { BROWSERS, framesShown, launch, serveHarness, type Harness } from './browsers.ts';
 
 /** The newest conversations of the demo's unified Inbox, which hold every kind of mail it has. */
 const NEWEST = 40;
@@ -24,38 +16,23 @@ const NEWEST = 40;
 let worker: LocalWorker;
 let harness: Harness;
 let mail: { message: Message; body: Body }[];
+const ada = member('ada', () => worker);
 
 beforeAll(async () => {
-  worker = await startWorker({
-    name: 'trail-mix-reader-test',
-    main: join(import.meta.dir, 'worker.ts'),
-    durable_objects: { bindings: [{ name: 'MAILROOM', class_name: 'TestMailroom' }] },
-    migrations: [{ tag: 'v1', new_sqlite_classes: ['TestMailroom'] }],
-    r2_buckets: [{ binding: 'BODIES', bucket_name: 'bodies' }],
-    vars: { CREDENTIALS_KEY: 'a-test-key-that-is-at-least-32-characters', DEMO_MAILBOX: '200' },
-  });
+  worker = await mailrooms({ DEMO_MAILBOX: '200' }, join(import.meta.dir, 'worker.ts'));
   harness = await serveHarness();
-  await until(
-    async () => (await call<Account[]>('accounts')).every((a) => a.status === 'ready'),
+  await ada.until(
+    async () => (await ada.call<Account[]>('accounts')).every((a) => a.status === 'ready'),
     60_000,
   );
-  const { items } = await call<Page>('conversations', { in: 'inbox' });
-  // A bundle's conversations stand in its place.
-  const conversations = (
-    await Promise.all(
-      items.map(async (item) =>
-        isBundle(item) ? (await call<BundlePage>('bundle', item.id)).items : [item],
-      ),
-    )
-  ).flat();
   const newest = await Promise.all(
-    conversations.slice(0, NEWEST).map(async ({ id }: ConversationSummary) => {
-      const thread = await call<Message[]>('conversation', id);
+    (await ada.page({ in: 'inbox' })).slice(0, NEWEST).map(async ({ id }) => {
+      const thread = await ada.call<Message[]>('conversation', id);
       return thread.toSorted((a, b) => a.date.localeCompare(b.date)).at(-1)!;
     }),
   );
   mail = await Promise.all(
-    newest.map(async (message) => ({ message, body: await call<Body>('body', refOf(message)) })),
+    newest.map(async (message) => ({ message, body: await ada.call<Body>('body', message) })),
   );
 }, 120_000);
 
@@ -123,13 +100,7 @@ for (const type of BROWSERS) {
         (shown) => window.show(shown.map((each) => ({ html: each, images: 'blocked' as const }))),
         html,
       );
-      await page.waitForFunction(
-        (count) =>
-          [...document.querySelectorAll('iframe')].filter(
-            (frame) => frame.style.visibility === 'visible',
-          ).length === count,
-        html.length,
-      );
+      await framesShown(page, html.length);
       await page.waitForTimeout(500);
       expect(await page.evaluate(() => window.pwned)).toEqual([]);
       expect(elsewhere).toEqual([]);
@@ -138,21 +109,4 @@ for (const type of BROWSERS) {
   });
 }
 
-async function call<T>(name: string, ...args: unknown[]): Promise<T> {
-  const response = await fetch(`${worker.url}/ada/call`, {
-    method: 'POST',
-    body: JSON.stringify({ name, args }),
-  });
-  const result = (await response.json()) as { value?: T; error?: string };
-  if (result.error !== undefined) throw new Error(result.error);
-  return result.value as T;
-}
-
 const bytes = (path: string) => fetch(`${worker.url}/ada${path}`);
-
-const refOf = ({ account, path, uidValidity, uid }: MessageRef): MessageRef => ({
-  account,
-  path,
-  uidValidity,
-  uid,
-});
