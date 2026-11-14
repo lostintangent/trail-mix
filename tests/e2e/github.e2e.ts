@@ -93,7 +93,7 @@ test('each Inbox lists one row for each repository, and a search or a folder lis
   await expect(bundleRow(page, TOY_BOX).count()).resolves.toBe(0);
 }, 60_000);
 
-test('a bundle opens its threads unread, and a thread opens under it, steps by J and links to GitHub', async () => {
+test('a bundle opens its threads unread, and a thread opens under it and links to GitHub', async () => {
   const page = await open(DESKTOP);
   const row = bundleRow(page, TOY_BOX);
   await row.click();
@@ -118,27 +118,6 @@ test('a bundle opens its threads unread, and a thread opens under it, steps by J
   const place = page.getByRole('toolbar', { name: 'Conversation' });
   await place.getByText(/^1 of \d+$/).waitFor();
   await shows(page, title);
-  const threads = Number(/of (\d+)/.exec((await place.textContent())!)![1]);
-  expect(threads).toBeGreaterThan(50);
-  // The thread reaches the address once the selection has rested, and J's step would take its place.
-  const newest = await openedOnceRested(page);
-  await page.keyboard.press('j');
-  await place.getByText(`2 of ${threads}`).waitFor();
-  const second = (await (
-    await page.waitForFunction((title) => {
-      const shown = document.querySelector('section[aria-label="Reader"] h1')?.textContent;
-      return shown && shown !== title ? shown : undefined;
-    }, title)
-  ).jsonValue()) as string;
-
-  // The address keeps the bundle and its thread, and the crumb steps back to the bundle.
-  await openedOnceRested(page, newest);
-  expect(new URL(page.url()).searchParams.has('bundle')).toBe(true);
-  await page.reload();
-  await place.getByText(`2 of ${threads}`).waitFor();
-  await shows(page, second);
-  await reader(page).getByRole('button', { name: TOY_BOX, exact: true }).click();
-  await shows(page, TOY_BOX);
 }, 60_000);
 
 test('a thread deep in its bundle opens at its place on a reload, and J moves on from it', async () => {
