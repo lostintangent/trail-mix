@@ -1,4 +1,4 @@
-export type { Cursor, MailProvider, Moved, SyncBatch, SyncWindow } from './provider.ts';
+export type { Cursor, MailProvider, SyncBatch, SyncWindow } from './provider.ts';
 export { FIRST_SYNC_BATCH, SEARCH_LIMIT, SendFailure } from './provider.ts';
 export { demoImage } from './demo/images.ts';
 export { DEMO_PICTURES } from './demo/pictures.ts';
@@ -31,13 +31,13 @@ export {
   refreshRequest,
   refreshed,
   withStandIn,
-  type Answer,
   type Client,
   type DeviceSignIn,
   type Endpoint,
   type Polled,
   type Preset,
   type PresetName,
-  type Request,
   type Tokens,
+  type VendorAnswer,
+  type VendorRequest,
 } from './imap/core/index.ts';

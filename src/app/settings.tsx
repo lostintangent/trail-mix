@@ -61,14 +61,14 @@ export function Settings({
           <Switch
             label="Notifications on this device"
             description={
-              notifications.standing === 'able'
+              notifications.readiness === 'able'
                 ? 'New mail in your Inboxes shows here, even while Trail Mix is closed.'
-                : needsOf(notifications.standing)
+                : needsOf(notifications.readiness)
             }
             labelPosition="start"
             labelSpacing="spread"
             value={notifications.isOn}
-            isDisabled={notifications.standing !== 'able'}
+            isDisabled={notifications.readiness !== 'able'}
             isLoading={notifications.isBusy}
             onChange={() => void notifications.toggle()}
           />

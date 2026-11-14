@@ -13,6 +13,7 @@ import {
   type Hint,
   type Message,
   type MessageRef,
+  type Moved,
   type Outgoing,
 } from '../../mail/core/index.ts';
 import { RESTARTED, UNDO_SECONDS } from '../../outbox/core/index.ts';
@@ -238,11 +239,7 @@ describe('The Mailroom', () => {
     const before = await ada.page({ in: 'inbox' });
     const garden = before.find((row) => row.subject === 'Garden')!;
     const [message] = await ada.call<Message[]>('conversation', garden.id);
-    const moved = await ada.call<{ from: MessageRef; to: MessageRef }[]>(
-      'move',
-      [message],
-      'archive',
-    );
+    const moved = await ada.call<Moved[]>('move', [message], 'archive');
     expect(moved.map(({ from }) => from)).toEqual([refOf(message!)]);
     expect(moved[0]!.to.path).toBe('Archive');
     await ada.until(
@@ -303,7 +300,6 @@ describe('The Mailroom', () => {
   };
 
   describe('triage, as the browser sends it, on the server', () => {
-    type Moved = { from: MessageRef; to: MessageRef };
     /** Undoes moves as the browser does, each back to its folder. Returns where each landed. */
     const undo = async (moved: Moved[]) =>
       (
@@ -317,11 +313,7 @@ describe('The Mailroom', () => {
     test('archives and deletes as moves to a role, and each undo moves it back', async () => {
       let tickets = await held('Tickets');
       for (const role of ['archive', 'trash'] as const) {
-        const moved = await ada.call<{ from: MessageRef; to: MessageRef }[]>(
-          'move',
-          [tickets],
-          role,
-        );
+        const moved = await ada.call<Moved[]>('move', [tickets], role);
         const path = role === 'archive' ? 'Archive' : 'Trash';
         expect(moved.map(({ to }) => to.path)).toEqual([path]);
         expect(await onServer(path)).toContainKey('<tickets@trailmix.test>');
@@ -337,7 +329,7 @@ describe('The Mailroom', () => {
     test('moves to a folder of the account, and deletes a search hit from Archive', async () => {
       await ada.call('createFolder', { account: account.id, path: 'Receipts' });
       const garden = await held('Garden');
-      const moved = await ada.call<{ from: MessageRef; to: MessageRef }[]>('move', [garden], {
+      const moved = await ada.call<Moved[]>('move', [garden], {
         account: account.id,
         path: 'Receipts',
       });
@@ -348,11 +340,7 @@ describe('The Mailroom', () => {
       // Found only by the server's own search, outside the index.
       const [row] = await ada.page({ in: 'search', text: 'periwinkle', fullText: true });
       const [old] = await ada.call<Message[]>('conversation', row!.id);
-      const deleted = await ada.call<{ from: MessageRef; to: MessageRef }[]>(
-        'move',
-        [refOf(old!)],
-        'trash',
-      );
+      const deleted = await ada.call<Moved[]>('move', [refOf(old!)], 'trash');
       expect(await onServer('Trash')).toContainKey('<old@trailmix.test>');
       await undo(deleted);
       expect(await onServer('Archive')).toContainKey('<old@trailmix.test>');
@@ -894,11 +882,7 @@ describe('The Mailroom', () => {
       }
 
       await ada.call('move', [deleted], 'trash');
-      const [archived] = await ada.call<{ from: MessageRef; to: MessageRef }[]>(
-        'move',
-        [moved],
-        'archive',
-      );
+      const [archived] = await ada.call<Moved[]>('move', [moved], 'archive');
       const landed = archived!.to;
       await expungeElsewhere(expunged!);
       await checkNow();
@@ -1338,7 +1322,7 @@ describe('The Mailroom with the demo mailbox', () => {
       row.unread,
     );
     await gus.until(async () => (await inInbox())?.unread === 0);
-    const moved = await gus.call<{ from: MessageRef; to: MessageRef }[]>('move', scope, 'archive');
+    const moved = await gus.call<Moved[]>('move', scope, 'archive');
     expect(new Set(moved.map(({ from }) => from.path))).toEqual(new Set(['INBOX']));
     await gus.until(async () => (await inInbox()) === undefined);
     await gus.call(

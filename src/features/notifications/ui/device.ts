@@ -4,8 +4,8 @@
  * iPhone shows notifications only to an app on its Home Screen. Subscribing is in `setup.ts`.
  */
 
-/** Where this device stands: able to subscribe, or what it needs first. */
-export type Standing =
+/** Whether this device is ready for notifications: able to subscribe, or what it needs first. */
+export type Readiness =
   /** Installed, so it subscribes. */
   | 'able'
   /** In a browser's tab, which needs Trail Mix installed. */
@@ -17,7 +17,7 @@ export type Standing =
   /** A browser with no Web Push at all. */
   | 'unable';
 
-export function standingOf(): Standing {
+export function readinessOf(): Readiness {
   const standalone = (navigator as Navigator & { standalone?: boolean }).standalone;
   const isInstalled = standalone === true || matchMedia('(display-mode: standalone)').matches;
   const isApplePhone = /iPhone|iPad/.test(navigator.userAgent) || standalone !== undefined;

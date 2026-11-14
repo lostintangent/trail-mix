@@ -29,12 +29,12 @@ export type Toast = {
   onHide?: () => void;
 };
 
-export type Show = (toast: Toast) => ToastDismissFn;
+export type ShowToast = (toast: Toast) => ToastDismissFn;
 
 let wanted = false;
 const wanters = new Set<() => void>();
-let resolveShow: (show: Show) => void;
-const shown = new Promise<Show>((resolve) => (resolveShow = resolve));
+let resolveShow: (show: ShowToast) => void;
+const shown = new Promise<ShowToast>((resolve) => (resolveShow = resolve));
 
 const Host = lazy(() => import('./toast-host.tsx'));
 

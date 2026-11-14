@@ -40,7 +40,7 @@ export function secretsUsedBy(built: Built): MadeSecret[] {
 }
 
 /** What the account holds of the Worker: whether it was ever deployed, and its secrets' names. */
-export type Found = { deployed: boolean; held: ReadonlySet<string> };
+export type WorkerOnAccount = { deployed: boolean; held: ReadonlySet<string> };
 
 /** Runs Wrangler with these arguments, under Node, and says how it went. */
 export type Wrangler = (
@@ -56,7 +56,7 @@ export class DeployStopped extends Error {}
  * deployed Worker without its `CREDENTIALS_KEY` stops the deploy.
  */
 export function secretsToMake(
-  { deployed, held }: Found,
+  { deployed, held }: WorkerOnAccount,
   used: readonly MadeSecret[],
 ): MadeSecret[] {
   if (used.includes('CREDENTIALS_KEY') && deployed && !held.has('CREDENTIALS_KEY')) {
@@ -87,7 +87,7 @@ export function mint(name: MadeSecret): string {
  * such Worker counts as nothing held: any other failure stops the deploy, so a key that exists is
  * never taken for missing.
  */
-export async function lookUp(worker: string, wrangler: Wrangler): Promise<Found> {
+export async function lookUp(worker: string, wrangler: Wrangler): Promise<WorkerOnAccount> {
   const deployments = await wrangler(['deployments', 'list', '--name', worker, '--json']);
   if (deployments.status !== 0) {
     if (/\[code: 10007\]/.test(deployments.stderr + deployments.stdout)) {

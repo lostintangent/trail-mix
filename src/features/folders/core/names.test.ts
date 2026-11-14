@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { Folder, FolderRole } from '../../mail/core/index.ts';
-import { childPath, inside, isOwn, placeOf, renamedPath } from './names.ts';
+import { childPath, inside, isOwn, nestingOf, renamedPath } from './names.ts';
 import { createProblem, deleteProblem, nameProblem, renameProblem } from './problems.ts';
 
 const folder = (path: string, extra: Partial<Folder> = {}): Folder => {
@@ -28,13 +28,13 @@ const workArchive = role('Work/Archive', 'archive');
 const folders = [inbox, archive, trips, japan, kyoto, work, workArchive];
 
 test('a folder sits inside the deepest folder whose path and delimiter begin its own', () => {
-  expect(placeOf('Trips/Japan/Osaka', folders)).toEqual({ parent: japan, name: 'Osaka' });
-  expect(placeOf('Trips/Lisbon', folders)).toEqual({ parent: trips, name: 'Lisbon' });
-  expect(placeOf('Receipts', folders)).toEqual({ name: 'Receipts' });
+  expect(nestingOf('Trips/Japan/Osaka', folders)).toEqual({ parent: japan, name: 'Osaka' });
+  expect(nestingOf('Trips/Lisbon', folders)).toEqual({ parent: trips, name: 'Lisbon' });
+  expect(nestingOf('Receipts', folders)).toEqual({ name: 'Receipts' });
   // "Trips" begins "Tripsy", but without its delimiter it isn't Tripsy's parent.
-  expect(placeOf('Tripsy', folders)).toEqual({ name: 'Tripsy' });
+  expect(nestingOf('Tripsy', folders)).toEqual({ name: 'Tripsy' });
   // A path under a folder that isn't there sits at the top, with the delimiter in its name.
-  expect(placeOf('Gone/Child', folders)).toEqual({ name: 'Gone/Child' });
+  expect(nestingOf('Gone/Child', folders)).toEqual({ name: 'Gone/Child' });
 });
 
 test('a child’s path is its parent’s, the parent’s delimiter, then its name', () => {
@@ -49,7 +49,7 @@ test('a child’s path is its parent’s, the parent’s delimiter, then its nam
 test('a rename keeps a folder in its parent', () => {
   expect(renamedPath(japan, 'Nippon')).toBe('Trips/Nippon');
   expect(renamedPath(trips, 'Travel')).toBe('Travel');
-  expect(placeOf(renamedPath(kyoto, 'Nara'), folders)).toEqual({ parent: japan, name: 'Nara' });
+  expect(nestingOf(renamedPath(kyoto, 'Nara'), folders)).toEqual({ parent: japan, name: 'Nara' });
 });
 
 test('a name needs words, no delimiter, and no space at either end', () => {
@@ -62,7 +62,7 @@ test('a name needs words, no delimiter, and no space at either end', () => {
   expect(nameProblem('Lisbon', at)).toBeUndefined();
 });
 
-test('the delimiter checked is the place’s, or the account’s at the top', () => {
+test('the delimiter checked is the parent’s, or the account’s at the top', () => {
   const dotted = [folder('INBOX', { role: 'inbox', delimiter: '.' })];
   expect(nameProblem('a.b', { folders: dotted })).toBe('A folder’s name can’t hold “.”.');
   expect(nameProblem('a/b', { folders: dotted })).toBeUndefined();

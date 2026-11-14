@@ -17,11 +17,11 @@ export {
   polled,
   refreshRequest,
   refreshed,
-  type Answer,
   type Client,
   type DeviceCode,
   type DeviceSignIn,
   type Polled,
-  type Request,
   type Tokens,
+  type VendorAnswer,
+  type VendorRequest,
 } from './device-sign-in.ts';

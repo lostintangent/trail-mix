@@ -41,11 +41,11 @@ export type SyncPlan = {
    */
   flags: { changedSince: bigint } | 'all' | 'none';
   /** This batch's events, the next cursor, and whether work remains beyond this batch. */
-  reconcile(fetched: Fetched): { events: SyncEvent[]; cursor: string; more: boolean };
+  reconcile(fetched: FetchedForPlan): { events: SyncEvent[]; cursor: string; more: boolean };
 };
 
 /** What the provider fetched for a plan. */
-export type Fetched = {
+export type FetchedForPlan = {
   envelopes: readonly Envelope[];
   /** Flags by UID, when the plan asked for them. */
   flags?: ReadonlyMap<number, Flags>;

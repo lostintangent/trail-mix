@@ -1,5 +1,5 @@
 import type { Folder } from '../../mail/core/index.ts';
-import { inside, isOwn, placeOf } from './names.ts';
+import { inside, isOwn, nestingOf } from './names.ts';
 
 /**
  * Why a folder change can't be made, as a sentence the member reads. The browser checks a name
@@ -43,7 +43,7 @@ export function nameProblem(
 
 /** Why a new folder can't be at `path`, or nothing if it can: its parent is held, and its name fits. */
 export function createProblem(path: string, folders: readonly Folder[]): string | undefined {
-  const { parent, name } = placeOf(path, folders);
+  const { parent, name } = nestingOf(path, folders);
   return nameProblem(name, { folders, parent: parent?.path, delimiter: parent?.delimiter });
 }
 

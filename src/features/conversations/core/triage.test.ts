@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import type { Folder, FolderRole, Message, View } from '../../mail/core/index.ts';
-import { changeMessages, commandFor, followMoves, undoOf, type Command } from './carrying.ts';
+import { changeMessages, errandFor, followMoves, undoOf, type Errand } from './carrying.ts';
 import { changeRows, isShown, overlaid, putBack, rowChange, unreadOnly } from './triage.ts';
 
 const ROLES: Partial<Record<string, FolderRole>> = {
@@ -53,23 +53,23 @@ function message(
 }
 
 const inbox: View = { in: 'inbox' };
-const paths = (command: Command | undefined) =>
-  command && 'move' in command ? command.move.map(({ path }) => path) : [];
+const paths = (errand: Errand | undefined) =>
+  errand && 'move' in errand ? errand.move.map(({ path }) => path) : [];
 
 test('archiving from a unified view moves the conversation’s Inbox messages, and nothing it sent', () => {
   const conversation = [message('INBOX'), message('Sent'), message('INBOX'), message('Archive')];
 
-  const command = commandFor({ do: 'archive' }, inbox, [conversation], folders);
+  const errand = errandFor({ do: 'archive' }, inbox, [conversation], folders);
 
-  expect(command).toMatchObject({ to: 'archive' });
-  expect(paths(command)).toEqual(['INBOX', 'INBOX']);
+  expect(errand).toMatchObject({ to: 'archive' });
+  expect(paths(errand)).toEqual(['INBOX', 'INBOX']);
 });
 
 test('in a folder, an action moves that folder’s messages only', () => {
   const conversation = [message('Projects'), message('INBOX'), message('Projects')];
   const projects: View = { in: 'folder', folder: { account: 'personal', path: 'Projects' } };
 
-  expect(paths(commandFor({ do: 'delete' }, projects, [conversation], folders))).toEqual([
+  expect(paths(errandFor({ do: 'delete' }, projects, [conversation], folders))).toEqual([
     'Projects',
     'Projects',
   ]);
@@ -80,20 +80,20 @@ test('a search finds mail anywhere, so a conversation found only in Archive can 
   const search: View = { in: 'search', text: 'lunch' };
   const projects = { account: 'personal', path: 'Projects' };
 
-  expect(commandFor({ do: 'delete' }, search, [conversation], folders)).toMatchObject({
+  expect(errandFor({ do: 'delete' }, search, [conversation], folders)).toMatchObject({
     to: 'trash',
   });
-  expect(paths(commandFor({ do: 'delete' }, search, [conversation], folders))).toEqual(['Archive']);
-  expect(paths(commandFor({ do: 'move', to: projects }, search, [conversation], folders))).toEqual([
+  expect(paths(errandFor({ do: 'delete' }, search, [conversation], folders))).toEqual(['Archive']);
+  expect(paths(errandFor({ do: 'move', to: projects }, search, [conversation], folders))).toEqual([
     'Archive',
   ]);
-  expect(commandFor({ do: 'archive' }, search, [conversation], folders)).toBeUndefined();
+  expect(errandFor({ do: 'archive' }, search, [conversation], folders)).toBeUndefined();
 });
 
 test('Drafts deletes the drafts, not the conversation they answer', () => {
   const conversation = [message('INBOX'), message('Drafts', { seen: true })];
 
-  expect(paths(commandFor({ do: 'delete' }, { in: 'drafts' }, [conversation], folders))).toEqual([
+  expect(paths(errandFor({ do: 'delete' }, { in: 'drafts' }, [conversation], folders))).toEqual([
     'Drafts',
   ]);
 });
@@ -103,9 +103,9 @@ test('a move to a folder takes only that folder’s account, since mail can’t 
   const work = [message('Inbox', { account: 'work' })];
   const projects = { account: 'personal', path: 'Projects' };
 
-  const command = commandFor({ do: 'move', to: projects }, inbox, [personal, work], folders);
+  const errand = errandFor({ do: 'move', to: projects }, inbox, [personal, work], folders);
 
-  expect(command && 'move' in command && command.move.map(({ account }) => account)).toEqual([
+  expect(errand && 'move' in errand && errand.move.map(({ account }) => account)).toEqual([
     'personal',
   ]);
 });
@@ -116,26 +116,26 @@ test('flags and read marks change only the messages that aren’t already as ask
     message('INBOX', { seen: true, flagged: true, date: '2026-11-02T09:00:00Z' }),
     message('INBOX', { seen: false, date: '2026-11-03T09:00:00Z' }),
   ];
-  const uids = (command: Command | undefined) =>
-    command && 'setFlags' in command ? command.setFlags.map(({ uid }) => uid) : [];
+  const uids = (errand: Errand | undefined) =>
+    errand && 'setFlags' in errand ? errand.setFlags.map(({ uid }) => uid) : [];
   const [first, second, newest] = conversation.map(({ uid }) => uid) as [number, number, number];
 
-  expect(uids(commandFor({ do: 'read' }, inbox, [conversation], folders))).toEqual([first, newest]);
-  expect(uids(commandFor({ do: 'unflag' }, inbox, [conversation], folders))).toEqual([second]);
-  expect(uids(commandFor({ do: 'flag' }, inbox, [conversation], folders))).toEqual([newest]);
-  expect(commandFor({ do: 'unread' }, inbox, [conversation], folders)).toBeUndefined();
+  expect(uids(errandFor({ do: 'read' }, inbox, [conversation], folders))).toEqual([first, newest]);
+  expect(uids(errandFor({ do: 'unflag' }, inbox, [conversation], folders))).toEqual([second]);
+  expect(uids(errandFor({ do: 'flag' }, inbox, [conversation], folders))).toEqual([newest]);
+  expect(errandFor({ do: 'unread' }, inbox, [conversation], folders)).toBeUndefined();
 });
 
 test('an action that would change nothing sends nothing', () => {
   const read = [message('INBOX'), message('Archive')];
 
-  expect(commandFor({ do: 'read' }, inbox, [read], folders)).toBeUndefined();
-  expect(commandFor({ do: 'archive' }, inbox, [[message('Archive')]], folders)).toBeUndefined();
+  expect(errandFor({ do: 'read' }, inbox, [read], folders)).toBeUndefined();
+  expect(errandFor({ do: 'archive' }, inbox, [[message('Archive')]], folders)).toBeUndefined();
 });
 
 test('Undo puts each moved message back in the folder it left', () => {
   const ref = (path: string, uid: number) => ({ account: 'personal', path, uidValidity: 1, uid });
-  const command: Command = {
+  const errand: Errand = {
     move: [ref('INBOX', 1), ref('Projects', 2), ref('INBOX', 3)],
     to: 'trash',
   };
@@ -145,7 +145,7 @@ test('Undo puts each moved message back in the folder it left', () => {
     { from: ref('INBOX', 3), to: ref('Trash', 43) },
   ];
 
-  expect(undoOf(command, moved)).toEqual([
+  expect(undoOf(errand, moved)).toEqual([
     { move: [ref('Trash', 41), ref('Trash', 43)], to: { account: 'personal', path: 'INBOX' } },
     { move: [ref('Trash', 42)], to: { account: 'personal', path: 'Projects' } },
   ]);
@@ -174,12 +174,12 @@ test('Undo of a read mark makes unread again only the messages it marked', () =>
     message('INBOX'),
     message('INBOX', { seen: false }),
   ];
-  const command = commandFor({ do: 'read' }, inbox, [conversation], folders)!;
+  const errand = errandFor({ do: 'read' }, inbox, [conversation], folders)!;
 
-  expect(undoOf(command, [])).toEqual([
-    { setFlags: 'setFlags' in command ? command.setFlags : [], change: { seen: false } },
+  expect(undoOf(errand, [])).toEqual([
+    { setFlags: 'setFlags' in errand ? errand.setFlags : [], change: { seen: false } },
   ]);
-  expect(changeMessages(conversation, command).map(({ flags }) => flags.seen)).toEqual([
+  expect(changeMessages(conversation, errand).map(({ flags }) => flags.seen)).toEqual([
     true,
     true,
     true,

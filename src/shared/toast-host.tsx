@@ -3,9 +3,9 @@ import { Icon } from '@astryxdesign/core/Icon';
 import { ToastViewport, useToast, type ToastViewportProps } from '@astryxdesign/core/Toast';
 import { useCallback, useEffect } from 'react';
 import { ToastRule } from './ToastRule.tsx';
-import type { Show } from './toasts.tsx';
+import type { ShowToast } from './toasts.tsx';
 
-type Ready = { onReady: (show: Show) => void };
+type Ready = { onReady: (show: ShowToast) => void };
 
 /**
  * Astryx's toast viewport, which hands the way to show a toast to `toast` once it's mounted. The
@@ -30,7 +30,7 @@ export default function ToastHost({
  */
 function Shows({ onReady }: Ready) {
   const showToast = useToast();
-  const show = useCallback<Show>(
+  const show = useCallback<ShowToast>(
     ({ body, type, action, render, onHide }) => {
       const dismiss = showToast({
         body,

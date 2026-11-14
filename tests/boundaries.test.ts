@@ -2,11 +2,14 @@ import { expect, test } from 'bun:test';
 import { dirname, join } from 'node:path/posix';
 
 /**
- * Who may import what, checked against the import graph of `src` and `tests`.
+ * Who may import what, checked against the import graph of `src` and `tests`, and what a type may
+ * be named.
  *
  * - Features reach each other only through an `index.ts`.
  * - A `core` module is framework-free: nothing it imports, directly or through other modules, may
  *   be React, Astryx, StyleX, Cloudflare or a mail library.
+ * - One name, one meaning: no two modules of `src` export a type or an interface of the same name.
+ *   A re-export declares nothing, and a class is the one meaning of the type it implements.
  *
  * Imports are read from source text, so `import type` counts. A type borrowed from another
  * feature's internals couples the two features just as a value does.
@@ -29,6 +32,7 @@ const FRAMEWORKS: [name: string, specifier: RegExp][] = [
 
 const FEATURE = /^src\/features\/([^/]+)\//;
 const CORE_MODULE = /^src\/features\/(?:[^/]+\/)+core\/(?!.*\.test\.tsx?$)/;
+const EXPORTED_TYPE = /^export\s+(?:declare\s+)?(?:type|interface)\s+([A-Za-z_$][\w$]*)/gm;
 
 test('a feature may use its own modules and the index.ts of another feature', () => {
   const graph = importGraph({
@@ -75,12 +79,42 @@ test('a core that reaches a framework through other modules is reported with the
   ]);
 });
 
-test('the repository keeps both rules', async () => {
-  const graph = importGraph(await repositorySources());
+test('a type name exported by two modules of src is reported with both', () => {
+  expect(
+    homonyms({
+      'src/features/mail/core/place.ts': 'export type Place = { view: string };',
+      'src/features/folders/core/names.ts': 'export type Place<Path> = { parent: Path };',
+      'src/features/mail/core/model.ts': 'export interface Moved {\n  from: string;\n}',
+      'src/features/providers/provider.ts': 'export interface Moved {}',
+    }),
+  ).toEqual([
+    'Place: src/features/mail/core/place.ts, src/features/folders/core/names.ts',
+    'Moved: src/features/mail/core/model.ts, src/features/providers/provider.ts',
+  ]);
+});
+
+test('a re-export, a class, a private type and a test outside src declare no homonym', () => {
+  expect(
+    homonyms({
+      'src/features/mail/core/model.ts': 'export type Moved = { from: string };',
+      'src/features/mail/core/index.ts': "export type { Moved } from './model.ts';",
+      'src/features/providers/index.ts': "export { type Moved } from '../mail/core/index.ts';",
+      'src/features/outbox/core/sending.ts': 'type Moved = string;',
+      'tests/e2e/suite.ts': 'export type Moved = number;',
+      'src/server/access.ts': 'export type VisitorGate = { admit(): boolean };',
+      'src/server/visitors.ts': 'export class VisitorGate {}',
+    }),
+  ).toEqual([]);
+});
+
+test('the repository keeps every rule', async () => {
+  const sources = await repositorySources();
+  const graph = importGraph(sources);
 
   expect(graph.has('tests/boundaries.test.ts')).toBe(true);
   expect(featureShortcuts(graph)).toEqual([]);
   expect(impureCores(graph)).toEqual([]);
+  expect(homonyms(sources)).toEqual([]);
 });
 
 /** Imports between two features that do not land on an `index.ts`. */
@@ -119,6 +153,20 @@ function impureCores(graph: Graph): string[] {
     }
   }
   return reached;
+}
+
+/** Each type name that more than one module of `src` declares and exports, with those modules. */
+function homonyms(sources: Sources): string[] {
+  const declared = new Map<string, string[]>();
+  for (const [path, source] of Object.entries(sources)) {
+    if (!path.startsWith('src/')) continue;
+    for (const [, name = ''] of source.matchAll(EXPORTED_TYPE)) {
+      declared.set(name, [...(declared.get(name) ?? []), path]);
+    }
+  }
+  return [...declared]
+    .filter(([, paths]) => paths.length > 1)
+    .map(([name, paths]) => `${name}: ${paths.join(', ')}`);
 }
 
 function importGraph(sources: Sources): Graph {

@@ -10,7 +10,7 @@ import type { AccountSetup, ThisDevice } from '../client/contract.ts';
 import { caFile, empty, ports, start, stop, users } from '../../../../tests/mail-server/server.ts';
 import { mailrooms, member } from '../../../../tests/mailrooms.ts';
 import type { LocalWorker } from '../../../../tests/workerd.ts';
-import type { Pushed } from './test-worker.ts';
+import type { SentPush } from './test-worker.ts';
 
 const { alice, bob } = users;
 const OPERATOR = 'operator@trailmix.test';
@@ -54,12 +54,12 @@ describe('The Mailroom, notifying devices', () => {
   async function pushed(count: number) {
     const device = nia.device();
     await device.opened;
-    const sent = async () => (await nia.call<Pushed[]>('pushes')).length;
+    const sent = async () => (await nia.call<SentPush[]>('pushes')).length;
     await nia.until(async () => (await sent()) >= opened + count);
     // Any push the same news would wrongly add goes in the same wake, right after.
     await Bun.sleep(1_000);
     device.close();
-    const pushes = (await nia.call<Pushed[]>('pushes')).slice(opened);
+    const pushes = (await nia.call<SentPush[]>('pushes')).slice(opened);
     opened += pushes.length;
     const from = service.received.length;
     for (const { url, headers, body } of pushes) {

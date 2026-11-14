@@ -1,4 +1,4 @@
-import type { Envelope, Flags, Folder, MessageRef, SyncEvent } from '../mail/core/index.ts';
+import type { Envelope, Flags, Folder, MessageRef, Moved, SyncEvent } from '../mail/core/index.ts';
 
 /**
  * The MailProvider contract: everything Trail Mix needs from a mail host. Adding a protocol means
@@ -133,9 +133,6 @@ export async function beforeSending<T>(work: () => Promise<T>): Promise<T> {
     throw new SendFailure(error instanceof Error ? error.message : String(error), true);
   }
 }
-
-/** Where a moved message was, and where it is now. */
-export type Moved = { from: MessageRef; to: MessageRef };
 
 /** Where a folder's sync stopped. It belongs to the provider and is opaque to the Mailroom. */
 export type Cursor = string;

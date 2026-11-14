@@ -14,6 +14,7 @@ import type {
   ListItem,
   Message,
   MessageRef,
+  Moved,
   Outgoing,
   View,
 } from '../../mail/core/index.ts';
@@ -107,10 +108,7 @@ export interface Commands {
    * Archive and delete are moves to a role, and of a bundle, they move its conversations' Inbox
    * messages. Undo moves each `to` back to its `from` folder.
    */
-  move(
-    messages: MessageRef[] | BundleScope,
-    to: FolderRef | FolderRole,
-  ): Promise<{ from: MessageRef; to: MessageRef }[]>;
+  move(messages: MessageRef[] | BundleScope, to: FolderRef | FolderRole): Promise<Moved[]>;
   /**
    * Files a draft in place of the version it replaces. `id` names the save, which is asked again
    * under it until the Mailroom answers or refuses it, with `isAgain`, since an ask whose answer was

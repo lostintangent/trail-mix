@@ -23,10 +23,10 @@ export type DeviceSignIn = {
 export type Client = { id: string };
 
 /** A form-encoded POST to a vendor. */
-export type Request = { url: string; form: URLSearchParams };
+export type VendorRequest = { url: string; form: URLSearchParams };
 
 /** A vendor's answer: its HTTP status, and its body as JSON, or null when it sent none. */
-export type Answer = { status: number; body: unknown };
+export type VendorAnswer = { status: number; body: unknown };
 
 /** What a sign-in starts with. `deviceCode` redeems the tokens, so only the Mailroom holds it. */
 export type DeviceCode = {
@@ -68,14 +68,18 @@ const LAPSES = ['invalid_grant', 'interaction_required', 'consent_required', 'lo
 
 // The requests
 
-export function codeRequest(signIn: DeviceSignIn, client: Client): Request {
+export function codeRequest(signIn: DeviceSignIn, client: Client): VendorRequest {
   return request(signIn, '/oauth2/v2.0/devicecode', {
     client_id: client.id,
     scope: signIn.scopes.join(' '),
   });
 }
 
-export function pollRequest(signIn: DeviceSignIn, client: Client, deviceCode: string): Request {
+export function pollRequest(
+  signIn: DeviceSignIn,
+  client: Client,
+  deviceCode: string,
+): VendorRequest {
   return request(signIn, '/oauth2/v2.0/token', {
     grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
     client_id: client.id,
@@ -83,7 +87,11 @@ export function pollRequest(signIn: DeviceSignIn, client: Client, deviceCode: st
   });
 }
 
-export function refreshRequest(signIn: DeviceSignIn, client: Client, refresh: string): Request {
+export function refreshRequest(
+  signIn: DeviceSignIn,
+  client: Client,
+  refresh: string,
+): VendorRequest {
   return request(signIn, '/oauth2/v2.0/token', {
     grant_type: 'refresh_token',
     client_id: client.id,
@@ -95,7 +103,7 @@ export function refreshRequest(signIn: DeviceSignIn, client: Client, refresh: st
 // The answers
 
 /** The code a sign-in starts with. Throws why, in the vendor's words, when it gives none. */
-export function codeFrom(signIn: DeviceSignIn, answer: Answer, now: number): DeviceCode {
+export function codeFrom(signIn: DeviceSignIn, answer: VendorAnswer, now: number): DeviceCode {
   const body = fields(answer.body);
   const deviceCode = text(body.device_code);
   const code = text(body.user_code);
@@ -118,7 +126,7 @@ export function codeFrom(signIn: DeviceSignIn, answer: Answer, now: number): Dev
 /** What a poll came to, given the interval it waited. */
 export function polled(
   signIn: DeviceSignIn,
-  answer: Answer,
+  answer: VendorAnswer,
   interval: number,
   now: number,
 ): Polled {
@@ -142,7 +150,7 @@ export function polled(
 /** What a refresh came to. A vendor may keep the refresh token it was given, and then it's kept. */
 export function refreshed(
   signIn: DeviceSignIn,
-  answer: Answer,
+  answer: VendorAnswer,
   held: string,
   now: number,
 ): Refreshed {
@@ -178,7 +186,7 @@ function tokensFrom(body: Fields, held: string | undefined, now: number): Tokens
 }
 
 /** An answer succeeded only if it names no error, since some vendors send errors with a 200. */
-const succeeded = (answer: Answer, body: Fields) =>
+const succeeded = (answer: VendorAnswer, body: Fields) =>
   answer.status >= 200 && answer.status < 300 && body.error === undefined;
 
 /**
@@ -202,7 +210,11 @@ function count(value: unknown, fallback: number): number {
   return typeof given === 'number' && Number.isFinite(given) && given > 0 ? given : fallback;
 }
 
-function request(signIn: DeviceSignIn, path: string, params: Record<string, string>): Request {
+function request(
+  signIn: DeviceSignIn,
+  path: string,
+  params: Record<string, string>,
+): VendorRequest {
   return {
     url: `${signIn.authority.replace(/\/$/, '')}${path}`,
     form: new URLSearchParams(params),

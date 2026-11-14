@@ -9,6 +9,7 @@ import {
   type FolderRole,
   type Message,
   type MessageRef,
+  type Moved,
   type View,
 } from '../../mail/core/index.ts';
 import type { Action } from './triage.ts';
@@ -20,8 +21,8 @@ import type { Action } from './triage.ts';
  * puts back exactly what changed.
  */
 
-/** What the Mailroom is asked to do, in the terms of its commands. */
-export type Command =
+/** An errand for the Mailroom, in the terms of its commands: a move, or a change of flags. */
+export type Errand =
   | { move: MessageRef[]; to: FolderRef | FolderRole }
   | { setFlags: MessageRef[]; change: Partial<Flags> };
 
@@ -29,26 +30,23 @@ export type Command =
  * What the Mailroom is asked to do to a bundle's conversations, as far as its row showed them: the
  * messages they held by its date. The Mailroom finds them, and says which it changed or moved.
  */
-export type BundleCommand =
+export type BundleErrand =
   | { move: BundleScope; to: FolderRef | FolderRole }
   | { setFlags: BundleScope; change: Partial<Flags> };
 
 type BundleScope = { bundle: BundleId; through: string };
 
-/** Where a moved message went, as the Mailroom reports it. */
-export type Moved = { from: MessageRef; to: MessageRef };
-
 /**
- * The command that carries out an action on some conversations, or nothing when no message would
+ * The errand that carries out an action on some conversations, or nothing when no message would
  * change. Each conversation is given as its messages, as the reader gets them. A move to a folder
  * takes only the messages of that folder's account, since mail can't move between accounts.
  */
-export function commandFor(
+export function errandFor(
   action: Action,
   view: View,
   conversations: readonly (readonly Message[])[],
   folders: readonly Folder[],
-): Command | undefined {
+): Errand | undefined {
   const all = conversations.flat();
   switch (action.do) {
     case 'archive':
@@ -78,15 +76,15 @@ export function commandFor(
 }
 
 /**
- * The command that carries out an action on a bundle, or nothing when it can't: a move to another
+ * The errand that carries out an action on a bundle, or nothing when it can't: a move to another
  * account, or to the Inbox its conversations lie in. A flag and an unread mark reach each
  * conversation's newest message, and the rest reach every message.
  */
-export function bundleCommandFor(
+export function bundleErrandFor(
   action: Action,
   bundle: BundleSummary,
   folders: readonly Folder[],
-): BundleCommand | undefined {
+): BundleErrand | undefined {
   const scope = { bundle: bundle.id, through: bundle.date };
   switch (action.do) {
     case 'archive':
@@ -108,13 +106,13 @@ export function bundleCommandFor(
   }
 }
 
-/** What undoes a command: each moved message back to the folder it left, or each flag back. */
-export function undoOf(command: Command, moved: readonly Moved[]): Command[] {
-  if ('setFlags' in command) {
+/** What undoes an errand: each moved message back to the folder it left, or each flag back. */
+export function undoOf(errand: Errand, moved: readonly Moved[]): Errand[] {
+  if ('setFlags' in errand) {
     const change = Object.fromEntries(
-      Object.entries(command.change).map(([flag, value]) => [flag, !value]),
+      Object.entries(errand.change).map(([flag, value]) => [flag, !value]),
     );
-    return [{ setFlags: command.setFlags, change }];
+    return [{ setFlags: errand.setFlags, change }];
   }
   const back = Map.groupBy(moved, ({ from }) => `${from.account}\n${from.path}`);
   return [...back.values()].map((pairs) => ({
@@ -127,13 +125,13 @@ export function undoOf(command: Command, moved: readonly Moved[]): Command[] {
  * An open conversation's messages once a flag or read change reached them. A message already as
  * asked stays as it was.
  */
-export function changeMessages(messages: readonly Message[], command: Command): Message[] {
-  if (!('setFlags' in command)) return [...messages];
-  const changed = new Set(command.setFlags.map(refKey));
-  const changes = Object.entries(command.change) as [keyof Flags, boolean][];
+export function changeMessages(messages: readonly Message[], errand: Errand): Message[] {
+  if (!('setFlags' in errand)) return [...messages];
+  const changed = new Set(errand.setFlags.map(refKey));
+  const changes = Object.entries(errand.change) as [keyof Flags, boolean][];
   return messages.map((message) =>
     changed.has(refKey(message)) && changes.some(([flag, value]) => message.flags[flag] !== value)
-      ? { ...message, flags: { ...message.flags, ...command.change } }
+      ? { ...message, flags: { ...message.flags, ...errand.change } }
       : message,
   );
 }
@@ -185,7 +183,7 @@ const roleOf = (folders: readonly Folder[], account: string, path: string) =>
 function flagsFor(
   messages: readonly (Message | undefined)[],
   change: { flagged: boolean } | { seen: boolean },
-): Command | undefined {
+): Errand | undefined {
   const [flag, value] = Object.entries(change)[0] as [keyof Flags, boolean];
   const refs = messages
     .filter((message): message is Message => message !== undefined && message.flags[flag] !== value)

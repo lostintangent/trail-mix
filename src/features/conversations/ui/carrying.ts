@@ -10,20 +10,20 @@ import {
   type Folder,
   type ListItem,
   type Message,
+  type Moved,
   type View,
 } from '../../mail/core/index.ts';
 import { bodyQuery, conversationQuery, mailroom } from '../../mailroom/client/index.ts';
 import { reasonOf } from '../../../shared/reasons.ts';
 import { toast } from '../../../shared/toasts.tsx';
 import {
-  bundleCommandFor,
+  bundleErrandFor,
   changeMessages,
-  commandFor,
+  errandFor,
   followMoves,
   undoOf,
-  type BundleCommand,
-  type Command,
-  type Moved,
+  type BundleErrand,
+  type Errand,
 } from '../core/carrying.ts';
 import type { Action } from '../core/triage.ts';
 import type { Laid, ListOf, Overlays } from './overlays.ts';
@@ -91,8 +91,8 @@ export async function carryOut({
       void queryClient.invalidateQueries({ queryKey: conversationQuery(id).queryKey });
     }
   };
-  const carry = async (command: Command | BundleCommand) => {
-    const carried = await send(command);
+  const carry = async (errand: Errand | BundleErrand) => {
+    const carried = await send(errand);
     follow(queryClient, followed, carried);
     return carried;
   };
@@ -100,11 +100,11 @@ export async function carryOut({
     if (laid) overlays.lift(laid);
     const back = overlays.lay(list, { returning: earlierRows });
     // The refs from before a move are retired, so a move back waits for the refs it gives.
-    if (done.some(({ command }) => 'setFlags' in command)) restoreMessages();
+    if (done.some(({ errand }) => 'setFlags' in errand)) restoreMessages();
     try {
       // Every step leaves at once, since each moves its own messages, so a page that closes the
       // moment it shows them back has already asked for all of them.
-      const steps = done.flatMap(({ command, moved }) => undoOf(command, moved));
+      const steps = done.flatMap(({ errand, moved }) => undoOf(errand, moved));
       await Promise.all(steps.map(carry));
       overlays.settle(back);
     } catch (error) {
@@ -117,25 +117,25 @@ export async function carryOut({
     const conversations = await Promise.all(
       conversationIds.map((id) => queryClient.ensureQueryData(conversationQuery(id))),
     );
-    const command =
-      conversations.length > 0 ? commandFor(action, view, conversations, folders) : undefined;
-    const commands = [
-      ...(command ? [command] : []),
-      ...bundles.flatMap((bundle) => bundleCommandFor(action, bundle, folders) ?? []),
+    const errand =
+      conversations.length > 0 ? errandFor(action, view, conversations, folders) : undefined;
+    const errands = [
+      ...(errand ? [errand] : []),
+      ...bundles.flatMap((bundle) => bundleErrandFor(action, bundle, folders) ?? []),
     ];
-    if (commands.length === 0) {
+    if (errands.length === 0) {
       if (laid) overlays.lift(laid);
       return;
     }
-    if (command) {
+    if (errand) {
       for (const [at, id] of conversationIds.entries()) {
         const messages = conversations[at] ?? [];
         earlierMessages.set(id, messages);
-        queryClient.setQueryData(conversationQuery(id).queryKey, changeMessages(messages, command));
+        queryClient.setQueryData(conversationQuery(id).queryKey, changeMessages(messages, errand));
       }
     }
     const done: Carried[] = [];
-    for (const each of commands) done.push(await carry(each));
+    for (const each of errands) done.push(await carry(each));
     if (laid) overlays.settle(laid);
     if (quietly) return;
     // The toast's Undo spends the key's undo too, so neither undoes it twice.
@@ -166,28 +166,28 @@ export async function carryOut({
   }
 }
 
-/** A command the Mailroom carried out, by the messages it changed, and where each moved one went. */
-type Carried = { command: Command; moved: Moved[] };
+/** An errand the Mailroom carried out, by the messages it changed, and where each moved one went. */
+type Carried = { errand: Errand; moved: Moved[] };
 
 /** The conversations of a bundle this browser holds. */
 const threadsOf = (queryClient: QueryClient, bundle: BundleSummary): ConversationId[] =>
   fetchedList(queryClient, bundle.id)?.flatMap((row) => (row ? [row.id] : [])) ?? [];
 
 /**
- * Gives some conversations' snapshots what a command did to them: the flags it changed, and the refs
+ * Gives some conversations' snapshots what an errand did to them: the flags it changed, and the refs
  * their messages moved to, so nothing asks for a message by a ref its move retired. A body is the
  * same wherever its message is, so one already fetched is kept under the new ref too.
  */
 function follow(
   queryClient: QueryClient,
   ids: readonly ConversationId[],
-  { command, moved }: Carried,
+  { errand, moved }: Carried,
 ) {
   for (const id of ids) {
     const { queryKey } = conversationQuery(id);
     const messages = queryClient.getQueryData(queryKey);
     if (!messages) continue;
-    const changed = changeMessages(messages, command);
+    const changed = changeMessages(messages, errand);
     const isChanged = changed.some((message, at) => message !== messages[at]);
     const followed = followMoves(changed, moved) ?? (isChanged ? changed : undefined);
     if (followed) queryClient.setQueryData(queryKey, followed);
@@ -199,16 +199,16 @@ function follow(
 }
 
 /**
- * Asks the Mailroom to carry out a command, and says what it changed: the messages given, or those
+ * Asks the Mailroom to carry out an errand, and says what it changed: the messages given, or those
  * of a bundle it found, and where each moved one went.
  */
-async function send(command: Command | BundleCommand): Promise<Carried> {
-  if ('move' in command) {
-    const moved = await mailroom.move(command.move, command.to);
-    return { command: { move: moved.map(({ from }) => from), to: command.to }, moved };
+async function send(errand: Errand | BundleErrand): Promise<Carried> {
+  if ('move' in errand) {
+    const moved = await mailroom.move(errand.move, errand.to);
+    return { errand: { move: moved.map(({ from }) => from), to: errand.to }, moved };
   }
-  const changed = await mailroom.setFlags(command.setFlags, command.change);
-  return { command: { setFlags: changed, change: command.change }, moved: [] };
+  const changed = await mailroom.setFlags(errand.setFlags, errand.change);
+  return { errand: { setFlags: changed, change: errand.change }, moved: [] };
 }
 
 /** What a toast says once the server has an action: "Archived", or "Moved 3 conversations to Receipts". */

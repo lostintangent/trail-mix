@@ -291,7 +291,7 @@ export class TestMailroom extends Mailroom {
     return Promise.resolve();
   }
 
-  private readonly pushed: Pushed[] = [];
+  private readonly pushed: SentPush[] = [];
   private pushAnswer = 201;
 
   /** Keeps each push as it would have gone, for a test's stand-in push service to open. */
@@ -306,7 +306,7 @@ export class TestMailroom extends Mailroom {
   }
 
   /** Every push since the Mailroom started, its body base64. */
-  pushes(): Promise<Pushed[]> {
+  pushes(): Promise<SentPush[]> {
     return Promise.resolve(this.pushed);
   }
 
@@ -363,7 +363,7 @@ export class TestMailroom extends Mailroom {
 
 export type Synced = { path: string; messages: number };
 
-export type Pushed = { url: string; headers: [string, string][]; body: string };
+export type SentPush = { url: string; headers: [string, string][]; body: string };
 
 export type Wake = {
   steps: number;

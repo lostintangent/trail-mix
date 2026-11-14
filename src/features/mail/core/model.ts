@@ -11,6 +11,9 @@ export type FolderRef = { account: AccountId; path: string };
 /** A message is its account, folder path, UIDVALIDITY and UID. */
 export type MessageRef = FolderRef & { uidValidity: number; uid: number };
 
+/** Where a moved message was, and where it is now. */
+export type Moved = { from: MessageRef; to: MessageRef };
+
 export type ConversationId = string;
 
 /** Folders are recognized by role, never by name. */

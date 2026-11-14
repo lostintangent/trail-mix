@@ -29,6 +29,7 @@ import {
   type Message,
   type MessageRef,
   type MimeAttachment,
+  type Moved,
   type Outgoing,
   type SyncEvent,
   type View,
@@ -59,7 +60,6 @@ import {
   refreshRequest,
   refreshed,
   withStandIn,
-  type Answer,
   type Client,
   type DemoKind,
   type DemoServer,
@@ -67,14 +67,14 @@ import {
   type ImapAccount,
   type ImapPart,
   type MailProvider,
-  type Moved,
   type Network,
   type Polled,
   type Preset,
   type PresetName,
-  type Request as VendorRequest,
   type SyncWindow,
   type Tokens,
+  type VendorAnswer,
+  type VendorRequest,
 } from '../../providers/index.ts';
 import {
   COMMANDS,
@@ -1600,7 +1600,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   }
 
   /** A request to a vendor, and its answer, within the vendor's patience. */
-  private async ask(request: VendorRequest): Promise<Answer> {
+  private async ask(request: VendorRequest): Promise<VendorAnswer> {
     const response = await fetch(request.url, {
       method: 'POST',
       body: request.form,

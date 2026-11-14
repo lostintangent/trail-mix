@@ -1,11 +1,11 @@
-import type { Standing } from './device.ts';
+import type { Readiness } from './device.ts';
 
 /**
  * What a device that can't subscribe yet needs first, as Settings and the palette's command say.
  * Only they say it, so the first screen goes without these words.
  */
-export function needsOf(standing: Exclude<Standing, 'able'>): string {
-  return NEEDS[standing === 'unable' ? 'needs-install' : standing];
+export function needsOf(readiness: Exclude<Readiness, 'able'>): string {
+  return NEEDS[readiness === 'unable' ? 'needs-install' : readiness];
 }
 
 const NEEDS = {

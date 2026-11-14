@@ -8,17 +8,12 @@ import {
   type Flags,
   type Folder,
   type MessageRef,
+  type Moved,
 } from '../../mail/core/index.ts';
 import { previewFrom } from '../imap/core/preview.ts';
 import { withoutBcc } from '../imap/core/send.ts';
 import { planSync } from '../imap/core/sync.ts';
-import {
-  SEARCH_LIMIT,
-  SendFailure,
-  beforeSending,
-  type MailProvider,
-  type Moved,
-} from '../provider.ts';
+import { SEARCH_LIMIT, SendFailure, beforeSending, type MailProvider } from '../provider.ts';
 import * as server from './mailbox.ts';
 import { BUSY_FOLDER, BUSY_LIST, DEMO_ACCOUNTS, UNREACHABLE, type DemoKind } from './stories.ts';
 

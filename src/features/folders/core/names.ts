@@ -1,18 +1,18 @@
 import type { Folder } from '../../mail/core/index.ts';
 
 /**
- * A folder's place in its account's tree. Paths are the server's: the parent's path, its delimiter,
- * then the name, or the name alone at the top.
+ * How a folder nests in its account's tree. Paths are the server's: the parent's path, its
+ * delimiter, then the name, or the name alone at the top.
  */
 
-/** Where a folder sits: the folder it's inside, if any, and its own name. */
-export type Place = { parent?: Folder; name: string };
+/** Where a folder nests: the folder it's inside, if any, and its own name. */
+export type Nesting = { parent?: Folder; name: string };
 
 /**
- * Where a folder at `path` sits among its account's `folders`: inside the deepest of them whose path
- * and delimiter begin it, or at the top.
+ * Where a folder at `path` nests among its account's `folders`: inside the deepest of them whose
+ * path and delimiter begin it, or at the top.
  */
-export function placeOf(path: string, folders: readonly Folder[]): Place {
+export function nestingOf(path: string, folders: readonly Folder[]): Nesting {
   let parent: Folder | undefined;
   for (const folder of folders) {
     const isAbove = folder.delimiter && path.startsWith(`${folder.path}${folder.delimiter}`);

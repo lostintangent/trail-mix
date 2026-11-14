@@ -3,7 +3,7 @@ import { Bell, BellOff } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Command } from '../../commands/index.ts';
 import { notifiedQuery } from '../../mailroom/client/index.ts';
-import { standingOf, subscribedAt, type Standing } from './device.ts';
+import { readinessOf, subscribedAt, type Readiness } from './device.ts';
 
 /**
  * Notifications on this device: whether the deployment and the browser have them at all, where the
@@ -13,7 +13,7 @@ import { standingOf, subscribedAt, type Standing } from './device.ts';
 export type Notifications = {
   /** Only a deployment with a push key notifies, and only a browser with Web Push can be. */
   isShown: boolean;
-  standing: Standing;
+  readiness: Readiness;
   isOn: boolean;
   /** Whether a turn is under way. */
   isBusy: boolean;
@@ -33,19 +33,19 @@ type Setup = Awaited<ReturnType<typeof loadSetup>>;
  */
 export function useNotifications(): Notifications {
   const queryClient = useQueryClient();
-  const [standing, setStanding] = useState(standingOf);
+  const [readiness, setReadiness] = useState(readinessOf);
   const [isBusy, setBusy] = useState(false);
   const endpoint = useQuery({
     queryKey: ['push-subscription'],
     queryFn: async () => (await subscribedAt()) ?? null,
-    enabled: standing === 'able',
+    enabled: readiness === 'able',
     staleTime: Infinity,
   });
-  const asked = standing !== 'able' || endpoint.isSuccess;
+  const asked = readiness !== 'able' || endpoint.isSuccess;
   const device = useQuery({ ...notifiedQuery(endpoint.data ?? undefined), enabled: asked });
   const pushKey = device.data?.pushKey;
   const isOn = device.data?.notified === true;
-  const isShown = Boolean(pushKey) && standing !== 'unable';
+  const isShown = Boolean(pushKey) && readiness !== 'unable';
   const [setup, setSetup] = useState<Setup>();
   useEffect(() => {
     if (isShown) void loadSetup().then(setSetup);
@@ -61,20 +61,20 @@ export function useNotifications(): Notifications {
   const toggle = useCallback(async () => {
     // Already loaded, as it is by any tap, so asking the browser comes from the tap itself.
     const turning = setup ?? (await loadSetup());
-    if (standing !== 'able') return turning.sayWhatIsNeeded(standing);
+    if (readiness !== 'able') return turning.sayWhatIsNeeded(readiness);
     if (!pushKey) return;
     setBusy(true);
     try {
-      if ((await turning.turn(isOn, pushKey)) === 'blocked') setStanding('blocked');
+      if ((await turning.turn(isOn, pushKey)) === 'blocked') setReadiness('blocked');
     } finally {
       await settle();
       setBusy(false);
     }
-  }, [setup, standing, pushKey, isOn, settle]);
+  }, [setup, readiness, pushKey, isOn, settle]);
 
   return useMemo(
-    () => ({ isShown, standing, isOn, isBusy, toggle }),
-    [isShown, standing, isOn, isBusy, toggle],
+    () => ({ isShown, readiness, isOn, isBusy, toggle }),
+    [isShown, readiness, isOn, isBusy, toggle],
   );
 }
 

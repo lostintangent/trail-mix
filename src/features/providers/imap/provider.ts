@@ -18,6 +18,7 @@ import {
   type Folder,
   type FolderRole,
   type MessageRef,
+  type Moved,
 } from '../../mail/core/index.ts';
 import {
   SEARCH_LIMIT,
@@ -25,7 +26,6 @@ import {
   beforeSending,
   type Cursor,
   type MailProvider,
-  type Moved,
   type SyncBatch,
   type SyncWindow,
 } from '../provider.ts';

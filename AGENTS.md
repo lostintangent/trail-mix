@@ -204,8 +204,8 @@ public/                the manifest, favicon.svg and the icons made from it, ser
 - `mail/core` is the shared vocabulary that every other feature imports.
 - `src/app` and `src/server` compose features. `src/shared` holds only generic mechanics and knows no feature.
 - Imports are relative and carry their file extension. There is no path alias.
-- One name, one meaning. An exported type is declared in one module, under a name no other module in `src` declares, and an `index.ts` only re-exports it. A name that means two things is renamed where it has fewer readers.
-- `tests/boundaries.test.ts` walks the import graph and fails on a shortcut between features or on a `core` that reaches a framework.
+- One name, one meaning. An exported type is declared in one module, under a name no other module in `src` exports, and an `index.ts` only re-exports it. A name that means two things is renamed where it has fewer readers.
+- `tests/boundaries.test.ts` walks the import graph and fails on a shortcut between features, on a `core` that reaches a framework, or on two modules in `src` that export a type of the same name.
 
 ## Writing Great Code
 
