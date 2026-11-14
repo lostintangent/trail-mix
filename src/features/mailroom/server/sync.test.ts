@@ -33,6 +33,7 @@ function mailroom(size: number, wrap = (provider: MailProvider) => provider) {
       window: () => WINDOW,
       settled: (account, error) => settled.push({ account, messages: messages(account), error }),
       landed: ({ path }, events) => landed.push({ path, events }),
+      wakeNow: () => {},
     });
   let queue = make();
   /** Everything a list or a conversation shows. */

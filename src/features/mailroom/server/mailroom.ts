@@ -2,7 +2,6 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { DurableObject } from 'cloudflare:workers';
 import { connect } from 'cloudflare:sockets';
 import {
-  refKey,
   type Account,
   type AccountId,
   type Address,
@@ -18,20 +17,11 @@ import {
   type MessageRef,
   type Moved,
   type Outgoing,
-  type SyncEvent,
   type View,
 } from '../../mail/core/index.ts';
-import {
-  newsIn,
-  noticesOf,
-  pushOf,
-  subscriptionOf,
-  type Subscription,
-} from '../../notifications/core/index.ts';
-import { deliver, pushKeyOf, type PushKey } from '../../notifications/server/index.ts';
+import { subscriptionOf, type Subscription } from '../../notifications/core/index.ts';
 import {
   imap,
-  namesThisMachine,
   type ImapPart,
   type MailProvider,
   type Preset,
@@ -66,13 +56,7 @@ import {
   windDownOf,
   type WindDown,
 } from '../core/idle.ts';
-import {
-  avatarCandidates,
-  namedMessages,
-  namedRows,
-  verifiedSenders,
-  type Picture,
-} from '../core/avatars.ts';
+import { verifiedSenders, type Picture } from '../core/avatars.ts';
 import {
   accountBook,
   connectedAccounts,
@@ -90,17 +74,7 @@ import { notifying, type Notifying } from './notifying.ts';
 import { envelopeIndex, type EnvelopeIndex } from './envelope-index.ts';
 import * as input from './input.ts';
 import { messageCommands, type MessageCommands } from './messages.ts';
-import {
-  avatarCache,
-  avatarNetwork,
-  demoSources,
-  internetSources,
-  INTERNET,
-  keyed,
-  standInInternet,
-  type AvatarCache,
-  type DomainFound,
-} from './avatars.ts';
+import { avatars, type Avatars } from './avatars.ts';
 import { upgrade, type Sql, type SqlValue } from './schema.ts';
 import {
   outboxCommands,
@@ -176,10 +150,6 @@ export type MailroomEnv = {
 /** Why a visitor's Mailroom keeps what it holds. */
 const VISITORS_KEEP =
   'The demo keeps its two accounts, and erases itself a day after your last visit.';
-/** How many refs of messages the member moved into an Inbox are held, oldest dropped first. */
-const MOVED_IN_HELD = 1_000;
-/** The most domains and senders one wake looks up pictures for. */
-const AVATAR_LOOKUPS = { domains: 6, senders: 16 };
 /** Where the id that names what an installed app keeps is stored. */
 const CACHE_KEY = 'cache';
 /** The most conversations one wake makes rows of again, as an upgrade asks. */
@@ -200,22 +170,19 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   protected readonly sql: Sql;
   protected readonly store: EnvelopeIndex;
   private readonly book: AccountBook;
-  private readonly avatars: AvatarCache;
+  private readonly avatars: Avatars;
   private readonly connections: Connections;
   private readonly signingIn: SigningIn;
   private readonly connected: ConnectedAccounts;
   private readonly fullText: FullTextSearch;
   private readonly bodies: BodyCache;
   private readonly oneClick: OneClick;
-  private readonly watchers = new Map<AccountId, () => void>();
   protected readonly queue: SyncQueue;
   protected readonly sending: OutboxQueue;
   private readonly drafts: SavingDrafts;
   protected readonly outboxCommands: OutboxCommands;
   private readonly folderCommands: FolderCommands;
   private readonly messageCommands: MessageCommands;
-  /** When every account was last owed a check. A cold start checks at its first wake. */
-  private checkedAt = 0;
   /** When a signed-in device last asked for something, as storage holds it. */
   protected openedAt: number;
   /** How long unopened before it rests, and before it erases itself. */
@@ -223,11 +190,6 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   /** Whether this instance has had anything to do yet, so the first call can say it started it. */
   private isRunning = false;
   private readonly notifying: Notifying;
-  /** Messages the member moved into an Inbox, by ref, whose arrival there is no news. */
-  private readonly movedIn = new Set<string>();
-  /** The news this wake's sync folded, told once the wake's sync is done. */
-  private news: Message[] = [];
-  private pushKey: Promise<PushKey | undefined> | undefined;
   private readonly demo: DemoSettings | undefined;
   /**
    * Whether this is a visitor's Mailroom on the public demo, which checks mail only while open and
@@ -248,9 +210,14 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     if (openedAt === undefined) this.writeOpened(this.openedAt);
     this.store = envelopeIndex(this.sql, () => this.book.all().map((account) => account.address));
     this.book = accountBook(this.sql);
-    this.avatars = avatarCache(this.sql);
     const credentials = credentialsOf(env.CREDENTIALS_KEY, this.member);
     const hint = (hint: Hint) => this.hint(hint);
+    this.avatars = avatars({
+      sql: this.sql,
+      hint,
+      isDemo: this.demo !== undefined,
+      standIn: env.AVATARS_STAND_IN,
+    });
     const check = (account: AccountId) => this.owe(() => this.queue.check(account));
     this.connections = connections({
       book: this.book,
@@ -269,7 +236,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       isDemo: this.demo !== undefined,
       checkSignIn: (...args) => this.connections.checkSignIn(...args),
       disconnect: (account) => this.disconnect(account),
-      unwatch: (account) => this.unwatch(account),
+      unwatch: (account) => this.queue.unwatch(account),
       setStatus: (account, status) => this.connected.setStatus(account, status),
       hint,
       check,
@@ -301,7 +268,13 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       demoLists: (account) => this.connections.demoLists(account),
       standIn: env.UNSUBSCRIBE_STAND_IN,
     });
-    this.notifying = notifying(this.sql);
+    this.notifying = notifying({
+      sql: this.sql,
+      reads: this.store.reads,
+      nameOf: (account) => this.book.get(account)?.account.name,
+      settings: env,
+      post: (request) => this.postPush(request),
+    });
     this.queue = syncQueue({
       sql: this.sql,
       store: this.store,
@@ -315,9 +288,10 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
         this.connected.setStatus(account, error ? 'error' : 'ready');
       },
       landed: (folder, events) => {
-        this.noteNews(folder, events);
+        this.notifying.note(folder, events);
         this.avatars.note(verifiedSenders(events), Date.now());
       },
+      wakeNow: () => this.background(this.ctx.storage.setAlarm(Date.now())),
     });
     this.sending = outboxQueue({
       sql: this.sql,
@@ -357,7 +331,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       provider,
       sync: this.queue,
       owe,
-      movedIn: (ref) => this.noteMovedIn(ref),
+      movedIn: (ref) => this.notifying.movedIn(ref),
     });
     // Every wake is a cold start, and this is where one begins: a send found mid-submit was cut
     // short by whatever ended the last instance.
@@ -419,10 +393,10 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     const asked = input.pageAtOf(at);
     if (checked.in === 'outbox') throw new TypeError('The Outbox is listed by outbox().');
     if (checked.in !== 'search') {
-      return this.named(this.store.page(checked, asked, undefined, input.keptOf(keep)));
+      return this.avatars.page(this.store.page(checked, asked, undefined, input.keptOf(keep)));
     }
-    if (!checked.fullText) return this.named(this.store.search(checked.text, asked));
-    return this.named(await this.fullText.page(checked.text, asked));
+    if (!checked.fullText) return this.avatars.page(this.store.search(checked.text, asked));
+    return this.avatars.page(await this.fullText.page(checked.text, asked));
   }
 
   people(typed: string): Promise<Address[]> {
@@ -431,19 +405,12 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
 
   bundle(id: BundleId, at?: PageAt): Promise<BundlePage> {
     const page = this.store.bundle(input.bundleOf(id), input.pageAtOf(at));
-    const pictures = this.pictures(
-      avatarCandidates([...page.items, ...(page.bundle ? [page.bundle] : [])]),
-    );
-    return Promise.resolve({
-      ...page,
-      items: namedRows(page.items, pictures),
-      ...(page.bundle ? { bundle: namedRows([page.bundle], pictures)[0] } : {}),
-    });
+    return Promise.resolve(this.avatars.bundle(page));
   }
 
   conversation(id: ConversationId): Promise<Message[]> {
     const messages = this.fullText.conversation(input.conversationOf(id));
-    return Promise.resolve(namedMessages(messages, this.pictures(avatarCandidates([], messages))));
+    return Promise.resolve(this.avatars.conversation(messages));
   }
 
   body(ref: MessageRef): Promise<Body> {
@@ -474,10 +441,10 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       cache = crypto.randomUUID();
       await this.ctx.storage.put(CACHE_KEY, cache);
     }
-    const key = await this.pushKeyNow();
+    const pushKey = await this.notifying.publicKey();
     return {
       cache,
-      ...(key ? { pushKey: key.publicKey } : {}),
+      ...(pushKey ? { pushKey } : {}),
       notified: asked !== undefined && this.notifying.isNotified(asked),
       ...(this.isVisitors ? { visitor: true as const } : {}),
     };
@@ -634,10 +601,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
    * interval that notifying keeps.
    */
   async notifyDevice(subscription: Subscription): Promise<void> {
-    const checked = subscriptionOf(subscription);
-    if (!(await this.pushKeyNow()))
-      throw new Error('Notifications aren’t set up on this Trail Mix.');
-    this.notifying.notify(checked, Date.now());
+    await this.notifying.notify(subscriptionOf(subscription), Date.now());
     await this.wakeBy(Date.now() + NOTIFYING_CHECKING_MS);
   }
 
@@ -682,7 +646,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     this.ctx.acceptWebSocket(socket);
     this.noteOpened();
     // A device just opened: catch up now, and watch while any device stays open.
-    this.background(this.owe(() => this.checkAll()));
+    this.background(this.owe(() => this.queue.checkAll(this.book.all())));
     return Promise.resolve(new Response(null, { status: 101, webSocket: device }));
   }
 
@@ -699,7 +663,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
         // Already closing.
       }
     }
-    for (const id of [...this.watchers.keys()]) this.unwatch(id);
+    this.queue.unwatchAll();
     return Promise.resolve();
   }
 
@@ -708,7 +672,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   }
 
   override webSocketClose(socket: WebSocket): void {
-    if (this.devices(socket) === 0) for (const id of [...this.watchers.keys()]) this.unwatch(id);
+    if (this.devices(socket) === 0) this.queue.unwatchAll();
   }
 
   override webSocketError(socket: WebSocket): void {
@@ -750,7 +714,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       return 0;
     }
     if (idleness === 'resting') {
-      for (const id of [...this.watchers.keys()]) this.unwatch(id);
+      this.queue.unwatchAll();
       await this.sending.run(() => new Date().toISOString());
       const erase = erasesAt(this.openedAt, this.windDown);
       await this.ctx.storage.setAlarm(Math.min(erase, this.sending.nextWake() ?? erase));
@@ -764,7 +728,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
         isWatched: open,
         isNotifying: this.notifying.isAnyNotified(),
         isVisitors: this.isVisitors,
-        checkedAt: this.checkedAt,
+        checkedAt: this.queue.checkedAt(),
         openedAt: this.openedAt,
       },
       this.windDown,
@@ -778,12 +742,12 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     // And so do the drafts newer versions replaced, so sync finds only the newest.
     const failing = await this.drafts.discardReplaced();
     // Timed from the wake's start, as the next alarm is, so the wake it sets always checks.
-    if (isCheckDue) this.checkAll(now);
-    await this.watchAll(open);
+    if (isCheckDue) this.queue.checkAll(this.book.all(), now);
+    await this.queue.watch(this.book.all(), open);
     const landed = await this.queue.run();
-    await this.tellNews();
+    await this.notifying.tell();
     // A new account's Inbox is known only once its folders are.
-    await this.watchAll(this.devices() > 0);
+    await this.queue.watch(this.book.all(), this.devices() > 0);
     const isOwingBodies = await this.letBodiesGo().catch((error: unknown) => {
       // What the bucket didn't delete stays owed, for the next wake.
       report(error);
@@ -794,7 +758,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
       report(error);
       return false;
     });
-    const isOwingAvatars = await this.lookUpAvatars();
+    const isOwingAvatars = await this.avatars.lookUp();
     const isResummarizing = this.resummarize();
     const isFillingPeople = this.sql.transaction(() => this.store.fillPeople(PEOPLE_FILLED));
     // A save meanwhile owes a discard, and one whose server failed waits for the next check.
@@ -828,85 +792,14 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   }
 
   /**
-   * Looks up the pictures owed, a few each wake, and hints every device when one comes or goes. A
-   * wake that asked sites for icons logs how many it found, how many named none, and how many
-   * turned the Mailroom away, and names no one. The demo mailbox brings its own and looks nothing up.
-   * Returns whether more are owed now, as when mail from many senders arrives at once.
-   */
-  private async lookUpAvatars(): Promise<boolean> {
-    const owed = this.avatars.owed(Date.now(), AVATAR_LOOKUPS);
-    if (owed.domains.length + owed.senders.length === 0) return false;
-    const sources = this.demo ? demoSources : internetSources(this.avatarNetwork());
-    const icons = { found: 0, none: 0, 'turned away': 0 };
-    const changed = await Promise.all([
-      ...owed.domains.map(async (domain) => {
-        try {
-          const { logo, icon } = await sources.domain(domain);
-          if (icon !== undefined) icons[typeof icon === 'object' ? 'found' : icon] += 1;
-          const found: DomainFound = {
-            ...(logo ? { logo: await keyed(logo) } : {}),
-            ...(icon ? { icon: typeof icon === 'object' ? await keyed(icon) : icon } : {}),
-          };
-          return this.avatars.foundDomain(domain, found, Date.now());
-        } catch (error) {
-          report(error);
-          this.avatars.failed({ domain }, Date.now());
-          return false;
-        }
-      }),
-      ...owed.senders.map(async (sender) => {
-        try {
-          const photo = await sources.sender(sender);
-          return this.avatars.foundSender(sender, photo && (await keyed(photo)), Date.now());
-        } catch (error) {
-          report(error);
-          this.avatars.failed({ sender }, Date.now());
-          return false;
-        }
-      }),
-    ]);
-    if (!this.demo && icons.found + icons.none + icons['turned away'] > 0) {
-      console.log(
-        `Mailroom: site icons, ${icons.found} found, ${icons.none} named none, ${icons['turned away']} turned the Mailroom away.`,
-      );
-    }
-    if (changed.includes(true)) this.hint({ changed: 'avatars' });
-    const more = this.avatars.owed(Date.now(), { domains: 1, senders: 1 });
-    return more.domains.length + more.senders.length > 0;
-  }
-
-  /** The internet as this Mailroom reaches it, or a test's stand-in on this machine. */
-  private avatarNetwork() {
-    const standIn = this.env.AVATARS_STAND_IN;
-    return standIn && namesThisMachine(standIn)
-      ? avatarNetwork(standInInternet(standIn), true)
-      : avatarNetwork(INTERNET);
-  }
-
-  /** A page with the pictures the cache holds named, and no others. */
-  private named(page: Page): Page {
-    return { ...page, items: namedRows(page.items, this.pictures(avatarCandidates(page.items))) };
-  }
-
-  /** The key of each sender's picture the cache holds, by sender. */
-  private pictures(senders: readonly string[]): Map<string, string> {
-    return this.avatars.pictures(senders);
-  }
-
-  /**
    * A new demo Mailroom's first steps, which land before it answers anything: each account's
    * folders, then each Inbox's newest batch, which sync lands ahead of any other folder's. The
    * unified Inbox's first page then holds conversations it will once the Mailroom is full, and
    * the older mail that lands later fills it out.
    */
   private async firstLook(): Promise<void> {
-    this.checkAll();
+    this.queue.checkAll(this.book.all());
     await this.queue.run({ steps: 2 * this.book.all().length, ms: WAKE.ms }).catch(report);
-  }
-
-  private checkAll(at = Date.now()) {
-    this.checkedAt = at;
-    for (const { id } of this.book.all()) this.queue.check(id);
   }
 
   /**
@@ -918,7 +811,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     if (!isWorthNoting(this.openedAt, now)) return;
     const wasResting = idlenessOf(this.openedAt, now, this.windDown) !== 'open';
     this.writeOpened(now);
-    if (wasResting) this.background(this.owe(() => this.checkAll()));
+    if (wasResting) this.background(this.owe(() => this.queue.checkAll(this.book.all())));
   }
 
   protected writeOpened(at: number) {
@@ -954,31 +847,6 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     await this.ctx.storage.setAlarm(Date.now());
   }
 
-  private async watchAll(open: boolean) {
-    for (const { id, status } of this.book.all()) {
-      if (open && status !== 'needs-sign-in') await this.watch(id).catch(report);
-      else this.unwatch(id);
-    }
-  }
-
-  private async watch(account: AccountId) {
-    if (this.watchers.has(account)) return;
-    const inbox = this.store.withRole(account, 'inbox');
-    if (!inbox) return;
-    const provider = await this.connections.provider(account);
-    if (this.watchers.has(account)) return;
-    const folder = folderRef(inbox);
-    this.watchers.set(
-      account,
-      provider.watch(folder.path, () => this.background(this.owe(() => this.queue.folder(folder)))),
-    );
-  }
-
-  private unwatch(account: AccountId) {
-    this.watchers.get(account)?.();
-    this.watchers.delete(account);
-  }
-
   /** The devices open now, apart from one that is closing. */
   private devices(closing?: WebSocket) {
     return this.ctx.getWebSockets().filter((socket) => socket !== closing).length;
@@ -996,83 +864,6 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
     }
   }
 
-  /**
-   * Notes the news in a batch an Inbox's sync landed, to tell once the wake's sync is done, and
-   * moves the Inbox's mark on. Marks move whether or not a device is notified, so turning
-   * notifications on finds every Inbox already read.
-   */
-  private noteNews(folder: FolderRef, events: readonly SyncEvent[]) {
-    if (this.store.reads.role(folder) !== 'inbox') return;
-    const held = this.notifying.mark(folder);
-    const { news, mark } = newsIn(events, held, {
-      now: Date.now(),
-      movedIn: (ref) => this.movedIn.delete(refKey(ref)),
-    });
-    if (mark && (mark.uid !== held?.uid || mark.uidValidity !== held.uidValidity)) {
-      this.notifying.setMark(folder, mark);
-    }
-    if (news.length === 0 || !this.notifying.isAnyNotified()) return;
-    for (const envelope of news) {
-      const message = this.store.reads.message(envelope);
-      if (message) this.news.push(message);
-    }
-  }
-
-  /**
-   * Tells every notified device the news this wake's sync folded. A device whose subscription has
-   * ended is forgotten. A push that fails costs that notice and nothing more, and never the wake.
-   */
-  private async tellNews() {
-    const news = this.news;
-    this.news = [];
-    const key = news.length > 0 ? await this.pushKeyNow() : undefined;
-    if (!key) return;
-    const notices = noticesOf(news, (id) => this.book.get(id)?.account.name);
-    for (const device of this.notifying.devices()) {
-      try {
-        for (const notice of notices) {
-          const fared = await deliver(device, pushOf(notice), key, (request) =>
-            this.postPush(request),
-          );
-          if (fared === 'gone') {
-            this.notifying.forget(device.endpoint);
-            break;
-          }
-          if (fared === 'refused') {
-            report(new Error('A push service refused this deployment’s key.'));
-          }
-        }
-      } catch (error) {
-        report(error);
-      }
-    }
-  }
-
-  /** A message the member moved, which isn't news if its move lands it in an Inbox. */
-  private noteMovedIn(ref: MessageRef) {
-    this.movedIn.add(refKey(ref));
-    for (const oldest of this.movedIn) {
-      if (this.movedIn.size <= MOVED_IN_HELD) break;
-      this.movedIn.delete(oldest);
-    }
-  }
-
-  /**
-   * The deployment's push key, or nothing where notifications are off. A key that can't be read is
-   * reported, and leaves notifications off and everything else working.
-   */
-  private pushKeyNow(): Promise<PushKey | undefined> {
-    const { PUSH_KEY: pem, OPERATOR_EMAIL: operator } = this.env;
-    this.pushKey ??=
-      pem && operator
-        ? pushKeyOf(pem, operator).catch((error: unknown) => {
-            report(error);
-            return undefined;
-          })
-        : Promise.resolve(undefined);
-    return this.pushKey;
-  }
-
   /** Posts a push to its push service. A test's Mailroom keeps it instead. */
   protected postPush(request: Request): Promise<Response> {
     return fetch(request);
@@ -1088,7 +879,7 @@ export class Mailroom extends DurableObject<MailroomEnv> implements Contract {
   /** Forgets what an account owes, so a step of it under way lands nothing, and closes its provider. */
   private async disconnect(account: AccountId) {
     this.queue.forget(account);
-    this.unwatch(account);
+    this.queue.unwatch(account);
     await this.connections.close(account);
   }
 

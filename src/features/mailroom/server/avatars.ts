@@ -1,12 +1,16 @@
-import { domainOf } from '../../mail/core/index.ts';
-import { DEMO_PICTURES } from '../../providers/index.ts';
+import { domainOf, type Hint, type Message } from '../../mail/core/index.ts';
+import { DEMO_PICTURES, namesThisMachine } from '../../providers/index.ts';
+import type { BundlePage, Page } from '../client/contract.ts';
 import {
+  avatarCandidates,
   avatarOf,
   bimiOf,
   dmarcOf,
   enforces,
   hostsPublicMailboxes,
   iconLocations,
+  namedMessages,
+  namedRows,
   organizationalOf,
   PICTURE_BYTES,
   pictureOf,
@@ -19,6 +23,7 @@ import {
   type Pictures,
 } from '../core/avatars.ts';
 import { isPublicHost } from '../../../shared/public-host.ts';
+import { report } from './report.ts';
 import type { Sql } from './schema.ts';
 
 /**
@@ -220,6 +225,109 @@ export function avatarCache(sql: Sql) {
   };
 }
 
+/**
+ * Verified senders' pictures as a Mailroom keeps and shows them: the Avatar cache, the lookups it
+ * owes, a few each wake, and the key of each picture it holds named on the lists and conversations
+ * a read returns, and no others.
+ */
+export type Avatars = ReturnType<typeof avatars>;
+
+/** The most domains and senders one wake looks up pictures for. */
+const LOOKUPS = { domains: 6, senders: 16 };
+
+export function avatars(ports: {
+  sql: Sql;
+  hint: (hint: Hint) => void;
+  /** Whether this is the demo mailbox, which brings its own pictures and looks nothing up. */
+  isDemo: boolean;
+  /** A test's stand-in for the internet, honored only when it names this machine. */
+  standIn?: string;
+}) {
+  const cache = avatarCache(ports.sql);
+
+  return {
+    /** Owes a lookup for each of these verified senders, and for their domains. */
+    note: (senders: readonly string[], now: number) => cache.note(senders, now),
+    /** Forgets every sender but these, and every domain but theirs. */
+    keep: (senders: ReadonlySet<string>) => cache.keep(senders),
+    /** The picture kept under a key. */
+    picture: (key: string) => cache.picture(key),
+
+    /**
+     * Looks up the pictures owed, a few each wake, and hints every device when one comes or goes.
+     * A wake that asked sites for icons logs how many it found, how many named none, and how many
+     * turned the Mailroom away, and names no one. Returns whether more are owed now, as when mail
+     * from many senders arrives at once.
+     */
+    async lookUp(): Promise<boolean> {
+      const owed = cache.owed(Date.now(), LOOKUPS);
+      if (owed.domains.length + owed.senders.length === 0) return false;
+      const sources = ports.isDemo ? demoSources : internetSources(networkOf(ports.standIn));
+      const icons = { found: 0, none: 0, 'turned away': 0 };
+      const changed = await Promise.all([
+        ...owed.domains.map(async (domain) => {
+          try {
+            const { logo, icon } = await sources.domain(domain);
+            if (icon !== undefined) icons[typeof icon === 'object' ? 'found' : icon] += 1;
+            const found: DomainFound = {
+              ...(logo ? { logo: await keyed(logo) } : {}),
+              ...(icon ? { icon: typeof icon === 'object' ? await keyed(icon) : icon } : {}),
+            };
+            return cache.foundDomain(domain, found, Date.now());
+          } catch (error) {
+            report(error);
+            cache.failed({ domain }, Date.now());
+            return false;
+          }
+        }),
+        ...owed.senders.map(async (sender) => {
+          try {
+            const photo = await sources.sender(sender);
+            return cache.foundSender(sender, photo && (await keyed(photo)), Date.now());
+          } catch (error) {
+            report(error);
+            cache.failed({ sender }, Date.now());
+            return false;
+          }
+        }),
+      ]);
+      if (!ports.isDemo && icons.found + icons.none + icons['turned away'] > 0) {
+        console.log(
+          `Mailroom: site icons, ${icons.found} found, ${icons.none} named none, ${icons['turned away']} turned the Mailroom away.`,
+        );
+      }
+      if (changed.includes(true)) ports.hint({ changed: 'avatars' });
+      const more = cache.owed(Date.now(), { domains: 1, senders: 1 });
+      return more.domains.length + more.senders.length > 0;
+    },
+
+    /** A page with the pictures the cache holds named. */
+    page(page: Page): Page {
+      return {
+        ...page,
+        items: namedRows(page.items, cache.pictures(avatarCandidates(page.items))),
+      };
+    },
+
+    /** A bundle's page, with the pictures the cache holds named on its rows and on the bundle's. */
+    bundle(page: BundlePage): BundlePage {
+      const pictures = cache.pictures(
+        avatarCandidates([...page.items, ...(page.bundle ? [page.bundle] : [])]),
+      );
+      return {
+        ...page,
+        items: namedRows(page.items, pictures),
+        ...(page.bundle ? { bundle: namedRows([page.bundle], pictures)[0] } : {}),
+      };
+    },
+
+    /** A conversation's messages, with the pictures the cache holds named. */
+    conversation(messages: Message[]): Message[] {
+      return namedMessages(messages, cache.pictures(avatarCandidates([], messages)));
+    },
+  };
+}
+
 // Looking pictures up
 
 /** Where the Mailroom finds pictures: a domain's logo and icon, and a sender's photo. */
@@ -235,6 +343,12 @@ export function internetSources(network: AvatarNetwork): AvatarSources {
     sender: async (sender) => network.gravatar(await sha256Of(sender)),
   };
 }
+
+/** The internet as a Mailroom reaches it, or a test's stand-in on this machine. */
+const networkOf = (standIn: string | undefined) =>
+  standIn && namesThisMachine(standIn)
+    ? avatarNetwork(standInInternet(standIn), true)
+    : avatarNetwork(INTERNET);
 
 /** The pictures the demo mailbox brings with it, so nothing is looked up. */
 export const demoSources: AvatarSources = {

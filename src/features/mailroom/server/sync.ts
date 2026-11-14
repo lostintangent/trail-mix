@@ -1,4 +1,5 @@
 import type {
+  Account,
   AccountId,
   Folder,
   FolderRef,
@@ -9,6 +10,7 @@ import type {
 } from '../../mail/core/index.ts';
 import type { MailProvider, SyncBatch, SyncWindow } from '../../providers/index.ts';
 import type { EnvelopeIndex } from './envelope-index.ts';
+import { report } from './report.ts';
 import type { Sql } from './schema.ts';
 
 /**
@@ -30,8 +32,9 @@ export type Budget = { steps: number; ms: number };
 export type SyncQueue = ReturnType<typeof syncQueue>;
 
 /**
- * What sync works with. `settled` hears when an account's check finishes, or fails, and `landed`
- * hears each batch of a folder as the index takes it, in the same transaction.
+ * What sync works with. `settled` hears when an account's check finishes, or fails, `landed` hears
+ * each batch of a folder as the index takes it, in the same transaction, and `wakeNow` has the next
+ * wake come at once, for a change a watched Inbox reported.
  */
 type Syncing = {
   sql: Sql;
@@ -41,6 +44,7 @@ type Syncing = {
   window: (account: AccountId) => SyncWindow;
   settled: (account: AccountId, error?: unknown) => void;
   landed?: (folder: FolderRef, events: readonly SyncEvent[]) => void;
+  wakeNow: () => void;
 };
 
 /** One thing owed: an account's folders to list, or a folder to sync. */
@@ -103,6 +107,10 @@ export function syncQueue(syncing: Syncing) {
   const failed = new Map<AccountId, Map<string, unknown>>();
   /** Folders a command renamed, whose messages move when a listing shows the rename. */
   let moves: Move[] = [];
+  /** How to stop watching each account's Inbox, while a device is open. */
+  const watchers = new Map<AccountId, () => void>();
+  /** When every account was last owed a check. A cold start checks at its first wake. */
+  let checkedAt = 0;
 
   function owe(job: Omit<Job, 'again' | 'changed' | 'cancelled'>) {
     place({ ...job, again: false, changed: false, cancelled: false });
@@ -271,6 +279,38 @@ export function syncQueue(syncing: Syncing) {
     }
   }
 
+  /** Owes a folder's sync, as a watcher or a command does, ahead of any check. */
+  function folder({ account, path }: FolderRef) {
+    const held = jobs.find((job) => job.account === account && job.path === path);
+    if (held) {
+      held.again = true;
+      held.recount = true;
+      return;
+    }
+    owe({ account, path, rank: OWED, recount: true });
+  }
+
+  async function watchInbox(account: AccountId) {
+    if (watchers.has(account)) return;
+    const inbox = store.withRole(account, 'inbox');
+    if (!inbox) return;
+    const provider = await syncing.provider(account);
+    if (watchers.has(account)) return;
+    const at = { account, path: inbox.path };
+    watchers.set(
+      account,
+      provider.watch(at.path, () => {
+        folder(at);
+        syncing.wakeNow();
+      }),
+    );
+  }
+
+  function unwatch(account: AccountId) {
+    watchers.get(account)?.();
+    watchers.delete(account);
+  }
+
   /** Forgets everything owed for an account. A step of it under way lands nothing. */
   function forget(account: AccountId) {
     for (const job of jobs) if (job.account === account) job.cancelled = true;
@@ -282,18 +322,36 @@ export function syncQueue(syncing: Syncing) {
   return {
     check,
 
-    /** Owes a folder's sync, as a watcher or a command does, ahead of any check. */
-    folder({ account, path }: FolderRef) {
-      const held = jobs.find((job) => job.account === account && job.path === path);
-      if (held) {
-        held.again = true;
-        held.recount = true;
-        return;
-      }
-      owe({ account, path, rank: OWED, recount: true });
-    },
+    folder,
 
     forget,
+
+    /**
+     * Watches each account's Inbox while a device is open, owing its sync at each change the server
+     * reports, and stops watching it when none is. An account that needs signing in isn't watched.
+     */
+    async watch(accounts: readonly Pick<Account, 'id' | 'status'>[], open: boolean) {
+      for (const { id, status } of accounts) {
+        if (open && status !== 'needs-sign-in') await watchInbox(id).catch(report);
+        else unwatch(id);
+      }
+    },
+
+    unwatch,
+
+    /** Stops watching every Inbox, as when the last device closes. */
+    unwatchAll() {
+      for (const id of [...watchers.keys()]) unwatch(id);
+    },
+
+    /** Owes every account a check, as of `at`. */
+    checkAll(accounts: readonly Pick<Account, 'id'>[], at = Date.now()) {
+      checkedAt = at;
+      for (const { id } of accounts) check(id);
+    },
+
+    /** When every account was last owed a check. */
+    checkedAt: () => checkedAt,
 
     /**
      * Notes folders a command renamed, from where the index holds them, so the listing that shows
