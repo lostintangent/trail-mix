@@ -1,8 +1,17 @@
-/** Waits until `check` holds, looking again every 25 ms, or fails once `ms` have passed without it. */
-export async function until(check: () => boolean | Promise<boolean>, ms = 2_000): Promise<void> {
+/**
+ * Resolves with what `find` finds, once it finds anything, looking again every `every` ms, or fails
+ * with `failure` once `ms` have passed without it.
+ */
+export async function until<T>(
+  find: () => T | Promise<T>,
+  ms = 2_000,
+  { every = 25, failure = `Still not so after ${ms} ms.` } = {},
+): Promise<NonNullable<T>> {
   const by = Date.now() + ms;
-  while (!(await check())) {
-    if (Date.now() > by) throw new Error(`Still not so after ${ms} ms.`);
-    await new Promise((done) => setTimeout(done, 25));
+  for (;;) {
+    const found = await find();
+    if (found) return found;
+    if (Date.now() > by) throw new Error(failure);
+    await new Promise((done) => setTimeout(done, every));
   }
 }

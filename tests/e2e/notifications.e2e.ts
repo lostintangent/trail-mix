@@ -8,6 +8,7 @@ import { expectUsable } from './usable.ts';
 import { SIZES, suite } from './suite.ts';
 import { mailIsIn } from '../mailIsIn.ts';
 import { atRest } from '../atRest.ts';
+import { until } from '../until.ts';
 
 /**
  * Notifications in the browser: Settings' switch and its command on a deployment that has a push
@@ -305,14 +306,12 @@ async function recordShown(context: BrowserContext) {
 /** What the worker has shown since it began recording, once it has shown something. */
 async function notifications(context: BrowserContext) {
   const [worker] = context.serviceWorkers();
-  for (let tries = 0; tries < 50; tries++) {
+  return until(async () => {
     const shown = await worker!.evaluate(
       () => (self as unknown as { shown: { title: string; options: object }[] }).shown,
     );
-    if (shown.length > 0) return shown;
-    await Bun.sleep(100);
-  }
-  return [];
+    return shown.length > 0 ? shown : undefined;
+  }, 5_000);
 }
 
 /**

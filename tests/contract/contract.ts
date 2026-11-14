@@ -16,6 +16,7 @@ import {
   type Cursor,
   type MailProvider,
 } from '../../src/features/providers/index.ts';
+import { until } from '../until.ts';
 
 export type Harness = {
   provider: MailProvider;
@@ -508,7 +509,7 @@ export function describeContract(
       const stop = provider.watch('INBOX', () => changes++);
       await Bun.sleep(1000);
       await world().deliver(message({ id: 'watched', subject: 'Watched' }));
-      await until(() => changes > 0);
+      await until(() => changes > 0, 5_000);
       stop();
       const seen = changes;
       await world().deliver(message({ id: 'unwatched', subject: 'Unwatched' }));
@@ -563,14 +564,6 @@ export function describeContract(
 /** Refs as comparable keys, in one order. */
 const keys = (refs: MessageRef[]) => refs.map(refKey).sort();
 const bytes = (raw: string) => new TextEncoder().encode(raw);
-
-async function until(done: () => boolean, ms = 5000) {
-  const deadline = Date.now() + ms;
-  while (!done()) {
-    if (Date.now() > deadline) throw new Error(`not within ${ms} ms`);
-    await Bun.sleep(50);
-  }
-}
 
 /**
  * A plain RFC 5322 message, with HTML beside its text or a file attached when asked. Its id is

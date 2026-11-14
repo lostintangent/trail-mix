@@ -22,6 +22,7 @@ import { missing } from './clients.ts';
 import { mutt } from './mutt.ts';
 import { roundcube, type Roundcube } from './roundcube.ts';
 import { mailIsIn } from '../mailIsIn.ts';
+import { until } from '../until.ts';
 
 const { alice, bob } = users;
 type User = { email: string; password: string };
@@ -637,17 +638,6 @@ describe('Mail written in Trail Mix', () => {
     }
   }
 });
-
-/** Resolves with what `find` finds, asking again until it finds something or time runs out. */
-async function until<T>(find: () => Promise<T | undefined>, ms: number): Promise<T> {
-  const deadline = Date.now() + ms;
-  for (;;) {
-    const found = await find();
-    if (found !== undefined) return found;
-    if (Date.now() > deadline) throw new Error(`Nothing turned up in ${ms} ms.`);
-    await Bun.sleep(250);
-  }
-}
 
 /** What a Roundcube page holds of its message list, threaded. */
 type RoundcubePage = {

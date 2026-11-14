@@ -31,6 +31,7 @@ import {
   type Profile,
 } from '../mail-server/server.ts';
 import { signedIn } from '../mail-server/sign-in.ts';
+import { until } from '../until.ts';
 import { describeContract, message, type Harness } from './contract.ts';
 
 const { alice } = users;
@@ -256,12 +257,9 @@ describe('The IMAP provider', () => {
     const stop = provider.watch('INBOX', () => changes++);
     await Bun.sleep(1000);
     await kick(alice.email);
-    for (const deadline = Date.now() + 10_000; changes === 0 && Date.now() < deadline;) {
-      await Bun.sleep(100);
-    }
+    await until(() => changes > 0, 10_000);
     stop();
     await provider.close();
-    expect(changes).toBeGreaterThan(0);
   }, 30_000);
 });
 

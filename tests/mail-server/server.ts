@@ -13,6 +13,7 @@ import { connect } from 'node:net';
 import { tmpdir, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { SMTPServerAuthentication } from 'smtp-server';
+import { until } from '../until.ts';
 import { signInStandIn as standIn } from './sign-in.ts';
 
 export const domain = 'trailmix.test';
@@ -151,12 +152,13 @@ async function launch(binaries: Dovecot, profile: Profile) {
   if (master.exitCode !== 0)
     throw new Error(`Dovecot did not start:\n${readFileSync(startup, 'utf8')}`);
 
+  const notUp = (what: string, log: string) => ({ failure: `${what} did not come up; see ${log}` });
   await until(
     () => existsSync(join(state, 'serve.ready')),
-    'the submission server',
-    join(state, 'serve.log'),
+    15_000,
+    notUp('The submission server', join(state, 'serve.log')),
   );
-  await until(imapGreets, 'Dovecot', join(state, 'dovecot.log'));
+  await until(imapGreets, 15_000, notUp('Dovecot', join(state, 'dovecot.log')));
 }
 
 export async function stop() {
@@ -364,14 +366,6 @@ function imapGreets() {
     socket.once('error', () => resolve(false));
     socket.once('close', () => resolve(false));
   });
-}
-
-async function until(ready: () => boolean | Promise<boolean>, what: string, log: string) {
-  const deadline = Date.now() + 15_000;
-  while (!(await ready())) {
-    if (Date.now() > deadline) throw new Error(`${what} did not come up; see ${log}`);
-    await Bun.sleep(100);
-  }
 }
 
 // Finding Dovecot, or building it on a Mac
@@ -588,18 +582,18 @@ const FILING_DELAY_MS = 250;
  * Waits until the host has filed every copy in Sent it owes, letting it file those it was holding.
  */
 export async function settled() {
-  const deadline = Date.now() + 10_000;
   await fetch(`http://127.0.0.1:${ports.identity}/filing`, { method: 'POST' });
-  for (;;) {
-    const response = await fetch(`http://127.0.0.1:${ports.identity}/filing`);
-    // Read as unknown, since the browser's Response, which a browser test reaching this sees, takes
-    // no type for its body.
-    const body: unknown = await response.json();
-    const { filing } = body as { filing: number };
-    if (filing === 0) return;
-    if (Date.now() > deadline) throw new Error('The host never filed its copy in Sent.');
-    await Bun.sleep(50);
-  }
+  await until(
+    async () => {
+      const response = await fetch(`http://127.0.0.1:${ports.identity}/filing`);
+      // Read as unknown, since the browser's Response, which a browser test reaching this sees, takes
+      // no type for its body.
+      const body: unknown = await response.json();
+      return (body as { filing: number }).filing === 0;
+    },
+    10_000,
+    { failure: 'The host never filed its copy in Sent.' },
+  );
 }
 
 /** The header that has submission take a message and then drop the connection without a reply. */

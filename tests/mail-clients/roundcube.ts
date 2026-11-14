@@ -5,6 +5,7 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { $ } from 'bun';
 import { caFile, ports } from '../mail-server/server.ts';
+import { until } from '../until.ts';
 import { clientsDir } from './clients.ts';
 
 const RELEASE = {
@@ -30,18 +31,14 @@ export async function roundcube(port: number): Promise<Roundcube> {
     stderr: 'ignore',
   });
   const url = `http://127.0.0.1:${port}`;
-  for (const deadline = Date.now() + 10_000; ;) {
-    const answered = await fetch(url).then(
-      (response) => response.ok,
-      () => false,
-    );
-    if (answered) break;
-    if (Date.now() > deadline) {
-      server.kill();
-      throw new Error(`Roundcube didn't answer on ${url}.`);
-    }
-    await Bun.sleep(100);
-  }
+  const answers = () =>
+    fetch(url)
+      .then(({ ok }) => ok)
+      .catch(() => false);
+  await until(answers, 10_000, { failure: `Roundcube didn't answer on ${url}.` }).catch((error) => {
+    server.kill();
+    throw error;
+  });
   return {
     url,
     async stop() {
