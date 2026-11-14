@@ -5,7 +5,7 @@ import { standingOfLeaving, type Leaving } from '../core/leaving.ts';
 import { formatAhead } from '../core/later.ts';
 import { UNDO_SECONDS } from '../core/outbox.ts';
 import { isUndoable, standingOfPress, type Standing } from '../core/standing.ts';
-import { isAsked, unreachedOf, useAsked, useAskedVersion } from './asked.ts';
+import { unreachedOf, useAsked } from './asked.ts';
 import { takeBack, undo as undoPress } from './undo.ts';
 import { offerUndo } from './undoable.ts';
 
@@ -45,8 +45,7 @@ export function useLeavingLine(leaving: Leaving): LeavingLine {
     if (refused !== undefined) setUndo({ refused });
   };
 
-  useAskedVersion();
-  const isMine = isAsked(leaving.id);
+  const isMine = useAsked(leaving.id) !== undefined;
   const canTakeBack = isUndoable(standing) && undo === 'idle';
   const latestPress = useRef(press);
   useLayoutEffect(() => {

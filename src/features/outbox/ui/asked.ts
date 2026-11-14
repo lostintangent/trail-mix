@@ -51,7 +51,6 @@ export type Answer = { send: Outgoing } | { refused: string };
 
 let asked: ReadonlyMap<string, Asked> = new Map();
 const listeners = new Set<() => void>();
-let version = 0;
 
 /** A press of Send, followed from the moment it's pressed, while its message's last save runs. */
 export function pressed(id: string, press: Omit<Asked, 'hand'>) {
@@ -87,8 +86,6 @@ export const unreachedOf = (hand: Hand | undefined) =>
 const mayGoUnanswered = (hand: Hand) =>
   hand.is === 'saving' || hand.is === 'asking' || hand.is === 'undoing';
 
-export const isAsked = (id: string) => asked.has(id);
-
 /** A press, as its hand-off stands now. */
 export const askedFor = (id: string) => asked.get(id);
 
@@ -103,10 +100,10 @@ const subscribe = (listener: () => void) => {
 };
 
 /**
- * Changes whenever this device asks for a send, which can be after a snapshot of the Outbox has
- * already brought it, as when the Mailroom's hint outruns its answer.
+ * Every press, by its id, anew whenever this device asks for a send, which can be after a snapshot
+ * of the Outbox has already brought it, as when the Mailroom's hint outruns its answer.
  */
-export const useAskedVersion = () => useSyncExternalStore(subscribe, () => version);
+export const useAllAsked = () => useSyncExternalStore(subscribe, () => asked);
 
 /** A press, as its hand-off goes on. */
 export const useAsked = (id: string) => useSyncExternalStore(subscribe, () => asked.get(id));
@@ -126,7 +123,6 @@ export function pressOf(outgoing: Outgoing): (Asked & { id: string }) | undefine
 
 function change(id: string, press: Asked) {
   asked = new Map(asked).set(id, press);
-  version++;
   holdPage(
     [...asked.values()].some(({ hand }) => ['saving', 'asking', 'undoing'].includes(hand.is)),
   );

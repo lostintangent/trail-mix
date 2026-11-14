@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { ConversationId } from '../../mail/core/index.ts';
 import { standingOfLeaving, toastFor, type Leaving } from '../core/leaving.ts';
-import { isAsked, useAskedVersion } from './asked.ts';
+import { useAllAsked } from './asked.ts';
 import { loadSending } from './useSend.ts';
 
 /**
@@ -10,7 +10,7 @@ import { loadSending } from './useSend.ts';
  * elsewhere. `shown` is the conversation on screen, if any is.
  */
 export function useLeavingToasts(all: readonly Leaving[], shown: ConversationId | undefined) {
-  const asked = useAskedVersion();
+  const asked = useAllAsked();
   const known = useRef(new Set<string>());
   const was = useRef(shown);
   useEffect(() => {
@@ -18,7 +18,7 @@ export function useLeavingToasts(all: readonly Leaving[], shown: ConversationId 
     was.current = shown;
     const now = Date.now();
     for (const leaving of all) {
-      if (!isAsked(leaving.id)) continue;
+      if (!asked.has(leaving.id)) continue;
       const isFirstSight = !known.current.has(leaving.id);
       if (!isFirstSight && !hasMoved) continue;
       known.current.add(leaving.id);
