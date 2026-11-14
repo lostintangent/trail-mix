@@ -40,7 +40,7 @@ import { previewOf } from './core/preview.ts';
 import { flagsOf, planSync, type SyncPlan } from './core/sync.ts';
 import { subtree } from './core/folders.ts';
 import type { Endpoint } from './core/presets.ts';
-import { submitFailure } from './core/send.ts';
+import { submitFailure, withoutBcc } from './core/send.ts';
 import { signInFailure, type SentCredentials } from './core/signin.ts';
 
 export type ImapAccount = {
@@ -113,7 +113,7 @@ const WATCH_RETRY_MS = 2000;
 const NEWEST_READ = 50;
 
 /** The IMAP and SMTP provider. Vendors differ only in the account's hosts, sign-in and quirks. */
-export function imapProvider(account: ImapAccount, network: Network = {}): MailProvider {
+export function imapProvider(account: ImapAccount, network: Network): MailProvider {
   const { account: id } = account;
   let client: Promise<ImapFlow> | undefined;
   let roles: Map<FolderRole, string> | undefined;
@@ -364,12 +364,18 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
     }
   }
 
-  /** The raw draft a ref names, or nothing once it is gone. */
-  function draftSource(draft: MessageRef) {
-    return inFolder(draft.path, async (connection, mailbox) => {
-      const [uid] = current([draft], mailbox);
+  /** The raw message a ref names, or nothing once it is gone. */
+  function sourceOf(ref: MessageRef) {
+    return inFolder(ref.path, async (connection, mailbox) => {
+      const [uid] = current([ref], mailbox);
       if (uid === undefined) return undefined;
-      const message = await connection.fetchOne(String(uid), { source: true }, { uid: true });
+      const fetch = () => connection.fetchOne(String(uid), { source: true }, { uid: true });
+      // A message that arrived after this session last heard from the server needs a NOOP first.
+      let message = await fetch();
+      if (!message) {
+        await connection.noop();
+        message = await fetch();
+      }
       return message && message.source?.length ? new Uint8Array(message.source) : undefined;
     });
   }
@@ -430,20 +436,9 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
     },
 
     async body(ref: MessageRef) {
-      const source = await inFolder(ref.path, async (connection, mailbox) => {
-        const [uid] = current([ref], mailbox);
-        if (uid === undefined) return undefined;
-        const fetch = () => connection.fetchOne(String(uid), { source: true }, { uid: true });
-        // A message that arrived after this session last heard from the server needs a NOOP first.
-        let message = await fetch();
-        if (!message) {
-          await connection.noop();
-          message = await fetch();
-        }
-        return message ? message.source : undefined;
-      });
+      const source = await sourceOf(ref);
       if (!source) throw new Error('The message is no longer on the server');
-      return new Blob([new Uint8Array(source)]).stream();
+      return new Blob([source]).stream();
     },
 
     async setFlags(refs: MessageRef[], change: Partial<Flags>) {
@@ -555,7 +550,7 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
 
     async submit(draft: MessageRef, messageId: string) {
       const source = await beforeSending(async () =>
-        (await inSent(messageId)) ? ('sent' as const) : ((await draftSource(draft)) ?? 'missing'),
+        (await inSent(messageId)) ? ('sent' as const) : ((await sourceOf(draft)) ?? 'missing'),
       );
       if (typeof source === 'string') return source;
       const parsed = await PostalMime.parse(source);
@@ -566,18 +561,18 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
       ].flatMap((a) => (a.group ? a.group.map((m) => m.address) : [a.address]));
       const from = parsed.from && !parsed.from.group ? parsed.from.address : account.auth.user;
       // Bcc recipients get the message, but no copy says who they were.
-      await deliver(withoutHeader(source, 'bcc'), from, recipients);
+      await deliver(withoutBcc(source), from, recipients);
       return 'sent';
     },
 
     async file(draft: MessageRef, messageId: string, waitForHost: boolean) {
       return beforeSending(async () => {
-        const source = await draftSource(draft);
+        const source = await sourceOf(draft);
         if (!source) return 'filed' as const;
         if (!(await inSent(messageId))) {
           if (account.filesSent && waitForHost) return 'unfiled' as const;
           const sent = await folderFor('sent');
-          const copy = Buffer.from(withoutHeader(source, 'bcc'));
+          const copy = Buffer.from(withoutBcc(source));
           await connected((connection) => connection.append(sent, copy, ['\\Seen']));
         }
         await remove(draft);
@@ -693,7 +688,6 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
     },
   };
 
-  /** Removes one message for good. Its folder may have no Trash to move it to. */
   const refIn = (path: string, uidValidity: bigint | number, uid: number): MessageRef => ({
     account: id,
     path,
@@ -701,6 +695,7 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
     uid,
   });
 
+  /** Removes one message for good. Its folder may have no Trash to move it to. */
   async function remove(ref: MessageRef) {
     await inFolder(ref.path, async (connection, mailbox) => {
       const uids = current([ref], mailbox);
@@ -719,7 +714,7 @@ export function imapProvider(account: ImapAccount, network: Network = {}): MailP
  * nothing. Rejects with why a host turned it away, in its own words when it gave any. Each host has
  * `SIGN_IN_PATIENCE_MS` to connect, greet and take the password, so a mistyped host is told soon.
  */
-export async function checkSignIn(account: ImapAccount, network: Network = {}): Promise<void> {
+export async function checkSignIn(account: ImapAccount, network: Network): Promise<void> {
   const { auth } = account;
   // What was sent, so no part of it is in a reason a host gives.
   const sent: SentCredentials =
@@ -957,7 +952,7 @@ async function heldUid(
 }
 
 /** Ascending UIDs as an IMAP sequence set, with runs collapsed, so a long list stays short. */
-export function rangeOf(uids: number[]): string {
+function rangeOf(uids: number[]): string {
   const sorted = [...new Set(uids)].sort((a, b) => a - b);
   const runs: string[] = [];
   for (let i = 0; i < sorted.length;) {
@@ -968,21 +963,6 @@ export function rangeOf(uids: number[]): string {
     i++;
   }
   return runs.join(',');
-}
-
-/** The message without one header, folded continuation lines included. The body is untouched. */
-function withoutHeader(message: Uint8Array, name: string): Uint8Array {
-  const text = new TextDecoder('latin1').decode(message);
-  const end = text.search(/\r?\n\r?\n/);
-  const head = end < 0 ? text : text.slice(0, end);
-  const kept = head.replace(new RegExp(`^${name}:.*(?:\\r?\\n[ \\t].*)*(?:\\r?\\n|$)`, 'gim'), '');
-  return latin1(kept + (end < 0 ? '' : text.slice(end)));
-}
-
-function latin1(text: string): Uint8Array {
-  const bytes = new Uint8Array(text.length);
-  for (let i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i);
-  return bytes;
 }
 
 function concat(a: Uint8Array, b: Uint8Array): Uint8Array {

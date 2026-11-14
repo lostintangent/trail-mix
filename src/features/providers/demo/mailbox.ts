@@ -1,4 +1,5 @@
 import type { Flags, FolderRole } from '../../mail/core/index.ts';
+import { sameFlags } from '../imap/core/sync.ts';
 import {
   SEEDED_FOLDERS,
   seededFolders,
@@ -40,7 +41,7 @@ export type DemoMailbox = {
   refused?: string[];
 };
 
-export type DemoFolder = {
+type DemoFolder = {
   path: string;
   role?: FolderRole;
   uidValidity: number;
@@ -52,7 +53,7 @@ export type DemoFolder = {
 };
 
 /** A message as the server holds it. What it says is read only when asked. */
-export type Held = {
+type Held = {
   uid: number;
   modSeq: number;
   flags: Flags;
@@ -198,28 +199,17 @@ export function move(
   uids: readonly number[],
   to: string,
 ): [DemoMailbox, [from: number, to: number][]] {
-  if (to === path && folderOf(mailbox, to)) return [mailbox, []];
+  if (!folderOf(mailbox, to)) throw new Error(`There is no folder "${to}" to file it in.`);
+  if (to === path) return [mailbox, []];
   const moved: [number, number][] = [];
   const next = uids.reduce((current, uid) => {
-    const [copied, landed] = copy(current, path, uid, to);
-    if (landed === undefined) return current;
+    const entry = storedAt(current, path, uid);
+    if (!entry) return current;
+    const [copied, landed] = add(current, to, entry.source, entry.flags);
     moved.push([uid, landed]);
     return expunge(copied, path, [uid]);
   }, mailbox);
   return [next, moved];
-}
-
-/** Files a copy of a message in `to`, with other flags if given, and says the UID it was given. */
-export function copy(
-  mailbox: DemoMailbox,
-  path: string,
-  uid: number,
-  to: string,
-  flags?: Flags,
-): [DemoMailbox, number | undefined] {
-  if (!folderOf(mailbox, to)) throw new Error(`There is no folder "${to}" to file it in.`);
-  const entry = storedAt(mailbox, path, uid);
-  return entry ? add(mailbox, to, entry.source, flags ?? entry.flags) : [mailbox, undefined];
 }
 
 export function expunge(mailbox: DemoMailbox, path: string, uids: readonly number[]): DemoMailbox {
@@ -398,10 +388,4 @@ function mapFolder(
     ...mailbox,
     folders: mailbox.folders.map((folder) => (folder.path === path ? change(folder) : folder)),
   };
-}
-
-function sameFlags(a: Flags, b: Flags): boolean {
-  return (
-    a.seen === b.seen && a.flagged === b.flagged && a.answered === b.answered && a.draft === b.draft
-  );
 }

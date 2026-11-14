@@ -55,7 +55,6 @@ export const PRESETS = {
     // Personal Microsoft accounts, through the app the operator registered in Microsoft Entra.
     device: {
       vendor: 'Microsoft',
-      dialect: 'microsoft',
       authority: 'https://login.microsoftonline.com/consumers',
       // IMAP and SMTP as the member, and offline_access for a refresh token, so they stay signed in.
       scopes: [

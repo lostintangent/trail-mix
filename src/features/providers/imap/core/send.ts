@@ -40,3 +40,36 @@ const REFUSALS = new Set([
   'EMESSAGE',
   'EMAXRECIPIENTS',
 ]);
+
+/**
+ * The message without its Bcc field, folded lines included, which no recipient and no copy in Sent
+ * may carry. Every other byte is kept as it was.
+ */
+export function withoutBcc(message: Uint8Array): Uint8Array {
+  const kept: Uint8Array[] = [];
+  let dropping = false;
+  for (let start = 0; start < message.length;) {
+    const newline = message.indexOf(LF, start);
+    const end = newline < 0 ? message.length : newline + 1;
+    const line = message.subarray(start, end);
+    // The header ends at its first empty line, and the body is kept whole.
+    if (line[0] === CR || line[0] === LF) {
+      kept.push(message.subarray(start));
+      break;
+    }
+    if (line[0] !== SPACE && line[0] !== TAB) {
+      dropping = String.fromCharCode(...line.subarray(0, 4)).toLowerCase() === 'bcc:';
+    }
+    if (!dropping) kept.push(line);
+    start = end;
+  }
+  const joined = new Uint8Array(kept.reduce((length, part) => length + part.length, 0));
+  let at = 0;
+  for (const part of kept) {
+    joined.set(part, at);
+    at += part.length;
+  }
+  return joined;
+}
+
+const [TAB, LF, CR, SPACE] = [9, 10, 13, 32];

@@ -39,7 +39,7 @@ export const DEMO_SIGNERS: readonly string[] = ['mx.trailmix.test'];
 export type Content = Omit<Envelope, keyof MessageRef | 'flags'>;
 
 /** A seeded message. Its flags and date are cheap, and what it says is made only when asked. */
-export type SeededMessage = {
+type SeededMessage = {
   folder: string;
   flags: Flags;
   date: string;

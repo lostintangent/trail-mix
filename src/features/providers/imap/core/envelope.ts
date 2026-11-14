@@ -27,9 +27,9 @@ export type Structure = {
   childNodes?: Structure[];
 };
 
-export type ImapAddress = { name?: string; address?: string };
+type ImapAddress = { name?: string; address?: string };
 
-export type ImapEnvelope = {
+type ImapEnvelope = {
   date?: Date | string;
   subject?: string;
   messageId?: string;

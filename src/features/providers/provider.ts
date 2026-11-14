@@ -98,8 +98,6 @@ export interface MailProvider {
   close(): Promise<void>;
 }
 
-export type { SyncEvent };
-
 /**
  * The most messages a folder's first batch holds when it starts over, so its newest mail shows
  * soon, and the batch that pays for a cold start does the least work.

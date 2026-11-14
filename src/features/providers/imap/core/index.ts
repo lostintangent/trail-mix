@@ -22,7 +22,6 @@ export {
   type DeviceCode,
   type DeviceSignIn,
   type Polled,
-  type Refreshed,
   type Request,
   type Tokens,
 } from './device-sign-in.ts';

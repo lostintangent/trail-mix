@@ -1,4 +1,4 @@
-export type { Cursor, MailProvider, Moved, SyncBatch, SyncEvent, SyncWindow } from './provider.ts';
+export type { Cursor, MailProvider, Moved, SyncBatch, SyncWindow } from './provider.ts';
 export { FIRST_SYNC_BATCH, SEARCH_LIMIT, SendFailure } from './provider.ts';
 export { demoImage } from './demo/images.ts';
 export { DEMO_PICTURES } from './demo/pictures.ts';

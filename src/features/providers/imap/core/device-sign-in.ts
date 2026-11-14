@@ -1,27 +1,23 @@
 /**
  * Signing in at a vendor instead of with a password: OAuth's device authorization grant (RFC 8628),
- * then refresh tokens. The member reads a short code in Trail Mix and enters it on the vendor's own
- * page, so there is no callback route. This module builds each request and reads each answer, in
- * the vendor's dialect. Who sends them, and when, is the Mailroom's.
+ * then refresh tokens, as Microsoft speaks them. The member reads a short code in Trail Mix and
+ * enters it on the vendor's own page, so there is no callback route. This module builds each
+ * request and reads each answer. Who sends them, and when, is the Mailroom's.
  *
- * Every answer comes to one of a few outcomes, whichever vendor gave it, so another vendor is a new
- * dialect and nothing else. A vendor's words reach the member as it said them, without the trace
- * and correlation IDs Microsoft adds, and every reason names the vendor from its preset.
+ * A vendor's words reach the member as it said them, without the trace and correlation IDs
+ * Microsoft adds, and every reason names the vendor from its preset.
  */
 
-/** A vendor's sign-in: who it is, how it speaks, where it signs in, and what the tokens open. */
+/** A vendor's sign-in: who it is, where it signs in, and what the tokens open. */
 export type DeviceSignIn = {
   /** The vendor as a member knows it, such as Microsoft. */
   vendor: string;
-  dialect: Dialect;
   /** Where sign-ins start and refresh. Only a test replaces it, with a stand-in on its own machine. */
   authority: string;
   scopes: readonly string[];
   /** Said after a host's refusal of the token, such as where the member turns IMAP on. */
   whenRefused?: string;
 };
-
-export type Dialect = 'microsoft';
 
 /** The app the operator registered with the vendor. */
 export type Client = { id: string };
@@ -53,86 +49,53 @@ export type Polled = { pending: number } | { granted: Tokens } | { refused: stri
  * What one refresh came to. `lapsed` when only the member signing in again will do, as after 90 idle
  * days, a changed password or revoked consent. `failed` when asking again later may work.
  */
-export type Refreshed = { granted: Tokens } | { lapsed: string } | { failed: string };
+type Refreshed = { granted: Tokens } | { lapsed: string } | { failed: string };
 
 export const EXPIRED = 'The code expired before you signed in.';
 
 /** An access token is used until this long before it expires, so none runs out mid-command. */
-export const FRESH_MARGIN_MS = 5 * 60_000;
+const FRESH_MARGIN_MS = 5 * 60_000;
 
 /** What RFC 8628 has a client add to its interval each time it's told to slow down. */
 const SLOW_DOWN_MS = 5000;
-/** Access tokens last an hour unless the vendor says otherwise. */
+/** How long an access token and a code last, and the wait between polls, when the vendor doesn't say. */
 const TOKEN_SECONDS = 3600;
+const CODE_SECONDS = 900;
+const INTERVAL_SECONDS = 5;
 
-/** How a vendor speaks the device flow: its paths and parameters, and the words its answers use. */
-type Speech = {
-  code: (scopes: readonly string[], client: Client) => Call;
-  poll: (client: Client, deviceCode: string) => Call;
-  refresh: (client: Client, refresh: string, scopes: readonly string[]) => Call;
-  /** What a code's lifetime and interval count in, and what they are when left out. */
-  unit: number;
-  codeLifetime: number;
-  interval: number;
-  declined: readonly string[];
-  expired: readonly string[];
-  /** Refusals of a refresh that only a new sign-in answers. */
-  lapses: readonly string[];
-};
-
-type Call = { path: string; params: Record<string, string> };
-
-const DIALECTS: Record<Dialect, Speech> = {
-  microsoft: {
-    code: (scopes, client) => ({
-      path: '/oauth2/v2.0/devicecode',
-      params: { client_id: client.id, scope: scopes.join(' ') },
-    }),
-    poll: (client, deviceCode) => ({
-      path: '/oauth2/v2.0/token',
-      params: {
-        grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
-        client_id: client.id,
-        device_code: deviceCode,
-      },
-    }),
-    refresh: (client, refresh, scopes) => ({
-      path: '/oauth2/v2.0/token',
-      params: {
-        grant_type: 'refresh_token',
-        client_id: client.id,
-        refresh_token: refresh,
-        scope: scopes.join(' '),
-      },
-    }),
-    unit: 1000,
-    codeLifetime: 900,
-    interval: 5,
-    declined: ['authorization_declined', 'access_denied'],
-    expired: ['expired_token'],
-    lapses: ['invalid_grant', 'interaction_required', 'consent_required', 'login_required'],
-  },
-};
+/** Refusals of a refresh that only a new sign-in answers. */
+const LAPSES = ['invalid_grant', 'interaction_required', 'consent_required', 'login_required'];
 
 // The requests
 
 export function codeRequest(signIn: DeviceSignIn, client: Client): Request {
-  return request(signIn, DIALECTS[signIn.dialect].code(signIn.scopes, client));
+  return request(signIn, '/oauth2/v2.0/devicecode', {
+    client_id: client.id,
+    scope: signIn.scopes.join(' '),
+  });
 }
 
 export function pollRequest(signIn: DeviceSignIn, client: Client, deviceCode: string): Request {
-  return request(signIn, DIALECTS[signIn.dialect].poll(client, deviceCode));
+  return request(signIn, '/oauth2/v2.0/token', {
+    grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+    client_id: client.id,
+    device_code: deviceCode,
+  });
 }
 
 export function refreshRequest(signIn: DeviceSignIn, client: Client, refresh: string): Request {
-  return request(signIn, DIALECTS[signIn.dialect].refresh(client, refresh, signIn.scopes));
+  return request(signIn, '/oauth2/v2.0/token', {
+    grant_type: 'refresh_token',
+    client_id: client.id,
+    refresh_token: refresh,
+    scope: signIn.scopes.join(' '),
+  });
 }
 
 // The answers
 
 /** The code a sign-in starts with. Throws why, in the vendor's words, when it gives none. */
 export function codeFrom(signIn: DeviceSignIn, answer: Answer, now: number): DeviceCode {
-  const speech = DIALECTS[signIn.dialect];
   const body = fields(answer.body);
   const deviceCode = text(body.device_code);
   const code = text(body.user_code);
@@ -147,8 +110,8 @@ export function codeFrom(signIn: DeviceSignIn, answer: Answer, now: number): Dev
     deviceCode,
     code,
     link,
-    expiresAt: now + count(body.expires_in, speech.codeLifetime) * speech.unit,
-    interval: count(body.interval, speech.interval) * speech.unit,
+    expiresAt: now + count(body.expires_in, CODE_SECONDS) * 1000,
+    interval: count(body.interval, INTERVAL_SECONDS) * 1000,
   };
 }
 
@@ -159,7 +122,6 @@ export function polled(
   interval: number,
   now: number,
 ): Polled {
-  const speech = DIALECTS[signIn.dialect];
   const body = fields(answer.body);
   if (succeeded(answer, body)) {
     const tokens = tokensFrom(body, undefined, now);
@@ -170,10 +132,10 @@ export function polled(
   const error = text(body.error) ?? '';
   if (error === 'authorization_pending') return { pending: interval };
   if (error === 'slow_down') return { pending: interval + SLOW_DOWN_MS };
-  if (speech.declined.includes(error)) {
+  if (error === 'authorization_declined' || error === 'access_denied') {
     return { refused: `You declined the sign-in at ${signIn.vendor}.` };
   }
-  if (speech.expired.includes(error)) return { refused: EXPIRED };
+  if (error === 'expired_token') return { refused: EXPIRED };
   return { refused: `${signIn.vendor} refused the sign-in: ${said(body)}` };
 }
 
@@ -184,14 +146,13 @@ export function refreshed(
   held: string,
   now: number,
 ): Refreshed {
-  const speech = DIALECTS[signIn.dialect];
   const body = fields(answer.body);
   if (succeeded(answer, body)) {
     const tokens = tokensFrom(body, held, now);
     return tokens ? { granted: tokens } : { failed: `${signIn.vendor} sent no access token.` };
   }
   const reason = `${signIn.vendor} refused to keep you signed in: ${said(body)}`;
-  return speech.lapses.includes(text(body.error) ?? '') ? { lapsed: reason } : { failed: reason };
+  return LAPSES.includes(text(body.error) ?? '') ? { lapsed: reason } : { failed: reason };
 }
 
 /** Whether a token can still be used, with room to spare. */
@@ -241,7 +202,7 @@ function count(value: unknown, fallback: number): number {
   return typeof given === 'number' && Number.isFinite(given) && given > 0 ? given : fallback;
 }
 
-function request(signIn: DeviceSignIn, { path, params }: Call): Request {
+function request(signIn: DeviceSignIn, path: string, params: Record<string, string>): Request {
   return {
     url: `${signIn.authority.replace(/\/$/, '')}${path}`,
     form: new URLSearchParams(params),

@@ -10,6 +10,7 @@ import {
   type MessageRef,
 } from '../../mail/core/index.ts';
 import { previewFrom } from '../imap/core/preview.ts';
+import { withoutBcc } from '../imap/core/send.ts';
 import { planSync } from '../imap/core/sync.ts';
 import {
   SEARCH_LIMIT,
@@ -201,12 +202,6 @@ export function demoServer(
     async saveDraft(message) {
       const draft = await written(message);
       const drafts = roleFolder('drafts');
-      // Saving the same draft again finds the copy the first save filed.
-      const uid = server.uidsIn(mailbox, drafts).find((candidate) => {
-        const saved = server.messageAt(mailbox, drafts, candidate)!;
-        return saved.content().messageId === draft.content.messageId && saved.raw() === draft.raw;
-      });
-      if (uid !== undefined) return refOf(drafts, uid);
       const [next, filed] = server.append(mailbox, drafts, draft, DRAFT);
       await commit(next, [drafts]);
       return refOf(drafts, filed);
@@ -322,11 +317,6 @@ export function demoServer(
     close: () => settle(() => watchers.clear()),
   };
 
-  /**
-   * What the host does with a message it accepted: delivers it to each recipient, and later files a
-   * copy in Sent if it files its own. The only recipient this server holds mail for is the account
-   * itself, so mail to yourself arrives.
-   */
   /** Files in Sent the host's own copies that `which` picks, of those it owes. */
   async function fileHostCopies(which: (copy: server.Written) => boolean) {
     const sent = server.folderWithRole(mailbox, 'sent');
@@ -338,6 +328,11 @@ export function demoServer(
     await commit(next, sent ? [sent.path] : []);
   }
 
+  /**
+   * What the host does with a message it accepted: delivers it to each recipient, and later files a
+   * copy in Sent if it files its own. The only recipient this server holds mail for is the account
+   * itself, so mail to yourself arrives.
+   */
   function accepted(
     current: server.DemoMailbox,
     message: server.Written,
@@ -444,20 +439,6 @@ async function recipientsOf(bytes: Uint8Array): Promise<string[]> {
   return addresses([...(parsed.to ?? []), ...(parsed.cc ?? []), ...(parsed.bcc ?? [])]).map(
     ({ email }) => email.toLowerCase(),
   );
-}
-
-/** The message without its Bcc header, which no recipient and no copy in Sent may carry. */
-function withoutBcc(bytes: Uint8Array): Uint8Array {
-  const raw = binary(bytes);
-  const end = raw.search(/\r?\n\r?\n/);
-  const head = end < 0 ? raw : raw.slice(0, end);
-  let dropping = false;
-  const kept = head.split(/\r?\n/).filter((line) => {
-    if (/^[ \t]/.test(line)) return !dropping;
-    dropping = /^bcc:/i.test(line);
-    return !dropping;
-  });
-  return bytesOf(kept.join('\r\n') + raw.slice(head.length));
 }
 
 function addresses(parsed: readonly ParsedAddress[]): Address[] {

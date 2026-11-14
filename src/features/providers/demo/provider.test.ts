@@ -111,28 +111,6 @@ test('a reply is never older than what it answers, and a year holds the whole ma
   }
 });
 
-test('saving the same draft again, as a retry does, files it once', async () => {
-  const { provider } = open('personal', 20);
-  const draft = new TextEncoder().encode(
-    writeMime({
-      date: CREATED,
-      messageId: '<note.1@trailmix.test>',
-      from: DEMO_ACCOUNTS.personal.me,
-      to: [],
-      subject: 'Note to self',
-      text: 'Remember the canister.',
-      boundary: 'note',
-    }),
-  );
-
-  const saved = await provider.saveDraft(draft);
-  const again = await provider.saveDraft(draft);
-
-  expect(again).toEqual(saved);
-  const { messages } = await everything({ provider });
-  expect(messages.filter(({ subject }) => subject === 'Note to self')).toHaveLength(1);
-});
-
 test('the seeded draft to an unreachable host is refused once, with the reason, and its next try goes', async () => {
   let saved: DemoMailbox | undefined;
   const server = demoServer('personal', demoMailbox('personal', 20, CREATED), (mailbox) => {

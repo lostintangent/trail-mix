@@ -160,7 +160,7 @@ function flagsToFetch(known: Remembered, state: FolderState): SyncPlan['flags'] 
   return since === state.highestModSeq ? 'none' : { changedSince: since };
 }
 
-function sameFlags(a: Flags, b: Flags): boolean {
+export function sameFlags(a: Flags, b: Flags): boolean {
   return (
     a.seen === b.seen && a.flagged === b.flagged && a.answered === b.answered && a.draft === b.draft
   );
