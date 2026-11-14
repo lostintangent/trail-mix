@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import type { MessageRef } from '../../mail/core/index.ts';
 import type { Attached, Writing } from '../core/session.ts';
-import type { Drafting } from './drafting.ts';
+import type { Drafting, Showing } from './drafting.ts';
 
 /**
  * Shows a message being written in its composer: hands it what the member writes, owes a save for
@@ -21,7 +20,7 @@ export function useAutosave({
   drafting: Drafting;
   writing: Writing;
   edits: number;
-  onDraft: (saved: MessageRef, replaced: MessageRef | undefined) => void;
+  onDraft: Showing['onDraft'];
   onNamed: (named: Map<Attached, Attached>) => void;
 }) {
   const [state, setState] = useState(drafting.state);

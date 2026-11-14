@@ -16,10 +16,10 @@ import { holdKeys, releaseKeys, type Compose, type Drafting } from '../../compos
  * the conversation open when it started, and opening another conversation closes it, which saves
  * what it holds. The drafts it has saved stay out of the reader: every draft that comes to its
  * conversation while the composer is open, which a hint can bring before the save that made it has
- * answered, and every one a later save replaced, which the server has dropped. Send closes the
- * composer at once, and its drafts stay out the same way until its message's last save is done. The
- * reader asks which to leave out of the messages it is about to show, so it never draws one that
- * came in the same snapshot as the conversation.
+ * answered, and every one a later save replaced or a discard took, which the server has dropped.
+ * Send closes the composer at once, and its drafts stay out the same way until its message's last
+ * save is done. The reader asks which to leave out of the messages it is about to show, so it never
+ * draws one that came in the same snapshot as the conversation.
  */
 export function useComposing(selected: ConversationId | undefined, leaving: readonly MessageRef[]) {
   const queryClient = useQueryClient();
@@ -134,10 +134,17 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
       }),
     [],
   );
-  // A save can land after its composer has closed, and then only what it replaced matters.
+  // A save can land after its composer has closed, and then only what it replaced matters. A
+  // discard replaces the draft with none, and a refused one brings it back.
   const noteDraft = useCallback(
-    (from: Compose, saved: MessageRef, older: MessageRef | undefined) => {
-      if (older) setReplaced((was) => [...was, older]);
+    (from: Compose, saved: MessageRef | undefined, older: MessageRef | undefined) => {
+      setReplaced((was) => {
+        const kept =
+          saved && was.some((gone) => sameRef(gone, saved))
+            ? was.filter((gone) => !sameRef(gone, saved))
+            : was;
+        return older ? [...kept, older] : kept;
+      });
       if (open.current === from) setEditing(saved);
     },
     [],

@@ -1,7 +1,7 @@
 import { afterEach, beforeAll, expect } from 'bun:test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { chromium, webkit, type Locator, type Page } from 'playwright';
+import { chromium, webkit, type Locator, type Page, type Route } from 'playwright';
 import { SAVE_AFTER_MS, SAVE_AT_LEAST_EVERY_MS } from '../../src/features/composer/core/session.ts';
 import { unusable } from './usable.ts';
 import { suite } from './suite.ts';
@@ -118,17 +118,34 @@ test('a reply is saved as it is written, opens again with its words and files, a
   // While it is written again, the draft it came from stays out of the conversation.
   await expect(draft.count()).resolves.toBe(0);
 
-  // Discarding it moves it to the Trash, and once the Mailroom has synced that, the conversation
-  // leaves it out.
+  // A discard the Mailroom refuses leaves the draft where it was, so its line comes back.
+  const refused = (route: Route) =>
+    route.request().postData()?.includes('"move"') ? route.abort('failed') : route.fallback();
+  await page.route('**/_serverFn/**', refused);
+  await reopened.getByRole('button', { name: 'Discard draft' }).click();
+  const toasts = page.getByRole('region', { name: 'Notifications' });
+  await toasts.getByText('Couldn’t discard the draft. It is still in Drafts.').waitFor();
+  await draft.click();
+  await page.unroute('**/_serverFn/**', refused);
+
+  // Discarding it moves it to the Trash, and the conversation leaves it out from the press, not
+  // only once the Mailroom has synced the move.
   const synced = page.waitForResponse(
     async (response) =>
       decodeURIComponent(response.url()).includes('"conversation"') &&
       !(await response.text()).includes('See you Thursday'),
   );
+  await reader(page).evaluate((reader) => {
+    new MutationObserver(() => {
+      const lines = Array.from(reader.querySelectorAll('button'), (line) => line.textContent);
+      if (lines.some((line) => line.startsWith('Draft'))) Object.assign(window, { isBack: true });
+    }).observe(reader, { subtree: true, childList: true, characterData: true });
+  });
   await reopened.getByRole('button', { name: 'Discard draft' }).click();
-  await page.getByRole('region', { name: 'Notifications' }).getByText('Draft discarded').waitFor();
+  await toasts.getByText('Draft discarded').waitFor();
   await synced;
-  await draft.waitFor({ state: 'detached' });
+  await page.evaluate(() => new Promise(requestAnimationFrame));
+  await expect(page.evaluate(() => 'isBack' in window)).resolves.toBe(false);
 }, 60_000);
 
 test('a pasted image shows as it is pasted, once its draft is saved, and when it opens again', async () => {

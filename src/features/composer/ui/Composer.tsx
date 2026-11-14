@@ -51,7 +51,7 @@ import {
 import { AddressInput } from './AddressInput.tsx';
 import { Editor, placeImages, type EditorProps } from './Editor.tsx';
 import { ComposerSkeleton, isDocked, Over, sheetStyles } from './sheet.tsx';
-import { startDrafting, type Drafting, type SaveState } from './drafting.ts';
+import { startDrafting, type Drafting, type SaveState, type Showing } from './drafting.ts';
 import { useAutosave } from './useAutosave.ts';
 
 /**
@@ -71,10 +71,10 @@ type ComposerProps = {
   compose: Compose;
   accounts: readonly Account[];
   /**
-   * Each draft a save makes, and the one it replaced, so the reader can leave the draft being
-   * written out of the conversation it shows.
+   * Each draft the message takes, and the one it took the place of, so the reader can leave the
+   * draft being written, and one being discarded, out of the conversation it shows.
    */
-  onDraft: (saved: MessageRef, replaced: MessageRef | undefined) => void;
+  onDraft: Showing['onDraft'];
   /**
    * Sends the message, with what was written, and the composer closes at once. Its last save
    * finishes behind it, and the message comes back if the send is undone.

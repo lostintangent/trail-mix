@@ -21,10 +21,14 @@ const RETRIES_ONCE_CLOSED = 2;
 export type SaveState = 'unsaved' | 'saving' | 'saved' | 'failed';
 
 /** What the composer showing a message hears of its saves. */
-type Showing = {
+export type Showing = {
   onState: (state: SaveState) => void;
-  /** Each draft a save makes, and the one it replaced, as soon as the Mailroom answers. */
-  onDraft: (saved: MessageRef, replaced: MessageRef | undefined) => void;
+  /**
+   * Each draft the message takes, and the one it took the place of: the one a save makes, as soon
+   * as the Mailroom answers, none from the moment a discard begins, and the same one again if the
+   * Mailroom refuses the discard.
+   */
+  onDraft: (saved: MessageRef | undefined, replaced: MessageRef | undefined) => void;
   /** The files it carries, named by the parts of the draft saved, so their bytes cross once. */
   onNamed: (named: Map<Attached, Attached>) => void;
 };
@@ -298,10 +302,14 @@ export function startDrafting(
     discard: async () => {
       isDiscarded = true;
       clearTimeout(timer);
+      const pressed = draft;
+      if (pressed) showing?.onDraft(undefined, pressed);
       await saving;
       if (!draft) return;
+      if (draft !== pressed) showing?.onDraft(undefined, draft);
       const moved = await mailroom.move([draft], 'trash').catch(() => undefined);
       if (!moved) {
+        showing?.onDraft(draft, undefined);
         void toast({ type: 'error', body: 'Couldn’t discard the draft. It is still in Drafts.' });
         return;
       }
