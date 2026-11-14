@@ -90,36 +90,35 @@ describe('correspondentsOf', () => {
 });
 
 describe('isNoReply', () => {
-  test('knows the shapes senders write a no-reply address in, and a mail server’s own', () => {
-    for (const address of [
-      'noreply@example.com',
-      'NoReply@example.com',
-      'no-reply@example.com',
-      'no_reply@example.com',
-      'no.reply@example.com',
-      'donotreply@example.com',
-      'do-not-reply@example.com',
-      'do_not_reply@example.com',
-      'dont-reply@example.com',
-      'notifications-noreply@example.com',
-      'noreply+receipts@example.com',
-      'noreply2@example.com',
-      'MAILER-DAEMON@example.com',
-      'noreply',
-    ])
-      expect([address, isNoReply(address)]).toEqual([address, true]);
-  });
+  test.each([
+    'noreply@example.com',
+    'NoReply@example.com',
+    'no-reply@example.com',
+    'no_reply@example.com',
+    'no.reply@example.com',
+    'donotreply@example.com',
+    'do-not-reply@example.com',
+    'do_not_reply@example.com',
+    'dont-reply@example.com',
+    'notifications-noreply@example.com',
+    'noreply+receipts@example.com',
+    'noreply2@example.com',
+    'MAILER-DAEMON@example.com',
+    'noreply',
+  ])(
+    'knows the shapes senders write a no-reply address in, and a mail server’s own: %s',
+    (address) => expect(isNoReply(address)).toBe(true),
+  );
 
-  test('leaves alone an address that only looks like one', () => {
-    for (const address of [
-      'nora@example.com',
-      'reply@example.com',
-      'replies@example.com',
-      'snoreply@example.com',
-      'noreplyx@example.com',
-      'ada@noreply.example.com',
-      'nor',
-    ])
-      expect([address, isNoReply(address)]).toEqual([address, false]);
-  });
+  test.each([
+    'nora@example.com',
+    'reply@example.com',
+    'replies@example.com',
+    'snoreply@example.com',
+    'noreplyx@example.com',
+    'ada@noreply.example.com',
+    'nor',
+  ])('leaves alone an address that only looks like one: %s', (address) =>
+    expect(isNoReply(address)).toBe(false),
+  );
 });

@@ -76,6 +76,11 @@ describe('Signing in to Outlook', () => {
   test('an account signs in with a code, then reads with a token, keeping only what’s sealed', async () => {
     const ada = fresh('ada');
     expect(await ada.call('signInPresets')).toEqual(['outlook']);
+    // Through the stand-in, which a stand-in elsewhere can't be, as the test below shows.
+    expect(await ada.call('presetFrom', 'outlook')).toMatchObject({
+      device: { authority: identity.authority },
+      imap: { host: 'localhost', port: ports.imaps },
+    });
     const started = await ada.call<SignIn>('signIn', outlook);
     expect(started).toMatchObject({
       address: alice.email,
@@ -204,14 +209,17 @@ describe('Signing in to Outlook', () => {
       async () => (await eve.call<Account[]>('accounts'))[0]?.status === 'needs-sign-in',
     );
     // Nothing asks Microsoft again while it waits: not the open device, not another one opening,
-    // and not a command that needs the server, which fails at once.
+    // not the wake that opening owes, and not a command that needs the server, which fails at once.
     const asked = await refreshes();
     const another = eve.device();
     await another.opened;
     await expect(
       eve.call('createFolder', { account: account.id, path: 'While signed out' }),
     ).rejects.toThrow('Sign in to Outlook again.');
-    await Bun.sleep(5000);
+    // A wake that ends owing nothing, so the next alarm is a poll's, ran the check opening owed.
+    await eve.until(
+      async () => (await eve.call<{ alarm: number }>('wakeNow')).alarm - Date.now() > 1000,
+    );
     expect(await refreshes()).toBe(asked);
     expect((await eve.call<Account[]>('accounts'))[0]?.status).toBe('needs-sign-in');
     another.close();
@@ -231,37 +239,22 @@ describe('Signing in to Outlook', () => {
 });
 
 describe('Outlook, where it can’t sign in', () => {
-  test('a stand-in with any address that isn’t this machine leaves Outlook as Microsoft’s', async () => {
+  test('a stand-in dressed as this machine that names elsewhere leaves Outlook as Microsoft’s', async () => {
+    // presets.test tries each dressing, and this one shows the Mailroom's preset comes through it.
     const standIn = JSON.parse(OUTLOOK.OUTLOOK_STAND_IN) as Record<string, unknown>;
-    const elsewhere = { host: 'outlook.office365.com', port: 993, secure: true };
-    for (const dressed of [
-      { authority: 'https://login.evil.com/consumers' },
-      { authority: 'https://127.0.0.1@login.evil.com/consumers' },
-      { imap: elsewhere },
-      { smtp: { ...elsewhere, port: 587, secure: false } },
-    ]) {
-      const worker = await mailrooms({
-        ...OUTLOOK,
-        OUTLOOK_STAND_IN: JSON.stringify({ ...standIn, ...dressed }),
-      });
-      try {
-        const hal = member('hal', () => worker);
-        expect(await hal.call('presetFrom', 'outlook')).toEqual(PRESETS.outlook);
-      } finally {
-        worker.stop();
-      }
-    }
-    // And the stand-in the tests above use is honored, through the same path.
-    const honored = await mailrooms(OUTLOOK);
+    const authority = 'https://127.0.0.1@login.evil.com/consumers';
+    const worker = await mailrooms({
+      ...OUTLOOK,
+      OUTLOOK_STAND_IN: JSON.stringify({ ...standIn, authority }),
+    });
     try {
-      expect(await member('ida', () => honored).call('presetFrom', 'outlook')).toMatchObject({
-        device: { authority: identity.authority },
-        imap: { host: 'localhost', port: ports.imaps },
-      });
+      expect(await member('hal', () => worker).call('presetFrom', 'outlook')).toEqual(
+        PRESETS.outlook,
+      );
     } finally {
-      honored.stop();
+      worker.stop();
     }
-  }, 120_000);
+  }, 60_000);
 
   test('without the operator’s Microsoft app, or on a demo deployment, nothing reaches Microsoft', async () => {
     await start('outlook');

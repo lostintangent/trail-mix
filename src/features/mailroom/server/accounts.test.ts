@@ -4,13 +4,13 @@ import { accountBook, connectionOf, demoSettings, type Connection } from './acco
 import { upgrade } from './schema.ts';
 import { testSql } from './test-sql.ts';
 
-const imap: Connection = {
+const imap = {
   provider: 'imap',
   imap: { host: 'imap.example.com', port: 993, secure: true },
   smtp: { host: 'smtp.example.com', port: 465, secure: true },
   user: 'me@example.com',
   filesSent: false,
-};
+} satisfies Connection;
 const named = (id: string) => ({
   id,
   name: id,
@@ -129,21 +129,16 @@ test('an account from before light paper shows every sender darkened, and keeps 
 });
 
 test('an account is reached through the hosts it was given, or else its preset’s, with the preset’s quirks', () => {
-  const address = 'me@example.com';
-  const imap = { host: 'imap.example.com', port: 993, secure: true };
-  const smtp = { host: 'smtp.example.com', port: 465, secure: true };
-  expect(connectionOf({ address, preset: 'zoho', imap, smtp })).toEqual({
-    provider: 'imap',
-    imap,
-    smtp,
-    user: address,
+  const { imap: hosts, smtp, user: address } = imap;
+  expect(connectionOf({ address, preset: 'zoho', imap: hosts, smtp })).toEqual({
+    ...imap,
     filesSent: PRESETS.zoho.filesSent,
   });
-  expect(connectionOf({ address, preset: 'outlook', imap, smtp }).filesSent).toBe(true);
+  expect(connectionOf({ address, preset: 'outlook', imap: hosts, smtp }).filesSent).toBe(true);
   expect(connectionOf({ address, preset: 'zoho' })).toMatchObject({
     imap: PRESETS.zoho.imap,
     smtp: PRESETS.zoho.smtp,
   });
-  expect(connectionOf({ address, imap, smtp })).toMatchObject({ imap, smtp, filesSent: false });
-  expect(() => connectionOf({ address, imap })).toThrow(TypeError);
+  expect(connectionOf({ address, imap: hosts, smtp })).toEqual(imap);
+  expect(() => connectionOf({ address, imap: hosts })).toThrow(TypeError);
 });

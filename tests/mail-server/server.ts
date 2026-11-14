@@ -244,7 +244,7 @@ export function homeOf(user: string): string {
   return join(state, 'mail', user);
 }
 
-type User = { email: string; password: string };
+export type User = { email: string; password: string };
 
 /** A session as a user over IMAP, logged out once `use` is done with it. */
 export async function overImap<T>(user: User, use: (client: ImapFlow) => Promise<T>): Promise<T> {

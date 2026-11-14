@@ -387,29 +387,33 @@ function sendThrough(point: Point | undefined, kind: Host, failFiling = false) {
   return { outbox, server, entry: outbox.get(scheduled.id), minute };
 }
 
+/** Where a restart catches a send while it submits, which it holds as failed. */
+const SUBMITTING: readonly Point[] = ['once it has begun', 'once the host has accepted it'];
+/** No restart, or one at any other point, which a send still goes once through. */
+const RESUMED = [
+  { restart: 'no restart', point: undefined },
+  ...POINTS.filter((point) => !SUBMITTING.includes(point)).map((point) => ({
+    restart: `a restart ${point}`,
+    point,
+  })),
+];
+
 for (const [name, kind] of HOSTS) {
-  test(`on ${name}, a restart before a send begins, once its acceptance is recorded, or while it waits, still sends it once`, () => {
-    for (const point of [undefined, ...POINTS]) {
-      if (point === 'once the host has accepted it' || point === 'once it has begun') continue;
-      const { entry, server } = sendThrough(point, kind);
-      expect({ point, entry }).toEqual({ point, entry: undefined });
-      expect({ point, ...server.world }).toEqual({
-        point,
-        drafts: new Set(),
-        sent: [send().messageId],
-        delivered: 1,
-      });
-    }
+  test.each(RESUMED)(`on ${name}, a send with $restart still goes once`, ({ point }) => {
+    const { entry, server } = sendThrough(point, kind);
+    expect(entry).toBeUndefined();
+    expect(server.world).toEqual({ drafts: new Set(), sent: [send().messageId], delivered: 1 });
   });
 
-  test(`on ${name}, a restart while it submits holds the send as failed, draft and all`, () => {
-    for (const point of ['once it has begun', 'once the host has accepted it'] as const) {
+  test.each(SUBMITTING)(
+    `on ${name}, a restart %s holds the send as failed, draft and all`,
+    (point) => {
       const { entry, server } = sendThrough(point, kind);
       expect(entry).toMatchObject({ state: 'failed', error: RESTARTED });
       expect(server.world.drafts.has(send().messageId)).toBe(true);
       expect(server.world.delivered).toBe(point === 'once it has begun' ? 0 : 1);
-    }
-  });
+    },
+  );
 
   test(`on ${name}, a failed filing after acceptance files later and delivers nothing again`, () => {
     const { entry, server } = sendThrough(undefined, kind, true);

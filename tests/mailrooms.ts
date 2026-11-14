@@ -20,6 +20,7 @@ import {
   type Page,
 } from '../src/features/mailroom/client/contract.ts';
 import { caFile, ports } from './mail-server/server.ts';
+import { until as eventually } from './until.ts';
 import { startWorker, type LocalWorker } from './workerd.ts';
 
 /**
@@ -89,13 +90,7 @@ export function member(name: string, worker: () => LocalWorker) {
     }
   }
 
-  async function until(done: () => Promise<boolean>, ms = 30_000) {
-    const deadline = Date.now() + ms;
-    while (!(await done())) {
-      if (Date.now() > deadline) throw new Error('Timed out');
-      await Bun.sleep(100);
-    }
-  }
+  const until = (done: () => Promise<boolean>, ms = 30_000) => eventually(done, ms, { every: 100 });
 
   /** Every conversation of a bundle, following its pages. */
   async function bundled(id: BundleId): Promise<ConversationSummary[]> {
@@ -115,9 +110,12 @@ export function member(name: string, worker: () => LocalWorker) {
     save: (draft: unknown, replaces?: MessageRef) =>
       call<MessageRef>('saveDraft', draft, replaces, crypto.randomUUID(), false),
 
-    /** Presses Send on a draft, or on the save it carries, under an id of its own. */
-    send: (draft: unknown, at?: string) =>
-      call<Outgoing>('send', draft, at, 0, crypto.randomUUID()),
+    /**
+     * Presses Send on a draft, or on the save it carries, under an id of its own, `ago` ms before
+     * it asks, so a press a whole undo window ago goes at once.
+     */
+    send: (draft: unknown, at?: string, ago = 0) =>
+      call<Outgoing>('send', draft, at, ago, crypto.randomUUID()),
 
     /** What a browser would show: folders, the unified Inbox, and each folder's conversations. */
     async snapshot() {

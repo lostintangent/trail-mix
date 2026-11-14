@@ -43,18 +43,19 @@ test('a query the Mailroom failed for a moment is asked again, through a new stu
   expect(mailroom.timing.filter(({ name }) => name === 'retried')).toHaveLength(2);
 });
 
-test('a command a second run would change is never asked again, nor an overloaded Mailroom', async () => {
-  for (const [name, error] of [
-    ['saveDraft', RESET],
-    ['move', RESET],
-    ['accounts', OVERLOADED],
-    ['accounts', failure('There is no such account.', {})],
-  ] as const) {
+test.each([
+  ['saveDraft', RESET],
+  ['move', RESET],
+  ['accounts', OVERLOADED],
+  ['accounts', failure('There is no such account.', {})],
+] as const)(
+  'a command a second run would change is never asked again, nor an overloaded Mailroom: %s',
+  async (name, error) => {
     const mailroom = reaching(error, ['an answer']);
     await expect(mailroom.asking(name)).rejects.toBe(error);
-    expect({ name, stubs: mailroom.stubs() }).toEqual({ name, stubs: 1 });
-  }
-});
+    expect(mailroom.stubs()).toBe(1);
+  },
+);
 
 test('a command a second run leaves as it was is asked again', async () => {
   const mailroom = reaching(RESET, undefined);
