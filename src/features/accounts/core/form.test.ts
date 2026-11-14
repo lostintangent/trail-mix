@@ -3,7 +3,6 @@ import type { Account } from '../../mail/core/index.ts';
 import {
   formFor,
   formProblems,
-  isSecurePort,
   nameFor,
   setupFrom,
   signInSetupFrom,
@@ -76,8 +75,6 @@ test('another host is reached on its own ports, over TLS unless the port says ST
   expect(setup.imap).toEqual({ host: 'mail.example.org', port: 143, secure: false });
   expect(setup.smtp).toEqual({ host: 'mail.example.org', port: 587, secure: false });
   expect(setupFrom(filled('other', { imapPort: '10993' }), ZOHO).imap.secure).toBe(true);
-  expect([25, 143, 587].map(isSecurePort)).toEqual([false, false, false]);
-  expect([465, 993].map(isSecurePort)).toEqual([true, true]);
 });
 
 test('an account without a name goes by its address’s domain, and a From name is kept trimmed', () => {

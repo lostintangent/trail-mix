@@ -36,8 +36,6 @@ const OTHER: PresetServers = {
 /** The ports that start in the clear and switch to TLS with STARTTLS. Any other port is TLS. */
 const STARTTLS_PORTS = new Set([25, 143, 587]);
 
-export const isSecurePort = (port: number) => !STARTTLS_PORTS.has(port);
-
 /** A form for a server, keeping what the member already typed about themselves. */
 export function formFor(
   server: AccountForm['server'],
@@ -102,7 +100,7 @@ export function setupFrom(form: AccountForm, zoho: PresetServers) {
     const number = Number(port.trim());
     return isZoho
       ? { host: host.trim(), port: preset.port, secure: preset.secure }
-      : { host: host.trim(), port: number, secure: isSecurePort(number) };
+      : { host: host.trim(), port: number, secure: !STARTTLS_PORTS.has(number) };
   };
   const fromName = form.fromName.trim();
   return {
