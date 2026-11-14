@@ -20,7 +20,6 @@ import {
   useCallback,
   useEffect,
   useId,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -39,6 +38,7 @@ import { useMediaQuery } from '../../../shared/useMediaQuery.ts';
 import { highlight, marksOf, type Marks, type View } from '../../mail/core/index.ts';
 import { conversationsQuery } from '../../mailroom/client/index.ts';
 import type { SearchScopeProps } from './SearchScope.tsx';
+import { useLatest } from '../../../shared/useLatest.ts';
 
 /** What the search field shows, and where what the member types goes. */
 type SearchState = { text: string; onSearch: (text: string) => void };
@@ -58,10 +58,7 @@ export const SearchContext = createContext<SearchState>({ text: '', onSearch: ()
 export function useSearch(view: View, onViewChange: (view: View) => void) {
   const queryClient = useQueryClient();
   const text = view.in === 'search' ? view.text : '';
-  const latest = useRef(view);
-  useLayoutEffect(() => {
-    latest.current = view;
-  });
+  const latest = useLatest(view);
   const [returnTo, setReturnTo] = useState<View>(view.in === 'search' ? { in: 'inbox' } : view);
   const onSearch = useCallback(
     (next: string) => {
@@ -72,7 +69,7 @@ export function useSearch(view: View, onViewChange: (view: View) => void) {
       void queryClient.prefetchQuery(conversationsQuery(searched));
       onViewChange(searched);
     },
-    [onViewChange, queryClient, returnTo],
+    [onViewChange, queryClient, returnTo, latest],
   );
   const search = useMemo(() => ({ text, onSearch }), [text, onSearch]);
   const marks = useMemo(() => marksOf(text), [text]);

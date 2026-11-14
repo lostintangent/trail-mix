@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { BundleId, ConversationId, Place, View } from '../../mail/core/index.ts';
 import { conversationQuery } from '../../mailroom/client/index.ts';
+import { useLatest } from '../../../shared/useLatest.ts';
 
 /**
  * The open conversation and the place, kept together. A change of view pushes the place, so Back
@@ -43,10 +44,7 @@ export function useSelectedPlace({
   // The place that came from outside, until the member moves on. The conversation it opens is
   // looked up, since it may have gone since the address was written.
   const [arrived, setArrived] = useState<Place | undefined>(place);
-  const latest = useRef({ view, bundle, open, arrive, close });
-  useLayoutEffect(() => {
-    latest.current = { view, bundle, open, arrive, close };
-  });
+  const latest = useLatest({ view, bundle, open, arrive, close });
   const move = useCallback(
     (next: Place, history: 'push' | 'replace') => {
       moved.current = next;
@@ -61,7 +59,7 @@ export function useSelectedPlace({
     written.current = place.open ?? place.bundle;
     setArrived(place);
     latest.current.arrive(place);
-  }, [place]);
+  }, [place, latest]);
 
   // Only a change of selection moves the place, not the place moving under a selection that hasn't
   // followed it yet.
@@ -72,7 +70,7 @@ export function useSelectedPlace({
     setArrived(undefined);
     const { view, bundle, open } = latest.current;
     move(placeIn(view, bundle, open), 'replace');
-  }, [isMany, at, move]);
+  }, [isMany, at, move, latest]);
 
   const opens = arrived?.open;
   const { data: shown } = useQuery({
@@ -88,7 +86,7 @@ export function useSelectedPlace({
     written.current = bundle;
     latest.current.close();
     move(placeIn(view, bundle, undefined), 'replace');
-  }, [opens, shown, move]);
+  }, [opens, shown, move, latest]);
 
   // The view changes under the open conversation, as a search typed or a folder renamed changes it.
   // A filter turned on or off takes the place of the view it filters.
@@ -97,7 +95,7 @@ export function useSelectedPlace({
       const { view, bundle, open } = latest.current;
       move(placeIn(next, bundle, open), history ?? historyFrom(view));
     },
-    [move],
+    [move, latest],
   );
   // The member chooses a view, which opens with nothing open, until its newest fills it.
   const chooseView = useCallback(
@@ -106,7 +104,7 @@ export function useSelectedPlace({
       setArrived(undefined);
       move({ view: next }, historyFrom(latest.current.view));
     },
-    [move],
+    [move, latest],
   );
   // A search typed or a filter turned on makes a view of its own, which the place didn't name.
   const isArrived = arrived?.view === view;

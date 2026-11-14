@@ -1,17 +1,7 @@
 import { colorVars, durationVars, spacingVars } from '@astryxdesign/core/theme/tokens.stylex';
 import * as stylex from '@stylexjs/stylex';
 import { hashKey, useQuery, useQueryClient } from '@tanstack/react-query';
-import {
-  Suspense,
-  useCallback,
-  useEffect,
-  useId,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react';
+import { Suspense, useCallback, useEffect, useId, useMemo, useState, type ReactNode } from 'react';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { Toasts } from '../../../shared/toasts.tsx';
 import {
@@ -132,6 +122,7 @@ import {
   viewIcon,
   type ViewCounts,
 } from '../../folders/index.ts';
+import { useLatest } from '../../../shared/useLatest.ts';
 import { useMediaQuery } from '../../../shared/useMediaQuery.ts';
 import {
   accountCommands,
@@ -384,16 +375,13 @@ export function Workbench({
     return clearSelection();
   };
   // A refused triage puts the phone's pane back with the selection, as it was when the triage began.
-  const phonePaneNow = useRef(phonePane);
-  useLayoutEffect(() => {
-    phonePaneNow.current = phonePane;
-  });
+  const phonePaneNow = useLatest(phonePane);
   const backIfRefused = useCallback(
     (left: Selection) => {
       const pane = phonePaneNow.current;
       return selectionBackIfRefused(left, () => setPhonePane(pane));
     },
-    [selectionBackIfRefused],
+    [selectionBackIfRefused, phonePaneNow],
   );
   const triageShown = (action: Action, id: ConversationId): void => {
     if (bundleOpen !== undefined && id !== bundleOpen) return triageThread(action, id, bundleOpen);
@@ -435,10 +423,7 @@ export function Workbench({
   };
   const readMark = useReadMark({ selected: opened, markRead });
   // The reader's actions stay the same while the selection moves, so a held key doesn't redraw them.
-  const latestTriageShown = useRef(triageShown);
-  useLayoutEffect(() => {
-    latestTriageShown.current = triageShown;
-  });
+  const latestTriageShown = useLatest(triageShown);
   const { replyIn, replyTo } = composing;
   // The reader's triage controls, where each place shows them, and on a phone Reply beside the
   // island's filing.
@@ -471,7 +456,7 @@ export function Workbench({
         </>
       );
     },
-    [folders, replyIn, isPhone],
+    [folders, replyIn, isPhone, latestTriageShown],
   );
   // The reader's place renders again only as the list or the conversation shown changes. A thread's
   // place is in its bundle.
@@ -551,28 +536,22 @@ export function Workbench({
     },
     [closeComposer, clearSelection],
   );
+  // The place and the device as they are now, read by the ways in and out below. On a phone,
+  // opening a conversation pushes the address, so Back slides from it to its list.
+  const latest = useLatest({ place, isPhone });
   // Closing a page leaves the view as if it had just arrived: on a desktop, its newest opens.
   const closePage = useCallback(() => {
     setPage(undefined);
     if (isPhone) setPhonePane('list');
-    else openNewestAt(latestPlace.current.view);
-  }, [isPhone, openNewestAt]);
+    else openNewestAt(latest.current.place.view);
+  }, [isPhone, openNewestAt, latest]);
   // The phone's ways between panes, the same functions every render, so the buttons they're on stay
   // drawn as they are while the list and the reader change.
   const showFolders = useCallback(() => setPhonePane('sidebar'), []);
   // Back from a conversation on a phone is the browser's Back where opening it pushed the address,
   // and otherwise takes the conversation out of the address.
-  const latestPlace = useRef(place);
-  useLayoutEffect(() => {
-    latestPlace.current = place;
-  });
-  // On a phone, opening a conversation pushes the address, so Back slides from it to its list.
-  const isPhoneNow = useRef(isPhone);
-  useLayoutEffect(() => {
-    isPhoneNow.current = isPhone;
-  });
   const backToList = useCallback(() => {
-    const { view, bundle, open } = latestPlace.current;
+    const { view, bundle, open } = latest.current.place;
     const at = open ?? bundle;
     if (at !== undefined && pushed.current === at) {
       pushed.current = undefined;
@@ -584,7 +563,7 @@ export function Workbench({
     deselect(bundle ?? open);
     setPhonePane('list');
     if (at !== undefined) move({ view }, 'replace');
-  }, [onBack, move, pushed, written, deselect]);
+  }, [onBack, move, pushed, written, deselect, latest]);
   // A thread opens in its bundle's place in the reader. On a phone that pushes the address, so Back
   // returns to the bundle, and a step to the next thread takes the place of the one open. Otherwise
   // the selection writes it, as a conversation's does.
@@ -592,16 +571,16 @@ export function Workbench({
     (id: ConversationId) => {
       if (bundleOpen === undefined) return;
       setThreadIn({ bundle: bundleOpen, open: id });
-      if (!isPhoneNow.current) return;
-      const { view, open } = latestPlace.current;
+      if (!latest.current.isPhone) return;
+      const { view, open } = latest.current.place;
       written.current = id;
       if (open === undefined || pushed.current === open) pushed.current = id;
       move({ view, bundle: bundleOpen, open: id }, open === undefined ? 'push' : 'replace');
     },
-    [bundleOpen, move, pushed, written, setThreadIn],
+    [bundleOpen, move, pushed, written, setThreadIn, latest],
   );
   const closeThread = useCallback(() => {
-    const { bundle, open } = latestPlace.current;
+    const { bundle, open } = latest.current.place;
     if (open !== undefined && pushed.current === open) {
       // The bundle was pushed too when the list opened it, so Back from it returns to the list.
       pushed.current = bundle;
@@ -609,7 +588,7 @@ export function Workbench({
       return;
     }
     setThreadIn(undefined);
-  }, [onBack, pushed, setThreadIn]);
+  }, [onBack, pushed, setThreadIn, latest]);
   // A demo visitor's Mailroom keeps its accounts, erases itself, and says so.
   const isVisitor = useQuery(thisDeviceQuery).data?.visitor === true;
   const accountsCommands = useMemo(
@@ -660,14 +639,14 @@ export function Workbench({
       if (by !== 'only') return;
       setPhonePane('reader');
       openedByMember(id);
-      const { view, bundle, open } = latestPlace.current;
-      if (isPhoneNow.current && (bundle ?? open) !== id) {
+      const { view, bundle, open } = latest.current.place;
+      if (latest.current.isPhone && (bundle ?? open) !== id) {
         written.current = id;
         pushed.current = id;
         move(bundlePartsOf(id) ? { view, bundle: id } : { view, open: id }, 'push');
       }
     },
-    [move, pushed, written, openedByMember, setThreadIn, selectBy, cancelOpening],
+    [move, pushed, written, openedByMember, setThreadIn, selectBy, cancelOpening, latest],
   );
   // A finger tapping a row's avatar starts picking with it, or adds it or lets it go while picking.
   const pickRow = useCallback(
@@ -880,16 +859,13 @@ export function Workbench({
   const isChecking = !isCaughtUp || accounts.some(({ status }) => status === 'syncing');
   // What an account's menu in the sidebar lists: a new folder at its top, then its own commands.
   // It asks the registry as the menu opens, so the sidebar doesn't render again as that changes.
-  const latestCommands = useRef(commands);
-  useLayoutEffect(() => {
-    latestCommands.current = commands;
-  });
+  const latestCommands = useLatest(commands);
   const accountActions = useCallback(
     (account: Account) =>
       latestCommands.current.filter(
         (command) => command.id === `${CREATE}${account.id}` || isAccountCommand(command, account),
       ),
-    [],
+    [latestCommands],
   );
 
   const newMessage = commands.find(({ id }) => id === 'message.new');

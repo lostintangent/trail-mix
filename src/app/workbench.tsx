@@ -7,7 +7,6 @@ import {
   useCallback,
   useDeferredValue,
   useEffect,
-  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -52,6 +51,7 @@ import { tm } from './theme/tokens.stylex.ts';
 import { trailMixTheme } from './theme/built/trail-mix.js';
 import { accentCommands } from './theme/commands.ts';
 import { useAccent } from './theme/useAccent.ts';
+import { useLatest } from '../shared/useLatest.ts';
 
 export const Route = createFileRoute('/')({
   // The address names the member's place, which a reload, a link or a notification opens.
@@ -227,15 +227,12 @@ function Desk({
   // view arrives, from the address or once the folders are first known, not as the folders change,
   // since a folder renamed in view is laid over them a moment before the view follows it.
   const isHeld = held !== undefined;
-  const foldersNow = useRef(folders);
-  useLayoutEffect(() => {
-    foldersNow.current = folders;
-  });
+  const foldersNow = useLatest(folders);
   useEffect(() => {
     if (!isHeld) return;
     const kept = standing(view, foldersNow.current);
     if (kept !== view) changePlace({ view: kept }, 'replace');
-  }, [view, isHeld, changePlace]);
+  }, [view, isHeld, changePlace, foldersNow]);
   const { data: outbox = NONE, isRefetching: isOutboxComing } = useQuery(outboxQuery);
   // Mail on its way is in the Outbox, and out of Drafts and its count, from the press of Send
   // until its draft has gone from the server's Drafts.

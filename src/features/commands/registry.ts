@@ -2,6 +2,7 @@ import type { LucideIcon } from 'lucide-react';
 import { createContext, use, useEffect, useLayoutEffect, useRef } from 'react';
 import { labelShortcuts, matches, shortcutsOf, worksWhileTyping } from './core/keys.ts';
 import { commandFor, matching, type CommandLike } from './core/registry.ts';
+import { useLatest } from '../../shared/useLatest.ts';
 
 /**
  * Every action is a command. One registry feeds the palette, the shortcut sheet and the visible
@@ -75,10 +76,7 @@ export function runCommandKey(event: KeyboardEvent) {
  * on what is shown now.
  */
 export function useSteadyCommands(commands: readonly Command[]): readonly Command[] {
-  const latest = useRef(commands);
-  useLayoutEffect(() => {
-    latest.current = commands;
-  });
+  const latest = useLatest(commands);
   const kept = useRef<readonly Command[]>([]);
   const before = kept.current;
   const now = commands.map((command) => {

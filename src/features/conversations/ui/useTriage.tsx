@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { BundleId, ConversationId, Folder, ListItem, View } from '../../mail/core/index.ts';
 import { overlaid, rowChange, type Action } from '../core/triage.ts';
 import { afterFirstScreen } from '../../../shared/afterFirstScreen.ts';
@@ -8,6 +8,7 @@ import { reasonOf } from '../../../shared/reasons.ts';
 import { toast } from '../../../shared/toasts.tsx';
 import { overlaysOf, type ListOf } from './overlays.ts';
 import { fetchedRows } from './useConversations.ts';
+import { useLatest } from '../../../shared/useLatest.ts';
 
 /**
  * Triages some of a view's rows, conversations or bundles, by default saying so with a way to undo
@@ -66,10 +67,7 @@ export function useTriage(
   useEffect(() => afterFirstScreen(loadCarrying), []);
   // Read as a triage starts, so `triage` stays the same function as counts change, and every row
   // it's handed to doesn't draw again for a folder's count.
-  const latestFolders = useRef(folders);
-  useLayoutEffect(() => {
-    latestFolders.current = folders;
-  });
+  const latestFolders = useLatest(folders);
 
   const triage = useCallback<Triage>(
     (action, ids, { quietly = false, onRefused, in: bundle } = {}) => {
@@ -111,7 +109,7 @@ export function useTriage(
         }
       })();
     },
-    [queryClient, view, undoKey],
+    [queryClient, view, undoKey, latestFolders],
   );
   return { triage, undoLast, canUndo };
 }

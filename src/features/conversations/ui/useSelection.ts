@@ -1,4 +1,4 @@
-import { startTransition, useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { startTransition, useCallback, useMemo, useState } from 'react';
 import type { ConversationId, ListItem } from '../../mail/core/index.ts';
 import { idsIn, placesOf, type Listed } from '../core/pages.ts';
 import {
@@ -12,6 +12,7 @@ import {
   type Selection,
   type Vacating,
 } from '../core/selection.ts';
+import { useLatest } from '../../../shared/useLatest.ts';
 
 const NO_PLACES: ReadonlyMap<ConversationId, number> = new Map();
 
@@ -53,12 +54,8 @@ export function useSelection(
   );
   // The selection and whether the member is picking as they are now, which a refused triage puts
   // back, and the list's order, read only by a pick that adds to the selection or extends it.
-  const now = useRef({ selection, isPicking });
-  const order = useRef<Listed<ListItem>>([]);
-  useLayoutEffect(() => {
-    now.current = { selection, isPicking };
-    order.current = conversations ?? [];
-  });
+  const now = useLatest({ selection, isPicking });
+  const order = useLatest<Listed<ListItem>>(conversations ?? []);
 
   /**
    * A conversation that leaves the list gives way to the one below it, or above it at the end. The
@@ -83,19 +80,25 @@ export function useSelection(
    * too, as nothing happened, unless the member has moved it since. `putBack` restores what else
    * moved with it.
    */
-  const backIfRefused = useCallback((left: Selection, putBack?: () => void) => {
-    const before = now.current;
-    return () => {
-      if (!isSameSelection(now.current.selection, left)) return;
-      setSelection(before.selection);
-      setPicking(before.isPicking);
-      putBack?.();
-    };
-  }, []);
+  const backIfRefused = useCallback(
+    (left: Selection, putBack?: () => void) => {
+      const before = now.current;
+      return () => {
+        if (!isSameSelection(now.current.selection, left)) return;
+        setSelection(before.selection);
+        setPicking(before.isPicking);
+        putBack?.();
+      };
+    },
+    [now],
+  );
   /** A pick in the list, in its order. */
-  const selectBy = useCallback((id: ConversationId, by: SelectBy) => {
-    setSelection((current) => select(current, id, by, by === 'only' ? [] : idsIn(order.current)));
-  }, []);
+  const selectBy = useCallback(
+    (id: ConversationId, by: SelectBy) => {
+      setSelection((current) => select(current, id, by, by === 'only' ? [] : idsIn(order.current)));
+    },
+    [order],
+  );
   const startPicking = useCallback((id: ConversationId) => {
     setPicking(true);
     setSelection(selectOnly(id));
@@ -117,12 +120,15 @@ export function useSelection(
     setSelection(active === undefined ? NOTHING_SELECTED : { ids: [], active });
   }, []);
   /** A row that leaves, as a swipe takes it, leaves any selection that held it. */
-  const releaseRow = useCallback((id: ConversationId) => {
-    const { selection } = now.current;
-    const left = selection.ids.includes(id) ? NOTHING_SELECTED : selection;
-    setSelection(left);
-    return left;
-  }, []);
+  const releaseRow = useCallback(
+    (id: ConversationId) => {
+      const { selection } = now.current;
+      const left = selection.ids.includes(id) ? NOTHING_SELECTED : selection;
+      setSelection(left);
+      return left;
+    },
+    [now],
+  );
   return {
     selection,
     isPicking,

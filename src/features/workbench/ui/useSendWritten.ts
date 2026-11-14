@@ -1,9 +1,10 @@
-import { useCallback, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { toast } from '../../../shared/toasts.tsx';
 import type { ConversationId, MessageRef } from '../../mail/core/index.ts';
 import { isDocked, type ComposerSend, type Drafting } from '../../composer/ui/index.ts';
 import { useSend, useSendCommands, type useLeaving } from '../../outbox/index.ts';
 import { leftBySend, type useComposing } from './useComposing.ts';
+import { useLatest } from '../../../shared/useLatest.ts';
 
 /**
  * Send closes the composer at once and hands what it holds to the Mailroom, carrying its last save.
@@ -34,12 +35,8 @@ export function useSendWritten({
   const send = useSend();
   const composerSend = useRef<ComposerSend['current']>(undefined);
   const [isSendable, setSendable] = useState(false);
-  const shownNow = useRef(opened);
-  const composeNow = useRef(compose);
-  useLayoutEffect(() => {
-    shownNow.current = opened;
-    composeNow.current = compose;
-  });
+  const shownNow = useLatest(opened);
+  const composeNow = useLatest(compose);
   // A reply is on its way at the end of its conversation in the frame its composer closes, as is a
   // draft opened in its own, and leaves it again if the send fails or Undo takes it back. A new
   // message has no conversation until the Outbox names one.

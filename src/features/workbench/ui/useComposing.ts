@@ -1,5 +1,5 @@
 import { useQueryClient } from '@tanstack/react-query';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   newestShown,
   sameRef,
@@ -17,6 +17,7 @@ import {
   type Drafting,
 } from '../../composer/ui/index.ts';
 import { leavesDrafts, type Leaving } from '../../outbox/index.ts';
+import { useLatest } from '../../../shared/useLatest.ts';
 
 /**
  * What the member is writing, if anything, and how writing starts and ends. A composer belongs to
@@ -43,10 +44,7 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
   const [replaced, setReplaced] = useState<readonly MessageRef[]>([]);
   // The composers Send closed, by press, whose last saves are still on their way.
   const [sending, setSending] = useState<ReadonlyMap<string, Written>>(new Map());
-  const selectedNow = useRef(selected);
-  useLayoutEffect(() => {
-    selectedNow.current = selected;
-  });
+  const selectedNow = useLatest(selected);
   const start = useCallback(
     (next: Compose | undefined) => {
       const opened = selectedNow.current;
@@ -68,7 +66,7 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
       if (next?.as === 'reply') holdKeys();
       else releaseKeys();
     },
-    [queryClient],
+    [queryClient, selectedNow],
   );
   // Opening another conversation closes the composer at once, and then forgets it, so coming back
   // doesn't open it again from where it began.

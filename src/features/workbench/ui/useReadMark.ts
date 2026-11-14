@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type { ConversationId } from '../../mail/core/index.ts';
 import { REST_MS } from '../../reader/index.ts';
+import { useLatest } from '../../../shared/useLatest.ts';
 
 /** How long a conversation its view opened stays open, while the page is visible, to count as read. */
 export const DWELL_MS = 2_000;
@@ -28,10 +29,7 @@ export function useReadMark({
   if (byView && byView.id !== selected) setByView(undefined);
   // The callbacks read these, so they stay the same functions and what they're handed to doesn't
   // render again.
-  const latest = useRef({ markRead, byView });
-  useLayoutEffect(() => {
-    latest.current = { markRead, byView };
-  });
+  const latest = useLatest({ markRead, byView });
 
   useEffect(() => {
     if (!byView?.isShown) return;
@@ -63,20 +61,26 @@ export function useReadMark({
       document.removeEventListener('visibilitychange', wait);
       for (const type of ACTS) removeEventListener(type, act, { capture: true });
     };
-  }, [byView]);
+  }, [byView, latest]);
 
   /** The reader has drawn a conversation. */
-  const onShown = useCallback((id: ConversationId) => {
-    if (latest.current.byView?.id === id) setByView({ id, isShown: true });
-    else latest.current.markRead(id);
-  }, []);
+  const onShown = useCallback(
+    (id: ConversationId) => {
+      if (latest.current.byView?.id === id) setByView({ id, isShown: true });
+      else latest.current.markRead(id);
+    },
+    [latest],
+  );
   /** Choosing its view opened a conversation, in the same moment as it's selected. */
   const openedByView = useCallback((id: ConversationId) => setByView({ id, isShown: false }), []);
   /** The member opened a conversation, which reads one its view opened at once. */
-  const openedByMember = useCallback((id: ConversationId) => {
-    if (latest.current.byView?.id !== id) return;
-    setByView(undefined);
-    latest.current.markRead(id);
-  }, []);
+  const openedByMember = useCallback(
+    (id: ConversationId) => {
+      if (latest.current.byView?.id !== id) return;
+      setByView(undefined);
+      latest.current.markRead(id);
+    },
+    [latest],
+  );
   return { onShown, openedByView, openedByMember };
 }

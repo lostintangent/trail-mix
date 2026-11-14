@@ -21,6 +21,7 @@ import type { ConversationId, ListItem, Marks, StampColor } from '../../mail/cor
 import type { Listed } from '../core/pages.ts';
 import type { SelectBy, Selection } from '../core/selection.ts';
 import { ConversationRow, RowRuler, RowSkeleton } from './ConversationRow.tsx';
+import { useLatest } from '../../../shared/useLatest.ts';
 
 /** A row's height before the list is first laid out: three lines of text and the row's padding. */
 const FIRST_GUESS = 72;
@@ -176,15 +177,12 @@ export function ConversationList({
   // arrives after it. Rows coming and going above it move it in the list but not in sight, so they
   // don't scroll. The list's own keys scroll as they move, in the same commit, so they're left alone.
   const isMovedHere = useRef(false);
-  const selectedAt = useRef(selectedIndex);
-  useLayoutEffect(() => {
-    selectedAt.current = selectedIndex;
-  });
+  const selectedAt = useLatest(selectedIndex);
   const isSelectedListed = selectedIndex >= 0;
   useLayoutEffect(() => {
     if (isMovedHere.current) isMovedHere.current = false;
     else if (isSelectedListed) virtualizer.scrollToIndex(selectedAt.current, { align: 'auto' });
-  }, [virtualizer, selection.active, isSelectedListed]);
+  }, [virtualizer, selection.active, isSelectedListed, selectedAt]);
   const first = Math.max(0, (inSight?.startIndex ?? 0) - AHEAD);
   const last = (inSight?.endIndex ?? 0) + AHEAD;
   useEffect(() => {
