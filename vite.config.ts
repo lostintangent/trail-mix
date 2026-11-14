@@ -10,6 +10,7 @@ import { astryxIcons } from './src/shared/build/astryxIcons.ts';
 import { astryxStyles } from './src/shared/build/astryxStyles.ts';
 import { astryxMessages } from './src/shared/build/astryxMessages.ts';
 import { astryxUseTheme } from './src/shared/build/astryxUseTheme.ts';
+import { preloadMissing } from './src/shared/build/preloadMissing.ts';
 import { serviceWorker } from './src/shared/build/serviceWorker.ts';
 import { stylexDefinitionsFirst } from './src/shared/build/stylexDefinitionsFirst.ts';
 import { stylexOptions } from './src/shared/build/stylexOptions.ts';
@@ -62,6 +63,8 @@ export default defineConfig(({ isPreview }) => ({
     // The installed app's service worker, `/sw.js`, which keeps this build for offline.
     serviceWorker({ entry: 'src/app/service-worker.ts' }),
     workerModules(),
+    // Each lazy import's preload list, kept to the chunks its importer hasn't already loaded.
+    preloadMissing(),
     stylexDefinitionsFirst(),
     stylex(stylexOptions),
     react(),
