@@ -26,7 +26,8 @@ import {
   type Errand,
 } from '../core/carrying.ts';
 import type { Action } from '../core/triage.ts';
-import type { Laid, ListOf, Overlays } from './overlays.ts';
+import type { Laid } from '../../../shared/laying.ts';
+import { onList, type ListOf, type OnList, type Overlays } from './overlays.ts';
 import { fetchedList } from './useConversations.ts';
 
 /**
@@ -48,7 +49,7 @@ type Triaged = {
   quietly: boolean;
   overlays: Overlays;
   /** What the rows show of it, until the Mailroom's own list does. */
-  laid: Laid | undefined;
+  laid: Laid<OnList> | undefined;
   /** The rows as they were, which Undo puts back. */
   earlierRows: readonly ListItem[];
   /** The key that undoes the last triage: offered this one's Undo, or spent by the toast's. */
@@ -98,7 +99,7 @@ export async function carryOut({
   };
   const undo = async (done: readonly Carried[]) => {
     if (laid) overlays.lift(laid);
-    const back = overlays.lay(list, { returning: earlierRows });
+    const back = overlays.lay(onList(list, { returning: earlierRows }));
     // The refs from before a move are retired, so a move back waits for the refs it gives.
     if (done.some(({ errand }) => 'setFlags' in errand)) restoreMessages();
     try {

@@ -6,7 +6,7 @@ import { whenIdle } from '../../../shared/whenIdle.ts';
 import { afterPaint } from '../../../shared/afterPaint.ts';
 import { reasonOf } from '../../../shared/reasons.ts';
 import { toast } from '../../../shared/toasts.tsx';
-import { laidOn, overlaysOf, type ListOf } from './overlays.ts';
+import { laidOn, onList, overlaysOf, type ListOf } from './overlays.ts';
 import { fetchedRows } from './useConversations.ts';
 import { useLatest } from '../../../shared/useLatest.ts';
 
@@ -80,7 +80,7 @@ export function useTriage(
         (row): row is ListItem => row !== undefined && ids.includes(row.id),
       );
       const change = rowChange(action, view);
-      const laid = change && overlays.lay(list, { ids: new Set(ids), change });
+      const laid = change && overlays.lay(onList(list, { ids: new Set(ids), change }));
 
       void (async () => {
         // The rows show the change in this frame. Telling the Mailroom waits until it has painted.
