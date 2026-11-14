@@ -2,9 +2,9 @@ import { queryOptions } from '@tanstack/react-query';
 import { asksAgain } from '../../../shared/query-client.ts';
 import {
   bundlePartsOf,
+  sameFolder,
   type BundleId,
   type ConversationId,
-  type FolderRef,
   type Hint,
   type MessageRef,
   type View,
@@ -56,7 +56,7 @@ export function isStale(key: Key, hint: Hint): boolean {
     hint.changed === 'conversations' &&
     ((key[0] === 'bundle' && bundlePartsOf(key[1])?.account === hint.folder.account) ||
       (key[0] === 'conversations' &&
-        (key[1].in !== 'folder' || isSameFolder(key[1].folder, hint.folder))))
+        (key[1].in !== 'folder' || sameFolder(key[1].folder, hint.folder))))
   );
 }
 
@@ -69,8 +69,6 @@ const STALE: Record<Exclude<Hint['changed'], 'everything'>, readonly Key[0][]> =
   // And the folder's list, the views across accounts and the account's bundles, as above.
   conversations: ['folders', 'conversation', 'people', 'outbox'],
 };
-
-const isSameFolder = (a: FolderRef, b: FolderRef) => a.account === b.account && a.path === b.path;
 
 /**
  * Each query as options for TanStack Query, to read with `useQuery` or fetch ahead with

@@ -1,6 +1,7 @@
 import { useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { useEffect, useSyncExternalStore } from 'react';
 import type { Hint } from '../../mail/core/index.ts';
+import { listeners } from '../../../shared/listeners.ts';
 import { isStale, type Key } from './queries.ts';
 
 /**
@@ -29,29 +30,26 @@ export function useHints(): void {
  */
 export function useIsCaughtUp(): boolean {
   const caught = caughtUpWith(useQueryClient());
-  return useSyncExternalStore(caught.watch, () => caught.is);
+  return useSyncExternalStore(caught.subscribe, () => caught.is);
 }
 
 /** Whether the page holding `queryClient` has caught up with its Mailroom. */
 export const isCaughtUp = (queryClient: QueryClient) => caughtUpWith(queryClient).is;
 
-type CaughtUp = { is: boolean; watch: (watcher: () => void) => () => void; now: () => void };
+type CaughtUp = ReturnType<typeof listeners> & { is: boolean; now: () => void };
 const caughtUps = new WeakMap<QueryClient, CaughtUp>();
 
 function caughtUpWith(queryClient: QueryClient): CaughtUp {
   const held = caughtUps.get(queryClient);
   if (held) return held;
-  const watchers = new Set<() => void>();
+  const watchers = listeners();
   const caught: CaughtUp = {
+    ...watchers,
     is: false,
-    watch: (watcher) => {
-      watchers.add(watcher);
-      return () => void watchers.delete(watcher);
-    },
     now: () => {
       if (caught.is) return;
       caught.is = true;
-      for (const watcher of watchers) watcher();
+      watchers.tell();
     },
   };
   caughtUps.set(queryClient, caught);

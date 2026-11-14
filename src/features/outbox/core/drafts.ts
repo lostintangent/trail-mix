@@ -1,4 +1,5 @@
 import {
+  sameFolder,
   sameRef,
   type ConversationId,
   type Folder,
@@ -40,10 +41,7 @@ export function awayFromDrafts(
 export const isDraftsView = (view: View, folders: readonly Folder[]): boolean =>
   view.in === 'drafts' ||
   (view.in === 'folder' &&
-    folders.some(
-      ({ account, path, role }) =>
-        role === 'drafts' && account === view.folder.account && path === view.folder.path,
-    ));
+    folders.some((folder) => folder.role === 'drafts' && sameFolder(folder, view.folder)));
 
 /**
  * Whether a send leaves its conversation out of the Drafts view, given the conversation's other

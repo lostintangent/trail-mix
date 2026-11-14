@@ -1,6 +1,7 @@
 import {
   refKey,
   refOf,
+  sameFolder,
   type BundleId,
   type BundleSummary,
   type Flags,
@@ -58,9 +59,7 @@ export function errandFor(
           ? shown.filter(
               ({ account, path }) => account === action.to.account && path !== action.to.path,
             )
-          : shown.filter(
-              ({ account, path }) => roleOf(folders, account, path) !== destination(action),
-            );
+          : shown.filter((message) => roleOf(folders, message) !== destination(action));
       const to = action.do === 'move' ? action.to : destination(action);
       return movable.length > 0 ? { move: movable.map(refOf), to } : undefined;
     }
@@ -87,8 +86,7 @@ export function bundleErrandFor(
     case 'delete':
       return { move: scope, to: destination(action) };
     case 'move':
-      return action.to.account === bundle.account &&
-        roleOf(folders, action.to.account, action.to.path) !== 'inbox'
+      return action.to.account === bundle.account && roleOf(folders, action.to) !== 'inbox'
         ? { move: scope, to: action.to }
         : undefined;
     default:
@@ -160,10 +158,8 @@ export function followMoves(
  * shows every folder but Sent and Drafts, which hold what the member wrote.
  */
 function isShownIn(view: View, message: Message, folders: readonly Folder[]): boolean {
-  if (view.in === 'folder') {
-    return message.account === view.folder.account && message.path === view.folder.path;
-  }
-  const role = roleOf(folders, message.account, message.path);
+  if (view.in === 'folder') return sameFolder(message, view.folder);
+  const role = roleOf(folders, message);
   switch (view.in) {
     case 'drafts':
       return role === 'drafts';
@@ -177,8 +173,8 @@ function isShownIn(view: View, message: Message, folders: readonly Folder[]): bo
 const destination = (action: { do: 'archive' | 'delete' }): FolderRole =>
   action.do === 'archive' ? 'archive' : 'trash';
 
-const roleOf = (folders: readonly Folder[], account: string, path: string) =>
-  folders.find((folder) => folder.account === account && folder.path === path)?.role;
+const roleOf = (folders: readonly Folder[], ref: FolderRef) =>
+  folders.find((folder) => sameFolder(folder, ref))?.role;
 
 /** The messages whose flag isn't already as asked, so Undo changes back exactly those. */
 function flagsFor(
