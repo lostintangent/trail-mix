@@ -14,6 +14,7 @@ import { EditorContent, useEditor, type Editor as TiptapEditor } from '@tiptap/r
 import StarterKit from '@tiptap/starter-kit';
 import { useEffect, useLayoutEffect, useRef } from 'react';
 import { tm } from '../../../app/theme/tokens.stylex.ts';
+import { useLatest } from '../../../shared/useLatest.ts';
 import { DraftImage, DraftParagraph } from './draftImage.ts';
 import { editableHtml } from './editable.ts';
 import { releaseKeys } from './heldKeys.ts';
@@ -53,10 +54,8 @@ export function Editor({
   label,
   isFocused,
 }: EditorProps) {
-  const latest = useRef({ onChange, imageUrl, onFiles });
-  useEffect(() => {
-    latest.current = { onChange, imageUrl, onFiles };
-  });
+  // Tiptap hands the editor each render's handlers, but an image's options are fixed as it is made.
+  const imageUrls = useLatest(imageUrl);
   const known = useRef<string>(undefined);
   // Every image's way to look up where it shows from again, since that changes as the composer
   // takes a pasted file and as a save moves it into the draft.
@@ -82,7 +81,7 @@ export function Editor({
       }),
       Markdown,
       DraftImage.configure({
-        imageUrl: (id) => latest.current.imageUrl(id),
+        imageUrl: (id) => imageUrls.current(id),
         shown: images.current,
         className: css(styles.image),
       }),
@@ -97,7 +96,7 @@ export function Editor({
       : { content: start.markdown, contentType: 'markdown' as const }),
     onCreate: ({ editor: created }) => {
       known.current = created.getMarkdown();
-      if ('html' in start) latest.current.onChange(known.current, false);
+      if ('html' in start) onChange(known.current, false);
     },
     editorProps: {
       attributes: {
@@ -122,20 +121,15 @@ export function Editor({
       const markdown = updated.getMarkdown();
       const isEdit = known.current !== undefined && markdown.trimEnd() !== known.current.trimEnd();
       known.current = markdown;
-      latest.current.onChange(markdown, isEdit);
+      onChange(markdown, isEdit);
     },
   });
-  const current = useRef(editor);
-  useEffect(() => {
-    current.current = editor;
-  }, [editor]);
 
   /** Hands pasted or dropped files to the composer, and places its images where the cursor is. */
   function place(list: FileList | null | undefined): boolean {
     const files = [...(list ?? [])];
-    const writing = current.current;
-    if (!writing || files.length === 0) return false;
-    placeImages(writing, latest.current.onFiles(files));
+    if (!editor || files.length === 0) return false;
+    placeImages(editor, onFiles(files));
     return true;
   }
 

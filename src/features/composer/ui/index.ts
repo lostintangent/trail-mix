@@ -6,4 +6,3 @@ export { holdKeys, releaseKeys, useIsReplyOnItsWay } from './heldKeys.ts';
 export { ComposerSkeleton, isDocked } from './sheet.tsx';
 export type { Compose, ComposerSend } from './Composer.tsx';
 export type { Drafting } from './drafting.ts';
-export type { Writing } from '../core/session.ts';

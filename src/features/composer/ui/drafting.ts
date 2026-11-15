@@ -55,8 +55,8 @@ export type Drafting = {
   subscribe: (listener: () => void) => () => void;
   /** A composer shows it, and hears of its saves until another does. */
   show: (showing: Showing) => void;
-  /** Hears of each draft a save makes, until it stops. */
-  watch: (watcher: (saved: MessageRef) => void) => () => void;
+  /** Hears of each draft a save makes, as its `draft`, until it stops. */
+  watch: (watcher: () => void) => () => void;
   /** What the member writes, which the next save saves. */
   write: (writing: Writing) => void;
   /** A change of the member's, which owes a save. */
@@ -99,7 +99,7 @@ export function startDrafting(
   let state: SaveState = draft ? 'saved' : 'unsaved';
   let showing: Showing | undefined;
   const { subscribe, tell } = listeners();
-  const watchers = new Set<(saved: MessageRef) => void>();
+  const saves = listeners();
   let isOwed = false;
   let owedSince = 0;
   let isDiscarded = false;
@@ -158,7 +158,7 @@ export function startDrafting(
         const made = await file(draftInputOf(saved), replaces);
         draft = made;
         showing?.onDraft(made, older);
-        for (const watcher of watchers) watcher(made);
+        saves.tell();
         if (older && !replaces) await mailroom.move([older], 'trash').catch(() => {});
         await rename(saved.attachments, made);
         become(isOwed ? 'unsaved' : 'saved');
@@ -238,10 +238,7 @@ export function startDrafting(
       isClosed = false;
       retriesClosed = 0;
     },
-    watch: (watcher) => {
-      watchers.add(watcher);
-      return () => watchers.delete(watcher);
-    },
+    watch: saves.subscribe,
     subscribe,
     write,
     owe: () => {
@@ -293,7 +290,7 @@ export function startDrafting(
       if (carried) unnamed = { made: saved, attachments: carried };
       carried = undefined;
       showing?.onDraft(saved, older);
-      for (const watcher of watchers) watcher(saved);
+      saves.tell();
       if (older && older.account !== saved.account) {
         void mailroom.move([older], 'trash').catch(() => {});
       }

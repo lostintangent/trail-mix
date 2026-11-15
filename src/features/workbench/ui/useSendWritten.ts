@@ -33,7 +33,7 @@ export function useSendWritten({
 }) {
   const { compose } = composing;
   const send = useSend();
-  const composerSend = useRef<ComposerSend['current']>(undefined);
+  const composerSend = useRef<ComposerSend['current']>(null);
   const [isSendable, setSendable] = useState(false);
   const shownNow = useLatest(opened);
   const composeNow = useLatest(compose);
@@ -65,7 +65,7 @@ export function useSendWritten({
       pressedAt,
     });
     composing.sent(id);
-    const unwatch = drafting.watch((saved) => leaving.named(id, saved));
+    const unwatch = drafting.watch(() => drafting.draft && leaving.named(id, drafting.draft));
     // Until the Mailroom has the send, the drafts it makes are the leaving’s, and stay out of sight.
     const handed = (draft: MessageRef | undefined) => {
       if (draft) drafting.took(draft);

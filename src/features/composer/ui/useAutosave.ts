@@ -15,10 +15,11 @@ export function useAutosave(drafting: Drafting, onDraft: Showing['onDraft']) {
       if (document.visibilityState === 'hidden') drafting.hidden();
     };
     document.addEventListener('visibilitychange', hide);
-    window.addEventListener('pagehide', hide);
+    // A page that goes is still visible as it does, and Safari may close a tab without hiding it.
+    window.addEventListener('pagehide', drafting.hidden);
     return () => {
       document.removeEventListener('visibilitychange', hide);
-      window.removeEventListener('pagehide', hide);
+      window.removeEventListener('pagehide', drafting.hidden);
       drafting.close();
     };
   }, [drafting]);

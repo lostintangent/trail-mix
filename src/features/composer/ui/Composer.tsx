@@ -13,7 +13,7 @@ import * as stylex from '@stylexjs/stylex';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { type Editor as TiptapEditor } from '@tiptap/react';
 import { ImagePlus, Paperclip, Trash2 } from 'lucide-react';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useImperativeHandle, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useMediaQuery } from '../../../shared/useMediaQuery.ts';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { refOf, type Account, type Message, type MessageRef } from '../../mail/core/index.ts';
@@ -48,7 +48,7 @@ export type Compose =
   | { as: 'resumed'; drafting: Drafting; isDocked: boolean };
 
 /** How the workbench's Send reaches the open composer: a time to send at, or now. */
-export type ComposerSend = { current: ((at?: string) => void) | undefined };
+export type ComposerSend = { current: ((at?: string) => void) | null };
 
 type ComposerProps = {
   compose: Compose;
@@ -200,10 +200,7 @@ function Writer({
     onSend(drafting, at);
     onClose();
   };
-  useLayoutEffect(() => {
-    composerSend.current = send;
-  });
-  useEffect(() => () => void (composerSend.current = undefined), [composerSend]);
+  useImperativeHandle(composerSend, () => send);
   useEffect(() => onSendable(canSend), [canSend, onSendable]);
   const discard = () => {
     void drafting.discard();
