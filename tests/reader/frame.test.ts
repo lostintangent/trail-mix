@@ -165,7 +165,8 @@ for (const type of BROWSERS) {
         const remote = (name: string) => `${canary.origin}/held/${name}.png`;
         const html = [
           `<img src="${remote('masthead')}" width="640" height="140" alt="Kernel Weekly">`,
-          `<img src="${remote('wide')}" width="300" alt="wide">`,
+          // Protocol-relative, which a browser reads as remote too.
+          `<img src="//${canary.host}/held/wide.png" width="300" alt="wide">`,
           `<img src="${remote('tall')}" height="40" alt="tall">`,
           `<p>A line with <img src="${remote('icon')}" alt="an icon"> in it.</p>`,
           `<img src="${remote('pixel')}" width="1" height="1" alt="">`,

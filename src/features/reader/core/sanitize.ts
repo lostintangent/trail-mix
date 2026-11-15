@@ -186,7 +186,7 @@ export function sanitizeMail(html: string, images: Images, dark: DarkPaper): Saf
       case 'src': {
         if (tag !== 'img') return keep(null);
         const source = imageSource(value);
-        if (source === null && /^\s*https?:/i.test(value)) held.add(element);
+        if (source === null && isRemote(parseUrl(value))) held.add(element);
         return keep(source);
       }
       case 'srcset':
