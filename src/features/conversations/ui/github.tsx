@@ -64,6 +64,9 @@ export function BundleChips({ chips, threads }: { chips: readonly BundleChip[]; 
   useLayoutEffect(() => {
     const element = line.current;
     if (!element) return;
+    // The first fold has to come before the observer's, or its first callback resizes the line it
+    // watches, which WebKit reports as a ResizeObserver loop.
+    fold(element, beyond);
     const observer = new ResizeObserver(() => fold(element, beyond));
     observer.observe(element);
     return () => observer.disconnect();
