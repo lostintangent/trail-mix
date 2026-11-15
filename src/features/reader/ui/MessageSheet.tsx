@@ -37,6 +37,7 @@ import { foldQuote } from '../core/quotes.ts';
 import { setLightPaper, useDarkTheme } from './lightPaper.ts';
 import { sheetStyles } from './layout.ts';
 import { MessageFrame } from './MessageFrame.tsx';
+import { counted } from './meta.tsx';
 import { PlainText } from './PlainText.tsx';
 import { BodySkeleton } from './skeletons.tsx';
 import { safeMail } from './safeMail.ts';
@@ -73,9 +74,7 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
     [body],
   );
   const hasQuote = Boolean(mail?.quote || text?.quote);
-  const trackers = mail?.trackers
-    ? `${mail.trackers} ${mail.trackers === 1 ? 'tracker' : 'trackers'} blocked`
-    : undefined;
+  const trackers = mail?.trackers ? `${counted(mail.trackers, 'tracker')} blocked` : undefined;
   const shownTrackers = mail?.blockedImages ? undefined : trackers;
   const offer = body?.unsubscribe;
   const inline = new Set(mail?.inlineParts);
@@ -144,8 +143,8 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
       </header>
 
       {mail?.blockedImages && (
-        <div role="status" {...stylex.props(styles.images)}>
-          <span {...stylex.props(styles.imagesText)}>
+        <div role="status" {...stylex.props(styles.quietLine, styles.images)}>
+          <span {...stylex.props(styles.shield, styles.imagesText)}>
             <Icon icon={ImageOff} size="sm" color="secondary" />
             <span>
               Images from {displayName(message.from)} are hidden.
@@ -309,24 +308,16 @@ const styles = stylex.create({
   when: {
     flexShrink: 0,
   },
+  // The note on images is a quiet line in a box of its own.
   images: {
-    display: 'flex',
-    flexWrap: 'wrap',
-    alignItems: 'center',
     gap: spacingVars['--spacing-1'],
-    paddingInline: spacingVars['--spacing-2'],
     paddingBlock: spacingVars['--spacing-1'],
     borderRadius: radiusVars['--radius-element'],
     backgroundColor: colorVars['--color-background-muted'],
-    color: colorVars['--color-text-secondary'],
-    fontSize: typeScaleVars['--text-supporting-size'],
   },
   // The icon stays beside the words as they wrap, and the choices wrap under them.
   imagesText: {
-    display: 'flex',
-    alignItems: 'center',
     flexGrow: 1,
-    gap: spacingVars['--spacing-1'],
   },
   // The count of trackers wraps as one phrase.
   whole: {

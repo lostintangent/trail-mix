@@ -45,7 +45,7 @@ type ReaderProps = {
   conversation: Message[];
   account: Account;
   /** The member's folders, to name the one the conversation lies in. */
-  folders?: readonly Folder[];
+  folders: readonly Folder[];
   /**
    * What can be done with one message, such as replying to it. The same function each render. The
    * keys of the registry's commands answer the newest message, so only its own name them.
@@ -57,11 +57,11 @@ type ReaderProps = {
    * Keys pressed inside a message's frame, which the page around the frame never hears, for the
    * workbench's shortcuts. The same function from one render to the next.
    */
-  onMessageKey?: (event: KeyboardEvent) => void;
+  onMessageKey: (event: KeyboardEvent) => void;
   /** Drafts left out, such as the one being written below the conversation. */
   hidden?: readonly MessageRef[];
   /** The sends this device follows, each a reply on its way at the end of its conversation. */
-  leaving?: readonly Leaving[];
+  leaving: readonly Leaving[];
   /** Opens a draft to go on writing it. Without it, a draft reads like any message. */
   onOpenDraft?: (draft: Message) => void;
   /**
@@ -83,23 +83,18 @@ export const Reader = memo(function Reader({
   upcoming = [],
   onMessageKey,
   hidden = NONE_HIDDEN,
-  folders = NONE_LISTED,
-  leaving = NONE_LEAVING,
   ...props
 }: ReaderProps) {
   usePrepared(upcoming);
   const id = props.conversation[0]?.conversation ?? '';
   return (
-    <MessageKeys value={onMessageKey ?? IGNORE_KEY}>
-      <Conversation key={id} hidden={hidden} folders={folders} leaving={leaving} {...props} />
+    <MessageKeys value={onMessageKey}>
+      <Conversation key={id} hidden={hidden} {...props} />
     </MessageKeys>
   );
 }, isSameReading);
 
-const IGNORE_KEY = () => {};
 const NONE_HIDDEN: readonly MessageRef[] = [];
-const NONE_LISTED: readonly Folder[] = [];
-const NONE_LEAVING: readonly Leaving[] = [];
 
 const keys = (refs: readonly MessageRef[] = NONE_HIDDEN) => refs.map(refKey).join('\u0001');
 
@@ -129,11 +124,7 @@ const Conversation = memo(function Conversation({
   leaving,
   onOpenDraft,
   isPassing = false,
-}: Omit<ReaderProps, 'hidden' | 'folders' | 'leaving'> & {
-  hidden: readonly MessageRef[];
-  folders: readonly Folder[];
-  leaving: readonly Leaving[];
-}) {
+}: Omit<ReaderProps, 'hidden' | 'onMessageKey'> & { hidden: readonly MessageRef[] }) {
   const leftOut = new Set(hidden.map(refKey));
   const messages = conversation
     .filter((message) => !leftOut.has(refKey(message)))

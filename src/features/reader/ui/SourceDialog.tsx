@@ -1,6 +1,7 @@
 import { Dialog, DialogHeader } from '@astryxdesign/core/Dialog';
 import {
   colorVars,
+  fontWeightVars,
   radiusVars,
   spacingVars,
   typeScaleVars,
@@ -89,7 +90,7 @@ const styles = stylex.create({
   },
   headerName: {
     color: tm.textQuiet,
-    fontWeight: 600,
+    fontWeight: fontWeightVars['--font-weight-semibold'],
   },
   headerValue: {
     margin: 0,

@@ -11,24 +11,19 @@ export function PlainText({ text }: { text: string }) {
 }
 
 /** Web addresses, without the punctuation that usually ends the sentence around them. */
-const ADDRESS = /\bhttps?:\/\/[^\s<>"]+[^\s<>".,;:!?)\]'}]/gi;
+const ADDRESS = /\b(https?:\/\/[^\s<>"]+[^\s<>".,;:!?)\]'}])/i;
 
-function linked(text: string) {
-  const pieces: (string | React.JSX.Element)[] = [];
-  let at = 0;
-  for (const match of text.matchAll(ADDRESS)) {
-    const href = match[0];
-    pieces.push(text.slice(at, match.index));
-    pieces.push(
-      <a key={match.index} href={href} target="_blank" rel="noopener noreferrer">
-        {href}
-      </a>,
-    );
-    at = match.index + href.length;
-  }
-  pieces.push(text.slice(at));
-  return pieces;
-}
+// Split on the address it captures, text lies at the even places and addresses at the odd ones.
+const linked = (text: string) =>
+  text.split(ADDRESS).map((piece, at) =>
+    at % 2 === 0 ? (
+      piece
+    ) : (
+      <a key={at} href={piece} target="_blank" rel="noopener noreferrer">
+        {piece}
+      </a>
+    ),
+  );
 
 const styles = stylex.create({
   text: {

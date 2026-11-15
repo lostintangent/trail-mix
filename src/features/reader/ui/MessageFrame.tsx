@@ -10,6 +10,7 @@ import {
   useState,
   type RefObject,
 } from 'react';
+import { useLatest } from '../../../shared/useLatest.ts';
 import { REST_MS } from '../core/rest.ts';
 import { frameDocument, type FrameLook } from '../core/frame.ts';
 import type { SafeMail } from '../core/sanitize.ts';
@@ -67,11 +68,7 @@ export function MessageFrame({ mail, quotes, title, isLightPaper = false }: Mess
     [mail, look, quotes],
   );
   const fitToContent = useFitToContent(box, sizer, frame);
-  const passKey = use(MessageKeys);
-  const passing = useRef(passKey);
-  useLayoutEffect(() => {
-    passing.current = passKey;
-  });
+  const passing = useLatest(use(MessageKeys));
   const forgetFocus = useRef<() => void>(null);
   useLayoutEffect(() => () => forgetFocus.current?.(), []);
   // Which frame this is, and the one that already holds a document.
@@ -101,7 +98,7 @@ export function MessageFrame({ mail, quotes, title, isLightPaper = false }: Mess
       fitToContent();
     }, REST_MS);
     return () => clearTimeout(rest);
-  }, [written, fitToContent, frameKey]);
+  }, [written, fitToContent, frameKey, passing]);
 
   return (
     <div ref={box} tabIndex={-1} {...stylex.props(styles.box)}>

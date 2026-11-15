@@ -90,10 +90,5 @@ function stop() {
 
 function hasSelection(frame: HTMLIFrameElement): boolean {
   const selection = frame.contentDocument?.getSelection();
-  return (
-    selection !== null &&
-    selection !== undefined &&
-    !selection.isCollapsed &&
-    selection.toString().trim() !== ''
-  );
+  return selection?.isCollapsed === false && selection.toString().trim() !== '';
 }

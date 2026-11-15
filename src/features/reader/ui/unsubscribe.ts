@@ -4,6 +4,7 @@ import { listeners } from '../../../shared/listeners.ts';
 import { reasonOf } from '../../../shared/reasons.ts';
 import type { Command } from '../../commands/index.ts';
 import {
+  newestShown,
   refOf,
   type Body,
   type ConversationId,
@@ -20,7 +21,7 @@ import { bodyQuery, conversationQuery, mailroom } from '../../mailroom/client/in
  */
 
 /** Where unsubscribing from one list stands on this page. */
-export type Unsubscribing =
+type Unsubscribing =
   { is: 'offered' } | { is: 'asking' } | { is: 'taken' } | { is: 'refused'; reason: string };
 
 /** Asks the Mailroom to unsubscribe from the list at `address`, unless it is asking or has. */
@@ -75,12 +76,11 @@ export function useUnsubscribeCommand(open: ConversationId | undefined): Command
 
 /** The newest message, not a draft, from a list its sender is verified for. */
 function newestListMail(conversation: readonly Message[]): MessageRef | undefined {
-  const newest = conversation
-    .filter(({ flags, verified, list }) => !flags.draft && verified && list?.unsubscribe)
-    .reduce<Message | undefined>(
-      (latest, message) => (latest && latest.date >= message.date ? latest : message),
-      undefined,
-    );
+  const newest = newestShown(
+    conversation.filter(
+      ({ flags, verified, list }) => !flags.draft && verified && list?.unsubscribe,
+    ),
+  );
   return newest && refOf(newest);
 }
 

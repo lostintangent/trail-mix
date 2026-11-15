@@ -145,6 +145,8 @@ window.showConversation = (name, html, upcoming) => {
   );
 };
 
+const NONE = [] as const;
+
 function Pane({ fixture, upcoming }: { fixture: Fixture; upcoming?: ConversationId[] }) {
   const { data: accounts } = useQuery(accountsQuery);
   const account = accounts?.find(({ id }) => id === fixture.account.id) ?? fixture.account;
@@ -159,6 +161,8 @@ function Pane({ fixture, upcoming }: { fixture: Fixture; upcoming?: Conversation
       <Reader
         conversation={fixture.conversation}
         account={account}
+        folders={NONE}
+        leaving={NONE}
         upcoming={upcoming}
         onMessageKey={recordKey}
         actionsFor={actionsFor}

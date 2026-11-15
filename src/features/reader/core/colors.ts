@@ -224,7 +224,7 @@ export function mailColors(dark: DarkPaper) {
     const unchanged = { changed: false, needsInk: false };
     if (!adapting()) return unchanged;
     // A shorthand that takes a variable leaves its colors unread until the page resolves them.
-    const hidesColor = Array.from({ length: style.length }, (_, i) => style.item(i)).some(
+    const hidesColor = [...style].some(
       (name) => COLORED.has(name) && style.getPropertyValue(name) === '',
     );
     if (hidesColor) return stayLight(unchanged);
