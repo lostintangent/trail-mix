@@ -40,7 +40,7 @@ import {
   useNotifications,
 } from '../features/notifications/index.ts';
 import { useDraftsAway, useLeaving } from '../features/outbox/index.ts';
-import { REST_MS } from '../features/reader/index.ts';
+import { MessageAccent, REST_MS } from '../features/reader/index.ts';
 import { whenIdle } from '../shared/whenIdle.ts';
 import { useHeldWhile } from '../shared/useHeldWhile.ts';
 import { Workbench, type SettingsAt } from '../features/workbench/index.ts';
@@ -126,7 +126,9 @@ function App() {
   );
   return (
     <AppTheme theme={trailMixTheme}>
-      <Suspense>{screen}</Suspense>
+      <MessageAccent value={accent}>
+        <Suspense>{screen}</Suspense>
+      </MessageAccent>
     </AppTheme>
   );
 }

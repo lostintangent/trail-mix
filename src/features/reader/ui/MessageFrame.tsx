@@ -13,6 +13,7 @@ import {
 import { REST_MS } from '../core/rest.ts';
 import { frameDocument, type FrameLook } from '../core/frame.ts';
 import type { SafeMail } from '../core/sanitize.ts';
+import { MessageAccent } from './accent.ts';
 import { hearsListeners, returnFocusFrom } from './focus.ts';
 import { sheetStyles } from './layout.ts';
 import { useDarkTheme } from './lightPaper.ts';
@@ -120,10 +121,11 @@ export function MessageFrame({ mail, quotes, title, isLightPaper = false }: Mess
 
 /**
  * The frame's colors and type, resolved from the theme on the frame's own element, and resolved
- * again when the system's theme changes, or the paper it lies on.
+ * again when the system's theme changes, the accent, or the paper it lies on.
  */
 function useLook(frame: RefObject<HTMLIFrameElement | null>, paper: SafeMail['paper']) {
   const isDark = useDarkTheme();
+  const accent = use(MessageAccent);
   const [look, setLook] = useState<Omit<FrameLook, 'quotes'>>();
   useLayoutEffect(() => {
     // The frame now, since a document after the first goes into a new one.
@@ -131,7 +133,7 @@ function useLook(frame: RefObject<HTMLIFrameElement | null>, paper: SafeMail['pa
     if (!element) return;
     const next = readLook(element, isDark);
     setLook((current) => (JSON.stringify(current) === JSON.stringify(next) ? current : next));
-  }, [frame, paper, isDark]);
+  }, [frame, paper, isDark, accent]);
   return look;
 }
 

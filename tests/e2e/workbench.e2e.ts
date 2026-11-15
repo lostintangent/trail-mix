@@ -548,9 +548,11 @@ test('the desk, the browser’s chrome and a saved accent follow the system befo
   }
 });
 
-test('an accent picked in Settings shows at once, outlasts a reload, and goes back to ink blue', async () => {
-  const { page, problems } = await open(SIZES.desktop);
+test('an accent picked in Settings shows at once, outlasts a reload, reaches open mail from the palette or another tab, and goes back to ink blue', async () => {
+  const { context, page, problems } = await open(SIZES.desktop);
   const inkBlue = await accentShown(page);
+  await bodiesShown(page);
+  const inkLinks = await linksShown(page);
   const picker = page.getByLabel('Accent color');
   const openSettings = () => page.getByRole('button', { name: 'Open settings' }).click();
   await openSettings();
@@ -574,6 +576,9 @@ test('an accent picked in Settings shows at once, outlasts a reload, and goes ba
 
   await page.reload({ waitUntil: 'networkidle' });
   expect(await accentShown(page)).toBe(picked);
+  await bodiesShown(page);
+  const pickedLinks = await linksShown(page);
+  expect(pickedLinks).not.toBe(inkLinks);
   await openSettings();
   expect(await picker.inputValue()).toBe('#c2185b');
 
@@ -597,6 +602,24 @@ test('an accent picked in Settings shows at once, outlasts a reload, and goes ba
   );
   expect(await picker.evaluate((input) => input === document.activeElement)).toBe(true);
 
+  // The mail open takes the accent from the palette, and from a pick in another tab.
+  await page.keyboard.press('Escape');
+  await page.getByRole('searchbox', { name: 'Search mail' }).click();
+  await page.keyboard.type('use the default accent');
+  await page.getByRole('listbox', { name: 'Commands' }).getByRole('option').first().waitFor();
+  await page.keyboard.press('Enter');
+  expect(await accentShown(page)).toBe(inkBlue);
+  await linksShown(page, inkLinks);
+  const otherTab = await context.newPage();
+  await otherTab.goto(new URL('/health', app.url).href);
+  await otherTab.evaluate(([key, value]) => localStorage.setItem(key, value), [
+    ACCENT_STORAGE_KEY,
+    JSON.stringify({ color: '#c2185b', css: accentRule('#c2185b') }),
+  ] as const);
+  await linksShown(page, pickedLinks);
+  expect(await accentShown(page)).toBe(picked);
+
+  await openSettings();
   await page.getByRole('button', { name: 'Use the default accent' }).click();
   expect(await accentShown(page)).toBe(inkBlue);
   expect(await page.getByRole('button', { name: 'Use the default accent' }).count()).toBe(0);
@@ -1167,6 +1190,24 @@ function accentShown(page: Page): Promise<string> {
     probe.remove();
     return color;
   });
+}
+
+/**
+ * The color links take in the message open in the reader, read from a link put in its frame: once it
+ * shows, or once it is `color`, since a new look is written into a new frame.
+ */
+async function linksShown(page: Page, color?: string): Promise<string> {
+  const shown = await page.waitForFunction((color) => {
+    const inside = document.querySelector<HTMLIFrameElement>('[aria-label="Reader"] iframe')
+      ?.contentDocument?.body;
+    if (!inside) return false;
+    const link = inside.appendChild(inside.ownerDocument.createElement('a'));
+    link.href = '#';
+    const shown = getComputedStyle(link).color;
+    link.remove();
+    return (color ?? shown) === shown && shown;
+  }, color);
+  return (await shown.jsonValue()) as string;
 }
 
 /** `#rrggbb` as a computed style gives it back. */

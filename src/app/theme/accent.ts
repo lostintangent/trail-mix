@@ -5,9 +5,10 @@ import { listeners } from '../../shared/listeners.ts';
  * The accent this device shows: ink blue by default, or a color the member picked, saved here.
  *
  * A pick is saved with the style rule it makes, which `prepaint.ts` puts on the page before first
- * paint without doing any color math, and `useAccent` keeps on the page after that. Only saving a
- * pick does the math, which loads apart from the first screen. The rule is remade from the pick
- * once each time the app starts, while the browser is idle, so a saved copy is never stale for
+ * paint without doing any color math. After that, a pick here or in another tab is on the page
+ * before anything hears of it, so whatever reads its colors from the page reads the new one. Only
+ * saving a pick does the math, which loads apart from the first screen. The rule is remade from the
+ * pick once each time the app starts, while the browser is idle, so a saved copy is never stale for
  * longer than one load.
  */
 
@@ -54,7 +55,9 @@ export async function saveAccent(color: string | undefined): Promise<void> {
 /** Calls `onChange` when this page or another tab on this device saves a pick. */
 export function subscribeToAccent(onChange: () => void): () => void {
   const onStorage = (event: StorageEvent) => {
-    if (event.key === ACCENT_STORAGE_KEY || event.key === null) onChange();
+    if (event.key !== ACCENT_STORAGE_KEY && event.key !== null) return;
+    showAccent(readAccent());
+    onChange();
   };
   const unsubscribe = saves.subscribe(onChange);
   addEventListener('storage', onStorage);
