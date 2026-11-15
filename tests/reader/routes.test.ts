@@ -255,7 +255,7 @@ for (const type of BROWSERS) {
     }, 30_000);
     afterAll(() => browser.close());
 
-    test('runs nothing, whatever the sender’s bytes say they are', async () => {
+    test('runs nothing, whatever the sender’s bytes say they are, and shows the source as text', async () => {
       ran.length = 0;
       const context = await browser.newContext({ acceptDownloads: true });
       for (const path of [
@@ -270,6 +270,8 @@ for (const type of BROWSERS) {
         const page = await context.newPage();
         // A download aborts the navigation, which is what should happen to a document part.
         await page.goto(`${app.url.origin}${path}`).catch(() => {});
+        if (path === '/messages')
+          expect(await page.locator('body').textContent()).toContain('<script>fetch(');
         await page.waitForTimeout(300);
         await page.close();
       }
@@ -287,13 +289,6 @@ for (const type of BROWSERS) {
       await page.waitForTimeout(300);
       await page.close();
       expect(ran).toEqual([]);
-    });
-
-    test('shows the raw source as text', async () => {
-      const page = await browser.newPage();
-      await page.goto(`${app.url.origin}/messages`);
-      expect(await page.locator('body').textContent()).toContain('<script>fetch(');
-      await page.close();
     });
   });
 }

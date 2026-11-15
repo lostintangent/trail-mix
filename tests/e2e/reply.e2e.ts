@@ -392,7 +392,7 @@ for (const [size, options] of Object.entries(SIZES)) {
       await page.keyboard.press('ControlOrMeta+Enter');
     }
 
-    test('a reply sent lies at the end of its conversation at once, and becomes the server’s copy when the index has it', async () => {
+    it('a reply sent lies at the end of its conversation at once, and becomes the server’s copy when the index has it', async () => {
       const page = await inbox('light');
       await open(page);
       // Each conversation comes late, as when a host files its copy in Sent late, so the Outbox
