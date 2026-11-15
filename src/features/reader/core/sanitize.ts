@@ -57,7 +57,6 @@ export type SafeMail = {
 
 export function sanitizeMail(html: string, images: Images, dark: DarkPaper): SafeMail {
   const purify = DOMPurify(window);
-  const colors = mailColors(dark);
   const mail = {
     blockedImages: false,
     // Their addresses, so a pixel the message repeats counts once.
@@ -101,6 +100,9 @@ export function sanitizeMail(html: string, images: Images, dark: DarkPaper): Saf
   };
 
   const safeCss = (css: string) => rewriteCssResources(css, imageSource);
+  // A background image shows unless each of its layers is left out or held back. Its images are
+  // met again as its CSS is kept, and each counts once.
+  const colors = mailColors(dark, (image) => !/^none(\s*,\s*none)*$/i.test(safeCss(image)));
   // Inline styles as written, and as they are kept.
   const styles = new Map<string, { rewritten: string; needsInk: boolean }>();
   // Elements whose text takes the light theme's ink in the dark theme, marked once they're walked.

@@ -18,13 +18,13 @@ import {
  * to read on the lightest of those: its hue kept, and lightened until it reads as strongly as it
  * did on white, and at least 4.5:1. Black and near-black become the theme's ink.
  *
- * Strong colors and dark ones, such as a button or a footer, and every image are kept as sent,
- * and so is everything on them: their element takes the light color scheme, so the colors inside
- * it are the sender's own, a light card on a dark desk included, and text with no color of its
- * own takes the light theme's ink, as the sender saw it.
+ * Strong colors and dark ones, such as a button or a footer, and every image that shows are kept as
+ * sent, and so is everything on them: their element takes the light color scheme, so the colors
+ * inside it are the sender's own, a light card on a dark desk included, and text with no color of
+ * its own takes the light theme's ink, as the sender saw it.
  *
  * Mail that declares a dark color scheme shows its own dark styles. Mail that asks for light only,
- * paints an image with no color under it, or sets a color no browser reads the same way stays on
+ * shows an image with no color under it, or sets a color no browser reads the same way stays on
  * light paper in both themes.
  *
  * Each color is rewritten as `light-dark(original, dark)`, so one sanitized message serves both
@@ -144,8 +144,10 @@ type FromAttribute = { declarations: [name: string, value: string][]; needsInk: 
 /**
  * What a walk through a message learns about its colors, and the rewrites that let them read on
  * the dark theme's paper. Declarations and attributes are handed to it as the walk meets them.
+ * `shows` says whether a `background-image` shows anything: an image held back until the member
+ * allows its sender paints nothing yet, so what lies under it darkens like any other color.
  */
-export function mailColors(dark: DarkPaper) {
+export function mailColors(dark: DarkPaper, shows: (image: string) => boolean) {
   const read = colorReader(MOST_COLORS);
   const lifted = new Map<string, string | null>();
   // Text is lifted to read on the lightest darkened background, so it reads on any of them.
@@ -231,9 +233,10 @@ export function mailColors(dark: DarkPaper) {
     const set = (name: string, value: string) =>
       style.setProperty(name, value, style.getPropertyPriority(name));
     const ownsInk = !KEEPS.test(style.getPropertyValue('color').trim());
+    const images = style.getPropertyValue('background-image').trim();
     const background = painted(
       style.getPropertyValue('background-color').trim(),
-      !KEEPS.test(style.getPropertyValue('background-image').trim()),
+      !KEEPS.test(images) && shows(images),
       ownsInk,
     );
     if (background === null) return stayLight(unchanged);
@@ -276,7 +279,7 @@ export function mailColors(dark: DarkPaper) {
     return { declarations: [['color', `light-dark(${css}, ${shade})`]], needsInk: false };
   };
 
-  /** An image a legacy `background` attribute paints, which says nothing of what lies on it. */
+  /** An image a legacy `background` attribute shows, which says nothing of what lies on it. */
   const image = () => {
     if (adapting()) keepsLight = true;
   };

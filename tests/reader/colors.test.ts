@@ -54,6 +54,10 @@ const KINDS = {
   unreadable: 'receipt.html',
   /** Paints its desk with a gradient and no color under it. */
   imageOnly: 'receipt.html',
+  /** Paints its desk, in its body's attribute, with an image held back and no color under it. */
+  heldImage: 'receipt.html',
+  /** Paints its desk, in a style sheet, with an image held back over a light color. */
+  heldOverLight: 'receipt.html',
   /** The newsletter, on light paper the member chose for its sender. */
   newsletterOnLight: 'painted-newsletter.html',
   /** Mail with dark styles of its own, on light paper the member chose for its sender. */
@@ -92,6 +96,14 @@ beforeAll(async () => {
     'background:#f5f5f7',
     'background-image:linear-gradient(#ffffff, #eeeeee)',
   );
+  const desk = `${canary.origin}/desk.jpg`;
+  mail.heldImage = mail.painted.replace(
+    'style="background:#f5f5f7;',
+    `background="${desk}" style="`,
+  );
+  mail.heldOverLight = mail.painted
+    .replace('style="background:#f5f5f7;', 'class="desk" style="')
+    .replace('</style>', `.desk { background: #f5f5f7 url(${desk}); }\n</style>`);
   mail.ownDarkMeta = mail.ownDark.replace(/:root \{[^}]*\}/, '');
   mail.ownDarkCss = mail.ownDark
     .replace(/<meta name="(color-scheme|supported-color-schemes)"[^>]*>/g, '')
@@ -271,6 +283,13 @@ for (const type of BROWSERS) {
       }
     });
 
+    test('in the dark theme, an image held back paints nothing, so what lies under it darkens', () => {
+      const held = of('dark', 'heldImage');
+      expect(luminance(held.paper)).toBeLessThan(0.1);
+      expect(held.desk).toEqual(held.paper);
+      expect(of('dark', 'heldOverLight')).toEqual(of('dark', 'painted'));
+    });
+
     test('light paper shows mail in the dark theme with the light theme’s colors', () => {
       const lightPaper = of('dark', 'lightOnly').paper;
       for (const [kind, as] of [
@@ -321,16 +340,11 @@ for (const type of BROWSERS) {
       await page.goto(harness.origin);
       await page.evaluate((html) => window.showConversation('newsletter', html), mail.newsletter);
       const control = page.getByRole('button', { name: 'Light paper' });
-      // The sheet and the frame on it both show the paper, light or dark.
-      const shows = (paper: 'light' | 'dark') =>
-        until(async () =>
-          (await papersOf(page)).every((rgb) => luminance(rgb) > 0.5 === (paper === 'light')),
-        );
       const isPressed = (on: boolean) =>
         until(async () => (await control.getAttribute('aria-pressed')) === String(on));
       await control.waitFor();
       await isPressed(false);
-      await shows('dark');
+      await papersShow(page, 'dark');
 
       for (const on of [true, false]) {
         harness.calls.length = 0;
@@ -340,11 +354,21 @@ for (const type of BROWSERS) {
           { name: 'setLightPaper', args: ['personal', 'news@trailhead.example.com', on] },
         ]);
         await isPressed(on);
-        await shows(on ? 'light' : 'dark');
+        await papersShow(page, on ? 'light' : 'dark');
       }
 
       await page.emulateMedia({ colorScheme: 'light' });
       await control.waitFor({ state: 'detached' });
+      await page.close();
+    });
+
+    test('showing a sender’s images puts an image with no color under it on light paper, in place', async () => {
+      const page = await browser.newPage({ colorScheme: 'dark' });
+      await page.goto(harness.origin);
+      await page.evaluate((html) => window.showConversation('newsletter', html), mail.heldImage);
+      await papersShow(page, 'dark');
+      await page.getByRole('button', { name: 'Show', exact: true }).click();
+      await papersShow(page, 'light');
       await page.close();
     });
 
@@ -484,6 +508,15 @@ async function papersOf(page: Page): Promise<Rgb[]> {
   });
   return drawn.map((color) => seenOf(color).rgb);
 }
+
+/** Waits until the open message's sheet and the frame on it both show light paper, or dark. */
+const papersShow = (page: Page, paper: 'light' | 'dark') =>
+  until(async () => {
+    const papers = await papersOf(page);
+    return (
+      papers.length === 2 && papers.every((rgb) => luminance(rgb) > 0.5 === (paper === 'light'))
+    );
+  });
 
 const white: Rgb = { r: 1, g: 1, b: 1 };
 
