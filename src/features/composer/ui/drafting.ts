@@ -12,6 +12,7 @@ import {
   type Attached,
   type Writing,
 } from '../core/session.ts';
+import { forwardedIn } from '../core/forward.ts';
 
 /** How long after the Mailroom refuses a save a new one is tried. */
 const RETRY_AFTER_MS = 5_000;
@@ -202,14 +203,15 @@ export function startDrafting(
 
   /**
    * Names files as they were when saved, `attachments`, by the parts of the draft `made` that hold
-   * them, so their bytes cross once.
+   * them, so their bytes cross once. A forward's card stays only while the draft holds the forward.
    */
   const rename = async (attachments: readonly Attached[], made: MessageRef) => {
     const body = await queryClient.fetchQuery(bodyQuery(made));
     const fresh = afterSave(attachments, made, body);
     const names = new Map(attachments.map((file, at) => [file, fresh[at]!]));
+    const { forwarding: _forwarding, forwards: _forwards, ...unforwarded } = writing;
     write({
-      ...writing,
+      ...(writing.forwarding && !forwardedIn(body) ? unforwarded : writing),
       attachments: writing.attachments.map((attached) => names.get(attached) ?? attached),
     });
   };

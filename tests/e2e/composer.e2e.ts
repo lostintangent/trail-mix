@@ -6,6 +6,7 @@ import { expectUsable, unusable } from './usable.ts';
 import { chipsIn, goTo, reader } from './helpers.ts';
 import { RESULTS, SIZES, suite } from './suite.ts';
 import { atRest } from '../atRest.ts';
+import { until } from '../until.ts';
 
 /**
  * Writing, end to end: the built app on workerd with a member's demo mail. What the member writes
@@ -28,7 +29,7 @@ const { test } = app;
 const saved = (page: Page) => page.getByRole('status').filter({ hasText: 'Saved to Drafts' });
 
 /** The composer by its name, whether it lies on the page or rises as a phone's sheet. */
-const composerNamed = (page: Page, name: 'Reply' | 'New message') =>
+const composerNamed = (page: Page, name: 'Reply' | 'Forward' | 'New message') =>
   page.locator(`section[aria-label="${name}"]`);
 
 /** The reader's Reply to the newest message: on its own sheet on a desktop, in the island on a phone. */
@@ -109,6 +110,83 @@ test('a reply is saved as it is written, opens again with its words and files, a
   await page.evaluate(() => new Promise(requestAnimationFrame));
   await expect(page.evaluate(() => 'isBack' in window)).resolves.toBe(false);
 }, 60_000);
+
+test('a forward carries the original and its files under the note, opens again with only the note, and folds once sent', async () => {
+  const page = await app.open(SIZE);
+  await page.getByRole('option').filter({ hasText: 'Trip photos' }).first().click();
+  await reader(page).getByRole('heading', { level: 1, name: 'Trip photos' }).waitFor();
+  // By F on a desktop, and from the message's own menu on a phone, which has no keys.
+  if (IS_PHONE) {
+    await reader(page).getByRole('button', { name: 'More for this message' }).last().click();
+    await page.getByRole('menuitem', { name: 'Forward' }).click();
+  } else {
+    await page.keyboard.press('f');
+  }
+  const composer = composerNamed(page, 'Forward');
+  const to = composer.getByRole('combobox', { name: 'To' });
+  await until(() => to.evaluate((field) => field === document.activeElement), 10_000);
+  await expectForward(composer);
+  await page.screenshot({
+    path: join(RESULTS, `composer-forward-${ENGINE.name()}-${IS_PHONE ? 'phone' : 'desktop'}.png`),
+  });
+  await expect(unusable(page)).resolves.toEqual([]);
+  await to.fill('theo@example.com');
+  await composer.getByRole('textbox', { name: 'Message' }).click();
+  await page.keyboard.type('The ridge, at last.');
+  await saved(page).waitFor({ timeout: 10_000 });
+  await leave(page, composer);
+
+  // Its draft joins the original's conversation, and gives back only what the member wrote.
+  await reader(page)
+    .getByRole('button', { name: /^Draft/ })
+    .click({ timeout: 10_000 });
+  await expect(
+    composer.getByRole('textbox', { name: 'Message' }).textContent({ timeout: 10_000 }),
+  ).resolves.toBe('The ridge, at last.');
+  await expectForward(composer);
+  await page.keyboard.press('ControlOrMeta+Enter');
+  await composer.waitFor({ state: 'detached' });
+
+  // Opened, the server's copy shows the note, and folds the original the conversation already
+  // shows.
+  await reader(page)
+    .getByRole('button', { name: /^You The ridge, at last\./ })
+    .click({ timeout: 60_000 });
+  const copy = reader(page).getByRole('article').last();
+  const body = copy.locator('iframe').contentFrame().locator('body');
+  await until(async () => (await body.innerText().catch(() => '')).includes('The ridge'), 10_000);
+  expect(await body.innerText()).not.toContain('Forwarded message');
+  // What went names the message it forwards, and carries its header block and both its pictures.
+  await copy.getByRole('button', { name: 'More for this message' }).click();
+  await page.getByRole('menuitem', { name: 'View source' }).click();
+  const source = page.getByRole('dialog');
+  await source.getByText('Loading the source…').waitFor({ state: 'detached' });
+  const header = (name: string) =>
+    source
+      .locator('dt', { hasText: new RegExp(`^${name}$`, 'i') })
+      .locator('xpath=following-sibling::dd[1]');
+  await expect(header('Subject').textContent()).resolves.toBe('Fwd: Trip photos');
+  await expect(header('X-Forwarded-Message-Id').textContent()).resolves.toMatch(/^<.+>$/);
+  const raw = await source.getByLabel('Raw source').textContent();
+  for (const said of ['---------- Forwarded message ---------', 'lake.png', 'ridge.png']) {
+    expect(raw).toContain(said);
+  }
+}, 120_000);
+
+/**
+ * Checks a forward of Trip photos is to its new Subject and names its original on a card, with the
+ * original's attachment to remove and none of the pictures its HTML shows.
+ */
+async function expectForward(composer: Locator) {
+  await expect(composer.getByRole('textbox', { name: 'Subject' }).inputValue()).resolves.toBe(
+    'Fwd: Trip photos',
+  );
+  const card = composer.getByRole('region', { name: 'Forwarded message' });
+  await expect(card.textContent()).resolves.toContain('Trip photos');
+  const files = await composer.getByRole('list', { name: 'Attachments' }).textContent();
+  expect(files).toContain('lake.png');
+  expect(files).not.toContain('ridge.png');
+}
 
 test('pasted HTML brings no remote image, which never loads, even as the composer closes', async () => {
   const page = await app.open(SIZE);

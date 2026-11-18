@@ -22,16 +22,17 @@ import type { Compose } from './Composer.tsx';
  * with lines in the shape of its fields and what's written, shown only once it is late.
  */
 export function ComposerSkeleton({
-  isNew,
+  compose,
   isSheet,
   onClose,
 }: {
-  /** Whether it stands alone, filling the reader with a Subject, rather than under its parent. */
-  isNew: boolean;
+  /** What the composer on its way writes, which says where it lies and whether it has a Subject. */
+  compose: Compose;
   /** Whether it rises over everything, as on a phone. */
   isSheet: boolean;
   onClose: () => void;
 }) {
+  const isNew = !isDocked(compose);
   const sheet = (
     <section
       aria-label="Message"
@@ -42,7 +43,7 @@ export function ComposerSkeleton({
         <span {...stylex.props(styles.line)}>
           <TextSkeleton width="40%" />
         </span>
-        {isNew && (
+        {(isNew || compose.as === 'forward') && (
           <span {...stylex.props(styles.line)}>
             <TextSkeleton width="55%" index={1} />
           </span>
@@ -72,10 +73,17 @@ export function Over({ children, onClose }: { children: ReactNode; onClose: () =
   );
 }
 
-/** Whether a composer lies under the conversation it answers, rather than filling the reader. */
+/**
+ * Whether a composer lies under the conversation it answers or forwards from, rather than filling
+ * the reader.
+ */
 export function isDocked(compose: Compose): boolean {
   if (compose.as === 'draft') return compose.conversation.some(({ flags }) => !flags.draft);
-  return compose.as === 'reply' || (compose.as === 'resumed' && compose.isDocked);
+  return (
+    compose.as === 'reply' ||
+    compose.as === 'forward' ||
+    (compose.as === 'resumed' && compose.isDocked)
+  );
 }
 
 const FOCUS_WIDTH = `calc(${borderVars['--border-width']} * 2)`;

@@ -9,12 +9,20 @@ import {
   type MessageRef,
 } from '../../mail/core/index.ts';
 import { replyRecipients, replySubject, withSignature } from './draft.ts';
+import {
+  cardOf,
+  forwardedIn,
+  forwardSubject,
+  imagesShownBy,
+  noteOf,
+  type ForwardCard,
+} from './forward.ts';
 
 /**
  * What the composer holds while the member writes, and how it begins and is saved. A message starts
- * as a reply, a new message or a draft opened again. Each save replaces the draft before it, and
- * after one, every file the composer carries is named by the part of the saved draft that holds it,
- * so its bytes cross to the Mailroom once.
+ * as a reply, a forward, a new message or a draft opened again. Each save replaces the draft before
+ * it, and after one, every file the composer carries is named by the part of the saved draft that
+ * holds it, so its bytes cross to the Mailroom once.
  */
 
 /** A file the composer carries: bytes not yet saved, or a part of the draft saved last. */
@@ -41,6 +49,16 @@ export type Writing = {
    * threading from the draft itself.
    */
   answers?: string;
+  /**
+   * The message this one forwards, which the first save writes under the note and which threads
+   * it. Every later save carries the forward on from the draft it replaces.
+   */
+  forwards?: MessageRef;
+  /**
+   * Who sent what this one forwards, when and what about, as its card shows. A save never carries
+   * it.
+   */
+  forwarding?: ForwardCard;
   attachments: Attached[];
 };
 
@@ -80,6 +98,24 @@ export function replyTo(parent: Message, body: Body | undefined, account: Accoun
   } satisfies Writing;
 }
 
+/**
+ * A forward of a message, from the account it reached, to no one yet. The original's files travel
+ * with it, each of which the member may take off, except the images its HTML shows, which go with
+ * what it forwards.
+ */
+export function forwardingOf(original: Message, body: Body, account: Account): Writing {
+  const shown = imagesShownBy(body.html?.trim() ? body.html : '');
+  return {
+    ...newMessage(account),
+    subject: forwardSubject(original.subject),
+    forwards: refOf(original),
+    forwarding: { from: original.from, subject: original.subject, date: original.date },
+    attachments: body.attachments
+      .filter(({ contentId }) => contentId === undefined || !shown.has(contentId))
+      .map(({ id, name, type, size }) => ({ in: refOf(original), id, name, type, size })),
+  };
+}
+
 /** Whom a reply goes to: the parent's Reply-To when its body says, or else its sender. */
 export function recipientsOf(
   parent: Message,
@@ -98,7 +134,8 @@ export function recipientsOf(
 /**
  * A draft opened again: its words exactly as written, which its text part holds, its files as the
  * parts that hold them, and the message it replies to when the conversation still has it, or else
- * the Message-ID it answers.
+ * the Message-ID it answers. A forward opens as its note, with its card, and names the message it
+ * forwards when the conversation has it.
  */
 export function reopened(draft: Message, body: Body, conversation: readonly Message[]): Writing {
   const parentId = header(body, 'In-Reply-To')?.trim();
@@ -106,7 +143,17 @@ export function reopened(draft: Message, body: Body, conversation: readonly Mess
     ? conversation.find((message) => message.messageId === parentId && !message.flags.draft)
     : undefined;
   const bcc = header(body, 'Bcc');
-  const { markdown, signature } = signed(body.text ?? '');
+  const forwarded = forwardedIn(body);
+  // What a forward carries may hold a signature of its own, so it comes off first.
+  const { markdown, signature } = signed(forwarded ? noteOf(body.text ?? '') : (body.text ?? ''));
+  const carried = new Set(forwarded?.images.map(({ contentId }) => contentId));
+  const threading = forwarded
+    ? { forwarding: cardOf(forwarded), ...(parent ? { forwards: refOf(parent) } : {}) }
+    : parent
+      ? { inReplyTo: refOf(parent) }
+      : parentId
+        ? { answers: parentId }
+        : {};
   return {
     account: draft.account,
     to: draft.to,
@@ -115,8 +162,10 @@ export function reopened(draft: Message, body: Body, conversation: readonly Mess
     subject: draft.subject,
     markdown,
     ...(signature ? { signature } : {}),
-    ...(parent ? { inReplyTo: refOf(parent) } : parentId ? { answers: parentId } : {}),
-    attachments: body.attachments.map((part) => ({ ...part, in: refOf(draft) })),
+    ...threading,
+    attachments: body.attachments
+      .filter(({ contentId }) => !carried.has(contentId))
+      .map((part) => ({ ...part, in: refOf(draft) })),
   };
 }
 
@@ -124,7 +173,13 @@ export function reopened(draft: Message, body: Body, conversation: readonly Mess
  * What a save sends of the writing: the Markdown signed, and every file it carries, except an
  * image the member has taken out of the text, which leaves the draft with it.
  */
-export function draftInputOf({ attachments, signature, answers: _answers, ...writing }: Writing) {
+export function draftInputOf({
+  attachments,
+  signature,
+  answers: _answers,
+  forwarding: _forwarding,
+  ...writing
+}: Writing) {
   const shown = (contentId: string | undefined) =>
     contentId === undefined || writing.markdown.includes(`cid:${contentId}`);
   return {

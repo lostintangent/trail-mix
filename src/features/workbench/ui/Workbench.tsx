@@ -413,7 +413,7 @@ export function Workbench({
   const readMark = useReadMark({ selected: opened, markRead });
   // The reader's actions stay the same while the selection moves, so a held key doesn't redraw them.
   const latestTriageShown = useLatest(triageShown);
-  const { replyIn, replyTo } = composing;
+  const { replyIn, replyTo, forwardOne } = composing;
   // The reader's triage controls, where each place shows them, and on a phone Reply beside the
   // island's filing.
   const readerActions = useCallback(
@@ -436,6 +436,7 @@ export function Workbench({
       const [, reply] = composerCommands({
         write: undefined,
         reply: (all) => replyIn(conversation, all),
+        forward: undefined,
       });
       return (
         <>
@@ -463,12 +464,14 @@ export function Workbench({
   const [source, setSource] = useState<Message>();
   const messageActions = useCallback(
     (message: Message) => [
-      ...composerCommands({ write: undefined, reply: (all) => replyTo(message, all) }).filter(
-        ({ id }) => id !== 'message.new',
-      ),
+      ...composerCommands({
+        write: undefined,
+        reply: (all) => replyTo(message, all),
+        forward: () => forwardOne(message),
+      }).filter(({ id }) => id !== 'message.new'),
       sourceCommand(() => setSource(message)),
     ],
-    [replyTo],
+    [replyTo, forwardOne],
   );
 
   const { openedByView, openedByMember } = readMark;
@@ -799,6 +802,7 @@ export function Workbench({
     ...composerCommands({
       write,
       reply: openInView === undefined ? undefined : (all) => void composing.reply(all),
+      forward: openInView === undefined ? undefined : () => void composing.forward(),
     }),
     gitHubCommand(isBehindComposer ? undefined : openRow),
     sourceCommand(
@@ -844,11 +848,7 @@ export function Workbench({
       composer: (
         <Suspense
           fallback={
-            <ComposerSkeleton
-              isNew={!isDocked(compose)}
-              isSheet={isPhone}
-              onClose={closeComposer}
-            />
+            <ComposerSkeleton compose={compose} isSheet={isPhone} onClose={closeComposer} />
           }
         >
           <Composer

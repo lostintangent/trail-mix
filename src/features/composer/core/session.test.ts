@@ -1,9 +1,12 @@
 import { expect, test } from 'bun:test';
 import { addressesIn, type Account, type Body, type Message } from '../../mail/core/index.ts';
+import { forwardOf, withForward } from './forward.ts';
+import { renderMarkdown } from './markdown.ts';
 import {
   addressText,
   afterSave,
   draftInputOf,
+  forwardingOf,
   newMessage,
   reopened,
   replyTo,
@@ -141,6 +144,83 @@ test('a draft whose parent the conversation doesn’t hold names no message, but
   expect(draftInputOf(writing)).not.toContainKey('answers');
   // A draft that answers nothing is no reply.
   expect(reopened(parent, { ...body, headers: [] }, [])).not.toContainKey('answers');
+});
+
+const gear = { name: 'gear.png', type: 'image/png', size: 3, contentId: 'gear@example.com' };
+const plans = { name: 'plans.pdf', type: 'application/pdf', size: 8 };
+const parentRef = { account: 'personal', path: 'INBOX', uidValidity: 1, uid: 7 };
+const card = { from: grace, subject: 'The engine', date: '2026-11-10T09:00:00.000Z' };
+
+test('a forward is to no one yet, says it forwards, and carries the files its original attached', () => {
+  const body: Body = {
+    html: '<p>Shall we?</p><img src="cid:gear@example.com">',
+    attachments: [
+      { id: '1', ...gear },
+      { id: '2', ...plans },
+    ],
+    headers: [],
+  };
+  expect(forwardingOf(parent, body, account)).toEqual({
+    account: 'personal',
+    to: [],
+    cc: [],
+    bcc: [],
+    subject: 'Fwd: The engine',
+    markdown: '',
+    signature: 'Ada',
+    forwards: parentRef,
+    forwarding: card,
+    // The image the original shows goes with what it forwards, never as a file to take off.
+    attachments: [{ in: parentRef, id: '2', ...plans }],
+  });
+  // A save names the original, but its card stays with the composer.
+  const saved = draftInputOf(forwardingOf(parent, body, account));
+  expect(saved.forwards).toEqual(parentRef);
+  expect(saved).not.toContainKey('forwarding');
+});
+
+test('a forward opened again gives back its note and signature alone, with its card and its files', () => {
+  const forwarded = forwardOf({
+    ...parent,
+    html: '<p>Shall we?</p><img src="cid:gear@example.com">',
+    text: 'Shall we?\n\n-- \nGrace',
+    headers: [['Date', 'Tue, 10 Nov 2026 09:00:00 +0000']],
+    attachments: [{ ...gear, content: new Uint8Array(3) }],
+  });
+  const written = 'Have a look.\n\n-- \nAda';
+  const draft: Message = {
+    ...parent,
+    path: 'Drafts',
+    uid: 3,
+    flags: { ...parent.flags, draft: true },
+  };
+  const body: Body = {
+    ...withForward({ text: written, html: renderMarkdown(written, new Set()) }, forwarded),
+    attachments: [
+      { id: '1', ...plans },
+      { id: '2', ...gear },
+    ],
+    headers: [
+      ['In-Reply-To', '<engine@example.com>'],
+      ['X-Forwarded-Message-Id', '<engine@example.com>'],
+    ],
+  };
+
+  const writing = reopened(draft, body, [parent, draft]);
+
+  expect(writing.markdown).toBe('Have a look.');
+  expect(writing.signature).toBe('Ada');
+  expect(writing.forwarding).toEqual(card);
+  // It forwards the message it threads under, and answers nothing.
+  expect(writing.forwards).toEqual(parentRef);
+  expect(writing).not.toContainAnyKeys(['inReplyTo', 'answers']);
+  expect(writing.attachments).toEqual([
+    { in: { ...parentRef, path: 'Drafts', uid: 3 }, id: '1', ...plans },
+  ]);
+  // Without the original, it still holds the forward, which every save carries on.
+  const alone = reopened(draft, body, [draft]);
+  expect(alone.forwarding).toEqual(card);
+  expect(alone).not.toContainAnyKeys(['forwards', 'inReplyTo', 'answers']);
 });
 
 test('after a save, each file is named by the part of the saved draft that holds it', () => {

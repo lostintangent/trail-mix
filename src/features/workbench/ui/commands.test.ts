@@ -53,7 +53,7 @@ function registry(isUnread: boolean): Command[] {
       openSettings: nothing,
       showShortcuts: nothing,
     }),
-    ...composerCommands({ write: nothing, reply: nothing }),
+    ...composerCommands({ write: nothing, reply: nothing, forward: nothing }),
     gitHubCommand(undefined),
     sourceCommand(nothing),
     ...viewCommands(accounts, folders, nothing),

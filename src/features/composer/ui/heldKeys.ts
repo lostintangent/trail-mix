@@ -6,7 +6,8 @@ import { listeners } from '../../../shared/listeners.ts';
  * reply counts as the composer from the moment it begins, so they never reach the conversation
  * behind it as commands. What they type waits for the reply's editor, which takes it as it first
  * places the cursor. Esc still goes back, which closes the reply, and a key in a field of its own,
- * as in search, is that field's, which drops what waited.
+ * as in search, is that field's, which drops what waited. A forward holds them too, and lets what
+ * they typed go, since its cursor starts in To.
  */
 
 /** What the keys held have typed, while a reply is on its way. */

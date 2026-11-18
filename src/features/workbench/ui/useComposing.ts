@@ -62,8 +62,9 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
             ? next.drafting.draft
             : undefined,
       );
-      // A reply holds the keys pressed from the moment it begins until its editor takes them.
-      if (next?.as === 'reply') holdKeys();
+      // A reply or a forward holds the keys pressed from the moment it begins until its composer
+      // takes them, so none acts on the conversation behind it.
+      if (next?.as === 'reply' || next?.as === 'forward') holdKeys();
       else releaseKeys();
     },
     [queryClient, selectedNow],
@@ -108,6 +109,27 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
     },
     [queryClient, selected, replyIn],
   );
+  /** Forwards one message. */
+  const forwardOne = useCallback(
+    (message: Message) => start({ as: 'forward', original: message }),
+    [start],
+  );
+  /**
+   * Forwards the selected conversation's newest message that isn't a draft, once it's at hand, and
+   * holds the keys pressed while it comes, as a reply does.
+   */
+  const forward = useCallback(async () => {
+    if (selected === undefined) return;
+    const query = conversationQuery(selected);
+    let conversation = queryClient.getQueryData(query.queryKey);
+    if (!conversation) {
+      holdKeys();
+      conversation = await queryClient.ensureQueryData(query).catch(() => []);
+    }
+    const original = newestShown(conversation);
+    if (original?.flags.draft === false) forwardOne(original);
+    else releaseKeys();
+  }, [queryClient, selected, forwardOne]);
   const openDraft = useCallback(
     (draft: Message, conversation: Message[]) => start({ as: 'draft', draft, conversation }),
     [start],
@@ -165,6 +187,8 @@ export function useComposing(selected: ConversationId | undefined, leaving: read
     reply,
     replyTo,
     replyIn,
+    forward,
+    forwardOne,
     openDraft,
     resume,
     close,

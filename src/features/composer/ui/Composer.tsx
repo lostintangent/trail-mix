@@ -20,24 +20,33 @@ import { refOf, type Account, type Message, type MessageRef } from '../../mail/c
 import { bodyQuery } from '../../mailroom/client/index.ts';
 import { useReach } from '../../offline/index.ts';
 import { isWritten } from '../core/completion.ts';
-import { newMessage, recipientsOf, reopened, replyTo, type Writing } from '../core/session.ts';
+import {
+  forwardingOf,
+  newMessage,
+  recipientsOf,
+  reopened,
+  replyTo,
+  type Writing,
+} from '../core/session.ts';
 import { Editor, placeImages, type EditorProps } from './Editor.tsx';
 import { Fields } from './Fields.tsx';
 import { Attachments, FilePicker } from './Files.tsx';
+import { Forwarding } from './Forwarding.tsx';
 import { Formatting, LinkField, type LinkRange } from './Formatting.tsx';
-import { ComposerSkeleton, isDocked, Over, sheetStyles } from './sheet.tsx';
+import { ComposerSkeleton, Over, sheetStyles } from './sheet.tsx';
 import { startDrafting, type Drafting, type SaveState, type Showing } from './drafting.ts';
 import { useAutosave } from './useAutosave.ts';
 import { useVisibleBand } from './useVisibleBand.ts';
 import { useWriting, type AddressProblem } from './useWriting.ts';
 
 /**
- * What the member asked to write: a new message, a reply, a draft opened again, or what was being
- * written when Send was pressed, back again after Undo took the send back.
+ * What the member asked to write: a new message, a reply, a forward, a draft opened again, or what
+ * was being written when Send was pressed, back again after Undo took the send back.
  */
 export type Compose =
   | { as: 'new'; account: Account }
   | { as: 'reply'; to: Message; all: boolean }
+  | { as: 'forward'; original: Message }
   | { as: 'draft'; draft: Message; conversation: readonly Message[] }
   | { as: 'resumed'; drafting: Drafting; isDocked: boolean };
 
@@ -73,38 +82,37 @@ type ComposerProps = {
 };
 
 /**
- * Where the member writes a message, on a sheet of its own: under the conversation for a reply, and
- * filling the reader for a new message. A reply starts at once from what the conversation holds,
- * and takes the parent's Reply-To when its body arrives, unless the member has chosen whom it's to
- * by then. A draft opened again starts once its words and files have loaded.
+ * Where the member writes a message, on a sheet of its own: under the conversation for a reply or a
+ * forward, and filling the reader for a new message. A reply starts at once from what the
+ * conversation holds, and takes the parent's Reply-To when its body arrives, unless the member has
+ * chosen whom it's to by then. A forward starts once the original's files are known, and a draft
+ * opened again once its words and files have loaded.
  */
 export function Composer({ compose, ...props }: ComposerProps) {
   // Keyed as the reader keys it, so a parent on screen is already at hand.
   const ref =
     compose.as === 'reply'
       ? refOf(compose.to)
-      : compose.as === 'draft'
-        ? refOf(compose.draft)
-        : undefined;
+      : compose.as === 'forward'
+        ? refOf(compose.original)
+        : compose.as === 'draft'
+          ? refOf(compose.draft)
+          : undefined;
   const { data: body, isError } = useQuery({
     ...bodyQuery(ref ?? NO_REF),
     enabled: ref !== undefined,
   });
   const answering = compose.as === 'reply' ? compose : undefined;
-  const account = answering && props.accounts.find(({ id }) => id === answering.to.account);
+  const from =
+    compose.as === 'reply' ? compose.to : compose.as === 'forward' ? compose.original : undefined;
+  const account = from && props.accounts.find(({ id }) => id === from.account);
   const start = startOf(compose, account, body);
   const recipients = useMemo(
     () => answering && account && body && recipientsOf(answering.to, body, account, answering.all),
     [answering, account, body],
   );
   if (!start && !isError) {
-    return (
-      <ComposerSkeleton
-        isNew={!isDocked(compose)}
-        isSheet={props.isSheet}
-        onClose={props.onClose}
-      />
-    );
+    return <ComposerSkeleton compose={compose} isSheet={props.isSheet} onClose={props.onClose} />;
   }
   if (!start) {
     const failed = (
@@ -146,6 +154,8 @@ function startOf(
       return newMessage(compose.account);
     case 'reply':
       return account && replyTo(compose.to, body, account, compose.all);
+    case 'forward':
+      return account && body && forwardingOf(compose.original, body, account);
     case 'draft':
       return body ? reopened(compose.draft, body, compose.conversation) : undefined;
     case 'resumed':
@@ -211,11 +221,13 @@ function Writer({
   const [linking, setLinking] = useState<LinkRange>();
   const band = useVisibleBand(isSheet);
 
-  // One that answers no message in the index stands alone, filling the reader with its Subject,
-  // though a draft that answers mail the index doesn't hold is a reply all the same.
-  const isNew = !start.inReplyTo;
+  // One that answers or forwards no message in the index stands alone, filling the reader with its
+  // Subject, though a draft that answers mail the index doesn't hold is a reply all the same. A
+  // forward names its own Subject wherever it lies.
+  const isNew = !start.inReplyTo && !start.forwards;
   const isReply = start.inReplyTo !== undefined || start.answers !== undefined;
-  const title = isReply ? 'Reply' : 'New message';
+  const { forwarding } = writing;
+  const title = isReply ? 'Reply' : forwarding ? 'Forward' : 'New message';
   // On a coarse pointer a tap is the only way in, and a tooltip it left would stay.
   const tip = (label: string) => (isCoarse ? undefined : label);
   // Saving is said in a place of its own, the same size whatever it says, so nothing moves for it.
@@ -260,7 +272,7 @@ function Writer({
           account={writing.account}
           fields={message.fields}
           refusal={refusal}
-          subject={isNew ? writing.subject : undefined}
+          subject={isNew || forwarding ? writing.subject : undefined}
           isToFocused={start.to.length === 0}
           isSheet={isSheet}
           onAccount={message.sendFrom}
@@ -281,6 +293,7 @@ function Writer({
             {`-- \n${writing.signature}`}
           </pre>
         )}
+        {forwarding && <Forwarding card={forwarding} />}
         <Attachments attachments={writing.attachments} onRemove={message.remove} />
       </div>
 
