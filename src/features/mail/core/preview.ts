@@ -15,7 +15,7 @@ export function previewFrom({ plain, html }: { plain?: string; html?: string }):
  * text is read as its message shows it, by the words alone.
  */
 export function previewOf(text: string, html: boolean): string {
-  return (html ? textOfHtml(text) : decoded(text))
+  return (html ? textOfHtml(text) : decodedEntities(text))
     .split(/\r\n|\r|\n/)
     .filter((line) => !line.trimStart().startsWith('>') && !DRAWN.test(line))
     .map((line) => {
@@ -118,7 +118,7 @@ const ENTITIES: Record<string, string> = {
 
 /** Text a person would read in HTML, closely enough for a preview. Nothing here is rendered. */
 function textOfHtml(html: string): string {
-  return decoded(
+  return decodedEntities(
     html
       .replace(/<(head|style|script|title)\b[\s\S]*?(<\/\1\s*>|$)/gi, ' ')
       .replace(/<blockquote\b[\s\S]*?(<\/blockquote\s*>|$)/gi, ' ')
@@ -128,7 +128,7 @@ function textOfHtml(html: string): string {
 }
 
 /** Text with HTML's character references written as the characters they stand for. */
-function decoded(text: string): string {
+export function decodedEntities(text: string): string {
   return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entity: string, name: string) => {
     if (name.startsWith('#')) {
       const code = Number(name.slice(1).replace(/^x/i, '0x'));

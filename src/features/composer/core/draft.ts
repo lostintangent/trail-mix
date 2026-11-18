@@ -5,13 +5,15 @@ import {
   type MimeAttachment,
   type MimeMessage,
 } from '../../mail/core/index.ts';
+import { FORWARDED_HEADER, withForward, type Forwarded } from './forward.ts';
 import { contentIdsIn, renderMarkdown } from './markdown.ts';
 
 /**
  * What a member writes, made into mail. The composer saves Markdown, and the message it becomes has
  * that Markdown rendered as its HTML part and, exactly as written, as its plain-text part. A reply
- * carries the headers that thread it in any client. A pasted image travels inline, related to the
- * HTML that shows it, and every other file is attached.
+ * carries the headers that thread it in any client, and so does a forward, which carries what it
+ * forwards under the Markdown. A pasted image travels inline, related to the HTML that shows it,
+ * and every other file is attached.
  */
 
 /**
@@ -26,8 +28,10 @@ export type Composed = {
   bcc: Address[];
   subject: string;
   markdown: string;
-  /** The message this one replies to. */
+  /** The message this one replies to, or forwards. */
   parent?: Pick<Envelope, 'messageId' | 'references'>;
+  /** What this one forwards, under the Markdown. */
+  forwarded?: Forwarded;
   /** A file with a Content-ID is an image the Markdown shows by `cid:`, if it still does. */
   attachments: MimeAttachment[];
 };
@@ -42,8 +46,13 @@ export function messageOf(
   composed: Composed,
   copy: Pick<MimeMessage, 'date' | 'messageId' | 'boundary'>,
 ): MimeMessage {
+  const { forwarded } = composed;
+  // The forward's images are its own, so a file of the member's under one of their Content-IDs,
+  // as a forward opened again would carry, goes with the forward.
+  const forwards = new Set(forwarded?.images.map(({ contentId }) => contentId));
+  const own = composed.attachments.filter(({ contentId }) => !forwards.has(contentId ?? ''));
   const images = new Map<string, MimeAttachment>();
-  for (const file of composed.attachments) {
+  for (const file of own) {
     if (file.contentId === undefined) continue;
     if (images.has(file.contentId)) {
       throw new Error(`Two attachments have the Content-ID ${file.contentId}.`);
@@ -61,6 +70,11 @@ export function messageOf(
   const references = composed.parent
     ? referencesOf(composed.parent.references.join(' '), composed.parent.messageId)
     : [];
+  const note = {
+    text: composed.markdown,
+    html: written ? renderMarkdown(composed.markdown, new Set(images.keys())) : '',
+  };
+  const { text, html } = forwarded ? withForward(note, forwarded) : note;
   return {
     ...copy,
     from: composed.from,
@@ -69,11 +83,15 @@ export function messageOf(
     bcc: composed.bcc,
     subject: composed.subject,
     ...(references.length ? { references } : {}),
-    text: composed.markdown,
-    ...(written ? { html: renderMarkdown(composed.markdown, new Set(images.keys())) } : {}),
-    attachments: composed.attachments.map(({ contentId, ...file }) =>
-      contentId !== undefined && shown.has(contentId) ? { ...file, contentId } : file,
-    ),
+    ...(forwarded?.messageId ? { headers: [[FORWARDED_HEADER, forwarded.messageId]] } : {}),
+    text,
+    ...(html ? { html } : {}),
+    attachments: [
+      ...own.map(({ contentId, ...file }) =>
+        contentId !== undefined && shown.has(contentId) ? { ...file, contentId } : file,
+      ),
+      ...(forwarded?.images ?? []),
+    ],
   };
 }
 

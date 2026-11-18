@@ -56,8 +56,12 @@ const HEADING = 'margin: 0 0 0.5em; font-weight: 600; line-height: 1.25';
 
 const H4 = `${HEADING}; font-size: 1em`;
 
+/** The style of everything the member writes, which wraps it. */
+export const WRITTEN_STYLE =
+  "font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; line-height: 1.5";
+
 const STYLE = {
-  body: "font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif; line-height: 1.5",
+  body: WRITTEN_STYLE,
   p: 'margin: 0 0 1em',
   h1: `${HEADING}; font-size: 1.5em`,
   h2: `${HEADING}; font-size: 1.3em`,
@@ -126,7 +130,7 @@ function renderer(contentIds: ReadonlySet<string>): RendererObject<string, strin
 }
 
 /** The Content-ID a `cid:` URL names. RFC 2392 writes it percent-encoded and without brackets. */
-function cidOf(href: string): string | undefined {
+export function cidOf(href: string): string | undefined {
   if (!/^cid:/i.test(href)) return undefined;
   try {
     return decodeURIComponent(href.slice(4));
@@ -139,6 +143,6 @@ function titleOf(title: string | null | undefined): string {
   return title ? ` title="${escapeHtml(title)}"` : '';
 }
 
-function escapeHtml(text: string): string {
+export function escapeHtml(text: string): string {
   return text.replace(/[&<>"']/g, (char) => `&#${char.charCodeAt(0)};`);
 }
