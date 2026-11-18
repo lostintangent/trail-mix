@@ -6,17 +6,18 @@ import { colorReader, type DarkPaper } from '../core/colors.ts';
 import { sanitizeMail, type SafeMail } from '../core/sanitize.ts';
 
 /**
- * A message's HTML, sanitized once for each choice about its images and kept. A body never
- * changes for its message, so a message opened again, or prepared ahead while the browser was
- * idle, shows at once.
+ * A message's HTML, sanitized once for each choice about its images, and about whether its forward
+ * folds, and kept. A body never changes for its message, so a message opened again, or prepared
+ * ahead while the browser was idle, shows at once.
  */
 export function safeMail(
   message: MessageRef,
   body: Body,
   imagesAllowed: boolean,
+  forward: boolean,
 ): SafeMail | undefined {
   if (body.html === undefined) return undefined;
-  const key = `${refKey(message)}\u0000${imagesAllowed}`;
+  const key = `${refKey(message)}\u0000${imagesAllowed}\u0000${forward}`;
   const kept = sanitized.get(key);
   if (kept) return kept;
   const parts = new Map(
@@ -31,6 +32,7 @@ export function safeMail(
       remote: imagesAllowed ? (url) => absolute(imageUrl(url)) : undefined,
     },
     darkPaper(),
+    forward,
   );
   sanitized.set(key, mail);
   if (sanitized.size > KEPT) sanitized.delete(sanitized.keys().next().value ?? '');

@@ -4,7 +4,6 @@ import { writeMime, type Address, type MimeAttachment } from '../../mail/core/in
 import { contentIdFor, messageOf, type Composed } from './draft.ts';
 import {
   cardOf,
-  FORWARD_MARKER,
   forwardedIn,
   forwardOf,
   forwardSubject,
@@ -12,6 +11,7 @@ import {
   noteOf,
   type ReadMessage,
 } from './forward.ts';
+import { FORWARD_MARKER } from './forwardMarks.ts';
 
 const me: Address = { name: 'Ada Lovelace', email: 'ada@example.com' };
 const grace: Address = { name: 'Grace Hopper', email: 'grace@example.com' };

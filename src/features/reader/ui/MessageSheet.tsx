@@ -33,7 +33,7 @@ import {
   mailroom,
   partUrl,
 } from '../../mailroom/client/index.ts';
-import { foldQuote } from '../core/quotes.ts';
+import { foldQuote, foldsForward } from '../core/quotes.ts';
 import { setLightPaper, useDarkTheme } from './lightPaper.ts';
 import { sheetStyles } from './layout.ts';
 import { MessageFrame } from './MessageFrame.tsx';
@@ -45,13 +45,15 @@ import { Unsubscribe } from './Unsubscribe.tsx';
 
 type MessageSheetProps = {
   message: Message;
+  /** The messages shown with it, which decide whether the member's own forward folds. */
+  conversation: readonly Message[];
   account: Account;
   /** What can be done with this message: a reply, beside its sender, and the rest in a menu. */
   actions?: readonly Command[];
 };
 
 /** One open message, on its own sheet of paper: who sent it, what it says, and what it carries. */
-export function MessageSheet({ message, account, actions = [] }: MessageSheetProps) {
+export function MessageSheet({ message, conversation, account, actions = [] }: MessageSheetProps) {
   const ref = refOf(message);
   const { data: body, isError, refetch } = useQuery(bodyQuery(ref));
   const [showOnce, setShowOnce] = useState(false);
@@ -67,7 +69,11 @@ export function MessageSheet({ message, account, actions = [] }: MessageSheetPro
   const reply = actions.find(({ id }) => id === 'message.reply');
   const more = actions.filter((action) => action !== reply && action.isEnabled !== false);
 
-  const mail = useMemo(() => body && safeMail(message, body, allowed), [message, body, allowed]);
+  const forward = body !== undefined && foldsForward(message, body, conversation, account);
+  const mail = useMemo(
+    () => body && safeMail(message, body, allowed, forward),
+    [message, body, allowed, forward],
+  );
   const onLightPaper = mail?.paper === 'light' || lightPaper;
   const text = useMemo(
     () => (body && !body.html && body.text !== undefined ? foldQuote(body.text) : undefined),

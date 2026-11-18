@@ -18,7 +18,8 @@ import { isTrackingAddress, unseenImages } from './trackers.ts';
  *   every `url()` and image function in CSS, which the browser's own CSS parser normalizes first.
  * - Tracking pixels never load, as `trackers.ts` describes, and are counted.
  * - Links open in a new tab, with no opener and no referrer, and only to http, mail and phone.
- * - A quote that ends the message is marked so the frame can fold it.
+ * - A quote that ends the message is marked so the frame can fold it, and so is the member's own
+ *   forward of a message its conversation holds.
  * - The colors the message sets are rewritten to read on the dark theme's paper as well, and its
  *   styles for a color scheme follow the theme's, as `colors.ts` describes. Text on a light color
  *   kept as sent is marked, or given a rule, to take the light theme's ink in the dark theme.
@@ -55,7 +56,16 @@ export type SafeMail = {
   sources: string[];
 };
 
-export function sanitizeMail(html: string, images: Images, dark: DarkPaper): SafeMail {
+/**
+ * `forward` folds the member's own forward under its note, as `foldsForward` decides from the
+ * conversation, which the sanitizer doesn't see.
+ */
+export function sanitizeMail(
+  html: string,
+  images: Images,
+  dark: DarkPaper,
+  forward = false,
+): SafeMail {
   const purify = DOMPurify(window);
   const mail = {
     blockedImages: false,
@@ -226,7 +236,7 @@ export function sanitizeMail(html: string, images: Images, dark: DarkPaper): Saf
       element.setAttribute(FOLD, '');
       return;
     }
-    const quote = foldingQuote(element);
+    const quote = foldingQuote(element, forward);
     if (!quote) return;
     element.setAttribute(FOLD, '');
     mail.quote = true;

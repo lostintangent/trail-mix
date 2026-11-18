@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { foldQuote, isAttribution, quoteMarker } from './quotes.ts';
+import type { Body, Message } from '../../mail/core/index.ts';
+import { foldQuote, foldsForward, isAttribution, quoteMarker } from './quotes.ts';
 
 const lines = (...rows: string[]) => rows.join('\n');
 
@@ -158,5 +159,59 @@ describe('attributions', () => {
     expect(isAttribution('Here is the plan for Thursday.')).toBe(false);
     expect(isAttribution('From: the desk of Ada')).toBe(false);
     expect(isAttribution(`${'A long paragraph. '.repeat(30)}Then someone wrote:`)).toBe(false);
+  });
+});
+
+describe('the member’s own forward', () => {
+  const account = { address: 'ada@example.com' };
+  const message = (uid: number, messageId: string, email: string): Message => ({
+    account: 'personal',
+    path: 'INBOX',
+    uidValidity: 1,
+    uid,
+    messageId,
+    references: [],
+    from: { email },
+    to: [],
+    cc: [],
+    subject: 'The cabin',
+    date: '2026-11-10T09:00:00.000Z',
+    preview: '',
+    flags: { seen: true, flagged: false, answered: false, draft: false },
+    hasAttachments: false,
+    verified: false,
+    conversation: 'c1',
+  });
+  const original = message(1, '<cabin@example.com>', 'jonas@example.com');
+  const forward = message(2, '<forward@trailmix.invalid>', 'Ada@Example.com');
+  const naming = (id: string): Body => ({
+    attachments: [],
+    headers: [['x-forwarded-message-id', id]],
+  });
+
+  test('folds when the conversation holds the message it forwards', () => {
+    expect(foldsForward(forward, naming('<cabin@example.com>'), [original, forward], account)).toBe(
+      true,
+    );
+  });
+
+  test('stays whole when it forwards anything the conversation doesn’t hold', () => {
+    expect(foldsForward(forward, naming('<cabin@example.com>'), [forward], account)).toBe(false);
+    expect(foldsForward(forward, naming('<other@example.com>'), [original, forward], account)).toBe(
+      false,
+    );
+    expect(
+      foldsForward(forward, { attachments: [], headers: [] }, [original, forward], account),
+    ).toBe(false);
+    // A message never stands in for its own original.
+    const itself = naming('<forward@trailmix.invalid>');
+    expect(foldsForward(forward, itself, [forward], account)).toBe(false);
+  });
+
+  test('anyone else’s forward stays whole', () => {
+    const theirs = { ...forward, from: { email: 'rae@example.com' } };
+    expect(foldsForward(theirs, naming('<cabin@example.com>'), [original, theirs], account)).toBe(
+      false,
+    );
   });
 });

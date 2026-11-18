@@ -1,9 +1,20 @@
+import { FORWARD_CLASS, FORWARDED_HEADER } from '../../composer/index.ts';
+import {
+  listed,
+  messageIdOf,
+  sameRef,
+  type Account,
+  type Body,
+  type Message,
+} from '../../mail/core/index.ts';
 import { FOLD } from './frame.ts';
 
 /**
  * Where a message stops being its writer's own words and starts quoting the conversation it
  * replies to. Only a quote that runs to the end of the message folds: replies written between
  * quoted lines stay as they are, and so does a message that is nothing but a quote or a forward.
+ * The one forward that folds is the member's own, as Trail Mix wrote it, of a message its
+ * conversation holds, since the original is there to read already.
  *
  * Plain text is folded here whole. HTML is folded as the sanitizer walks it, which asks
  * `foldingQuote` about each element it visits.
@@ -51,17 +62,48 @@ function isForward(text: string): boolean {
 }
 
 /**
+ * Whether `message` is the member's own forward of another message in `conversation`, so the
+ * forward under its note folds. Trail Mix names the original in a header no one else's HTML pairs
+ * with its forward's element.
+ */
+export function foldsForward(
+  message: Message,
+  body: Body,
+  conversation: readonly Message[],
+  account: Pick<Account, 'address'>,
+): boolean {
+  if (!listed(message.from.email, [account.address])) return false;
+  const wanted = FORWARDED_HEADER.toLowerCase();
+  const original = messageIdOf(body.headers.find(([name]) => name.toLowerCase() === wanted)?.[1]);
+  return (
+    original !== '' &&
+    conversation.some((each) => each.messageId === original && !sameRef(each, message))
+  );
+}
+
+/**
  * How `element` folds as the quote that ends its message: itself, or, as `rest`, with everything
  * after it, and with the attribution that introduces it. Null when it isn't such a quote, or lies
- * inside one already marked to fold.
+ * inside one already marked to fold. With `forward`, the member's own forward folds as a quote,
+ * header block and all, and only the outermost, since a forward it holds forwards something else.
  */
 export function foldingQuote(
   element: Element,
+  forward = false,
 ): { marker: QuoteMarker; attribution: Element | undefined } | null {
-  const marker = markerOf(element);
-  if (!marker || element.parentElement?.closest(`[${FOLD}]`) || !foldable(element, marker)) {
+  const isOwnForward =
+    forward &&
+    element.classList.contains(FORWARD_CLASS) &&
+    !element.parentElement?.closest(`.${FORWARD_CLASS}`);
+  const marker = isOwnForward ? 'quote' : markerOf(element);
+  if (
+    !marker ||
+    element.parentElement?.closest(`[${FOLD}]`) ||
+    !foldable(element, marker, isOwnForward)
+  ) {
     return null;
   }
+  if (isOwnForward) return { marker, attribution: undefined };
   const before = previousMeaningful(element);
   const attribution = before && isAttribution(before.textContent ?? '') ? before : undefined;
   return { marker, attribution };
@@ -164,8 +206,8 @@ function markerOf(element: Element): QuoteMarker | null {
 }
 
 /** A quote folds when the writer said something before it, and nothing of theirs follows it. */
-function foldable(element: Element, marker: QuoteMarker): boolean {
-  if (isForward(leadingText(element))) return false;
+function foldable(element: Element, marker: QuoteMarker, isOwnForward: boolean): boolean {
+  if (!isOwnForward && isForward(leadingText(element))) return false;
   if (!hasText(element, 'before')) return false;
   return marker === 'rest' || !hasText(element, 'after');
 }

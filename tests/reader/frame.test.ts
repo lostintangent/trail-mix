@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import type { Browser, Page } from 'playwright';
+import { forwardOf, withForward } from '../../src/features/composer/core/forward.ts';
+import { renderMarkdown } from '../../src/features/composer/core/markdown.ts';
 import {
   BROWSERS,
   corpus,
@@ -254,6 +256,59 @@ for (const type of BROWSERS) {
       test('stays on light paper only when it asks to, and otherwise follows the theme', () => {
         const light = real.filter((_, index) => seen.results[index]?.paper === 'light');
         expect(light.map(({ name }) => name)).toEqual(['light-only.html']);
+      });
+    });
+
+    describe('a forward Trail Mix wrote', () => {
+      const note = 'Over to you, Rae.';
+      const original = 'The cabin is booked for Friday.';
+      const red = 'rgb(255, 0, 0)';
+      let page: Page;
+      let results: Result[];
+      beforeAll(async () => {
+        // The original's own style sheet says what it can of the page around it.
+        const html = withForward(
+          { text: note, html: renderMarkdown(note) },
+          forwardOf({
+            from: { name: 'Jonas', email: 'jonas@example.com' },
+            to: [{ email: 'ada@example.com' }],
+            cc: [],
+            subject: 'The cabin',
+            messageId: '<cabin@example.com>',
+            references: [],
+            html: `<html><head><style>html, body, div, p { color: ${red} !important; font-size: 30px }</style></head><body><p>${original}</p></body></html>`,
+            headers: [['Date', 'Mon, 9 Nov 2026 10:00:00 +0000']],
+            attachments: [],
+          }),
+        ).html;
+        page = await browser.newPage({ viewport: { width: 900, height: 900 } });
+        results = await show(page, [
+          { html, images: 'blocked', forward: true },
+          { html, images: 'blocked' },
+        ]);
+      }, 30_000);
+      afterAll(() => page.close());
+
+      const frame = (index: number) => page.frameLocator(`[data-mail="${index}"] iframe`);
+      const colorOf = (index: number, text: string) =>
+        frame(index)
+          .getByText(text)
+          .evaluate((element) => getComputedStyle(element).color);
+
+      test('folds whole under the member’s note when the conversation holds the original', async () => {
+        expect(await frame(0).getByText(note).isVisible()).toBe(true);
+        expect(await frame(0).getByText('Forwarded message').isVisible()).toBe(false);
+        expect(await frame(0).getByText(original).isVisible()).toBe(false);
+        expect(results[0]?.quote).toBe(true);
+      });
+
+      test('shows whole otherwise, and the original’s styles reach nothing but the original', async () => {
+        expect(await frame(1).getByText('Forwarded message').isVisible()).toBe(true);
+        expect(await frame(1).getByText(original).isVisible()).toBe(true);
+        expect(results[1]?.quote).toBe(false);
+        expect(await colorOf(1, original)).toBe(red);
+        expect(await colorOf(1, note)).not.toBe(red);
+        expect(await colorOf(1, 'Forwarded message')).not.toBe(red);
       });
     });
 

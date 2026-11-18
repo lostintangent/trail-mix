@@ -5,7 +5,8 @@ import {
   type MimeAttachment,
   type MimeMessage,
 } from '../../mail/core/index.ts';
-import { FORWARDED_HEADER, withForward, type Forwarded } from './forward.ts';
+import { withForward, type Forwarded } from './forward.ts';
+import { FORWARDED_HEADER } from './forwardMarks.ts';
 import { contentIdsIn, renderMarkdown } from './markdown.ts';
 
 /**

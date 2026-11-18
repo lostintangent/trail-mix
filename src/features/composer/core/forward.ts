@@ -5,6 +5,7 @@ import {
   type Envelope,
   type MimeAttachment,
 } from '../../mail/core/index.ts';
+import { FORWARD_CLASS, FORWARD_MARKER, FORWARDED_HEADER } from './forwardMarks.ts';
 import { escapeHtml, WRITTEN_STYLE } from './markdown.ts';
 import { nestedHtml } from './nesting.ts';
 
@@ -45,15 +46,6 @@ export type ForwardCard = Pick<Envelope, 'from' | 'subject'> & {
   /** ISO 8601, when the original's Date header could be read. */
   date?: string;
 };
-
-/** The line that starts a forward, as Gmail writes it and every client knows it. */
-export const FORWARD_MARKER = '---------- Forwarded message ---------';
-
-/** The header that names the message a forward carries, as Thunderbird writes it. */
-export const FORWARDED_HEADER = 'X-Forwarded-Message-Id';
-
-/** The class of the element that holds a forward under its note, header block and original. */
-export const FORWARD_CLASS = 'trailmix-forward';
 
 /** The class of the element that holds the original, to which its style sheets are scoped. */
 const ORIGINAL_CLASS = 'trailmix-forwarded';

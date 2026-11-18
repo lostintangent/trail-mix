@@ -32,6 +32,7 @@ import {
   type Leaving,
 } from '../../outbox/index.ts';
 import { folderOf, receivedIn } from '../core/folder.ts';
+import { foldsForward } from '../core/quotes.ts';
 import { REST_MS } from '../core/rest.ts';
 import { bareSubject } from '../core/subject.ts';
 import { threadStyles } from './layout.ts';
@@ -138,7 +139,7 @@ const Conversation = memo(function Conversation({
   // once. Its open messages, with their frames, follow in a render of their own that yields to the
   // next keys, and not at all while a held key passes the conversation by.
   const isSheetsShown = useDeferredValue(!isPassing, false);
-  const fetchAhead = useFetchAhead(account);
+  const fetchAhead = useFetchAhead(account, messages);
   if (!newest) return null;
   const folder = folderOf(messages, folders);
   const github = threadOf(receivedIn(messages, folders));
@@ -186,6 +187,7 @@ const Conversation = memo(function Conversation({
             <MessageSheet
               key={refKey(message)}
               message={message}
+              conversation={messages}
               account={account}
               actions={actionsOf(message)}
             />
@@ -300,7 +302,12 @@ async function prepareConversation(
   await idle();
   // Sanitizing a large body is one long task, so it never starts once the member has moved on.
   if (isCancelled()) return;
-  safeMail(newest, body, listed(newest.from.email, account?.allowImagesFrom ?? []));
+  safeMail(
+    newest,
+    body,
+    listed(newest.from.email, account?.allowImagesFrom ?? []),
+    account !== undefined && foldsForward(newest, body, messages, account),
+  );
 }
 
 /**
@@ -309,7 +316,7 @@ async function prepareConversation(
  * pointer that only passes over the line, as when the conversation scrolls under it, asks for
  * nothing.
  */
-function useFetchAhead(account: Account) {
+function useFetchAhead(account: Account, conversation: readonly Message[]) {
   const queryClient = useQueryClient();
   const resting = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => () => clearTimeout(resting.current), []);
@@ -320,7 +327,12 @@ function useFetchAhead(account: Account) {
         .fetchQuery(bodyQuery(refOf(message)))
         .then(async (body) => {
           await idle();
-          safeMail(message, body, listed(message.from.email, account.allowImagesFrom));
+          safeMail(
+            message,
+            body,
+            listed(message.from.email, account.allowImagesFrom),
+            foldsForward(message, body, conversation, account),
+          );
         })
         .catch(() => {});
     };

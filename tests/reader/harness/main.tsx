@@ -33,6 +33,8 @@ export type Shown = {
    */
   walls?: 'both' | 'frame' | 'sanitizer';
   quotes?: 'folded' | 'shown';
+  /** Whether the forward under the member's own note folds. */
+  forward?: boolean;
   /** Whether the member chose light paper for the sender. */
   lightPaper?: boolean;
 };
@@ -172,7 +174,7 @@ function Pane({ fixture, upcoming }: { fixture: Fixture; upcoming?: Conversation
   );
 }
 
-function sanitize({ html, images, parts = {} }: Shown): SafeMail {
+function sanitize({ html, images, parts = {}, forward }: Shown): SafeMail {
   window.sanitized++;
   return sanitizeMail(
     html,
@@ -185,6 +187,7 @@ function sanitize({ html, images, parts = {} }: Shown): SafeMail {
           : undefined,
     },
     darkPaper(),
+    forward,
   );
 }
 
