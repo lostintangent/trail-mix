@@ -32,6 +32,15 @@ const saved = (page: Page) => page.getByRole('status').filter({ hasText: 'Saved 
 const composerNamed = (page: Page, name: 'Reply' | 'Forward' | 'New message') =>
   page.locator(`section[aria-label="${name}"]`);
 
+/** What a field says of itself beyond its name and value, as a screen reader hears it. */
+const describedAs = (field: Locator) =>
+  field.evaluate((element) =>
+    (element.getAttribute('aria-describedby') ?? '')
+      .split(' ')
+      .map((id) => document.getElementById(id)?.textContent ?? '')
+      .join(' '),
+  );
+
 /** The reader's Reply to the newest message: on its own sheet on a desktop, in the island on a phone. */
 const replyButton = (page: Page) =>
   reader(page).getByRole('button', { name: 'Reply', exact: true }).filter({ visible: true }).last();
@@ -421,6 +430,7 @@ test('To holds each address as a chip, which Backspace or its button removes, an
     'sam@trailmix.test',
   ]);
   await expect(to.inputValue()).resolves.toBe('');
+  await expect(describedAs(to)).resolves.toBe('3 addresses');
 
   // Backspace at the field's start selects the last chip, and again removes it.
   await page.keyboard.press('Backspace');
@@ -439,11 +449,25 @@ test('To holds each address as a chip, which Backspace or its button removes, an
     'Rae Chen, rae@example.com',
     'the ridge crew, Not an address',
   ]);
+  await expect(describedAs(to)).resolves.toBe('1 address, 1 not an address');
   await composer.getByRole('textbox', { name: 'Message' }).click();
   await page.keyboard.type('Bring the map.');
+  // The refusal reads whole under its field, on the narrowest phone too.
+  if (IS_PHONE) await page.setViewportSize({ width: 320, height: 640 });
   await page.keyboard.press('ControlOrMeta+Enter');
-  await composer.getByText('“the ridge crew” isn’t an address').waitFor();
+  const refusal = composer.getByText('“the ridge crew” isn’t an address');
+  await refusal.waitFor();
+  await expect(
+    refusal.evaluate(
+      (line) =>
+        line.scrollWidth <= line.clientWidth &&
+        line.getBoundingClientRect().right <= document.documentElement.clientWidth,
+    ),
+  ).resolves.toBe(true);
   await expect(to.evaluate((field) => field === document.activeElement)).resolves.toBe(true);
+  await expect(describedAs(to)).resolves.toBe(
+    '“the ridge crew” isn’t an address 1 address, 1 not an address',
+  );
   for (const colorScheme of ['light', 'dark'] as const) {
     await page.emulateMedia({ colorScheme });
     await expectUsable(
@@ -453,7 +477,8 @@ test('To holds each address as a chip, which Backspace or its button removes, an
   }
   await page.keyboard.press('Backspace');
   await expect(chips()).resolves.toEqual(['Rae Chen, rae@example.com']);
-  await composer.getByText('“the ridge crew” isn’t an address').waitFor({ state: 'detached' });
+  await refusal.waitFor({ state: 'detached' });
+  await expect(describedAs(to)).resolves.toBe('1 address');
 
   // Sent and undone, the message comes back to the same chips.
   await page.keyboard.press('ControlOrMeta+Enter');

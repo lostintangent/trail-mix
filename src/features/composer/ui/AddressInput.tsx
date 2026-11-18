@@ -57,6 +57,7 @@ export function AddressInput({
   onChange,
   isFocused,
   refused,
+  problem,
 }: {
   id: string;
   label: string;
@@ -64,7 +65,9 @@ export function AddressInput({
   onChange: (field: AddressField) => void;
   isFocused: boolean;
   /** Where the chip Send refused lies, to select, given anew with each refusal. */
-  refused: { at: number } | undefined;
+  refused: { at: number; text: string } | undefined;
+  /** The text Send refuses, said under the chips while the refusal stands. */
+  problem: string | undefined;
 }): ReactNode {
   const [hasFocus, setFocus] = useState(false);
   const [selection, select] = useState<number>();
@@ -118,11 +121,12 @@ export function AddressInput({
     select(place);
     if (chip) say(`${spoken(chip)}, selected`);
   };
-  // Send selects the chip it refused, for the member to fix or remove, and says why itself.
+  // Send selects the chip it refused, for the member to fix or remove, and says why under the chips.
   useEffect(() => {
     if (!refused) return;
     input.current?.focus();
     select(refused.at);
+    say(refusalOf(refused.text));
   }, [refused]);
 
   // The list lies in a layer of its own, which no pane's overflow clips and the phone's keyboard
@@ -148,6 +152,8 @@ export function AddressInput({
   }, [isOpen, isShown, show, hide]);
   const listId = useId();
   const optionId = (place: number) => `${listId}-${place}`;
+  const countId = `${listId}-count`;
+  const problemId = `${listId}-problem`;
   // The highlight stays in sight where the keyboard leaves the list too little room for all.
   useLayoutEffect(() => {
     if (isOpen) document.getElementById(`${listId}-${at}`)?.scrollIntoView({ block: 'nearest' });
@@ -171,133 +177,147 @@ export function AddressInput({
   };
 
   return (
-    // The chips and the input flow together, as Astryx's Tokenizer lays out its tokens, so what's
-    // typed follows the last chip. A press between them lands in the input, as on a field's box.
-    <div
-      role="group"
-      aria-label={label}
-      onMouseDown={(event) => {
-        if (event.target !== event.currentTarget) return;
-        event.preventDefault();
-        input.current?.focus();
-      }}
-      {...stylex.props(styles.box)}
-    >
-      {field.chips.map((chip, place) => (
-        <AddressChip
-          key={'address' in chip ? chip.address.email.toLowerCase() : `${place}:${chip.text}`}
-          chip={chip}
-          isSelected={place === selected}
-          onSelect={() => {
-            input.current?.focus();
-            choose(place);
+    <div {...stylex.props(styles.field)}>
+      {/* The chips and the input flow together, as Astryx's Tokenizer lays out its tokens, so
+          what's typed follows the last chip. A press between them lands in the input, as on a
+          field's box. */}
+      <div
+        role="group"
+        aria-label={label}
+        onMouseDown={(event) => {
+          if (event.target !== event.currentTarget) return;
+          event.preventDefault();
+          input.current?.focus();
+        }}
+        {...stylex.props(styles.box)}
+      >
+        {field.chips.map((chip, place) => (
+          <AddressChip
+            key={'address' in chip ? chip.address.email.toLowerCase() : `${place}:${chip.text}`}
+            chip={chip}
+            isSelected={place === selected}
+            onSelect={() => {
+              input.current?.focus();
+              choose(place);
+            }}
+            onEdit={() => edit(place)}
+            onRemove={() => remove(place)}
+          />
+        ))}
+        <input
+          ref={ref}
+          id={id}
+          role="combobox"
+          aria-autocomplete="list"
+          aria-expanded={isOpen}
+          aria-controls={isOpen ? listId : undefined}
+          aria-activedescendant={isOpen ? optionId(at) : undefined}
+          // The field says how many it holds, and why Send refused it.
+          aria-describedby={problem ? `${problemId} ${countId}` : countId}
+          aria-invalid={problem ? true : undefined}
+          value={field.typing}
+          onChange={(event) => change(typed(field, event.target.value))}
+          onPaste={(event) => {
+            const { value, selectionStart, selectionEnd } = event.currentTarget;
+            const text = event.clipboardData.getData('text/plain');
+            const typing =
+              value.slice(0, selectionStart ?? value.length) +
+              text +
+              value.slice(selectionEnd ?? value.length);
+            // A paste of several addresses makes a chip of each, and any other pastes as it would.
+            const next = pasted(field, typing);
+            if (!next) return;
+            event.preventDefault();
+            change(next);
           }}
-          onEdit={() => edit(place)}
-          onRemove={() => remove(place)}
+          onFocus={() => setFocus(true)}
+          onBlur={(event) => {
+            setFocus(false);
+            select(undefined);
+            // What's typed becomes a chip as the member leaves the field, though not as the window
+            // loses the focus, which leaves it where it was.
+            if (field.typing.trim() !== '' && document.activeElement !== event.currentTarget) {
+              change(committed(field));
+            }
+          }}
+          onKeyDown={(event) => {
+            if (event.nativeEvent.isComposing) return;
+            if (selected !== undefined) return onChipKey(event, selected);
+            const person = people[at];
+            const isPlain = !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
+            const { selectionStart, selectionEnd } = event.currentTarget;
+            if (isOpen && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
+              const step = event.key === 'ArrowDown' ? 1 : people.length - 1;
+              setHighlight({ query, at: (at + step) % people.length });
+            } else if (
+              isOpen &&
+              person &&
+              ((event.key === 'Enter' && !event.metaKey && !event.ctrlKey) ||
+                (event.key === 'Tab' && !event.shiftKey))
+            ) {
+              pick(person);
+            } else if (isOpen && event.key === 'Escape') {
+              // The list closes first, before Escape closes the composer.
+              setClosedFor(query);
+            } else if (event.key === 'Enter' && isPlain && field.typing.trim() !== '') {
+              change(committed(field));
+            } else if (
+              (event.key === 'Backspace' || event.key === 'ArrowLeft') &&
+              isPlain &&
+              selectionStart === 0 &&
+              selectionEnd === 0 &&
+              field.chips.length > 0
+            ) {
+              choose(field.chips.length - 1);
+            } else {
+              return;
+            }
+            event.preventDefault();
+          }}
+          autoComplete="off"
+          autoFocus={isFocused}
+          spellCheck={false}
+          {...stylex.props(fieldStyles.input, styles.input)}
         />
-      ))}
-      <input
-        ref={ref}
-        id={id}
-        role="combobox"
-        aria-autocomplete="list"
-        aria-expanded={isOpen}
-        aria-controls={isOpen ? listId : undefined}
-        aria-activedescendant={isOpen ? optionId(at) : undefined}
-        value={field.typing}
-        onChange={(event) => change(typed(field, event.target.value))}
-        onPaste={(event) => {
-          const { value, selectionStart, selectionEnd } = event.currentTarget;
-          const text = event.clipboardData.getData('text/plain');
-          const typing =
-            value.slice(0, selectionStart ?? value.length) +
-            text +
-            value.slice(selectionEnd ?? value.length);
-          // A paste of several addresses makes a chip of each, and any other pastes as it would.
-          const next = pasted(field, typing);
-          if (!next) return;
-          event.preventDefault();
-          change(next);
-        }}
-        onFocus={() => setFocus(true)}
-        onBlur={(event) => {
-          setFocus(false);
-          select(undefined);
-          // What's typed becomes a chip as the member leaves the field, though not as the window
-          // loses the focus, which leaves it where it was.
-          if (field.typing.trim() !== '' && document.activeElement !== event.currentTarget) {
-            change(committed(field));
-          }
-        }}
-        onKeyDown={(event) => {
-          if (event.nativeEvent.isComposing) return;
-          if (selected !== undefined) return onChipKey(event, selected);
-          const person = people[at];
-          const isPlain = !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey;
-          const { selectionStart, selectionEnd } = event.currentTarget;
-          if (isOpen && (event.key === 'ArrowDown' || event.key === 'ArrowUp')) {
-            const step = event.key === 'ArrowDown' ? 1 : people.length - 1;
-            setHighlight({ query, at: (at + step) % people.length });
-          } else if (
-            isOpen &&
-            person &&
-            ((event.key === 'Enter' && !event.metaKey && !event.ctrlKey) ||
-              (event.key === 'Tab' && !event.shiftKey))
-          ) {
-            pick(person);
-          } else if (isOpen && event.key === 'Escape') {
-            // The list closes first, before Escape closes the composer.
-            setClosedFor(query);
-          } else if (event.key === 'Enter' && isPlain && field.typing.trim() !== '') {
-            change(committed(field));
-          } else if (
-            (event.key === 'Backspace' || event.key === 'ArrowLeft') &&
-            isPlain &&
-            selectionStart === 0 &&
-            selectionEnd === 0 &&
-            field.chips.length > 0
-          ) {
-            choose(field.chips.length - 1);
-          } else {
-            return;
-          }
-          event.preventDefault();
-        }}
-        autoComplete="off"
-        autoFocus={isFocused}
-        spellCheck={false}
-        {...stylex.props(fieldStyles.input, styles.input)}
-      />
-      <VisuallyHidden role="status">{said}</VisuallyHidden>
-      {people.length > 0 &&
-        layer.render(
-          <ul role="listbox" id={listId} aria-label="People" {...stylex.props(styles.list)}>
-            {people.map((person, place) => (
-              <li
-                key={person.email}
-                id={optionId(place)}
-                role="option"
-                aria-selected={place === at}
-                // The field keeps the focus, so typing goes on while the pointer picks.
-                onMouseDown={(event) => event.preventDefault()}
-                onMouseMove={() => {
-                  if (place !== at) setHighlight({ query, at: place });
-                }}
-                onClick={() => pick(person)}
-                {...stylex.props(styles.person, place === at && styles.highlighted)}
-              >
-                <span {...stylex.props(styles.name)}>{person.name || person.email}</span>
-                {person.name && <span {...stylex.props(styles.address)}>{person.email}</span>}
-              </li>
-            ))}
-          </ul>,
-          {
-            placement: 'below',
-            alignment: 'start',
-            offset: spacingVars['--spacing-1'],
-            xstyle: styles.layer,
-          },
-        )}
+        <VisuallyHidden role="status">{said}</VisuallyHidden>
+        {people.length > 0 &&
+          layer.render(
+            <ul role="listbox" id={listId} aria-label="People" {...stylex.props(styles.list)}>
+              {people.map((person, place) => (
+                <li
+                  key={person.email}
+                  id={optionId(place)}
+                  role="option"
+                  aria-selected={place === at}
+                  // The field keeps the focus, so typing goes on while the pointer picks.
+                  onMouseDown={(event) => event.preventDefault()}
+                  onMouseMove={() => {
+                    if (place !== at) setHighlight({ query, at: place });
+                  }}
+                  onClick={() => pick(person)}
+                  {...stylex.props(styles.person, place === at && styles.highlighted)}
+                >
+                  <span {...stylex.props(styles.name)}>{person.name || person.email}</span>
+                  {person.name && <span {...stylex.props(styles.address)}>{person.email}</span>}
+                </li>
+              ))}
+            </ul>,
+            {
+              placement: 'below',
+              alignment: 'start',
+              offset: spacingVars['--spacing-1'],
+              xstyle: styles.layer,
+            },
+          )}
+      </div>
+      {problem && (
+        <p id={problemId} {...stylex.props(styles.problem)}>
+          {refusalOf(problem)}
+        </p>
+      )}
+      <span id={countId} hidden>
+        {countOf(field.chips)}
+      </span>
     </div>
   );
 }
@@ -373,15 +393,36 @@ const spoken = (chip: Chip) =>
     ? [chip.address.name, chip.address.email].filter(Boolean).join(', ')
     : `${chip.text}, not an address`;
 
+/** Why Send refused text in the field. */
+const refusalOf = (text: string) => `“${text}” isn’t an address`;
+
+/** How many addresses a field holds, and how many chips name none, as a screen reader hears it. */
+function countOf(chips: readonly Chip[]): string {
+  const none = chips.filter((chip) => !('address' in chip)).length;
+  const some = chips.length - none;
+  return [
+    some > 0 && `${some} ${some === 1 ? 'address' : 'addresses'}`,
+    none > 0 && `${none} ${none === 1 ? 'not an address' : 'not addresses'}`,
+  ]
+    .filter(Boolean)
+    .join(', ');
+}
+
 const isRemove = (target: EventTarget) =>
   target instanceof Element && target.closest('[data-remove]') !== null;
 
 const MODIFIERS = new Set(['Shift', 'Control', 'Alt', 'Meta', 'CapsLock']);
 
 const styles = stylex.create({
+  // The chips, and under them why Send refused one, beside the field's name.
+  field: {
+    flexGrow: 1,
+    minWidth: 0,
+    display: 'flex',
+    flexDirection: 'column',
+  },
   // The chips and the input wrap in the line beside the field's name.
   box: {
-    flexGrow: 1,
     minWidth: 0,
     display: 'flex',
     flexWrap: 'wrap',
@@ -400,6 +441,15 @@ const styles = stylex.create({
   // Room for a short address after the chips, or a line of its own.
   input: {
     flexBasis: '8em',
+  },
+  // Wrapping as it needs to, so a narrow phone shows all of it.
+  problem: {
+    margin: 0,
+    paddingBlockEnd: spacingVars['--spacing-1'],
+    color: colorVars['--color-text-red'],
+    fontSize: typeScaleVars['--text-supporting-size'],
+    lineHeight: typeScaleVars['--text-supporting-leading'],
+    overflowWrap: 'anywhere',
   },
   // Astryx's Token at its middle size, on the neutral plate. The remove button's target reaches
   // past the chip under a finger.

@@ -27,6 +27,7 @@ export function Fields({
   account,
   fields,
   refusal,
+  problem,
   subject,
   isToFocused,
   isSheet,
@@ -39,6 +40,8 @@ export function Fields({
   fields: AddressFields;
   /** The chip Send last refused, which its field selects. */
   refusal: AddressProblem | undefined;
+  /** What Send refuses while a refusal stands, which its field says under its chips. */
+  problem: AddressProblem | undefined;
   /** A new message's Subject. A reply shows none, since it takes its parent's. */
   subject: string | undefined;
   /** Whether To takes the focus as the composer opens, as it does while it names nobody. */
@@ -72,6 +75,7 @@ export function Fields({
         onChange={(field) => onAddress(name, field)}
         isFocused={isFocused}
         refused={refusal?.field === name ? refusal : undefined}
+        problem={problem?.field === name ? problem.text : undefined}
       />,
     );
   return (

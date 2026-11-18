@@ -198,7 +198,7 @@ function Writer({
   // press before it closes does nothing.
   const isSent = useRef(false);
   // Send is offered once anything is written to send to, and refuses text that names no address,
-  // saying which, until it's fixed or removed.
+  // saying which under its field, until it's fixed or removed.
   const canSend = Object.values(message.fields).some(isWritten);
   const [refusal, setRefusal] = useState<AddressProblem>();
   if (refusal && !message.problem) setRefusal(undefined);
@@ -237,12 +237,9 @@ function Writer({
       {...stylex.props(
         styles.status,
         isSheet ? [styles.centered, styles.sheetStatus] : styles.grow,
-        refusal && styles.refused,
       )}
     >
-      {refusal && message.problem
-        ? `“${message.problem.text}” isn’t an address`
-        : (isOffline ? OFFLINE : SAVED[saveState]) || '\u00a0'}
+      {(isOffline ? OFFLINE : SAVED[saveState]) || '\u00a0'}
     </span>
   );
   const writer = (
@@ -272,6 +269,7 @@ function Writer({
           account={writing.account}
           fields={message.fields}
           refusal={refusal}
+          problem={refusal && message.problem}
           subject={isNew || forwarding ? writing.subject : undefined}
           isToFocused={start.to.length === 0}
           isSheet={isSheet}
@@ -428,9 +426,6 @@ const styles = stylex.create({
     textOverflow: 'ellipsis',
     color: tm.textQuiet,
     fontSize: typeScaleVars['--text-supporting-size'],
-  },
-  refused: {
-    color: colorVars['--color-text-red'],
   },
   // A line of its own under the sheet's title, as wide whatever it says.
   centered: {
