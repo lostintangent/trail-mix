@@ -115,6 +115,13 @@ export function suite({
     // A round trip to each page lets the classes it last reported arrive.
     const pages = opened.flatMap((context) => context.pages());
     await Promise.all(pages.map((page) => page.evaluate(() => 0).catch(() => {})));
+    // A route still handling a request the page made as the test ended, such as a slowed body,
+    // would throw once its context closes, failing whichever test runs next.
+    const unrouted = { behavior: 'ignoreErrors' } as const;
+    await Promise.all([
+      ...pages.map((page) => page.unrouteAll(unrouted).catch(() => {})),
+      ...opened.map((context) => context.unrouteAll(unrouted).catch(() => {})),
+    ]);
     // The contexts of a browser that a timed-out test took down can't be closed, and needn't be.
     await Promise.all(opened.splice(0).map((context) => context.close().catch(() => {})));
     const unstyled = [...landed].filter((name) => pruned?.has(name));
