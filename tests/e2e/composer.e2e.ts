@@ -41,6 +41,17 @@ const describedAs = (field: Locator) =>
       .join(' '),
   );
 
+/** Whether everything in a part of the page reads whole: nothing cut off, nor past the window. */
+const readsWhole = (part: Locator) =>
+  part.evaluate((root) =>
+    [root, ...root.querySelectorAll('*')].every(
+      (element) =>
+        !(element instanceof HTMLElement) ||
+        (element.scrollWidth <= element.clientWidth &&
+          element.getBoundingClientRect().right <= document.documentElement.clientWidth),
+    ),
+  );
+
 /** The reader's Reply to the newest message: on its own sheet on a desktop, in the island on a phone. */
 const replyButton = (page: Page) =>
   reader(page).getByRole('button', { name: 'Reply', exact: true }).filter({ visible: true }).last();
@@ -452,18 +463,13 @@ test('To holds each address as a chip, which Backspace or its button removes, an
   await expect(describedAs(to)).resolves.toBe('1 address, 1 not an address');
   await composer.getByRole('textbox', { name: 'Message' }).click();
   await page.keyboard.type('Bring the map.');
-  // The refusal reads whole under its field, on the narrowest phone too.
+  // The refusal reads whole under its field, as does the sheet's header, on the narrowest phone too.
   if (IS_PHONE) await page.setViewportSize({ width: 320, height: 640 });
   await page.keyboard.press('ControlOrMeta+Enter');
-  const refusal = composer.getByText('“the ridge crew” isn’t an address');
+  const refusal = composer.locator('p', { hasText: '“the ridge crew” isn’t an address' });
   await refusal.waitFor();
-  await expect(
-    refusal.evaluate(
-      (line) =>
-        line.scrollWidth <= line.clientWidth &&
-        line.getBoundingClientRect().right <= document.documentElement.clientWidth,
-    ),
-  ).resolves.toBe(true);
+  await expect(readsWhole(refusal)).resolves.toBe(true);
+  if (IS_PHONE) await expect(readsWhole(composer.locator('header'))).resolves.toBe(true);
   await expect(to.evaluate((field) => field === document.activeElement)).resolves.toBe(true);
   await expect(describedAs(to)).resolves.toBe(
     '“the ridge crew” isn’t an address 1 address, 1 not an address',
@@ -480,6 +486,16 @@ test('To holds each address as a chip, which Backspace or its button removes, an
   await refusal.waitFor({ state: 'detached' });
   await expect(describedAs(to)).resolves.toBe('1 address');
 
+  // The field stays beside the last chip while a few characters fit there, on a phone too, where
+  // a long address leaves little of its line.
+  await page.keyboard.type('sam@trailmix.test,');
+  const middleOf = (part: Locator) =>
+    part.evaluate((element) => {
+      const { top, bottom } = element.getBoundingClientRect();
+      return Math.round((top + bottom) / 2);
+    });
+  await expect(middleOf(to)).resolves.toBe(await middleOf(composer.locator('[data-chip]').last()));
+
   // Sent and undone, the message comes back to the same chips.
   await page.keyboard.press('ControlOrMeta+Enter');
   await composer.waitFor({ state: 'detached' });
@@ -488,7 +504,7 @@ test('To holds each address as a chip, which Backspace or its button removes, an
     .getByRole('button', { name: 'Undo' })
     .click();
   await composer.getByRole('textbox', { name: 'Message' }).waitFor({ timeout: 10_000 });
-  await expect(chips()).resolves.toEqual(['Rae Chen, rae@example.com']);
+  await expect(chips()).resolves.toEqual(['Rae Chen, rae@example.com', 'sam@trailmix.test']);
 }, 60_000);
 
 test('Link turns the selected words into a link, adding https to an address typed without it', async () => {

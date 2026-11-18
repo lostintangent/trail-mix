@@ -33,6 +33,7 @@ import {
   picked,
   queryOf,
   removed,
+  stillNamed,
   typed,
   type AddressField,
   type Chip,
@@ -81,9 +82,12 @@ export function AddressInput({
   const { data: found = [] } = useQuery({
     ...peopleQuery(query),
     enabled: isAsking,
-    // While more is typed of the same address, its last list stays until the next arrives.
+    // While more is typed of the same address, those of its last list it still names stay until
+    // the next arrives.
     placeholderData: (previous, last) =>
-      last && query.startsWith(last.queryKey[1]) ? previous : undefined,
+      previous && last && query.startsWith(last.queryKey[1])
+        ? stillNamed(previous, query)
+        : undefined,
   });
   const people = isAsking ? completionsFor(field, found) : [];
   // Escape closes the list for what has been typed, and typing more opens it again.
@@ -277,7 +281,7 @@ export function AddressInput({
           autoComplete="off"
           autoFocus={isFocused}
           spellCheck={false}
-          {...stylex.props(fieldStyles.input, styles.input)}
+          {...stylex.props(fieldStyles.input, styles.input([...field.typing].length + 4))}
         />
         <VisuallyHidden role="status">{said}</VisuallyHidden>
         {people.length > 0 &&
@@ -438,10 +442,11 @@ const styles = stylex.create({
     maxWidth: '100%',
     minHeight: tm.target,
   },
-  // Room for a short address after the chips, or a line of its own.
-  input: {
-    flexBasis: '8em',
-  },
+  // Beside the last chip while what's typed fits there, from a few characters, and on a line of
+  // its own once it needs more.
+  input: (characters: number) => ({
+    flexBasis: `${characters}ch`,
+  }),
   // Wrapping as it needs to, so a narrow phone shows all of it.
   problem: {
     margin: 0,

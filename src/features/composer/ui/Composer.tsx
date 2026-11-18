@@ -255,7 +255,7 @@ function Writer({
     >
       {isSheet && (
         <header {...stylex.props(styles.sheetHeader)}>
-          <Button label="Close" variant="ghost" onClick={onClose} />
+          <Button label="Close" variant="ghost" onClick={onClose} xstyle={styles.fixed} />
           <div {...stylex.props(styles.sheetTitle)}>
             <h2 {...stylex.props(styles.title)}>{title}</h2>
             {status}
@@ -363,6 +363,8 @@ const styles = stylex.create({
     borderBottomStyle: 'solid',
     borderBottomColor: colorVars['--color-border'],
   },
+  // On the narrowest phone the title gives way first, so Close reads whole.
+  fixed: { flexShrink: 0 },
   // The title on the line of the buttons beside it, and what saving says laid under it, taking no
   // room, so the title stays centered and nothing moves whatever is said.
   sheetTitle: {

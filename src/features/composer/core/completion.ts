@@ -99,6 +99,27 @@ export function completionsFor(field: AddressField, people: readonly Address[]):
 }
 
 /**
+ * Those of `people` whom `query` still names, near enough to how the Mailroom matches them: each
+ * word of it begins a word of their name or address, in any case and with or without accents. So
+ * the list for fewer letters can stand while more are typed, until the Mailroom answers, and Enter
+ * never picks someone what's typed no longer names.
+ */
+export function stillNamed(people: readonly Address[], query: string): Address[] {
+  const typed = wordsOf(query);
+  return people.filter(({ name, email }) => {
+    const words = wordsOf(`${name ?? ''} ${email}`);
+    return typed.every((word) => words.some((theirs) => theirs.startsWith(word)));
+  });
+}
+
+const wordsOf = (text: string) =>
+  text
+    .normalize('NFKD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .match(/[\p{L}\p{N}]+/gu) ?? [];
+
+/**
  * What's typed, cut where each address ends: at a comma, a semicolon or a line break outside quotes
  * and angle brackets. A pasted list may put each address on a line of its own.
  */

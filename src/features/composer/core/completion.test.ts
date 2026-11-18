@@ -11,6 +11,7 @@ import {
   problemIn,
   queryOf,
   removed,
+  stillNamed,
   typed,
   type AddressField,
 } from './completion.ts';
@@ -127,4 +128,15 @@ test('what is typed completes to the people the field holds no chip for', () => 
   expect(completionsFor(field, [rae, theo])).toEqual([theo]);
   // An address in angle brackets is written already, and completes to nobody.
   expect(queryOf({ chips: [], typing: 'Rae Chen <rae' })).toBe('');
+});
+
+test('the people found for fewer letters stand only while what is typed still names them', () => {
+  const rene = { name: 'René Ortiz', email: 'rortiz@example.net' };
+  expect(stillNamed([rae, theo, rene], 'the')).toEqual([theo]);
+  expect(stillNamed([rae, theo, rene], 'theo@example.o')).toEqual([theo]);
+  expect(stillNamed([rae, theo, rene], 'chen ra')).toEqual([rae]);
+  // Accents fold as the index folds them.
+  expect(stillNamed([rae, theo, rene], 'rene')).toEqual([rene]);
+  // A word that begins none of theirs names nobody, so Enter makes it a chip of its own.
+  expect(stillNamed([rae, theo, rene], 'the ridge crew')).toEqual([]);
 });
