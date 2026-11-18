@@ -633,9 +633,10 @@ export function envelopeIndex(sql: Sql, own: () => readonly string[] = () => [])
         'gone_bodies',
       ])
         sql.run(`DELETE FROM ${table} WHERE account = ?`, account);
-      // A deleted search row stays readable in the table's segments until they merge, so they merge now.
-      sql.run(`INSERT INTO search (search) VALUES ('optimize')`);
-      sql.run(`INSERT INTO people_search (people_search) VALUES ('optimize')`);
+      // A deleted search row's words stay in the table's segments as its delete marker, and an
+      // optimize that finds one segment leaves it be, so the index is rebuilt from the rows left.
+      sql.run(`INSERT INTO search (search) VALUES ('rebuild')`);
+      sql.run(`INSERT INTO people_search (people_search) VALUES ('rebuild')`);
     },
   };
 }
