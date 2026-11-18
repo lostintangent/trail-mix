@@ -33,7 +33,7 @@ import {
   type User,
 } from '../../../../tests/mail-server/server.ts';
 import { mailrooms, member, setupOf } from '../../../../tests/mailrooms.ts';
-import { message } from '../../../../tests/message.ts';
+import { LOGO, message } from '../../../../tests/message.ts';
 import type { LocalWorker } from '../../../../tests/workerd.ts';
 import { WAKE } from './sync.ts';
 import type { Synced, Wake } from './test-worker.ts';
@@ -698,6 +698,91 @@ describe('The Mailroom', () => {
         references: '<picnic@example.com>',
       });
       await expect(ada.save(reply('Me too.\n'))).rejects.toThrow(/replies to is gone/);
+      await ada.call('move', [second], 'trash');
+    }, 30_000);
+
+    /** Mail from Ada whose HTML shows its logo, as a forward's original. */
+    const forwardable = async (id: string, subject: string) => {
+      await overImap(alice, (client) =>
+        client.append(
+          'INBOX',
+          message({
+            id,
+            subject,
+            minutesAgo: 5,
+            text: `${subject} at noon.`,
+            html: `<p>${subject} at <b>noon</b>.</p><img src="cid:logo@example.com" alt="">`,
+            logo: true,
+          }),
+        ),
+      );
+      return checked(subject);
+    };
+
+    test('a forward’s first save writes the original under the note, with the images it shows, and threads to it', async () => {
+      const kites = await forwardable('kites', 'Kites');
+      const saved = await ada.save(
+        draft({ subject: 'Fwd: Kites', markdown: 'Worth a look.\n', forwards: kites }),
+      );
+
+      const written = await PostalMime.parse((await draftOnServer(saved)).source);
+      expect(written).toMatchObject({
+        inReplyTo: '<kites@example.com>',
+        references: '<kites@example.com>',
+      });
+      const forwarded = written.headers.find(({ key }) => key === 'x-forwarded-message-id');
+      expect(forwarded?.value).toBe('<kites@example.com>');
+      expect(written.text).toStartWith('Worth a look.\n');
+      expect(written.text).toContain('Kites at noon.');
+      const html = written.html!;
+      expect(html.indexOf('Worth a look.')).toBeGreaterThan(-1);
+      expect(html.indexOf('Kites at <b>noon</b>.')).toBeGreaterThan(html.indexOf('Worth a look.'));
+      // The logo travels with the HTML that shows it, never as a file of its own.
+      const [logo, ...files] = written.attachments;
+      expect(files).toEqual([]);
+      expect(logo).toMatchObject({ mimeType: 'image/png', disposition: 'inline', related: true });
+      expect(new Uint8Array(logo!.content as ArrayBuffer)).toEqual(LOGO);
+      expect(html).toContain(`src="cid:${logo!.contentId!.slice(1, -1)}"`);
+      await ada.call('move', [saved], 'trash');
+    }, 30_000);
+
+    test('a forward saves on from the draft it replaces once its original is gone, and only a first save refuses', async () => {
+      const regatta = await forwardable('regatta', 'Regatta');
+      const forward = (markdown: string) =>
+        draft({ subject: 'Fwd: Regatta', markdown, forwards: regatta });
+      const first = await ada.save(forward('Worth a look.\n'));
+      const before = await PostalMime.parse((await draftOnServer(first)).source);
+      await ada.call('move', [regatta], 'trash');
+      // Its bytes leave the body cache too, so nothing but the draft could still hold the forward.
+      await ada.until(() =>
+        ada.call('body', regatta).then(
+          () => false,
+          (error: Error) => /no longer in this mailbox/.test(error.message),
+        ),
+      );
+
+      // The composer still names the original it began with.
+      const second = await ada.save(forward('Worth a look, rain or shine.\n'), first);
+      const after = await PostalMime.parse((await draftOnServer(second)).source);
+      /** What a draft holds after its note: the forward, exactly as the first save wrote it. */
+      const below = (written: string | undefined, note: string) =>
+        written!.slice(written!.indexOf(note) + note.length);
+      expect(below(before.html, 'Worth a look.')).toContain('Regatta at <b>noon</b>.');
+      expect(below(after.html, 'rain or shine.')).toBe(below(before.html, 'Worth a look.'));
+      expect(below(after.text, 'rain or shine.')).toBe(below(before.text, 'Worth a look.'));
+      const kept = ({ headers, inReplyTo, references, attachments }: typeof before) => ({
+        forwards: headers.find(({ key }) => key === 'x-forwarded-message-id')?.value,
+        inReplyTo,
+        references,
+        attachments: attachments.map(({ contentId, content }) => ({
+          contentId,
+          content: [...new Uint8Array(content as ArrayBuffer)],
+        })),
+      });
+      expect(kept(after)).toEqual(kept(before));
+      expect(kept(after).attachments).toHaveLength(1);
+
+      await expect(ada.save(forward('Worth a look.\n'))).rejects.toThrow(/forwards is gone/);
       await ada.call('move', [second], 'trash');
     }, 30_000);
 
@@ -1390,6 +1475,47 @@ describe('The Outbox', () => {
         drafts: 0,
       });
       expect(await whereIs('Carried')).toEqual({ delivered: 0, sent: 0, drafts: 0 });
+    }, 90_000);
+
+    test('a forward goes with its original under the note, as its last save wrote it', async () => {
+      await deliver(
+        alice.email,
+        message({
+          id: 'lanterns',
+          subject: 'Lanterns',
+          text: 'Lanterns at dusk.',
+          html: '<p>Lanterns at <b>dusk</b>.</p><img src="cid:logo@example.com" alt="">',
+          logo: true,
+        }),
+      );
+      // Found on the server, since this member's alarm hasn't checked mail since it came.
+      const [row] = await cal.page({ in: 'search', text: 'Lanterns', fullText: true });
+      const [lanterns] = await cal.call<Message[]>('conversation', row!.id);
+
+      const save = { ...draftOf('Fwd: Lanterns'), forwards: refOf(lanterns!) };
+      await cal.call('send', { save }, undefined, WINDOW_AGO, crypto.randomUUID());
+      await cal.until(async () => (await outbox()).length === 0, 60_000);
+      expect(await whereIs('Fwd: Lanterns')).toEqual({ delivered: 1, sent: 1, drafts: 0 });
+      const source = await inFolder(bob, 'INBOX', async (client) => {
+        for await (const { envelope, source } of client.fetch('1:*', {
+          envelope: true,
+          source: true,
+        })) {
+          if (envelope?.subject === 'Fwd: Lanterns') return source!;
+        }
+        throw new Error('Bob has no Fwd: Lanterns.');
+      });
+      const delivered = await PostalMime.parse(source);
+      expect(delivered.text).toStartWith('About Fwd: Lanterns.\n');
+      expect(delivered.text).toContain('Lanterns at dusk.');
+      expect(delivered.html).toContain('Lanterns at <b>dusk</b>.');
+      expect(delivered.inReplyTo).toBe('<lanterns@example.com>');
+      expect(
+        delivered.attachments.map(({ related, content }) => ({
+          related,
+          content: [...new Uint8Array(content as ArrayBuffer)],
+        })),
+      ).toEqual([{ related: true, content: [...LOGO] }]);
     }, 90_000);
 
     test('a press a restart cut short once its save was filed finds that draft when asked again, and goes once', async () => {

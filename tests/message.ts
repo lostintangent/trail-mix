@@ -1,6 +1,10 @@
+/** The picture a message's HTML shows as `cid:logo@example.com`, when it carries its logo. */
+export const LOGO = new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]);
+
 /**
  * An RFC 5322 message as a mail client writes one: its text, its HTML or both, or its text with a
- * file attached. Its id is `<id@example.com>`, and `headers` go above all the others.
+ * file attached. Its id is `<id@example.com>`, and `headers` go above all the others. With `logo`,
+ * its HTML carries {@link LOGO}, related to it.
  */
 export function message(fields: {
   id: string;
@@ -15,6 +19,7 @@ export function message(fields: {
   text?: string;
   html?: string;
   attachment?: boolean;
+  logo?: boolean;
   /** When it was sent, by default `minutesAgo` before now. */
   date?: Date;
   minutesAgo?: number;
@@ -38,11 +43,26 @@ export function message(fields: {
     '',
     fields.text ?? `This is ${fields.subject}.`,
   ];
-  const html = fields.html !== undefined && [
-    'Content-Type: text/html; charset=utf-8',
-    '',
-    fields.html,
-  ];
+  const html =
+    fields.html !== undefined &&
+    (fields.logo
+      ? [
+          'Content-Type: multipart/related; boundary="related"',
+          '',
+          '--related',
+          'Content-Type: text/html; charset=utf-8',
+          '',
+          fields.html,
+          '--related',
+          'Content-Type: image/png',
+          'Content-ID: <logo@example.com>',
+          'Content-Disposition: inline; filename="logo.png"',
+          'Content-Transfer-Encoding: base64',
+          '',
+          LOGO.toBase64(),
+          '--related--',
+        ]
+      : ['Content-Type: text/html; charset=utf-8', '', fields.html]);
   const file = fields.attachment === true && [
     'Content-Type: application/pdf; name="plan.pdf"',
     'Content-Disposition: attachment; filename="plan.pdf"',

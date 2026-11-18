@@ -224,6 +224,9 @@ export function draftOf(value: unknown): DraftUpload {
   if (!Array.isArray(draft.attachments) || draft.attachments.length > 100) {
     throw new TypeError('A draft’s attachments are a list.');
   }
+  if (draft.inReplyTo !== undefined && draft.forwards !== undefined) {
+    throw new TypeError('A draft forwards a message or replies to one, not both.');
+  }
   return {
     account: accountOf(draft.account),
     to: addressesOf(draft.to),
@@ -232,6 +235,7 @@ export function draftOf(value: unknown): DraftUpload {
     subject: lineOf(draft.subject, 'A subject', 1000),
     markdown: textOf(draft.markdown, 'A draft', 1_000_000, true, false),
     ...(draft.inReplyTo === undefined ? {} : { inReplyTo: refOf(draft.inReplyTo) }),
+    ...(draft.forwards === undefined ? {} : { forwards: refOf(draft.forwards) }),
     attachments: draft.attachments.map((attachment: unknown) => {
       const held = record(attachment, 'an attachment');
       if ('in' in held) {

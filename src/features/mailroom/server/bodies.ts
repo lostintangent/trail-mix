@@ -1,8 +1,16 @@
-import PostalMime, { type Attachment } from 'postal-mime';
+import PostalMime, {
+  type Address as PostalAddress,
+  type Attachment,
+  type Email,
+} from 'postal-mime';
+import type { ReadMessage } from '../../composer/index.ts';
 import {
+  messageIdOf,
   oneClickUnsubscribe,
+  referencesOf,
   refKey,
   type AccountId,
+  type Address,
   type Body,
   type MessageRef,
   type MimeAttachment,
@@ -97,14 +105,33 @@ export function bodyCache(ports: {
       const parsed = await PostalMime.parse(held);
       const unsubscribe = oneClickUnsubscribe(headerOf(held), ports.signersOf(ref.account));
       return {
-        ...(parsed.html === undefined ? {} : { html: parsed.html }),
-        ...(parsed.text === undefined ? {} : { text: parsed.text }),
+        ...contentOf(parsed),
         attachments: parsed.attachments.map((each, index) => {
           const { content, ...part } = attachmentIn(each, index);
           return { id: String(index), ...part, size: content.byteLength };
         }),
-        headers: parsed.headers.map((header) => [header.originalKey, header.value]),
         ...(unsubscribe ? { unsubscribe } : {}),
+      };
+    },
+
+    /**
+     * A message as its own bytes say, apart from the index: who it is from and to, its subject and
+     * threading, its parts and every file with its bytes, numbered as `read` numbers them. Null when
+     * the message is gone.
+     */
+    async readMessage(ref: MessageRef): Promise<ReadMessage | null> {
+      const held = await bytes(ref);
+      if (!held) return null;
+      const parsed = await PostalMime.parse(held);
+      return {
+        messageId: messageIdOf(parsed.messageId),
+        references: referencesOf(parsed.references, parsed.inReplyTo),
+        from: addressesIn(parsed.from && [parsed.from])[0] ?? { email: '' },
+        to: addressesIn(parsed.to),
+        cc: addressesIn(parsed.cc),
+        subject: parsed.subject ?? '',
+        ...contentOf(parsed),
+        attachments: parsed.attachments.map(attachmentIn),
       };
     },
 
@@ -206,6 +233,21 @@ async function attachmentOf(bytes: Uint8Array, index: number): Promise<MimeAttac
   const attachment = (await PostalMime.parse(bytes)).attachments[index];
   return attachment && attachmentIn(attachment, index);
 }
+
+/** A parsed message's text, HTML and headers, as a body and a read message both hold them. */
+const contentOf = (parsed: Email): Pick<Body, 'html' | 'text' | 'headers'> => ({
+  ...(parsed.html === undefined ? {} : { html: parsed.html }),
+  ...(parsed.text === undefined ? {} : { text: parsed.text }),
+  headers: parsed.headers.map((header) => [header.originalKey, header.value]),
+});
+
+/** Parsed addresses, a group's members in its place, leaving out any without an address. */
+const addressesIn = (list: PostalAddress[] | undefined): Address[] =>
+  (list ?? [])
+    .flatMap((entry) => entry.group ?? [entry])
+    .flatMap(({ name, address }) =>
+      address ? [{ ...(name ? { name } : {}), email: address }] : [],
+    );
 
 /** A parsed attachment as the Mailroom names it, at its place among the message's. */
 const attachmentIn = (attachment: Attachment, index: number): MimeAttachment => ({

@@ -267,6 +267,13 @@ type DraftInput<F = File> = {
   /** Joins the draft to that message's conversation. */
   inReplyTo?: MessageRef;
   /**
+   * The message this draft forwards. The Mailroom writes it under the note with a header block and
+   * its inline images, and it threads the draft as `inReplyTo` does. A draft is its own authority
+   * on what it forwards: a save that replaces one carries its forward on, so no save after the
+   * first depends on the original still being there. A draft forwards or replies, never both.
+   */
+  forwards?: MessageRef;
+  /**
    * New bytes travel once. After that, an attachment is named by the message that holds it, the
    * draft this one replaces or the message being forwarded, and by its `id` in that message's
    * `Body`, which a just-saved draft answers too. A pasted image carries the Content-ID

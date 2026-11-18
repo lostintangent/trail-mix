@@ -1,8 +1,5 @@
-import PostalMime, { type Address as PostalAddress } from 'postal-mime';
-import { messageOf } from '../../composer/index.ts';
+import { forwardedIn, forwardOf, messageOf, type ReadMessage } from '../../composer/index.ts';
 import {
-  messageIdOf,
-  referencesOf,
   sameRef,
   writeMime,
   type AccountId,
@@ -56,7 +53,7 @@ export function savingDrafts(ports: {
   book: Pick<AccountBook, 'get'>;
   store: EnvelopeIndex;
   provider: (account: AccountId) => Promise<MailProvider>;
-  bodies: Pick<BodyCache, 'bytes' | 'attachment' | 'keep' | 'filed' | 'replaced'>;
+  bodies: Pick<BodyCache, 'readMessage' | 'attachment' | 'keep' | 'filed' | 'replaced'>;
   /** A message the index holds, or the last full-text search found, which a save may answer. */
   known: (ref: MessageRef) => Message | undefined;
   /** The Outbox's hold on a draft on its way, and its release once a newer version replaces it. */
@@ -109,7 +106,16 @@ export function savingDrafts(ports: {
     if (checked.inReplyTo && !known && !older) {
       throw new Error('The message this replies to is gone.');
     }
-    const parent = known || (older && (await answeredBy(older)));
+    // Only a reply whose parent the index holds needs nothing from the draft it replaces.
+    const was = older && !known ? await draftAt(older) : undefined;
+    const carried = was && forwardedIn(was);
+    const original =
+      checked.forwards && !carried ? await bodies.readMessage(checked.forwards) : undefined;
+    if (checked.forwards && !carried && !original) {
+      throw new Error('The message this forwards is gone.');
+    }
+    const forwarded = carried || (original && forwardOf(original));
+    const parent = known || (was && answeredBy(was)) || original;
     const attachments: MimeAttachment[] = [];
     for (const attachment of checked.attachments) {
       if ('file' in attachment) {
@@ -132,6 +138,7 @@ export function savingDrafts(ports: {
         markdown: checked.markdown,
         ...(parent ? { parent } : {}),
         attachments,
+        ...(forwarded ? { forwarded } : {}),
       },
       { date: new Date().toISOString(), messageId, boundary: crypto.randomUUID() },
     );
@@ -177,43 +184,15 @@ export function savingDrafts(ports: {
     });
   };
 
-  /** A draft as its own bytes say, before sync has it. */
-  const parsed = async (draft: MessageRef) => {
-    const bytes = await bodies.bytes(draft);
-    if (!bytes) throw new Error('That draft is gone.');
-    const read = await PostalMime.parse(bytes);
-    const addresses = (list: PostalAddress[] | undefined) =>
-      (list ?? [])
-        .flatMap((entry) => entry.group ?? [entry])
-        .flatMap(({ name, address }) =>
-          address ? [{ ...(name ? { name } : {}), email: address }] : [],
-        );
-    return {
-      messageId: messageIdOf(read.messageId),
-      to: addresses(read.to),
-      cc: addresses(read.cc),
-      subject: read.subject ?? '',
-    };
-  };
-
   /**
-   * What a draft answers, by its own In-Reply-To and References, as a parent to thread a save to.
-   * Nothing for a message that isn't in Drafts, which no save replaces, or a draft that answers
-   * nothing. A draft that can't be read any more leaves its threading behind, never the save.
+   * A draft the save replaces, as its own bytes say, which is its own authority on what it answers
+   * and forwards. Nothing for a message that isn't in Drafts, which no save replaces. A draft that
+   * can't be read any more leaves its threading and its forward behind, never the save.
    */
-  const answeredBy = async (
-    draft: MessageRef,
-  ): Promise<Pick<Envelope, 'messageId' | 'references'> | undefined> => {
+  const draftAt = async (draft: MessageRef): Promise<ReadMessage | undefined> => {
     const drafts = store.withRole(draft.account, 'drafts');
     if (draft.path !== drafts?.path) return undefined;
-    const bytes = await bodies.bytes(draft).catch(() => null);
-    if (!bytes) return undefined;
-    const { references, inReplyTo } = await PostalMime.parse(bytes);
-    const thread = referencesOf(references, inReplyTo);
-    const parent = thread.at(-1);
-    return parent === undefined
-      ? undefined
-      : { messageId: parent, references: thread.slice(0, -1) };
+    return (await bodies.readMessage(draft).catch(() => null)) ?? undefined;
   };
 
   return {
@@ -254,7 +233,9 @@ export function savingDrafts(ports: {
      * it.
      */
     async addressing(draft: MessageRef): Promise<Addressing> {
-      const { messageId, to, cc, subject } = store.reads.message(draft) ?? (await parsed(draft));
+      const held = store.reads.message(draft) ?? (await bodies.readMessage(draft));
+      if (!held) throw new Error('That draft is gone.');
+      const { messageId, to, cc, subject } = held;
       if (!messageId) throw new Error('That draft has no Message-ID, so it can’t be sent safely.');
       return { messageId, to: [...to, ...cc], subject };
     },
@@ -300,4 +281,17 @@ export function savingDrafts(ports: {
  */
 async function messageIdFor(id: string, domain: string): Promise<string> {
   return `<${(await sha256Hex(id)).slice(0, 32)}@${domain}>`;
+}
+
+/**
+ * The message a message answers, by its own In-Reply-To and References, as a parent to thread a
+ * save to, or nothing for one that answers nothing.
+ */
+function answeredBy({
+  references,
+}: ReadMessage): Pick<Envelope, 'messageId' | 'references'> | undefined {
+  const parent = references.at(-1);
+  return parent === undefined
+    ? undefined
+    : { messageId: parent, references: references.slice(0, -1) };
 }

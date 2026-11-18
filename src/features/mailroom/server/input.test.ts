@@ -208,6 +208,11 @@ test('a draft keeps what its message needs, and its Markdown as typed', () => {
   expect(draftOf({ ...draft, inReplyTo: ref }).inReplyTo).toEqual(ref);
 });
 
+test('a draft forwards a message or answers one, never both', () => {
+  expect(draftOf({ ...draft, forwards: ref }).forwards).toEqual(ref);
+  expect(() => draftOf({ ...draft, forwards: ref, inReplyTo: ref })).toThrow(TypeError);
+});
+
 test('a file’s type is its essence, and one the browser didn’t know is plain bytes', () => {
   const typed = (type: string) =>
     draftOf({ ...draft, attachments: [{ file: { ...chart, type } }] }).attachments[0];
