@@ -573,7 +573,11 @@ if (!IS_PHONE) {
     await page.keyboard.type('Left for another conversation.');
     await row('Trip photos').click();
     await reply.waitFor({ state: 'detached' });
-    await row('Design review notes').click();
+    // The reply's save lifts its conversation to the top, so a click on the row on its way there
+    // could be released over another, which then opens instead.
+    const left = row('Design review notes').filter({ hasText: 'Left for another conversation.' });
+    await left.waitFor({ timeout: 10_000 });
+    await left.click();
     await reader(page)
       .getByRole('button', { name: /^Draft/ })
       .filter({ hasText: 'Left for another conversation.' })
