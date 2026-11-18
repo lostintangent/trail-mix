@@ -7,7 +7,7 @@ import { describe, expect } from 'bun:test';
 import { join } from 'node:path';
 import type { BrowserContextOptions, Page, Route } from 'playwright';
 import { expectUsable } from './usable.ts';
-import { hold, painted, reader, slow } from './helpers.ts';
+import { chipsIn, hold, painted, reader, slow } from './helpers.ts';
 import { RESULTS, SIZES, suite } from './suite.ts';
 import { until } from '../until.ts';
 
@@ -86,11 +86,10 @@ for (const [size, options] of Object.entries(SIZES)) {
       await editor.waitFor({ timeout: SLOW_MS / 2 });
       expect(await reply.getByText('Opening…').count()).toBe(0);
       expect(await editor.innerText()).toBe('Count me in.');
-      const to = reply.getByRole('combobox', { name: 'To' });
-      expect(await to.inputValue()).not.toContain(LIST);
+      expect(await chipsIn(reply, 'To')).not.toContain(LIST);
       // Once the parent says, the reply goes to the list, and so does the draft that will be sent.
       await savedToSender;
-      await until(async () => (await to.inputValue()) === LIST, SLOW_MS + 5000);
+      await until(async () => (await chipsIn(reply, 'To')).join('; ') === LIST, SLOW_MS + 5000);
       await savedToList;
       await expectUsable(page, `reply-${size}-light-opened`);
     }, 60_000);
@@ -228,11 +227,16 @@ for (const [size, options] of Object.entries(SIZES)) {
       );
       await open(page);
       await page.keyboard.press('r');
-      const to = composer(page).getByRole('combobox', { name: 'To' });
-      await to.fill('kwame@example.net');
+      const reply = composer(page);
+      const to = reply.getByRole('combobox', { name: 'To' });
+      // The member removes whom it was to and writes another.
+      const remove = reply.getByRole('button', { name: /^Remove / });
+      await remove.first().waitFor();
+      while ((await remove.count()) > 0) await remove.first().click();
+      await to.fill('kwame@example.net, ');
       await bodyCame;
       await painted(page);
-      expect(await to.inputValue()).toBe('kwame@example.net');
+      expect(await chipsIn(reply, 'To')).toEqual(['kwame@example.net']);
     }, 60_000);
 
     test('saving is said inside the composer, and nothing else moves for it', async () => {

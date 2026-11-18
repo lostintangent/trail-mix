@@ -4,7 +4,7 @@ import type { Locator, Page, Request } from 'playwright';
 import { REST_MS } from '../../src/features/reader/core/rest.ts';
 import { bareSubject } from '../../src/features/reader/core/subject.ts';
 import { expectUsable } from './usable.ts';
-import { bodiesShown, goTo, hold, reader, slow } from './helpers.ts';
+import { bodiesShown, chipsIn, goTo, hold, reader, slow } from './helpers.ts';
 import { RESULTS, SIZES, suite } from './suite.ts';
 import { until } from '../until.ts';
 
@@ -64,12 +64,14 @@ test('each message answers and shows the source of its own, and the palette the 
   const earlierName = senders.find((name) => ![newestName, 'You', 'Draft'].includes(name))!;
 
   // R answers the newest message, and the arrow on an earlier one answers that one.
-  const to = page.getByRole('region', { name: 'Reply' }).getByRole('combobox', { name: 'To' });
+  const reply = page.getByRole('region', { name: 'Reply' });
+  const to = reply.getByRole('combobox', { name: 'To' });
   const answered = async () => {
-    const value = await to.inputValue();
+    await to.waitFor();
+    const chips = await chipsIn(reply, 'To');
     await page.keyboard.press('Escape');
     await to.waitFor({ state: 'detached' });
-    return value;
+    return chips.join('; ');
   };
   await page.keyboard.press('r');
   const newestTo = await answered();
@@ -113,7 +115,7 @@ test('each message answers and shows the source of its own, and the palette the 
   const from = source
     .locator('dt', { hasText: /^From$/ })
     .locator('xpath=following-sibling::dd[1]');
-  const address = (to: string) => /<([^>]+)>/.exec(to)?.[1] ?? to;
+  const address = (to: string) => /[^\s,;]+@[^\s,;]+/.exec(to)?.[0] ?? to;
   await earlier.getByRole('button', { name: 'More for this message' }).click();
   await page.getByRole('menuitem', { name: 'View source' }).click();
   await source.getByText('Loading the source…').waitFor({ state: 'detached' });

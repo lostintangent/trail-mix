@@ -60,11 +60,6 @@ export function sentFrom(writing: Writing, account: Account): Writing {
   return { ...writing, ...from(account) };
 }
 
-/** Whether a message can be sent, which it can once it is to anyone, Bcc alone included. */
-export function isSendable({ to, cc, bcc }: Writing): boolean {
-  return to.length + cc.length + bcc.length > 0;
-}
-
 function from(account: Account): Pick<Writing, 'account' | 'signature'> {
   return { account: account.id, signature: account.signature?.trim() || undefined };
 }

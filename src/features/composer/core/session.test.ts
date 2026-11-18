@@ -4,7 +4,6 @@ import {
   addressText,
   afterSave,
   draftInputOf,
-  isSendable,
   newMessage,
   reopened,
   replyTo,
@@ -76,11 +75,6 @@ test('a message sent from another account takes its signature, and none when it 
   expect(sentFrom(written, work)).toMatchObject({ account: 'work', signature: 'Ada, at work' });
   expect(sentFrom(written, { ...work, signature: ' ' }).signature).toBeUndefined();
   expect(sentFrom(written, work).markdown).toBe('See you there.');
-});
-
-test('a message can be sent once it is to anyone, Bcc alone included', () => {
-  expect(isSendable(newMessage(account))).toBe(false);
-  expect(isSendable({ ...newMessage(account), bcc: [grace] })).toBe(true);
 });
 
 test('a draft saves its signature under the `-- ` line, and reads it back apart', () => {

@@ -9,13 +9,14 @@ import {
 } from '@astryxdesign/core/theme/tokens.stylex';
 import { VisuallyHidden } from '@astryxdesign/core/VisuallyHidden';
 import * as stylex from '@stylexjs/stylex';
-import { useState, type ReactNode } from 'react';
+import { useId, useState, type ReactNode } from 'react';
 import { StampDot } from '../../../app/theme/StampDot.tsx';
 import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import type { Account, AccountId } from '../../mail/core/index.ts';
+import { isWritten } from '../core/completion.ts';
 import { AddressInput } from './AddressInput.tsx';
 import { fieldStyles } from './fieldStyles.ts';
-import type { AddressText } from './useWriting.ts';
+import type { AddressFields, AddressName, AddressProblem } from './useWriting.ts';
 
 /**
  * The message's fields: the From chip in its account's stamp, To, Cc and Bcc, which show once the
@@ -24,7 +25,8 @@ import type { AddressText } from './useWriting.ts';
 export function Fields({
   accounts,
   account,
-  typed,
+  fields,
+  refusal,
   subject,
   isToFocused,
   isSheet,
@@ -34,35 +36,42 @@ export function Fields({
 }: {
   accounts: readonly Account[];
   account: AccountId;
-  typed: AddressText;
+  fields: AddressFields;
+  /** The chip Send last refused, which its field selects. */
+  refusal: AddressProblem | undefined;
   /** A new message's Subject. A reply shows none, since it takes its parent's. */
   subject: string | undefined;
   /** Whether To takes the focus as the composer opens, as it does while it names nobody. */
   isToFocused: boolean;
   isSheet: boolean;
   onAccount: (account: Account) => void;
-  onAddress: (field: keyof AddressText, text: string) => void;
+  onAddress: (name: AddressName, field: AddressFields[AddressName]) => void;
   onSubject: (subject: string) => void;
 }) {
   // Copies show once asked for, or once there are any, and stay while the member empties them.
   const [hasCopies, setHasCopies] = useState(false);
-  if (!hasCopies && (typed.cc !== '' || typed.bcc !== '')) setHasCopies(true);
+  if (!hasCopies && (isWritten(fields.cc) || isWritten(fields.bcc))) setHasCopies(true);
   const stamp = accounts.find(({ id }) => id === account)?.stamp;
-  /** A line of the header: a label and what's typed beside it. */
+  const id = useId();
+  /** A line of the header: a label and what's written beside it, which may take several lines. */
   const line = (label: string, input: ReactNode) => (
-    <label {...stylex.props(styles.field)}>
-      <span {...stylex.props(styles.label)}>{label}</span>
+    <div {...stylex.props(styles.field)}>
+      <label htmlFor={`${id}-${label}`} {...stylex.props(styles.label)}>
+        {label}
+      </label>
       {input}
-    </label>
+    </div>
   );
-  // Addresses are completed as they're typed.
-  const addresses = (field: keyof AddressText, label: string, isFocused = false) =>
+  const addresses = (name: AddressName, label: string, isFocused = false) =>
     line(
       label,
       <AddressInput
-        value={typed[field]}
-        onChange={(text) => onAddress(field, text)}
+        id={`${id}-${label}`}
+        label={label}
+        field={fields[name]}
+        onChange={(field) => onAddress(name, field)}
         isFocused={isFocused}
+        refused={refusal?.field === name ? refusal : undefined}
       />,
     );
   return (
@@ -107,6 +116,7 @@ export function Fields({
           {line(
             'Subject',
             <input
+              id={`${id}-Subject`}
               value={subject}
               onChange={(event) => onSubject(event.target.value)}
               autoComplete="off"
@@ -132,9 +142,10 @@ const styles = stylex.create({
   onPage: {
     paddingBlockEnd: spacingVars['--spacing-2'],
   },
+  // A line's name and its neighbors lie in its first line, however many its chips take.
   row: {
     display: 'flex',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: spacingVars['--spacing-2'],
     minHeight: tm.target,
   },
@@ -178,11 +189,14 @@ const styles = stylex.create({
   field: {
     flexGrow: 1,
     display: 'flex',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     gap: spacingVars['--spacing-2'],
     minWidth: 0,
   },
   label: {
+    display: 'flex',
+    alignItems: 'center',
+    minHeight: tm.target,
     color: tm.textQuiet,
     fontSize: typeScaleVars['--text-body-size'],
   },

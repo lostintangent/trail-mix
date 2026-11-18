@@ -11,6 +11,24 @@ export const reader = (page: Page) => page.getByRole('region', { name: 'Reader' 
 export const toast = (page: Page, text: RegExp) =>
   page.getByText(text).filter({ visible: true }).first();
 
+/**
+ * The chips of a composer's To, Cc or Bcc, as each reads: a name and its address, an address, or
+ * text that names none and says so.
+ */
+export const chipsIn = (composer: Locator, field: 'To' | 'Cc' | 'Bcc') =>
+  composer
+    .getByRole('group', { name: field, exact: true })
+    .locator('[data-chip]')
+    .evaluateAll((chips) =>
+      chips.map((chip) => {
+        const read = chip.cloneNode(true) as Element;
+        for (const extra of read.querySelectorAll('button, [role="tooltip"], [popover]')) {
+          extra.remove();
+        }
+        return read.textContent ?? '';
+      }),
+    );
+
 /** Whether a control is on screen and can be used. A pane off a phone's screen is inert. */
 export async function reachable(control: Locator): Promise<boolean> {
   return (await control.isVisible()) && control.evaluate((element) => !element.closest('[inert]'));

@@ -19,14 +19,8 @@ import { media, tm } from '../../../app/theme/tokens.stylex.ts';
 import { refOf, type Account, type Message, type MessageRef } from '../../mail/core/index.ts';
 import { bodyQuery } from '../../mailroom/client/index.ts';
 import { useReach } from '../../offline/index.ts';
-import {
-  isSendable,
-  newMessage,
-  recipientsOf,
-  reopened,
-  replyTo,
-  type Writing,
-} from '../core/session.ts';
+import { isWritten } from '../core/completion.ts';
+import { newMessage, recipientsOf, reopened, replyTo, type Writing } from '../core/session.ts';
 import { Editor, placeImages, type EditorProps } from './Editor.tsx';
 import { Fields } from './Fields.tsx';
 import { Attachments, FilePicker } from './Files.tsx';
@@ -35,7 +29,7 @@ import { ComposerSkeleton, isDocked, Over, sheetStyles } from './sheet.tsx';
 import { startDrafting, type Drafting, type SaveState, type Showing } from './drafting.ts';
 import { useAutosave } from './useAutosave.ts';
 import { useVisibleBand } from './useVisibleBand.ts';
-import { useWriting } from './useWriting.ts';
+import { useWriting, type AddressProblem } from './useWriting.ts';
 
 /**
  * What the member asked to write: a new message, a reply, a draft opened again, or what was being
@@ -193,9 +187,15 @@ function Writer({
   // Send hands the message over and closes at once, as its last save finishes behind it. A second
   // press before it closes does nothing.
   const isSent = useRef(false);
-  const canSend = isSendable(writing);
+  // Send is offered once anything is written to send to, and refuses text that names no address,
+  // saying which, until it's fixed or removed.
+  const canSend = Object.values(message.fields).some(isWritten);
+  const [refusal, setRefusal] = useState<AddressProblem>();
+  if (refusal && !message.problem) setRefusal(undefined);
   const send = (at?: string) => {
     if (isSent.current || !canSend) return;
+    const problem = message.commitAddresses();
+    if (problem) return setRefusal({ ...problem });
     isSent.current = true;
     onSend(drafting, at);
     onClose();
@@ -225,9 +225,12 @@ function Writer({
       {...stylex.props(
         styles.status,
         isSheet ? [styles.centered, styles.sheetStatus] : styles.grow,
+        refusal && styles.refused,
       )}
     >
-      {(isOffline ? OFFLINE : SAVED[saveState]) || '\u00a0'}
+      {refusal && message.problem
+        ? `“${message.problem.text}” isn’t an address`
+        : (isOffline ? OFFLINE : SAVED[saveState]) || '\u00a0'}
     </span>
   );
   const writer = (
@@ -255,7 +258,8 @@ function Writer({
         <Fields
           accounts={accounts}
           account={writing.account}
-          typed={message.typed}
+          fields={message.fields}
+          refusal={refusal}
           subject={isNew ? writing.subject : undefined}
           isToFocused={start.to.length === 0}
           isSheet={isSheet}
@@ -411,6 +415,9 @@ const styles = stylex.create({
     textOverflow: 'ellipsis',
     color: tm.textQuiet,
     fontSize: typeScaleVars['--text-supporting-size'],
+  },
+  refused: {
+    color: colorVars['--color-text-red'],
   },
   // A line of its own under the sheet's title, as wide whatever it says.
   centered: {

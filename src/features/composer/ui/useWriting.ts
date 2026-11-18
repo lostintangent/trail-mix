@@ -1,12 +1,25 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { addressesIn, type Account } from '../../mail/core/index.ts';
+import type { Account, Address } from '../../mail/core/index.ts';
 import { partUrl } from '../../mailroom/client/index.ts';
+import {
+  addressesOf,
+  committed,
+  fieldOf,
+  problemIn,
+  type AddressField,
+} from '../core/completion.ts';
 import { contentIdFor } from '../core/draft.ts';
-import { addressText, sentFrom, type Attached, type Writing } from '../core/session.ts';
+import { sentFrom, type Attached, type Writing } from '../core/session.ts';
 import type { Drafting } from './drafting.ts';
 
-/** The address fields as the member types them, which the message reads as addresses. */
-export type AddressText = Record<'to' | 'cc' | 'bcc', string>;
+/** The fields a message's addresses are written in. */
+export type AddressName = 'to' | 'cc' | 'bcc';
+
+/** The address fields as the member writes them, which the message reads as addresses. */
+export type AddressFields = Record<AddressName, AddressField>;
+
+/** A chip that names no address, which keeps the message from being sent. */
+export type AddressProblem = { field: AddressName; at: number; text: string };
 
 /**
  * The message being written, as the member changes it. Each change of theirs owes a save. The
@@ -15,10 +28,10 @@ export type AddressText = Record<'to' | 'cc' | 'bcc', string>;
  */
 export function useWriting(drafting: Drafting, recipients: Pick<Writing, 'to' | 'cc'> | undefined) {
   const writing = useSyncExternalStore(drafting.subscribe, () => drafting.writing);
-  const [typed, setTyped] = useState<AddressText>(() => ({
-    to: addressText(writing.to),
-    cc: addressText(writing.cc),
-    bcc: addressText(writing.bcc),
+  const [fields, setFields] = useState<AddressFields>(() => ({
+    to: fieldOf(writing.to),
+    cc: fieldOf(writing.cc),
+    bcc: fieldOf(writing.bcc),
   }));
   const fileUrl = useFileUrls();
   const hasEdited = useRef(false);
@@ -35,23 +48,39 @@ export function useWriting(drafting: Drafting, recipients: Pick<Writing, 'to' | 
   const hasChosen = useRef(false);
   useEffect(() => {
     if (!recipients || hasChosen.current) return;
-    setTyped((was) => ({ ...was, to: addressText(recipients.to), cc: addressText(recipients.cc) }));
+    setFields((was) => ({ ...was, to: fieldOf(recipients.to), cc: fieldOf(recipients.cc) }));
     drafting.write({ ...drafting.writing, ...recipients });
     if (hasEdited.current) drafting.owe();
   }, [recipients, drafting]);
 
   return {
     writing,
-    typed,
+    fields,
+    problem: problemOf(fields),
     /** What the editor holds, as the member writes it or as the editor settles what it was given. */
     write: (markdown: string, isEdit: boolean) => {
       if (isEdit) edit(() => ({ markdown }));
       else drafting.write({ ...drafting.writing, markdown });
     },
-    address: (field: keyof AddressText, text: string) => {
+    /** A field as the member writes it. Only a change to the addresses it names owes a save. */
+    address: (name: AddressName, field: AddressField) => {
       hasChosen.current = true;
-      setTyped((was) => ({ ...was, [field]: text }));
-      edit(() => ({ [field]: addressesIn(text) }));
+      setFields((was) => ({ ...was, [name]: field }));
+      const addresses = addressesOf(field);
+      if (!isSame(addresses, drafting.writing[name])) edit(() => ({ [name]: addresses }));
+    },
+    /**
+     * Makes what's typed in every field a chip, as Send does, and finds the first chip that names
+     * no address. The message already holds every address typed, so nothing owes a save for it.
+     */
+    commitAddresses: (): AddressProblem | undefined => {
+      const next = {
+        to: committed(fields.to),
+        cc: committed(fields.cc),
+        bcc: committed(fields.bcc),
+      };
+      setFields(next);
+      return problemOf(next);
     },
     sendFrom: (account: Account) => edit((was) => sentFrom(was, account)),
     setSubject: (subject: string) => edit(() => ({ subject })),
@@ -78,6 +107,18 @@ export function useWriting(drafting: Drafting, recipients: Pick<Writing, 'to' | 
     },
   };
 }
+
+function problemOf(fields: AddressFields): AddressProblem | undefined {
+  for (const field of ['to', 'cc', 'bcc'] as const) {
+    const problem = problemIn(fields[field]);
+    if (problem) return { field, ...problem };
+  }
+  return undefined;
+}
+
+const isSame = (a: readonly Address[], b: readonly Address[]) =>
+  a.length === b.length &&
+  a.every((each, at) => each.email === b[at]?.email && each.name === b[at]?.name);
 
 /** Where each new file shows from while it is written, for as long as the composer is open. */
 function useFileUrls() {

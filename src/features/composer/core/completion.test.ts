@@ -1,54 +1,130 @@
 import { expect, test } from 'bun:test';
-import { completed, completionsFor, typingIn } from './completion.ts';
+import {
+  addressesOf,
+  committed,
+  completionsFor,
+  editing,
+  fieldOf,
+  isWritten,
+  pasted,
+  picked,
+  problemIn,
+  queryOf,
+  removed,
+  typed,
+  type AddressField,
+} from './completion.ts';
 
 const rae = { name: 'Rae Chen', email: 'rae@example.com' };
 const theo = { name: 'Theo Park', email: 'theo@example.org' };
+const empty: AddressField = { chips: [], typing: '' };
 
-/** A field with the caret where `|` is, and the address the caret is in. */
-const typing = (written: string) => {
-  const caret = written.indexOf('|');
-  const field = written.replace('|', '');
-  return { field, typing: typingIn(field, caret) };
-};
-
-test('the address being typed is the one the caret is in, between commas or semicolons', () => {
-  expect(typing('ra|').typing).toEqual({ start: 0, end: 2, query: 'ra' });
-  expect(typing('ada@example.com, ra|').typing.query).toBe('ra');
-  expect(typing('ada@example.com; ra|').typing.query).toBe('ra');
-  const { field, typing: middle } = typing('ada@example.com, th|eo , bo@example.net');
-  expect(middle.query).toBe('theo');
-  expect(field.slice(middle.end)).toBe(', bo@example.net');
+test('a comma or semicolon makes what was typed before it a chip, and what follows stays typed', () => {
+  expect(typed(empty, 'rae@example.com')).toEqual({ chips: [], typing: 'rae@example.com' });
+  expect(typed(empty, 'rae@example.com, th')).toEqual({
+    chips: [{ address: { email: 'rae@example.com' } }],
+    typing: 'th',
+  });
+  expect(typed(fieldOf([rae]), 'Theo Park <theo@example.org>;')).toEqual({
+    chips: [{ address: rae }, { address: theo }],
+    typing: '',
+  });
+  // A separator alone makes nothing.
+  expect(typed(fieldOf([rae]), ', ')).toEqual(fieldOf([rae]));
 });
 
 test('a comma within quotes or angle brackets ends no address', () => {
-  expect(typing('"Chen, Rae" <rae@example.com>, th|').typing.query).toBe('th');
-  expect(typing('Rae <rae,chen@example.com>, th|').typing.query).toBe('th');
-  expect(typing('"Chen, \\"R\\"" <rae@example.com>, th|').typing.query).toBe('th');
+  expect(typed(empty, '"Chen, Rae" <rae@exa')).toEqual({
+    chips: [],
+    typing: '"Chen, Rae" <rae@exa',
+  });
+  expect(typed(empty, '"Chen, Rae" <rae@example.com>, ').chips).toEqual([
+    { address: { name: 'Chen, Rae', email: 'rae@example.com' } },
+  ]);
+  expect(typed(empty, '"Chen, \\"R\\"" <rae@example.com>,').chips).toEqual([
+    { address: { name: 'Chen, "R"', email: 'rae@example.com' } },
+  ]);
 });
 
-test('an address already in angle brackets completes to nobody', () => {
-  expect(typing('Rae Chen <rae@ex|ample.com>').typing.query).toBe('');
-  expect(typing('Rae Chen <rae|').typing.query).toBe('');
+test('text that names no address becomes a chip that says so, which Send finds', () => {
+  const field = typed(fieldOf([rae]), 'rae, theo@example.org,');
+  expect(field.chips).toEqual([
+    { address: rae },
+    { text: 'rae' },
+    { address: { email: 'theo@example.org' } },
+  ]);
+  expect(problemIn(field)).toEqual({ at: 1, text: 'rae' });
+  expect(problemIn(removed(field, 1))).toBeUndefined();
+  // Send is offered for it, to say so, as it is for an address typed and no chip at all.
+  expect(isWritten({ chips: [{ text: 'rae' }], typing: '' })).toBe(true);
+  expect(isWritten({ chips: [], typing: 'rae@example.com' })).toBe(true);
+  expect(isWritten({ chips: [], typing: ' ' })).toBe(false);
+  expect(typed(empty, 'rae@, ').chips).toEqual([{ text: 'rae@' }]);
 });
 
-test('a pick takes the place of the address being typed, ready for the next', () => {
-  const last = typing('ada@example.com, ra|');
-  const next = completed(last.field, last.typing, rae);
-  expect(next.field).toBe('ada@example.com, Rae Chen <rae@example.com>, ');
-  expect(next.caret).toBe(next.field.length);
-  const first = typing('  ra|');
-  expect(completed(first.field, first.typing, rae).field).toBe('Rae Chen <rae@example.com>, ');
-  // In the middle, what follows stays, and the caret rests after the pick.
-  const middle = typing('ada@example.com,th| , bo@example.net');
-  const picked = completed(middle.field, middle.typing, theo);
-  expect(picked.field).toBe('ada@example.com, Theo Park <theo@example.org>, bo@example.net');
-  expect(picked.field.slice(0, picked.caret)).toEndWith('<theo@example.org>');
+test('a paste of several addresses makes a chip of each, and a paste of one lands as typing', () => {
+  const list = 'Rae Chen <rae@example.com>; theo@example.org\nbo@example.net';
+  expect(pasted(empty, list)).toEqual({
+    chips: [
+      { address: rae },
+      { address: { email: 'theo@example.org' } },
+      { address: { email: 'bo@example.net' } },
+    ],
+    typing: '',
+  });
+  // Bare addresses a space parts, as a pasted column may.
+  expect(pasted(empty, 'rae@example.com theo@example.org')?.chips).toEqual([
+    { address: { email: 'rae@example.com' } },
+    { address: { email: 'theo@example.org' } },
+  ]);
+  // Words with one address are a name and the address.
+  expect(pasted(empty, 'Rae Chen rae@example.com')).toBeUndefined();
+  expect(pasted(empty, 'rae@example.com')).toBeUndefined();
+  expect(pasted(empty, 'rae@example.com,')).toBeUndefined();
 });
 
-test('a person the field already names elsewhere is not offered again', () => {
-  const { field, typing: at } = typing('RAE@example.com, |');
-  expect(completionsFor(field, at, [rae, theo])).toEqual([theo]);
-  // The address being typed, even when it is a person's whole address, doesn't count.
-  const again = typing('rae@example.com|');
-  expect(completionsFor(again.field, again.typing, [rae, theo])).toEqual([rae, theo]);
+test('an address the field already holds is not added again', () => {
+  const field = fieldOf([rae]);
+  expect(typed(field, 'RAE@example.com, ').chips).toEqual([{ address: rae }]);
+  expect(pasted(field, 'rae@example.com, theo@example.org, theo@example.org')?.chips).toEqual([
+    { address: rae },
+    { address: { email: 'theo@example.org' } },
+  ]);
+  expect(picked(field, rae).chips).toEqual([{ address: rae }]);
+});
+
+test('Enter, leaving the field or Send makes what is typed a chip, whatever it is', () => {
+  expect(committed({ chips: [], typing: 'Rae Chen <rae@example.com>' })).toEqual(fieldOf([rae]));
+  expect(committed({ chips: [], typing: 'Rae' })).toEqual({ chips: [{ text: 'Rae' }], typing: '' });
+  expect(committed({ chips: [], typing: '  ' })).toEqual(empty);
+});
+
+test('the addresses a save or Send takes include those still being typed', () => {
+  expect(
+    addressesOf({ chips: [{ address: rae }, { text: 'bo' }], typing: 'theo@example.org' }),
+  ).toEqual([rae, { email: 'theo@example.org' }]);
+  expect(addressesOf({ chips: [{ address: rae }], typing: 'the' })).toEqual([rae]);
+});
+
+test('a chip edited goes back to be typed again, after what was typed becomes a chip', () => {
+  const field = { chips: [{ address: rae }, { text: 'theo' }], typing: 'bo@example.net' };
+  expect(editing(field, 0)).toEqual({
+    chips: [{ text: 'theo' }, { address: { email: 'bo@example.net' } }],
+    typing: 'Rae Chen <rae@example.com>',
+  });
+  expect(editing(field, 1).typing).toBe('theo');
+  expect(
+    editing({ chips: [{ address: { name: 'Chen, Rae', email: rae.email } }], typing: '' }, 0),
+  ).toEqual({
+    chips: [],
+    typing: '"Chen, Rae" <rae@example.com>',
+  });
+});
+
+test('what is typed completes to the people the field holds no chip for', () => {
+  const field = { chips: [{ address: { email: 'RAE@example.com' } }], typing: ' th ' };
+  expect(queryOf(field)).toBe('th');
+  expect(completionsFor(field, [rae, theo])).toEqual([theo]);
+  // An address in angle brackets is written already, and completes to nobody.
+  expect(queryOf({ chips: [], typing: 'Rae Chen <rae' })).toBe('');
 });

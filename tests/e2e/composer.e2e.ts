@@ -2,8 +2,8 @@ import { expect } from 'bun:test';
 import { join } from 'node:path';
 import { chromium, webkit, type Locator, type Page, type Route } from 'playwright';
 import { SAVE_AFTER_MS, SAVE_AT_LEAST_EVERY_MS } from '../../src/features/composer/core/session.ts';
-import { unusable } from './usable.ts';
-import { goTo, reader } from './helpers.ts';
+import { expectUsable, unusable } from './usable.ts';
+import { chipsIn, goTo, reader } from './helpers.ts';
 import { RESULTS, SIZES, suite } from './suite.ts';
 import { atRest } from '../atRest.ts';
 
@@ -285,7 +285,8 @@ test('To completes from the people in the mail, by keys on a desktop and by a ta
     await page.keyboard.press('Enter');
   }
   await people.waitFor({ state: 'hidden' });
-  await expect(to.inputValue()).resolves.toBe('Theo Lindqvist <theo@example.com>, ');
+  await expect(chipsIn(composer, 'To')).resolves.toEqual(['Theo Lindqvist, theo@example.com']);
+  await expect(to.inputValue()).resolves.toBe('');
 
   // What's typed next completes the next address, and the list reads, and on a phone every person
   // is a finger's target, in both themes.
@@ -311,10 +312,80 @@ test('To completes from the people in the mail, by keys on a desktop and by a ta
     // Tab picks too, and keeps the focus in the field for the next.
     await page.keyboard.press('Tab');
   }
-  await expect(to.inputValue()).resolves.toBe(
-    'Theo Lindqvist <theo@example.com>, Priya Raman <priya@example.com>, ',
-  );
+  await expect(chipsIn(composer, 'To')).resolves.toEqual([
+    'Theo Lindqvist, theo@example.com',
+    'Priya Raman, priya@example.com',
+  ]);
   await expect(to.evaluate((field) => field === document.activeElement)).resolves.toBe(true);
+}, 60_000);
+
+test('To holds each address as a chip, which Backspace or its button removes, and Send refuses text', async () => {
+  const page = await app.open(SIZE);
+  await page.keyboard.press('c');
+  const composer = composerNamed(page, 'New message');
+  const to = composer.getByRole('combobox', { name: 'To' });
+  const chips = () => chipsIn(composer, 'To');
+  await to.click();
+
+  // A comma ends an address, and a paste of several makes a chip of each.
+  await page.keyboard.type('ari@example.com,');
+  await expect(chips()).resolves.toEqual(['ari@example.com']);
+  await page.evaluate(() => {
+    const pasted = new DataTransfer();
+    pasted.setData('text/plain', 'Rae Chen <rae@example.com>; sam@trailmix.test');
+    document.activeElement?.dispatchEvent(
+      new ClipboardEvent('paste', { clipboardData: pasted, bubbles: true, cancelable: true }),
+    );
+  });
+  await expect(chips()).resolves.toEqual([
+    'ari@example.com',
+    'Rae Chen, rae@example.com',
+    'sam@trailmix.test',
+  ]);
+  await expect(to.inputValue()).resolves.toBe('');
+
+  // Backspace at the field's start selects the last chip, and again removes it.
+  await page.keyboard.press('Backspace');
+  await expect(chips()).resolves.toHaveLength(3);
+  await page.keyboard.press('Backspace');
+  await expect(chips()).resolves.toEqual(['ari@example.com', 'Rae Chen, rae@example.com']);
+  // Its button removes a chip by a click or a tap, and leaves the focus in the field.
+  await composer.getByRole('button', { name: 'Remove ari@example.com' }).click();
+  await expect(chips()).resolves.toEqual(['Rae Chen, rae@example.com']);
+  await expect(to.evaluate((field) => field === document.activeElement)).resolves.toBe(true);
+
+  // Text that names no address is a chip in red, which Send refuses, saying which, and selects.
+  await page.keyboard.type('the ridge crew');
+  await page.keyboard.press('Enter');
+  await expect(chips()).resolves.toEqual([
+    'Rae Chen, rae@example.com',
+    'the ridge crew, Not an address',
+  ]);
+  await composer.getByRole('textbox', { name: 'Message' }).click();
+  await page.keyboard.type('Bring the map.');
+  await page.keyboard.press('ControlOrMeta+Enter');
+  await composer.getByText('“the ridge crew” isn’t an address').waitFor();
+  await expect(to.evaluate((field) => field === document.activeElement)).resolves.toBe(true);
+  for (const colorScheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme });
+    await expectUsable(
+      page,
+      `composer-${ENGINE.name()}-${IS_PHONE ? 'phone' : 'desktop'}-${colorScheme}-refused`,
+    );
+  }
+  await page.keyboard.press('Backspace');
+  await expect(chips()).resolves.toEqual(['Rae Chen, rae@example.com']);
+  await composer.getByText('“the ridge crew” isn’t an address').waitFor({ state: 'detached' });
+
+  // Sent and undone, the message comes back to the same chips.
+  await page.keyboard.press('ControlOrMeta+Enter');
+  await composer.waitFor({ state: 'detached' });
+  await page
+    .getByRole('region', { name: 'Notifications' })
+    .getByRole('button', { name: 'Undo' })
+    .click();
+  await composer.getByRole('textbox', { name: 'Message' }).waitFor({ timeout: 10_000 });
+  await expect(chips()).resolves.toEqual(['Rae Chen, rae@example.com']);
 }, 60_000);
 
 test('Link turns the selected words into a link, adding https to an address typed without it', async () => {
