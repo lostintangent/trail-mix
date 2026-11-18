@@ -7,7 +7,9 @@
 // mid-sentence keeps all it had written up to the last save, and the draft opens again in Trail
 // Mix with its formatting and its file. A draft another client wrote, quoting mail with remote
 // images, can be opened, written in, saved, copied from and closed, and its conversation read,
-// without the page or the Mailroom loading any of them.
+// without the page or the Mailroom loading any of them. A forward reads as the member wrote it in
+// both: the note and its signature, the header block, then the original, its HTML keeping its own
+// styles and its picture in place, its file attached, and a plain-text original's lines as written.
 import { afterAll, beforeAll, describe, expect } from 'bun:test';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -32,6 +34,15 @@ type User = { email: string; password: string };
 const PNG =
   'iVBORw0KGgoAAAANSUhEUgAAAAQAAAADCAIAAAA7ljmRAAAAGElEQVR4nGOQ91/86aA3hGSAs4AkA7IMAGQcEltTdKHYAAAAAElFTkSuQmCC';
 const NOTES = 'Bring a jacket, the terrace gets cold.\n';
+/** Carol's catalogue: its text part, the color its style sheet gives every paragraph, its PDF. */
+const CATALOGUE = {
+  text: 'The spring catalogue is out, with the cover we chose.\r\n\r\nThe price list is attached.',
+  color: 'rgb(200, 0, 0)',
+  prices: '%PDF-1.4 the spring prices',
+};
+/** Carol's word about the ferry, in plain text alone. */
+const FERRY = 'The ferry leaves at 7:40.\nPlatform 2, at the far end.\n\nBring the tickets.';
+const SIGNATURE = 'Alice Liddell\nDown the rabbit hole';
 const clients = missing('mutt', 'php') === undefined;
 
 describe('Mail written in Trail Mix', () => {
@@ -160,24 +171,11 @@ describe('Mail written in Trail Mix', () => {
     describe.skipIf(!clients)('in other clients', () => {
       test('shows in Roundcube with its formatting, its pasted image inline and its file, in its thread', async () => {
         const page = await signedIn(bob);
-        const uidOf = async (id: string) =>
-          (await until(() => found(bob, 'INBOX', { header: { 'message-id': id } }), 5_000)).uid;
-        const [parent, answer] = [await uidOf('<lunch@example.com>'), await uidOf(messageId)];
-
-        // Roundcube's own model of the list, threaded by Dovecot.
-        await page.waitForFunction(
-          () => (globalThis as unknown as RoundcubePage).rcmail.message_list.rowcount >= 3,
-        );
-        const rows = await page.evaluate(() =>
-          Object.values((globalThis as unknown as RoundcubePage).rcmail.message_list.rows).map(
-            ({ uid, parent_uid, depth }) => ({
-              uid: Number(uid),
-              parent: Number(parent_uid ?? 0),
-              depth,
-            }),
-          ),
-        );
-        expect(rows.find(({ uid }) => uid === answer)).toMatchObject({ parent, depth: 1 });
+        const [parent, answer] = [
+          await uidOf(bob, '<lunch@example.com>'),
+          await uidOf(bob, messageId),
+        ];
+        expect(await threadedAt(page, answer)).toEqual({ parent, depth: 1 });
 
         await page.goto(`${webmail.url}/?_task=mail&_mbox=INBOX&_uid=${answer}&_action=show`);
         const body = page.locator('#messagebody');
@@ -515,6 +513,207 @@ describe('Mail written in Trail Mix', () => {
     }
   });
 
+  describe('a forward, sent', () => {
+    // Carol wrote to Alice twice: her catalogue, copying Bob, and a word about the ferry in plain
+    // text. Alice forwards each to Bob with a note, under the signature her account adds.
+    const sentAt = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000).toUTCString();
+    const catalogue = { id: 'catalogue', subject: 'The spring catalogue', date: sentAt(30) };
+    const ferry = { id: 'ferry', subject: 'The ferry on Saturday', date: sentAt(20) };
+    const header = (carol: { subject: string; date: string }) => [
+      '---------- Forwarded message ---------',
+      'From: Carol Reyes <carol@example.com>',
+      `Date: ${carol.date}`,
+      `Subject: ${carol.subject}`,
+      `To: Alice <${alice.email}>`,
+    ];
+    type Received = NonNullable<Awaited<ReturnType<typeof found>>>;
+    let sent: Record<'catalogue' | 'ferry', Received>;
+
+    beforeAll(
+      app.witnessed('two forwards, sent', async () => {
+        for (const user of [alice, bob]) await append(user, 'INBOX', catalogueFrom(catalogue));
+        await append(
+          alice,
+          'INBOX',
+          message({
+            id: ferry.id,
+            from: 'Carol Reyes <carol@example.com>',
+            to: `Alice <${alice.email}>`,
+            subject: ferry.subject,
+            text: FERRY.replace(/\n/g, '\r\n'),
+            date: new Date(ferry.date),
+          }),
+        );
+        const signing = await trailMix();
+        await signing.getByRole('option').filter({ hasText: 'Lunch on Thursday?' }).waitFor();
+        await signing.keyboard.press('ControlOrMeta+k');
+        await signing.keyboard.type('edit the alice');
+        await signing.getByRole('option', { name: 'Edit the Alice account' }).click();
+        const form = signing.getByRole('form', { name: 'Edit Alice' });
+        await form.getByRole('textbox', { name: 'Signature' }).fill(SIGNATURE);
+        await form.getByRole('button', { name: 'Save' }).click();
+        await form.waitFor({ state: 'detached' });
+        await signing.context().close();
+
+        const page = await trailMix();
+        await forward(
+          page,
+          catalogue.subject,
+          "Bob, Carol's catalogue is below.\nThe cover is the one we chose.",
+        );
+        await forward(page, ferry.subject, 'Bob, this is for Saturday.');
+        const delivered = (subject: string) =>
+          until(() => found(bob, 'INBOX', { subject: `Fwd: ${subject}` }), 60_000);
+        sent = {
+          catalogue: await delivered(catalogue.subject),
+          ferry: await delivered(ferry.subject),
+        };
+        await page.context().close();
+      }),
+      120_000,
+    );
+
+    /** Alice forwards the message with this subject to Bob, with `note` over it, and sends it. */
+    async function forward(page: Page, subject: string, note: string) {
+      await page.getByRole('option').filter({ hasText: subject }).click({ timeout: 30_000 });
+      await page
+        .getByRole('region', { name: 'Reader' })
+        .getByRole('heading', { level: 1, name: subject })
+        .waitFor();
+      await page.keyboard.press('f');
+      const composer = page.getByRole('region', { name: 'Forward' });
+      await composer.getByRole('combobox', { name: 'To' }).fill(bob.email);
+      await composer.getByRole('textbox', { name: 'Message' }).click();
+      await page.keyboard.type(note);
+      await page.keyboard.press('ControlOrMeta+Enter');
+      await composer.waitFor({ state: 'detached' });
+    }
+
+    test('its text part is the note, the signature, the header block and the original’s text, in that order', () => {
+      expect(lined(sent.catalogue.text)).toBe(
+        [
+          "Bob, Carol's catalogue is below.",
+          '',
+          'The cover is the one we chose.',
+          '',
+          '-- ',
+          SIGNATURE,
+          '',
+          ...header(catalogue),
+          `Cc: Bob <${bob.email}>`,
+          '',
+          lined(CATALOGUE.text),
+        ].join('\n'),
+      );
+      expect(lined(sent.ferry.text)).toBe(
+        ['Bob, this is for Saturday.', '', '-- ', SIGNATURE, '', ...header(ferry), '', FERRY].join(
+          '\n',
+        ),
+      );
+    });
+
+    describe.skipIf(!clients)('in other clients', () => {
+      test('shows in Roundcube under what it forwards: the note, the header block, then the original with its own styles, its picture in place and its file', async () => {
+        const page = await signedIn(bob);
+        const original = await uidOf(bob, `<${catalogue.id}@example.com>`);
+        const forwarded = await uidOf(bob, sent.catalogue.messageId ?? '');
+        expect(await threadedAt(page, forwarded)).toEqual({ parent: original, depth: 1 });
+
+        await page.goto(`${webmail.url}/?_task=mail&_mbox=INBOX&_uid=${forwarded}&_action=show`);
+        const body = page.locator('#messagebody');
+        expectInOrder(await body.innerText(), [
+          "Bob, Carol's catalogue is below.",
+          'The cover is the one we chose.',
+          SIGNATURE,
+          ...header(catalogue),
+          `Cc: Bob <${bob.email}>`,
+          'The spring catalogue is out, with the cover we chose.',
+          'The price list is attached.',
+        ]);
+        // Carol's style sheet colors her paragraphs and none of Alice's.
+        const color = (text: string) =>
+          body
+            .locator('p', { hasText: text })
+            .evaluate((p) => (globalThis as unknown as Styled).getComputedStyle(p).color);
+        await expect(color('The price list is attached.')).resolves.toBe(CATALOGUE.color);
+        await expect(color('The cover is the one we chose.')).resolves.not.toBe(CATALOGUE.color);
+
+        // Her picture shows in place, so only her file is listed to download.
+        expect(
+          await body.locator('img').evaluate(async (img) => {
+            await (img as unknown as Picture).decode();
+            return [
+              (img as unknown as Picture).naturalWidth,
+              (img as unknown as Picture).naturalHeight,
+            ];
+          }),
+        ).toEqual([4, 3]);
+        const files = page.locator('#attachment-list li');
+        const listed = await files.allTextContents();
+        expect(listed).toHaveLength(1);
+        expect(listed[0]).toContain('prices.pdf');
+        const link = await files.locator('a').first().getAttribute('href');
+        const download = await page.request.get(
+          new URL(`${link}&_download=1`, `${webmail.url}/`).href,
+        );
+        expect(await download.text()).toBe(CATALOGUE.prices);
+        await page.context().close();
+      }, 60_000);
+
+      test('shows a plain-text original in Roundcube under the note, with its lines as written', async () => {
+        const page = await signedIn(bob);
+        const forwarded = await uidOf(bob, sent.ferry.messageId ?? '');
+        await page.goto(`${webmail.url}/?_task=mail&_mbox=INBOX&_uid=${forwarded}&_action=show`);
+        expectInOrder(await page.locator('#messagebody').innerText(), [
+          'Bob, this is for Saturday.',
+          SIGNATURE,
+          ...header(ferry),
+          FERRY,
+        ]);
+        await page.context().close();
+      }, 60_000);
+
+      test('shows in mutt under what it forwards, as sent, with its file attached and its picture kept with its HTML', async () => {
+        const id = ({ messageId }: Received) => (messageId ?? '').replace(/^<|>$/g, '');
+        // What mutt's pager shows of the message, kept in a file.
+        const shown = (message: Received, file: string) =>
+          `<search>~i ${id(message)}<enter>:set display_filter="tee ${file}"<enter><display-message><exit>`;
+        const dir = await mutt(
+          bob,
+          [
+            // Every message mutt threads with Carol's catalogue.
+            `<search>~i ^.${catalogue.id}@example<enter><tag-thread>`,
+            '<tag-prefix><pipe-message>cat >> thread.txt<enter><untag-pattern>~A<enter>',
+            shown(sent.catalogue, 'catalogue.txt'),
+            // Its picture and its file, as mutt saves them from its attachments.
+            '<view-attachments>',
+            '<search>cover.png<enter><save-entry><kill-line>cover.png<enter>',
+            '<search>prices.pdf<enter><save-entry><kill-line>prices.pdf<enter>',
+            '<exit>',
+            shown(sent.ferry, 'ferry.txt'),
+            '<quit>',
+          ].join(''),
+        );
+        const read = (file: string) => Bun.stripANSI(readFileSync(join(dir, file), 'utf8'));
+        // The forward quotes Carol's Subject in its body, but no Message-ID.
+        expect(read('thread.txt').match(/^Message-ID: .*$/gim)).toEqual([
+          `Message-ID: <${catalogue.id}@example.com>`,
+          `Message-ID: ${sent.catalogue.messageId}`,
+        ]);
+
+        const forwarded = read('catalogue.txt');
+        expect(forwarded).toContain(lined(sent.catalogue.text));
+        // The picture goes with the HTML that shows it, so the PDF is all mutt shows as attached.
+        expect(forwarded.match(/^\[-- Attachment #\d+: .* --\]$/gm)).toEqual([
+          '[-- Attachment #2: prices.pdf --]',
+        ]);
+        expect(readFileSync(join(dir, 'cover.png')).toBase64()).toBe(PNG);
+        expect(readFileSync(join(dir, 'prices.pdf'), 'utf8')).toBe(CATALOGUE.prices);
+        expect(read('ferry.txt')).toContain(lined(sent.ferry.text));
+      }, 60_000);
+    });
+  });
+
   /** Trail Mix in a desktop browser that may use the clipboard. */
   async function trailMix(): Promise<Page> {
     const context = await app.context({
@@ -581,6 +780,22 @@ describe('Mail written in Trail Mix', () => {
     return page;
   }
 
+  /** Where Roundcube's own model of `page`'s list, as Dovecot threads it, puts the message `uid`. */
+  async function threadedAt(page: Page, uid: number) {
+    const row = await page.waitForFunction((uid) => {
+      const { rows } = (globalThis as unknown as RoundcubePage).rcmail.message_list;
+      const row = Object.values(rows).find((row) => Number(row.uid) === uid);
+      return row && { parent: Number(row.parent_uid ?? 0), depth: row.depth };
+    }, uid);
+    return row.jsonValue();
+  }
+
+  /** The UID of the message with this Message-ID in `user`'s Inbox. */
+  async function uidOf(user: User, messageId: string) {
+    return (await until(() => found(user, 'INBOX', { header: { 'message-id': messageId } }), 5_000))
+      .uid;
+  }
+
   /** The one message `query` finds in `user`'s `folder`, parsed, or nothing until there is one. */
   function found(user: User, folder: string, query: SearchObject) {
     return withImap(user, folder, async (client) => {
@@ -588,7 +803,7 @@ describe('Mail written in Trail Mix', () => {
       if (uids.length !== 1) return undefined;
       const message = await client.fetchOne(String(uids[0]), { source: true }, { uid: true });
       if (!message || !message.source) return undefined;
-      return { uid: uids[0], ...(await PostalMime.parse(message.source)) };
+      return { uid: uids[0]!, ...(await PostalMime.parse(message.source)) };
     });
   }
 
@@ -639,6 +854,74 @@ type Clipboard = {
 
 /** An image in the page, as far as these tests read it. */
 type Picture = { decode(): Promise<void>; naturalWidth: number; naturalHeight: number };
+
+/** The page's styles, as far as these tests read them. */
+type Styled = { getComputedStyle(element: unknown): { color: string } };
+
+/** Text with each line ended by `\n` alone. */
+function lined(text: string | undefined): string {
+  return (text ?? '').replace(/\r\n/g, '\n');
+}
+
+/** Checks `text` says each of `said`, in that order. */
+function expectInOrder(text: string, said: string[]) {
+  const at = said.map((part) => text.indexOf(part));
+  expect(said.filter((_, i) => at[i]! < 0)).toEqual([]);
+  expect(at).toEqual(at.toSorted((a, b) => a - b));
+}
+
+/**
+ * Carol's catalogue as a client that writes both parts sends it: its text, and its HTML, whose head
+ * styles every paragraph and which shows a PNG it carries by `cid:`, with a PDF attached.
+ */
+function catalogueFrom(carol: { id: string; date: string; subject: string }): string {
+  return [
+    `Message-ID: <${carol.id}@example.com>`,
+    `Date: ${carol.date}`,
+    'From: Carol Reyes <carol@example.com>',
+    'To: Alice <alice@trailmix.test>',
+    'Cc: Bob <bob@trailmix.test>',
+    `Subject: ${carol.subject}`,
+    'MIME-Version: 1.0',
+    'Content-Type: multipart/mixed; boundary="mixed"',
+    '',
+    '--mixed',
+    'Content-Type: multipart/alternative; boundary="alternative"',
+    '',
+    '--alternative',
+    'Content-Type: text/plain; charset=utf-8',
+    '',
+    CATALOGUE.text,
+    '--alternative',
+    'Content-Type: multipart/related; boundary="related"',
+    '',
+    '--related',
+    'Content-Type: text/html; charset=utf-8',
+    '',
+    `<html><head><style>p { color: ${CATALOGUE.color} }</style></head><body>`,
+    '<p>The spring catalogue is out, with the cover we chose.</p>',
+    '<p><img src="cid:cover@example.com" alt="cover"></p>',
+    '<p>The price list is attached.</p>',
+    '</body></html>',
+    '--related',
+    'Content-Type: image/png; name="cover.png"',
+    'Content-Disposition: inline; filename="cover.png"',
+    'Content-ID: <cover@example.com>',
+    'Content-Transfer-Encoding: base64',
+    '',
+    PNG,
+    '--related--',
+    '--alternative--',
+    '--mixed',
+    'Content-Type: application/pdf; name="prices.pdf"',
+    'Content-Disposition: attachment; filename="prices.pdf"',
+    'Content-Transfer-Encoding: base64',
+    '',
+    btoa(CATALOGUE.prices),
+    '--mixed--',
+    '',
+  ].join('\r\n');
+}
 
 /** A draft as a client that writes HTML alone saves it, showing a PNG it carries by `cid:`. */
 function htmlDraft(subject: string): string {
